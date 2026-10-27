@@ -12,24 +12,25 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "jest",
     "check": "dotenv -e ../../apps/api/.env -- tsx scripts/db-check.ts",
-    "migrate:dev": "dotenv -e ../../apps/api/.env -- prisma migrate dev",
-    "migrate:deploy": "dotenv -e ../../apps/api/.env -- prisma migrate deploy",
-    "migrate:deploy:test": "dotenv -e ../../apps/api/.env -- tsx scripts/migrate-test.ts",
+    "migrate:check": "tsx scripts/check-migrations.ts",
+    "migrate:create": "dotenv -e ../../apps/api/.env -- tsx scripts/create-migration.ts",
+    "migrate:deploy": "tsx scripts/check-migrations.ts && dotenv -e ../../apps/api/.env -- prisma migrate deploy",
+    "migrate:deploy:test": "tsx scripts/check-migrations.ts && dotenv -e ../../apps/api/.env -- tsx scripts/migrate-test.ts",
     "migrate:status": "dotenv -e ../../apps/api/.env -- prisma migrate status",
     "bootstrap-super-admin": "dotenv -e ../../apps/api/.env -- tsx scripts/bootstrap-super-admin.ts"
   },
   "dependencies": {
-    "@prisma/client": "^6.2.1"
+    "@prisma/client": "^6.2.1",
+    "dotenv-cli": "^8.0.0",
+    "prisma": "^6.2.1",
+    "tsx": "^4.19.2"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",
     "@types/node": "^22.10.7",
     "argon2": "^0.41.1",
-    "dotenv-cli": "^8.0.0",
     "jest": "^29.7.0",
-    "prisma": "^6.2.1",
     "ts-jest": "^29.2.5",
-    "tsx": "^4.19.2",
     "typescript": "~5.7.3"
   },
   "jest": {

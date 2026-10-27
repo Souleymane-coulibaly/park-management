@@ -1,6 +1,6 @@
 /**
  * `pnpm db:migrate:deploy:test` : applique les migrations en attente sur la base de TEST
- * (TEST_DATABASE_URL, branche Neon `development`). Non destructif : `prisma migrate deploy` uniquement.
+ * (TEST_DATABASE_URL, branche Neon `test`). Non destructif : `prisma migrate deploy` uniquement.
  */
 import { spawnSync } from 'node:child_process';
 import { resolveTestDatabase } from '../src/test-database';

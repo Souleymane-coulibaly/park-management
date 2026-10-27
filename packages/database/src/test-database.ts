@@ -1,7 +1,7 @@
 /**
  * Garde-fou des tests automatisés : les tests d'intégration et E2E créent puis suppriment
- * des données. Ils ne s'exécutent QUE sur une base dédiée (`TEST_DATABASE_URL`, par exemple la
- * branche Neon `development`), jamais sur la base principale (`DATABASE_URL`).
+ * des données. Ils ne s’exécutent QUE sur une base dédiée (`TEST_DATABASE_URL`, branche Neon
+ * `test` ou base éphémère de CI), jamais sur la base de développement (`DATABASE_URL`).
  */
 export interface TestDatabase {
   databaseUrl: string;
@@ -23,8 +23,8 @@ export function resolveTestDatabase(env: NodeJS.ProcessEnv = process.env): TestD
   const databaseUrl = env.TEST_DATABASE_URL;
   if (!databaseUrl) {
     throw new Error(
-      'TEST_DATABASE_URL est absente : les tests refusent de s’exécuter sur la base principale. ' +
-        'Créez une branche Neon « development » et renseignez TEST_DATABASE_URL / TEST_DIRECT_URL ' +
+      'TEST_DATABASE_URL est absente : les tests refusent de s’exécuter sur la base de développement. ' +
+        'Créez une branche Neon « test » (distincte de la base de développement) et renseignez TEST_DATABASE_URL / TEST_DIRECT_URL ' +
         'dans apps/api/.env (voir docs/DEPLOIEMENT-RAILWAY.md).',
     );
   }
@@ -33,7 +33,7 @@ export function resolveTestDatabase(env: NodeJS.ProcessEnv = process.env): TestD
     const main = identity(env.DATABASE_URL);
     if (main.host === test.host && main.database === test.database) {
       throw new Error(
-        'TEST_DATABASE_URL désigne la même base que DATABASE_URL : utilisez une branche Neon dédiée aux tests.',
+        'TEST_DATABASE_URL désigne la base de développement (DATABASE_URL) : utilisez la branche Neon « test ».',
       );
     }
   }

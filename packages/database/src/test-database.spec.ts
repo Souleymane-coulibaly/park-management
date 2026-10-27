@@ -10,10 +10,10 @@ describe('resolveTestDatabase', () => {
     expect(() => resolveTestDatabase({ DATABASE_URL: MAIN_POOLED })).toThrow(/TEST_DATABASE_URL/);
   });
 
-  it('refuse une base de test identique à la base principale (même avec ou sans -pooler)', () => {
+  it('refuse une base de test identique à la base de développement (avec ou sans -pooler)', () => {
     expect(() =>
       resolveTestDatabase({ DATABASE_URL: MAIN_POOLED, TEST_DATABASE_URL: MAIN_DIRECT }),
-    ).toThrow(/même base/);
+    ).toThrow(/base de développement/);
   });
 
   it('accepte une branche Neon dédiée', () => {
