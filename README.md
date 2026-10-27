@@ -96,13 +96,16 @@ pnpm lint               # ESLint
 pnpm format:check       # Prettier
 pnpm typecheck          # TypeScript strict sur tous les paquets
 pnpm test               # tests unitaires (Jest)
-pnpm test:integration   # tests d'intégration API — utilisent la base de apps/api/.env
-pnpm build; pnpm test:e2e   # tests Playwright (démarre l'API et le web construits)
+pnpm db:migrate:deploy:test   # migrations sur la base de test
+pnpm test:integration   # tests d'intégration API — base de TEST uniquement
+pnpm build; pnpm test:e2e   # tests Playwright (démarre l'API et le web construits, base de TEST)
 ```
 
-⚠️ Les tests d'intégration et E2E **créent puis suppriment** leurs propres données dans la base
-configurée. Ne les lancez jamais contre la base de production : utilisez une branche Neon de
-développement. La CI GitHub Actions utilise sa propre base PostgreSQL éphémère.
+⚠️ Les tests d'intégration et E2E **créent puis suppriment** des données. Ils s'exécutent uniquement
+sur la base désignée par `TEST_DATABASE_URL` / `TEST_DIRECT_URL` (branche Neon `development`) et
+**refusent de démarrer** si elle est absente ou identique à `DATABASE_URL`. Création de la branche :
+voir [docs/DEPLOIEMENT-RAILWAY.md](docs/DEPLOIEMENT-RAILWAY.md#1-branches-neon). La CI GitHub Actions
+utilise sa propre base PostgreSQL éphémère.
 
 ## Déploiement
 
