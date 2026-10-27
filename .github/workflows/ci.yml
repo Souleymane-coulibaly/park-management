@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# La CI n'utilise JAMAIS la base Neon : elle démarre sa propre base PostgreSQL éphémère.
+env:
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ocall_park_ci
+  DIRECT_URL: postgresql://postgres:postgres@localhost:5432/ocall_park_ci
+  WEB_ORIGIN: http://localhost:3000
+  API_URL: http://localhost:4000
+  COOKIE_SECURE: 'false'
+
+jobs:
+  quality:
+    name: Lint, types, tests unitaires, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+
+  integration:
+    name: Tests d'intégration et E2E
+    runs-on: ubuntu-latest
+    needs: quality
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ocall_park_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Migrations (base éphémère)
+        run: pnpm db:migrate:deploy
+      - name: Tests d'intégration API
+        run: pnpm test:integration
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Tests E2E Playwright
+        run: pnpm test:e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report
+          retention-days: 7

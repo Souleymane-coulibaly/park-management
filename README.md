@@ -1,0 +1,110 @@
+# Ocall Park
+
+Logiciel SaaS B2B de gestion pour les établissements africains : **parcs aquatiques et espaces de
+loisirs**, **restaurants**, ou **les deux**. Lancement au Mali, en français, prix en FCFA (XOF).
+
+> Statut : **Sprint 1** — socle SaaS multi-tenant (authentification, organisations, établissements,
+> employés, rôles, abonnements en lecture, espace Super Admin). Les modules métier (billetterie, POS,
+> KDS, stocks, CRM, planning) sont annoncés « à venir » et ne sont pas développés.
+
+## Architecture
+
+```
+apps/
+  api/        API REST NestJS (/api/v1, Swagger sur /api/docs)
+  web/        Frontend Next.js App Router + Tailwind CSS
+packages/
+  shared/     Contrats partagés : métiers, rôles, matrice RBAC, modules, navigation
+  database/   Schéma Prisma, migrations, scripts (db:check, super admin)
+e2e/          Tests Playwright
+docs/         Documentation (déploiement Railway)
+```
+
+| Couche          | Technologie                          | Hébergement cible |
+| --------------- | ------------------------------------ | ----------------- |
+| Frontend        | Next.js 15, React 19, Tailwind CSS 3 | Railway (`web`)   |
+| API             | NestJS 11, class-validator, Swagger  | Railway (`api`)   |
+| Base de données | PostgreSQL + Prisma 6                | Neon              |
+| CI              | GitHub Actions                       | GitHub            |
+
+### Choix structurants
+
+- **Multi-tenant strict** : chaque ressource porte un `organizationId`. L'organisation active vient
+  **uniquement** de la session côté serveur ; tout champ `organizationId` envoyé par le client est
+  refusé (400). Une ressource d'une autre organisation renvoie 404.
+- **Session opaque** en cookie `httpOnly` / `SameSite=Lax` (seul son hash SHA-256 est stocké), révocable
+  immédiatement (déconnexion, désactivation, suspension, changement de mot de passe).
+- **Proxy same-origin** : le navigateur appelle `/api/v1/*` sur le domaine du frontend, que Next.js
+  relaie vers l'API. Le cookie reste first-party, l'API n'est pas exposée en cross-site.
+- **RBAC** : matrice unique dans `packages/shared/src/rbac.ts`, appliquée par l'API (gardes globales) et
+  reflétée par l'interface. Le `SUPER_ADMIN` est un rôle plateforme sans accès aux données métier.
+- **Métier vérifié côté serveur** : navigation et accès aux modules calculés par l'API selon
+  `PARK | RESTAURANT | PARK_RESTAURANT`. Seule évolution permise : vers `PARK_RESTAURANT`, sans perte.
+- **Prix des offres en base** (`SubscriptionPlan`), modifiables par le Super Admin, historisés dans
+  l'audit. Paiement Wave : interface `PaymentProvider` seulement — un abonnement ne sera jamais activé
+  sur la foi du frontend.
+- **Sécurité** : Argon2id, verrouillage de compte après échecs, limitation par IP des routes sensibles,
+  contrôle d'origine (CSRF), Helmet, journal d'audit en ajout seul.
+
+## Prérequis (Windows)
+
+- Node.js ≥ 20.11 (testé avec Node 24), pnpm 10 (`corepack enable` ou `npm i -g pnpm@10.17.0`)
+- Une base PostgreSQL Neon (une **branche de développement** est recommandée)
+
+## Installation (PowerShell)
+
+```powershell
+git clone https://github.com/Souleymane-coulibaly/park-management.git
+cd park-management
+pnpm install
+
+# Variables d'environnement (jamais commitées)
+Copy-Item apps/api/.env.example apps/api/.env
+Copy-Item apps/web/.env.example apps/web/.env.local
+# Éditez apps/api/.env : DATABASE_URL (Neon pooled) et DIRECT_URL (Neon direct)
+```
+
+## Base de données
+
+```powershell
+pnpm db:check            # teste la connexion Neon et liste les migrations appliquées
+pnpm db:migrate:deploy   # applique les migrations en attente (non destructif)
+pnpm db:migrate:status   # état des migrations
+pnpm db:bootstrap-super-admin -- --email admin@exemple.com --first-name Awa --last-name Traoré
+```
+
+La migration initiale crée aussi les trois offres : Parc 25 000, Restaurant 35 000,
+Parc + Restaurant 55 000 FCFA/mois. Pour faire évoluer le schéma en développement :
+`pnpm db:migrate:dev` (sur une base de développement uniquement).
+
+## Lancer en local
+
+```powershell
+pnpm build:packages   # compile packages/shared et packages/database
+pnpm dev              # API sur http://localhost:4000, web sur http://localhost:3000
+```
+
+- Application : http://localhost:3000
+- Swagger : http://localhost:4000/api/docs
+- En développement, le lien de réinitialisation de mot de passe est écrit dans la console de l'API
+  (aucun fournisseur e-mail n'est branché au Sprint 1).
+
+## Qualité et tests
+
+```powershell
+pnpm lint               # ESLint
+pnpm format:check       # Prettier
+pnpm typecheck          # TypeScript strict sur tous les paquets
+pnpm test               # tests unitaires (Jest)
+pnpm test:integration   # tests d'intégration API — utilisent la base de apps/api/.env
+pnpm build; pnpm test:e2e   # tests Playwright (démarre l'API et le web construits)
+```
+
+⚠️ Les tests d'intégration et E2E **créent puis suppriment** leurs propres données dans la base
+configurée. Ne les lancez jamais contre la base de production : utilisez une branche Neon de
+développement. La CI GitHub Actions utilise sa propre base PostgreSQL éphémère.
+
+## Déploiement
+
+Voir [docs/DEPLOIEMENT-RAILWAY.md](docs/DEPLOIEMENT-RAILWAY.md). Aucun déploiement de production sans
+validation.
