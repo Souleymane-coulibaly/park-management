@@ -1,0 +1,113 @@
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BUSINESS_TYPE_LABELS, canChangeBusinessType } from '@ocall/shared';
+import { PrismaService } from '../../prisma/prisma.service';
+import { AuditService } from '../../common/audit/audit.service';
+import type { TenantContext } from '../../common/auth-context';
+import type { ChangeBusinessTypeDto, UpdateOrganizationDto } from './organizations.dto';
+
+@Injectable()
+export class OrganizationsService {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
+
+  /** L'organisation est toujours celle de la session, jamais un identifiant fourni par le client. */
+  async current(auth: TenantContext) {
+    const org = await this.prisma.organization.findUnique({
+      where: { id: auth.membership.organizationId },
+      select: {
+        id: true,
+        name: true,
+        code: true,
+        businessType: true,
+        countryCode: true,
+        currency: true,
+        timezone: true,
+        status: true,
+        createdAt: true,
+      },
+    });
+    if (!org) throw new NotFoundException();
+    return org;
+  }
+
+  async update(auth: TenantContext, dto: UpdateOrganizationDto) {
+    const organizationId = auth.membership.organizationId;
+    await this.prisma.$transaction(async (tx) => {
+      await tx.organization.update({
+        where: { id: organizationId },
+        data: { name: dto.name, timezone: dto.timezone },
+      });
+      await this.audit.record(
+        {
+          organizationId,
+          actorUserId: auth.user.id,
+          action: 'organization.updated',
+          targetType: 'Organization',
+          targetId: organizationId,
+          metadata: { ...dto },
+        },
+        tx,
+      );
+    });
+    return this.current(auth);
+  }
+
+  /**
+   * Évolution du métier (PARK ou RESTAURANT → PARK_RESTAURANT). Aucune donnée n'est supprimée :
+   * établissements, employés et historique sont conservés ; l'abonnement bascule sur l'offre du
+   * nouveau métier en gardant son statut, et le changement est historisé.
+   */
+  async changeBusinessType(auth: TenantContext, dto: ChangeBusinessTypeDto) {
+    const organizationId = auth.membership.organizationId;
+    await this.prisma.$transaction(async (tx) => {
+      const org = await tx.organization.findUniqueOrThrow({
+        where: { id: organizationId },
+        include: { subscription: true },
+      });
+      if (!canChangeBusinessType(org.businessType, dto.businessType)) {
+        throw new BadRequestException({
+          code: 'BUSINESS_TYPE_CHANGE_NOT_ALLOWED',
+          message: `Évolution impossible de « ${BUSINESS_TYPE_LABELS[org.businessType]} » vers « ${BUSINESS_TYPE_LABELS[dto.businessType]} ».`,
+        });
+      }
+      const plan = await tx.subscriptionPlan.findUniqueOrThrow({
+        where: { businessType: dto.businessType },
+      });
+      await tx.organization.update({
+        where: { id: organizationId },
+        data: { businessType: dto.businessType },
+      });
+
+      if (org.subscription) {
+        await tx.subscription.update({
+          where: { id: org.subscription.id },
+          data: { planId: plan.id },
+        });
+        await tx.subscriptionEvent.create({
+          data: {
+            subscriptionId: org.subscription.id,
+            type: 'PLAN_CHANGED',
+            fromPlanId: org.subscription.planId,
+            toPlanId: plan.id,
+            actorUserId: auth.user.id,
+            reason: `Évolution du métier ${org.businessType} → ${dto.businessType}`,
+          },
+        });
+      }
+      await this.audit.record(
+        {
+          organizationId,
+          actorUserId: auth.user.id,
+          action: 'organization.business_type_changed',
+          targetType: 'Organization',
+          targetId: organizationId,
+          metadata: { from: org.businessType, to: dto.businessType },
+        },
+        tx,
+      );
+    });
+    return this.current(auth);
+  }
+}
