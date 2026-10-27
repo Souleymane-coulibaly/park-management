@@ -1,12 +1,11 @@
 import { config } from 'dotenv';
-import { PrismaClient } from '@ocall/database';
+import { PrismaClient, resolveTestDatabase } from '@ocall/database';
 import { E2E_SUFFIX } from './support';
 
-/** Supprime les organisations et comptes créés par les tests E2E. */
+/** Supprime, sur la base de TEST uniquement, les organisations et comptes créés par les tests E2E. */
 export default async function globalTeardown(): Promise<void> {
   config({ path: 'apps/api/.env' });
-  if (!process.env.DATABASE_URL) return;
-  const prisma = new PrismaClient();
+  const prisma = new PrismaClient({ datasourceUrl: resolveTestDatabase().databaseUrl });
   try {
     const orgs = await prisma.organization.findMany({
       where: { name: { endsWith: E2E_SUFFIX } },

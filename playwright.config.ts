@@ -1,8 +1,16 @@
 import { defineConfig, devices } from '@playwright/test';
+import { config } from 'dotenv';
+import { resolveTestDatabase } from '@ocall/database';
+
+// Base de TEST obligatoire (branche Neon `development` ou base éphémère de CI) :
+// la configuration échoue plutôt que de lancer les tests sur la base principale.
+config({ path: 'apps/api/.env' });
+const testDb = resolveTestDatabase();
 
 /**
- * Tests E2E : l'API (port 4000) et le frontend (port 3000) doivent être construits
- * au préalable (`pnpm build`). En local, des serveurs déjà lancés sont réutilisés.
+ * Tests E2E : l'API (port 4000) et le frontend (port 3000) doivent être construits au préalable
+ * (`pnpm build`). Playwright démarre toujours ses propres serveurs, branchés sur la base de test :
+ * un serveur de développement déjà lancé (potentiellement sur la base principale) n'est jamais réutilisé.
  */
 export default defineConfig({
   testDir: './e2e',
@@ -28,14 +36,15 @@ export default defineConfig({
       command: 'node dist/main.js',
       cwd: 'apps/api',
       url: 'http://localhost:4000/api/v1/health',
-      reuseExistingServer: !process.env.CI,
+      env: { DATABASE_URL: testDb.databaseUrl, DIRECT_URL: testDb.directUrl },
+      reuseExistingServer: false,
       timeout: 120_000,
     },
     {
       command: 'npx next start -p 3000',
       cwd: 'apps/web',
       url: 'http://localhost:3000',
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       timeout: 120_000,
     },
   ],

@@ -24,6 +24,7 @@
     "db:check": "pnpm --filter @ocall/database run check",
     "db:migrate:dev": "pnpm --filter @ocall/database run migrate:dev",
     "db:migrate:deploy": "pnpm --filter @ocall/database run migrate:deploy",
+    "db:migrate:deploy:test": "pnpm --filter @ocall/database run migrate:deploy:test",
     "db:migrate:status": "pnpm --filter @ocall/database run migrate:status",
     "db:bootstrap-super-admin": "pnpm --filter @ocall/database run bootstrap-super-admin"
   },

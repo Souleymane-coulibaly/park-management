@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { randomBytes } from 'node:crypto';
 import request from 'supertest';
+import { resolveTestDatabase } from '@ocall/database';
 import type { BusinessType } from '@ocall/shared';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -13,7 +14,14 @@ export const RUN = randomBytes(4).toString('hex');
 
 export type Agent = ReturnType<typeof request.agent>;
 
+/**
+ * Démarre l'API sur la base de TEST uniquement (TEST_DATABASE_URL) : refuse de s'exécuter
+ * si elle est absente ou si elle désigne la base principale.
+ */
 export async function createTestApp(): Promise<{ app: INestApplication; prisma: PrismaService }> {
+  const testDb = resolveTestDatabase();
+  process.env.DATABASE_URL = testDb.databaseUrl;
+  process.env.DIRECT_URL = testDb.directUrl;
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   const app = moduleRef.createNestApplication();
   setupApp(app);
