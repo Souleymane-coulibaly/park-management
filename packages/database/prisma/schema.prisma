@@ -1,0 +1,258 @@
+// Ocall Park — schéma Sprint 1 (socle SaaS multi-tenant).
+// Toute ressource métier porte un organizationId : c'est la clé d'isolation des tenants.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum BusinessType {
+  PARK
+  RESTAURANT
+  PARK_RESTAURANT
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  SUPERVISOR
+  CASHIER
+  KITCHEN
+  GATE_AGENT
+}
+
+enum PlatformRole {
+  SUPER_ADMIN
+}
+
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+enum SubscriptionStatus {
+  NOT_ACTIVATED
+  ACTIVE
+  PAST_DUE
+  EXPIRED
+  CANCELED
+}
+
+enum SubscriptionEventType {
+  CREATED
+  PLAN_CHANGED
+  STATUS_CHANGED
+}
+
+model Organization {
+  id           String             @id @default(uuid()) @db.Uuid
+  name         String
+  /// Code court unique, préfixe des identifiants employés (ex. AQUA → AQUA-0001).
+  code         String             @unique
+  businessType BusinessType
+  countryCode  String             @default("ML") @db.Char(2)
+  currency     String             @default("XOF") @db.Char(3)
+  timezone     String             @default("Africa/Bamako")
+  status       OrganizationStatus @default(ACTIVE)
+  /// Compteur des identifiants employés, incrémenté de façon atomique.
+  employeeSeq  Int                @default(0)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  establishments Establishment[]
+  memberships    OrganizationMembership[]
+  assignments    EstablishmentAssignment[]
+  subscription   Subscription?
+  auditLogs      AuditLog[]
+
+  @@index([status])
+  @@index([businessType])
+}
+
+model Establishment {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  name           String
+  /// Activité(s) exercée(s), toujours compatible(s) avec le métier de l'organisation.
+  businessType   BusinessType
+  city           String?
+  address        String?
+  phone          String?
+  timezone       String       @default("Africa/Bamako")
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignments  EstablishmentAssignment[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, isActive])
+}
+
+model User {
+  id                 String        @id @default(uuid()) @db.Uuid
+  firstName          String
+  lastName           String
+  /// Facultatif pour les employés ; stocké en minuscules.
+  email              String?       @unique
+  /// Identifiant de connexion individuel unique (ex. AQUA-0001).
+  loginId            String        @unique
+  passwordHash       String
+  mustChangePassword Boolean       @default(true)
+  platformRole       PlatformRole?
+  isActive           Boolean       @default(true)
+  failedLoginCount   Int           @default(0)
+  lockedUntil        DateTime?
+  lastLoginAt        DateTime?
+  passwordChangedAt  DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  memberships         OrganizationMembership[]
+  sessions            Session[]
+  passwordResetTokens PasswordResetToken[]
+}
+
+model OrganizationMembership {
+  id             String     @id @default(uuid()) @db.Uuid
+  organizationId String     @db.Uuid
+  userId         String     @db.Uuid
+  role           MemberRole
+  isActive       Boolean    @default(true)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  organization Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignments  EstablishmentAssignment[]
+  sessions     Session[]
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@index([organizationId, role, isActive])
+}
+
+model EstablishmentAssignment {
+  id              String   @id @default(uuid()) @db.Uuid
+  /// Dénormalisé pour filtrer toutes les requêtes par tenant.
+  organizationId  String   @db.Uuid
+  membershipId    String   @db.Uuid
+  establishmentId String   @db.Uuid
+  createdAt       DateTime @default(now())
+
+  organization  Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  membership    OrganizationMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  establishment Establishment          @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+
+  @@unique([membershipId, establishmentId])
+  @@index([organizationId])
+  @@index([establishmentId])
+}
+
+/// Session opaque : seul le hash SHA-256 du jeton est stocké.
+model Session {
+  id           String    @id @default(uuid()) @db.Uuid
+  tokenHash    String    @unique
+  userId       String    @db.Uuid
+  /// Organisation active de la session ; null pour un SUPER_ADMIN.
+  membershipId String?   @db.Uuid
+  expiresAt    DateTime
+  lastSeenAt   DateTime  @default(now())
+  revokedAt    DateTime?
+  ipAddress    String?
+  userAgent    String?
+  createdAt    DateTime  @default(now())
+
+  user       User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  membership OrganizationMembership? @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// Jeton de réinitialisation : hashé, à usage unique, à durée limitée.
+model PasswordResetToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Offres commerciales. Les prix ne vivent qu'ici et sont modifiables par le Super Admin.
+model SubscriptionPlan {
+  id           String       @id @default(uuid()) @db.Uuid
+  businessType BusinessType @unique
+  name         String
+  monthlyPrice Int
+  currency     String       @default("XOF") @db.Char(3)
+  isActive     Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  subscriptions Subscription[]
+}
+
+model Subscription {
+  id             String             @id @default(uuid()) @db.Uuid
+  organizationId String             @unique @db.Uuid
+  planId         String             @db.Uuid
+  status         SubscriptionStatus @default(NOT_ACTIVATED)
+  startedAt      DateTime?
+  expiresAt      DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan         SubscriptionPlan    @relation(fields: [planId], references: [id])
+  events       SubscriptionEvent[]
+
+  @@index([status])
+}
+
+/// Historique des changements d'abonnement.
+model SubscriptionEvent {
+  id             String                @id @default(uuid()) @db.Uuid
+  subscriptionId String                @db.Uuid
+  type           SubscriptionEventType
+  fromPlanId     String?               @db.Uuid
+  toPlanId       String?               @db.Uuid
+  fromStatus     SubscriptionStatus?
+  toStatus       SubscriptionStatus?
+  actorUserId    String?               @db.Uuid
+  reason         String?
+  createdAt      DateTime              @default(now())
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([subscriptionId, createdAt])
+}
+
+/// Journal d'audit en ajout seul. organizationId null = action plateforme.
+model AuditLog {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String?  @db.Uuid
+  actorUserId    String?  @db.Uuid
+  action         String
+  targetType     String
+  targetId       String?
+  metadata       Json?
+  ipAddress      String?
+  createdAt      DateTime @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, createdAt])
+  @@index([actorUserId])
+}
