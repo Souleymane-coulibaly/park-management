@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design tokens Ocall Park (valeurs RGB pour l'opacité Tailwind). */
+:root {
+  --forest: 23 107 83; /* #176B53 vert profond */
+  --forest-dark: 16 77 60;
+  --forest-light: 225 239 233;
+  --savanna: 217 155 56; /* #D99B38 or savane — accent, jamais en texte sur fond clair */
+  --savanna-light: 248 234 208;
+  --terracotta: 196 106 67; /* #C46A43 terre cuite */
+  --terracotta-dark: 152 76 44; /* variante lisible pour le texte (contraste AA) */
+  --terracotta-light: 246 225 214;
+  --ivory: 246 240 229; /* #F6F0E5 ivoire */
+  --ivory-dark: 236 226 208;
+  --charcoal: 36 53 47; /* #24352F anthracite */
+  --charcoal-soft: 74 92 85;
+  --surface: 255 255 255;
+  --line: 226 218 203;
+  --muted: 101 116 110;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-ivory font-sans text-charcoal antialiased;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply font-display tracking-tight;
+  }
+  :focus-visible {
+    @apply outline-none ring-2 ring-savanna ring-offset-2 ring-offset-ivory;
+  }
+}
+
+@layer utilities {
+  /* Motif géométrique inspiré des tissages bogolan et kente, très atténué. */
+  .pattern-kente {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 48 48'%3E%3Cg fill='none' stroke='%23D99B38' stroke-opacity='0.22' stroke-width='1.5'%3E%3Cpath d='M0 24 12 12 24 24 12 36Z'/%3E%3Cpath d='M24 24 36 12 48 24 36 36Z'/%3E%3Cpath d='M12 0v6M36 0v6M12 42v6M36 42v6'/%3E%3C/g%3E%3C/svg%3E");
+  }
+  .pattern-bogolan {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Cg fill='%23F6F0E5' fill-opacity='0.07'%3E%3Cpath d='M0 0h8v8H0zM20 20h8v8h-8z'/%3E%3Ccircle cx='32' cy='8' r='2.5'/%3E%3Ccircle cx='12' cy='30' r='2.5'/%3E%3C/g%3E%3C/svg%3E");
+  }
+}

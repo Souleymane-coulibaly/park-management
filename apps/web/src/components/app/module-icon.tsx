@@ -1,0 +1,46 @@
+import {
+  BookOpen,
+  Boxes,
+  Building2,
+  CreditCard,
+  CalendarDays,
+  Calculator,
+  ChefHat,
+  HeartHandshake,
+  LayoutDashboard,
+  type LucideIcon,
+  Receipt,
+  ScanLine,
+  Settings,
+  Ticket,
+  Users,
+} from 'lucide-react';
+
+const ICONS: Record<string, LucideIcon> = {
+  dashboard: LayoutDashboard,
+  ticketing: Ticket,
+  'gate-control': ScanLine,
+  pos: Calculator,
+  catalog: BookOpen,
+  orders: Receipt,
+  kitchen: ChefHat,
+  stock: Boxes,
+  crm: HeartHandshake,
+  'hr-planning': CalendarDays,
+  employees: Users,
+  settings: Settings,
+  'platform-overview': LayoutDashboard,
+  'platform-organizations': Building2,
+  'platform-subscriptions': CreditCard,
+};
+
+export function ModuleIcon({
+  moduleKey,
+  className = 'h-[18px] w-[18px]',
+}: {
+  moduleKey: string;
+  className?: string;
+}) {
+  const Icon = ICONS[moduleKey] ?? LayoutDashboard;
+  return <Icon className={className} aria-hidden />;
+}
