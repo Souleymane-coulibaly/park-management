@@ -9,7 +9,10 @@ import { LoggingPasswordResetNotifier, PASSWORD_RESET_NOTIFIER } from './passwor
   controllers: [AuthController],
   providers: [
     AuthService,
-    { provide: PASSWORD_RESET_NOTIFIER, useClass: LoggingPasswordResetNotifier },
+    {
+      provide: PASSWORD_RESET_NOTIFIER,
+      useFactory: () => new LoggingPasswordResetNotifier(process.env.NODE_ENV),
+    },
   ],
 })
 export class AuthModule {}
