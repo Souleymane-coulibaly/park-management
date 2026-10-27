@@ -61,21 +61,35 @@ pnpm install
 # Variables d'environnement (jamais commitées)
 Copy-Item apps/api/.env.example apps/api/.env
 Copy-Item apps/web/.env.example apps/web/.env.local
-# Éditez apps/api/.env : DATABASE_URL (Neon pooled) et DIRECT_URL (Neon direct)
+# Éditez apps/api/.env : DATABASE_URL / DIRECT_URL (base Neon de développement)
+# et TEST_DATABASE_URL / TEST_DIRECT_URL (branche Neon « test »)
 ```
+
+## Environnements
+
+| Environnement | Base                                   | Variables                              |
+| ------------- | -------------------------------------- | -------------------------------------- |
+| Développement | Base Neon existante                    | `DATABASE_URL`, `DIRECT_URL`           |
+| Test          | Branche Neon `test` / base éphémère CI | `TEST_DATABASE_URL`, `TEST_DIRECT_URL` |
+| Production    | À choisir avant le déploiement         | Variables Railway (non configurées)    |
+
+Jamais de migration destructrice ni de nettoyage de tests sur la base de développement. Détails :
+[docs/DEPLOIEMENT-RAILWAY.md](docs/DEPLOIEMENT-RAILWAY.md).
 
 ## Base de données
 
 ```powershell
-pnpm db:check            # teste la connexion Neon et liste les migrations appliquées
-pnpm db:migrate:deploy   # applique les migrations en attente (non destructif)
-pnpm db:migrate:status   # état des migrations
+pnpm db:check                          # connexion et migrations appliquées (développement)
+pnpm db:migrate:status                 # état des migrations
+pnpm db:migrate:create -- nom_evolution  # génère une migration (lecture seule sur la base)
+pnpm db:migrate:check                  # refuse les migrations destructrices
+pnpm db:migrate:deploy                 # contrôle puis applique les migrations en attente
 pnpm db:bootstrap-super-admin -- --email admin@exemple.com --first-name Awa --last-name Traoré
 ```
 
 La migration initiale crée aussi les trois offres : Parc 25 000, Restaurant 35 000,
-Parc + Restaurant 55 000 FCFA/mois. Pour faire évoluer le schéma en développement :
-`pnpm db:migrate:dev` (sur une base de développement uniquement).
+Parc + Restaurant 55 000 FCFA/mois. `prisma migrate dev` n'est pas utilisé : il peut proposer de
+réinitialiser la base.
 
 ## Lancer en local
 
@@ -102,7 +116,7 @@ pnpm build; pnpm test:e2e   # tests Playwright (démarre l'API et le web constru
 ```
 
 ⚠️ Les tests d'intégration et E2E **créent puis suppriment** des données. Ils s'exécutent uniquement
-sur la base désignée par `TEST_DATABASE_URL` / `TEST_DIRECT_URL` (branche Neon `development`) et
+sur la base désignée par `TEST_DATABASE_URL` / `TEST_DIRECT_URL` (branche Neon `test`) et
 **refusent de démarrer** si elle est absente ou identique à `DATABASE_URL`. Création de la branche :
 voir [docs/DEPLOIEMENT-RAILWAY.md](docs/DEPLOIEMENT-RAILWAY.md#1-branches-neon). La CI GitHub Actions
 utilise sa propre base PostgreSQL éphémère.
