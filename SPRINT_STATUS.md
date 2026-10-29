@@ -1,13 +1,75 @@
 # Ocall Park — suivi des sprints
 
-| Sprint | Périmètre                                         | Branche           | Statut      |
-| ------ | ------------------------------------------------- | ----------------- | ----------- |
-| 1      | Socle SaaS multi-tenant, frontend, établissements | `claude/sprint-1` | ✅ Validé   |
-| 2      | Caisse POS restaurant                             | `claude/sprint-2` | ✅ Validé   |
-| 3      | POS Android, impression thermique, tiroir-caisse  | `claude/sprint-3` | 🔵 En cours |
+| Sprint | Périmètre                                         | Branche           | Statut                                                               |
+| ------ | ------------------------------------------------- | ----------------- | -------------------------------------------------------------------- |
+| 1      | Socle SaaS multi-tenant, frontend, établissements | `claude/sprint-1` | ✅ Validé                                                            |
+| 2      | Caisse POS restaurant                             | `claude/sprint-2` | ✅ Validé                                                            |
+| 3      | POS Android, impression thermique, tiroir-caisse  | `claude/sprint-3` | 🟡 Terminé, en attente de validation (validation matérielle à faire) |
+| 4      | —                                                 | —                 | ⛔ Non démarré (accord requis)                                       |
 
 Environnements : base Neon de **développement** (préservée), branche Neon **`test`** réservée aux
 tests automatisés, base de **production non configurée**. Aucune fusion dans `main`, aucun déploiement.
+Checkpoint Codex suivant : **CP-02** (Sprints 1 à 3), voir `docs/checkpoints/CP-02-preparation.md`.
+
+---
+
+## Sprint 3 — POS Android, impression thermique, tiroir-caisse
+
+### Fonctionnalités réalisées (logiciel)
+
+1. **POS Android** : caisse tactile portrait / paysage (PWA `orientation: any`), écran maintenu allumé
+   (Wake Lock), bandeau **hors connexion** qui suspend l'encaissement, prévention des doubles
+   paiements conservée (idempotence Sprint 2), choix du **poste de caisse** mémorisé sur l'appareil.
+2. **Connecteur matériel** : abstraction indépendante du fabricant (ESC/POS) ; pont Android
+   `OcallHardware` limité à une origine HTTPS et à 4 commandes ; transports réseau (TCP 9100),
+   Bluetooth (SPP) et USB (bulk) dans `apps/android` ; imprimante « Simulation » clairement signalée.
+3. **Impression thermique** : tickets 58 mm (32 car.) et 80 mm (48 car.), accents (PC858), impression
+   **après confirmation du paiement**, test d'impression, **réimpression contrôlée** (DUPLICATA, motif,
+   permission, audit), gestion de l'imprimante indisponible avec nouvelle tentative, **historique des
+   tentatives** ; un échec d'impression ne modifie jamais la vente (testé).
+4. **Tiroir-caisse** : ouverture **automatique uniquement après paiement espèces confirmé**, une seule
+   fois par paiement (unicité en base, concurrence testée), **jamais pour Wave**, ouverture manuelle
+   réservée et **justifiée**, délai minimal anti-répétition (10 s serveur, 3 s connecteur), audit.
+5. **Administration** (`/app/caisse/materiel`) : postes par établissement, connexion et adresse de
+   l'imprimante (validée), format de papier, impression automatique, tiroir et broche, test, échecs
+   récents, ouvertures du tiroir.
+
+API : `/pos-terminals`, `/print-jobs`, `/drawer-events` ; migration additive (3 tables). Documentation :
+[docs/MATERIEL-POS.md](docs/MATERIEL-POS.md), [apps/android/README.md](apps/android/README.md).
+
+### Tests (branche Neon `test` uniquement)
+
+| Suite                                            | Résultat |
+| ------------------------------------------------ | -------- |
+| Unitaires (shared 51, database 13, api 8)        | 72/72    |
+| Intégration API — Sprints 1, 2 et 3 (régression) | 76/76    |
+| E2E Playwright — Sprints 1, 2 et 3 (régression)  | 19/19    |
+| Lint, Prettier, TypeScript strict, build         | OK       |
+| Contrôle des migrations destructrices            | OK       |
+
+Les tests matériels Sprint 3 utilisent l'imprimante **simulée** (marqués « [simulation matérielle] ») :
+ils valident le parcours logiciel, **pas** le matériel physique.
+
+### Nécessite encore une validation matérielle
+
+- **Compilation du connecteur Android** : non compilé (pas de SDK Android ni de Gradle dans
+  l'environnement de développement).
+- Impression réelle **USB, Bluetooth, réseau**, en 58 et 80 mm, rendu des accents et de la coupe.
+- Ouverture réelle du **tiroir-caisse** (broche 2 / 5), une seule fois par paiement.
+- Comportement réel en coupure Wi-Fi, rotation et veille de la tablette.
+- Protocole complet : [docs/MATERIEL-POS.md §7](docs/MATERIEL-POS.md).
+
+### Problèmes restants
+
+- **Latence vers Neon `us-east-2`** : ~300 ms par aller-retour mesurés ; une impression prend 4 à 6 s
+  côté serveur en environnement de test (tiroir et ticket désormais demandés en parallèle). En
+  production, API et base dans la même région ramèneront cela à quelques dizaines de millisecondes.
+- **Arrêt des serveurs de test pendant une exécution E2E (1 occurrence)** : aucune sortie serveur dans
+  le journal, réussite à la relance ; journal conservé (`test-logs/e2e-s3-2026-10-29T23-05-46-468Z.log`).
+- **Problème PostgreSQL intermittent du Sprint 2** : **non réapparu** sur les exécutions du Sprint 3
+  (3 exécutions d'intégration complètes, 76/76) ; surveillance maintenue, journaux conservés.
+- Hors périmètre : paiement Wave effectif, KDS, impression de commandes cuisine, logo sur ticket,
+  sélection d'imprimante par découverte réseau / Bluetooth (adresse saisie manuellement).
 
 ---
 

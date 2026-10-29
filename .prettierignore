@@ -6,3 +6,6 @@ pnpm-lock.yaml
 packages/database/prisma/migrations
 playwright-report
 test-results
+
+# Rapports d'audit externes : conservés tels quels
+docs/checkpoints/audit-*.md
