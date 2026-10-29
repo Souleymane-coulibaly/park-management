@@ -77,6 +77,9 @@ model Organization {
   sales          Sale[]
   saleLines      SaleLine[]
   payments       Payment[]
+  posTerminals   PosTerminal[]
+  printJobs      PrintJob[]
+  drawerEvents   DrawerEvent[]
 
   @@index([status])
   @@index([businessType])
@@ -103,6 +106,9 @@ model Establishment {
   variantPrices VariantPrice[]
   cashSessions  CashSession[]
   sales         Sale[]
+  posTerminals  PosTerminal[]
+  printJobs     PrintJob[]
+  drawerEvents  DrawerEvent[]
 
   @@unique([organizationId, name])
   @@index([organizationId, isActive])
@@ -151,6 +157,8 @@ model OrganizationMembership {
   sales              Sale[]        @relation("SaleCashier")
   salesCancelled     Sale[]        @relation("SaleCancelledBy")
   paymentsReceived   Payment[]     @relation("PaymentReceivedBy")
+  printJobs          PrintJob[]    @relation("PrintJobRequestedBy")
+  drawerEvents       DrawerEvent[] @relation("DrawerEventRequestedBy")
 
   @@unique([organizationId, userId])
   @@index([userId])
@@ -446,6 +454,7 @@ model Sale {
   cancelledBy   OrganizationMembership? @relation("SaleCancelledBy", fields: [cancelledById], references: [id], onDelete: NoAction)
   lines         SaleLine[]
   payments      Payment[]
+  printJobs     PrintJob[]
 
   @@unique([establishmentId, number])
   @@unique([organizationId, clientRequestId])
@@ -496,8 +505,121 @@ model Payment {
   sale         Sale                   @relation(fields: [saleId], references: [id], onDelete: Cascade)
   cashSession  CashSession            @relation(fields: [cashSessionId], references: [id], onDelete: Cascade)
   receivedBy   OrganizationMembership @relation("PaymentReceivedBy", fields: [receivedById], references: [id], onDelete: NoAction)
+  drawerEvent  DrawerEvent?
 
   @@unique([organizationId, clientRequestId])
   @@index([saleId])
   @@index([cashSessionId, method, status])
+}
+
+// ─── Sprint 3 : postes de caisse, impression thermique et tiroir-caisse ───
+
+enum PrinterConnection {
+  NONE
+  SIMULATED
+  NETWORK
+  BLUETOOTH
+  USB
+}
+
+enum PrintJobKind {
+  RECEIPT
+  REPRINT
+  TEST
+}
+
+enum HardwareJobStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+enum DrawerOpenReason {
+  CASH_PAYMENT
+  MANUAL
+}
+
+/// Poste de caisse (tablette) d'un établissement, avec son imprimante et son tiroir-caisse.
+model PosTerminal {
+  id                String            @id @default(uuid()) @db.Uuid
+  organizationId    String            @db.Uuid
+  establishmentId   String            @db.Uuid
+  name              String
+  isActive          Boolean           @default(true)
+  printerConnection PrinterConnection @default(NONE)
+  /// Réseau : IPv4 locale[:port] ; Bluetooth : adresse MAC ; USB : vendorId:productId.
+  printerAddress    String?
+  /// Largeur du papier en mm : 58 ou 80.
+  paperWidth        Int               @default(80)
+  autoPrintReceipt  Boolean           @default(true)
+  drawerEnabled     Boolean           @default(false)
+  /// Broche du connecteur de tiroir (2 ou 5).
+  drawerPin         Int               @default(2)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  printJobs     PrintJob[]
+  drawerEvents  DrawerEvent[]
+
+  @@unique([establishmentId, name])
+  @@index([organizationId, establishmentId])
+}
+
+/// Tentative d'impression : chaque essai est historisé. Une impression ne modifie jamais la vente.
+model PrintJob {
+  id              String            @id @default(uuid()) @db.Uuid
+  organizationId  String            @db.Uuid
+  establishmentId String            @db.Uuid
+  terminalId      String            @db.Uuid
+  saleId          String?           @db.Uuid
+  kind            PrintJobKind
+  status          HardwareJobStatus @default(PENDING)
+  paperWidth      Int
+  reason          String?
+  errorCode       String?
+  errorMessage    String?
+  requestedById   String            @db.Uuid
+  clientRequestId String?
+  createdAt       DateTime          @default(now())
+  completedAt     DateTime?
+
+  organization  Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment          @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  terminal      PosTerminal            @relation(fields: [terminalId], references: [id], onDelete: Cascade)
+  sale          Sale?                  @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  requestedBy   OrganizationMembership @relation("PrintJobRequestedBy", fields: [requestedById], references: [id], onDelete: NoAction)
+
+  @@unique([organizationId, clientRequestId])
+  @@index([saleId])
+  @@index([terminalId, createdAt])
+}
+
+/// Ouverture du tiroir-caisse : automatique (une seule fois par paiement en espèces) ou manuelle justifiée.
+model DrawerEvent {
+  id              String            @id @default(uuid()) @db.Uuid
+  organizationId  String            @db.Uuid
+  establishmentId String            @db.Uuid
+  terminalId      String            @db.Uuid
+  reason          DrawerOpenReason
+  /// Unique : un paiement ne peut ouvrir le tiroir qu'une seule fois.
+  paymentId       String?           @unique @db.Uuid
+  justification   String?
+  status          HardwareJobStatus @default(PENDING)
+  errorCode       String?
+  errorMessage    String?
+  requestedById   String            @db.Uuid
+  clientRequestId String?
+  createdAt       DateTime          @default(now())
+  completedAt     DateTime?
+
+  organization  Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment          @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  terminal      PosTerminal            @relation(fields: [terminalId], references: [id], onDelete: Cascade)
+  payment       Payment?               @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  requestedBy   OrganizationMembership @relation("DrawerEventRequestedBy", fields: [requestedById], references: [id], onDelete: NoAction)
+
+  @@unique([organizationId, clientRequestId])
+  @@index([terminalId, createdAt])
 }
