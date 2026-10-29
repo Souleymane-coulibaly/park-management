@@ -17,6 +17,7 @@ import { BusinessModulesModule } from './modules/business-modules/business-modul
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { EmployeesModule } from './modules/employees/employees.module';
 import { EstablishmentsModule } from './modules/establishments/establishments.module';
+import { HardwareModule } from './modules/hardware/hardware.module';
 import { HealthController } from './modules/health/health.controller';
 import { OrganizationsModule } from './modules/organizations/organizations.module';
 import { PaymentsModule } from './modules/payments/payments.module';
@@ -47,6 +48,7 @@ import { SubscriptionsModule } from './modules/subscriptions/subscriptions.modul
     PaymentsModule,
     CatalogModule,
     PosModule,
+    HardwareModule,
   ],
   controllers: [HealthController],
   providers: [
