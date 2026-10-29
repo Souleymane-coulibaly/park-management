@@ -1,11 +1,13 @@
 import { defineConfig, devices } from '@playwright/test';
-import { config } from 'dotenv';
+import { existsSync, readFileSync } from 'node:fs';
+import { parse } from 'dotenv';
 import { resolveTestDatabase } from '@ocall/database';
 
-// Base de TEST obligatoire (branche Neon `development` ou base éphémère de CI) :
-// la configuration échoue plutôt que de lancer les tests sur la base principale.
-config({ path: 'apps/api/.env' });
-const testDb = resolveTestDatabase();
+// Base de TEST obligatoire (branche Neon `test` ou base éphémère de CI) : la configuration échoue
+// plutôt que de lancer les tests sur la base de développement. apps/api/.env est lu sans être injecté
+// dans process.env, pour ne pas transmettre NODE_ENV=development au serveur Next.js de production.
+const apiEnv = existsSync('apps/api/.env') ? parse(readFileSync('apps/api/.env')) : {};
+const testDb = resolveTestDatabase({ ...apiEnv, ...process.env });
 
 /**
  * Tests E2E : l'API (port 4000) et le frontend (port 3000) doivent être construits au préalable
