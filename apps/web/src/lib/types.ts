@@ -92,6 +92,10 @@ export interface Subscription {
 
 export interface DashboardSummary {
   activities: ('PARK' | 'RESTAURANT')[];
+  revenue: Record<
+    'PARK' | 'RESTAURANT',
+    { today: number; last30Days: number; paidSalesLast30Days: number } | null
+  >;
   establishments: { total: number; active: number };
   employees: { total: number; active: number; byRole: Partial<Record<MemberRole, number>> } | null;
   subscription: {
@@ -146,4 +150,111 @@ export interface PlatformSubscription {
   expiresAt: string | null;
   organization: { id: string; name: string; businessType: BusinessType };
   plan: { name: string; monthlyPrice: number; currency: string };
+}
+
+// ─── Sprint 2 : catalogue et caisse POS ───
+
+export interface CatalogCategory {
+  id: string;
+  name: string;
+  sortOrder: number;
+  isActive: boolean;
+  _count: { products: number };
+}
+
+export interface CatalogVariant {
+  id: string;
+  name: string;
+  isActive: boolean;
+  prices: { establishmentId: string; price: number; isAvailable: boolean }[];
+}
+
+export interface CatalogProduct {
+  id: string;
+  name: string;
+  description: string | null;
+  isActive: boolean;
+  category: { id: string; name: string };
+  variants: CatalogVariant[];
+}
+
+export interface PosEstablishment {
+  id: string;
+  name: string;
+}
+
+export interface PosCatalogCategory {
+  id: string;
+  name: string;
+  products: { id: string; name: string; variants: { id: string; name: string; price: number }[] }[];
+}
+
+export interface QuoteLine {
+  variantId: string;
+  productName: string;
+  variantName: string;
+  unitPrice: number;
+  quantity: number;
+  lineTotal: number;
+}
+
+export interface Quote {
+  lines: QuoteLine[];
+  total: number;
+}
+
+export interface SalePayment {
+  id: string;
+  method: 'CASH' | 'WAVE';
+  status: 'PENDING' | 'SUCCEEDED' | 'FAILED';
+  amount: number;
+  amountTendered: number | null;
+  changeGiven: number | null;
+  createdAt: string;
+}
+
+export interface Sale {
+  id: string;
+  number: number;
+  status: 'OPEN' | 'CANCELLED';
+  paymentStatus: 'UNPAID' | 'PAID';
+  preparationStatus: 'NOT_SENT' | 'SENT' | 'READY' | 'SERVED';
+  total: number;
+  createdAt: string;
+  cancelledAt: string | null;
+  cashSessionId: string;
+  establishment: { id: string; name: string };
+  cashier: { id: string; name: string };
+  lines: QuoteLine[];
+  payments: SalePayment[];
+}
+
+export interface PaymentResult {
+  sale: Sale;
+  payment: SalePayment;
+}
+
+export interface CashSession {
+  id: string;
+  status: 'OPEN' | 'CLOSED';
+  openingFloat: number;
+  openedAt: string;
+  closedAt: string | null;
+  expectedCash: number;
+  countedCash: number | null;
+  variance: number | null;
+  closingNote: string | null;
+  establishment: { id: string; name: string };
+  openedBy: { id: string; name: string | null };
+  closedBy: { id: string; name: string | null } | null;
+  cashSalesTotal: number;
+  salesCount: number;
+  unpaidCount: number;
+}
+
+export interface PaymentMethodInfo {
+  method: 'CASH' | 'WAVE';
+  label: string;
+  available: boolean;
+  reason: string | null;
 }

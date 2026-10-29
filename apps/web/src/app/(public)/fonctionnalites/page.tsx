@@ -13,6 +13,10 @@ const AVAILABLE_NOW = [
   'Rôles : propriétaire, administrateur, superviseur, caisse, cuisine, agent d’entrée',
   'Mot de passe initial à changer, verrouillage après tentatives répétées',
   'Journal d’audit des actions sensibles',
+  'Restaurant : catalogue avec catégories, variantes et tarifs par établissement',
+  'Restaurant : caisse tactile pour tablette, encaissement en espèces et rendu de monnaie',
+  'Restaurant : sessions de caisse avec fond, fermeture et suivi des écarts',
+  'Restaurant : historique des ventes et chiffre d’affaires encaissé',
 ];
 
 export default function FonctionnalitesPage() {

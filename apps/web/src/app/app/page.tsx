@@ -98,17 +98,56 @@ function DashboardContent({ data }: { data: DashboardSummary }) {
       <div className={`grid gap-4 ${data.activities.length > 1 ? 'md:grid-cols-2' : ''}`}>
         {data.activities.map((activity) => {
           const source = REVENUE_SOURCES[activity];
+          const revenue = data.revenue[activity];
+          if (revenue) {
+            return (
+              <Card key={activity}>
+                <CardHeader
+                  title={source.label}
+                  description="Ventes encaissées (hors ventes annulées ou non payées)."
+                />
+                <CardBody className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-sm text-muted">Aujourd’hui</p>
+                    <p
+                      className="font-display text-2xl font-bold"
+                      data-testid={`revenue-${activity}-today`}
+                    >
+                      {formatXof(revenue.today)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted">30 derniers jours</p>
+                    <p className="font-display text-2xl font-bold">
+                      {formatXof(revenue.last30Days)}
+                    </p>
+                    <p className="text-xs text-muted">
+                      {revenue.paidSalesLast30Days} vente(s) payée(s)
+                    </p>
+                  </div>
+                </CardBody>
+              </Card>
+            );
+          }
           return (
             <Card key={activity}>
               <CardHeader
                 title={source.label}
                 description="Chiffre d’affaires par jour, semaine et mois."
-                action={<UpcomingBadge />}
+                action={activity === 'PARK' ? <UpcomingBadge /> : undefined}
               />
               <EmptyState
                 icon={<TrendingUp className="h-7 w-7" />}
-                title="Aucune vente enregistrée"
-                description={`Les revenus apparaîtront ici dès la mise en service de ${source.module}. Aucune donnée n’est affichée tant qu’elle n’existe pas.`}
+                title={
+                  activity === 'PARK'
+                    ? 'Aucune vente enregistrée'
+                    : 'Revenus réservés aux responsables'
+                }
+                description={
+                  activity === 'PARK'
+                    ? `Les revenus apparaîtront ici dès la mise en service de ${source.module}. Aucune donnée n’est affichée tant qu’elle n’existe pas.`
+                    : 'Le chiffre d’affaires est visible par les propriétaires, administrateurs et superviseurs.'
+                }
               />
             </Card>
           );

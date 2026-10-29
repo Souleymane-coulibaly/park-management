@@ -33,6 +33,15 @@ const ACTION_LABELS: Record<string, string> = {
   'auth.login': 'Connexion',
   'auth.logout': 'Déconnexion',
   'auth.password_changed': 'Mot de passe changé',
+  'catalog.category_created': 'Catégorie créée',
+  'catalog.category_updated': 'Catégorie modifiée',
+  'catalog.product_created': 'Produit créé',
+  'catalog.product_updated': 'Produit modifié',
+  'cash_session.opened': 'Caisse ouverte',
+  'cash_session.closed': 'Caisse fermée',
+  'sale.created': 'Vente enregistrée',
+  'sale.paid': 'Vente encaissée',
+  'sale.cancelled': 'Vente annulée',
 };
 
 export const actionLabel = (action: string) => ACTION_LABELS[action] ?? action;

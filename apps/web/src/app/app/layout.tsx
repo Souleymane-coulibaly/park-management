@@ -26,6 +26,7 @@ export default async function MemberLayout({ children }: { children: ReactNode }
       context={{ title: org.name, subtitle: BUSINESS_TYPE_LABELS[org.businessType] }}
       homeHref="/app"
       accountHref="/app/compte"
+      wideRoutes={['/app/caisse']}
       headerNote={
         <>
           Fuseau : <span className="font-medium text-charcoal">{org.timezone}</span>

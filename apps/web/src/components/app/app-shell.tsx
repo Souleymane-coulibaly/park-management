@@ -27,6 +27,8 @@ interface ShellProps {
   homeHref: string;
   accountHref?: string;
   headerNote?: ReactNode;
+  /** Routes affichées en pleine largeur (ex. la caisse sur tablette). */
+  wideRoutes?: string[];
   children: ReactNode;
 }
 
@@ -93,6 +95,7 @@ export function AppShell({
   homeHref,
   accountHref,
   headerNote,
+  wideRoutes = [],
   children,
 }: ShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -169,7 +172,9 @@ export function AppShell({
               <LogoutButton className="text-charcoal-soft hover:bg-ivory-dark/50" />
             </div>
           </header>
-          <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 sm:py-8">
+          <main
+            className={`mx-auto w-full flex-1 ${wideRoutes.includes(pathname) ? 'px-3 py-3 sm:px-4' : 'max-w-6xl px-4 py-6 sm:px-6 sm:py-8'}`}
+          >
             {children}
           </main>
         </div>
