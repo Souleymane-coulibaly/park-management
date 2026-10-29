@@ -87,6 +87,12 @@ export default function CaissePage() {
           >
             Sessions
           </Link>
+          <Link
+            href="/app/caisse/materiel"
+            className="inline-flex min-h-11 items-center rounded-xl border border-line bg-surface px-3 hover:border-forest"
+          >
+            Matériel
+          </Link>
         </div>
       </div>
       {selected && <Register key={selected} establishmentId={selected} />}

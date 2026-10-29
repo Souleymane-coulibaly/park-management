@@ -42,6 +42,14 @@ const ACTION_LABELS: Record<string, string> = {
   'sale.created': 'Vente enregistrée',
   'sale.paid': 'Vente encaissée',
   'sale.cancelled': 'Vente annulée',
+  'terminal.created': 'Poste de caisse créé',
+  'terminal.updated': 'Poste de caisse modifié',
+  'print.reprint_requested': 'Réimpression de ticket',
+  'print.test_requested': 'Test d’impression',
+  'drawer.cash_open_requested': 'Ouverture du tiroir (paiement espèces)',
+  'drawer.manual_open_requested': 'Ouverture manuelle du tiroir',
+  'drawer.opened': 'Tiroir ouvert',
+  'drawer.open_failed': 'Échec d’ouverture du tiroir',
 };
 
 export const actionLabel = (action: string) => ACTION_LABELS[action] ?? action;

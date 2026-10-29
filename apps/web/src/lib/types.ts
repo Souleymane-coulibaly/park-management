@@ -258,3 +258,70 @@ export interface PaymentMethodInfo {
   available: boolean;
   reason: string | null;
 }
+
+// ─── Sprint 3 : postes, impression et tiroir-caisse ───
+
+export type PrinterConnectionType = 'NONE' | 'SIMULATED' | 'NETWORK' | 'BLUETOOTH' | 'USB';
+
+export interface PosTerminal {
+  id: string;
+  name: string;
+  isActive: boolean;
+  printerConnection: PrinterConnectionType;
+  printerAddress: string | null;
+  paperWidth: number;
+  autoPrintReceipt: boolean;
+  drawerEnabled: boolean;
+  drawerPin: number;
+  establishment: { id: string; name: string };
+}
+
+export interface HardwareTarget {
+  connection: PrinterConnectionType;
+  address: string | null;
+}
+
+export interface PrintJobView {
+  id: string;
+  kind: 'RECEIPT' | 'REPRINT' | 'TEST';
+  status: 'PENDING' | 'SUCCEEDED' | 'FAILED';
+  paperWidth: number;
+  reason: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  completedAt: string | null;
+  saleId: string | null;
+  saleNumber: number | null;
+  terminalName: string;
+  requestedByName: string;
+}
+
+export interface PrintJobResponse {
+  job: PrintJobView;
+  printer: HardwareTarget;
+  paperWidth: number;
+  data: string | null;
+  preview: string[];
+  alreadyCompleted: boolean;
+}
+
+export interface DrawerEventView {
+  id: string;
+  reason: 'CASH_PAYMENT' | 'MANUAL';
+  status: 'PENDING' | 'SUCCEEDED' | 'FAILED';
+  paymentId: string | null;
+  justification: string | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+  createdAt: string;
+  terminalName: string;
+  requestedByName: string;
+}
+
+export interface DrawerEventResponse {
+  event: DrawerEventView;
+  printer: HardwareTarget;
+  command: { pin: 2 | 5 } | null;
+  alreadyIssued: boolean;
+}

@@ -10,6 +10,8 @@ import { ApiError, api } from '@/lib/api';
 import { newRequestId } from '@/lib/request-id';
 import type { PaymentMethodInfo, PaymentResult, Sale } from '@/lib/types';
 import { useApi } from '@/lib/use-api';
+import type { PosTerminal } from '@/lib/types';
+import { AfterPaymentHardware } from './after-payment-hardware';
 
 /** Montants rapides : le total exact, puis les arrondis aux coupures FCFA courantes. */
 function quickAmounts(total: number): number[] {
@@ -156,8 +158,16 @@ export function PaymentDialog({
   );
 }
 
-/** Reçu affiché après paiement : montants confirmés par le serveur. */
-export function ReceiptDialog({ result, onClose }: { result: PaymentResult; onClose: () => void }) {
+/** Reçu affiché après paiement : montants confirmés par le serveur, puis tiroir et ticket. */
+export function ReceiptDialog({
+  result,
+  terminal,
+  onClose,
+}: {
+  result: PaymentResult;
+  terminal: PosTerminal | null;
+  onClose: () => void;
+}) {
   const { sale, payment } = result;
   return (
     <Dialog
@@ -183,6 +193,7 @@ export function ReceiptDialog({ result, onClose }: { result: PaymentResult; onCl
             </dd>
           </div>
         </dl>
+        <AfterPaymentHardware result={result} terminal={terminal} />
         <Alert tone="info">
           Préparation : non envoyée en cuisine. Le paiement ne déclenche jamais la préparation.
         </Alert>

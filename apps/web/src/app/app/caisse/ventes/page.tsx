@@ -1,11 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { Ban, Receipt } from 'lucide-react';
+import { Ban, Printer, Receipt } from 'lucide-react';
 import { PREPARATION_STATUS_LABELS, formatSaleNumber, formatXof } from '@ocall/shared';
 import { AccessDenied } from '@/components/app/access-denied';
 import { useCan } from '@/components/app/session-context';
 import { PaymentDialog, ReceiptDialog } from '@/components/pos/payment-dialog';
+import { ReprintDialog } from '@/components/pos/reprint-dialog';
+import { runPrintJob } from '@/lib/hardware/jobs';
+import { useDeviceTerminal } from '@/lib/hardware/use-terminal';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -15,7 +18,7 @@ import { ApiErrorAlert, EmptyState, ErrorState, LoadingState } from '@/component
 import { Table, Td } from '@/components/ui/table';
 import { ApiError, api } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
-import type { PaymentResult, Sale } from '@/lib/types';
+import type { PaymentResult, PrintJobView, Sale } from '@/lib/types';
 import { useApi } from '@/lib/use-api';
 
 const FILTERS = [
@@ -131,6 +134,12 @@ function SaleDetailDialog({
   onChanged: () => void;
 }) {
   const canCancel = useCan('sale.cancel');
+  const canReprint = useCan('receipt.reprint');
+  const device = useDeviceTerminal(sale.establishment.id);
+  const printJobs = useApi<PrintJobView[]>(`/print-jobs?saleId=${sale.id}`);
+  const [reprinting, setReprinting] = useState(false);
+  const [printing, setPrinting] = useState(false);
+  const [printMessage, setPrintMessage] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
   const [receipt, setReceipt] = useState<PaymentResult | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
@@ -150,7 +159,8 @@ function SaleDetailDialog({
     }
   }
 
-  if (receipt) return <ReceiptDialog result={receipt} onClose={onChanged} />;
+  if (receipt)
+    return <ReceiptDialog result={receipt} terminal={device.terminal} onClose={onChanged} />;
   if (paying)
     return <PaymentDialog sale={sale} onClose={() => setPaying(false)} onPaid={setReceipt} />;
 
@@ -189,6 +199,80 @@ function SaleDetailDialog({
             {formatXof(p.amountTendered ?? p.amount)}, rendu {formatXof(p.changeGiven ?? 0)}.
           </p>
         ))}
+        {sale.paymentStatus === 'PAID' && sale.status === 'OPEN' && (
+          <section aria-label="Impressions" className="space-y-2 rounded-xl border border-line p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold">Impressions du ticket</h3>
+              {device.terminal && device.terminal.printerConnection !== 'NONE' ? (
+                printJobs.state === 'success' &&
+                printJobs.data.some((j) => j.status === 'SUCCEEDED') ? (
+                  canReprint && (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => setReprinting(true)}
+                      icon={<Printer className="h-4 w-4" />}
+                    >
+                      Réimprimer (duplicata)
+                    </Button>
+                  )
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    loading={printing}
+                    icon={<Printer className="h-4 w-4" />}
+                    onClick={async () => {
+                      setPrinting(true);
+                      const outcome = await runPrintJob({
+                        terminalId: device.terminal!.id,
+                        kind: 'RECEIPT',
+                        saleId: sale.id,
+                      });
+                      setPrintMessage(
+                        outcome.status === 'SUCCEEDED'
+                          ? 'Ticket imprimé.'
+                          : (outcome.message ?? 'Échec de l’impression.'),
+                      );
+                      setPrinting(false);
+                      printJobs.reload();
+                    }}
+                  >
+                    Imprimer le ticket
+                  </Button>
+                )
+              ) : (
+                <span className="text-xs text-muted">Aucune imprimante sur ce poste.</span>
+              )}
+            </div>
+            {printMessage && <p className="text-sm text-muted">{printMessage}</p>}
+            {printJobs.state === 'success' && printJobs.data.length > 0 && (
+              <ul className="space-y-1 text-xs text-muted" data-testid="print-attempts">
+                {printJobs.data.map((j) => (
+                  <li key={j.id}>
+                    {formatDateTime(j.createdAt)} · {j.kind === 'REPRINT' ? 'Duplicata' : 'Ticket'}{' '}
+                    · {j.terminalName} ·{' '}
+                    {j.status === 'SUCCEEDED'
+                      ? 'imprimé'
+                      : j.status === 'FAILED'
+                        ? `échec (${j.errorCode})`
+                        : 'en attente'}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        )}
+        {reprinting && device.terminal && (
+          <ReprintDialog
+            saleId={sale.id}
+            terminal={device.terminal}
+            onClose={() => {
+              setReprinting(false);
+              printJobs.reload();
+            }}
+          />
+        )}
         <ApiErrorAlert error={error} />
         {payable && (
           <div className="flex flex-wrap justify-end gap-2">

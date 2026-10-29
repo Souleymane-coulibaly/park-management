@@ -1,8 +1,9 @@
 'use client';
 
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
-import { Lock, Minus, Plus, ShoppingBasket, Trash2, Unlock } from 'lucide-react';
+import { Lock, Minus, Plus, ShoppingBasket, Trash2, Unlock, Vault, WifiOff } from 'lucide-react';
 import { computeCashVariance, formatSaleNumber, formatXof } from '@ocall/shared';
+import { useCan } from '@/components/app/session-context';
 import { PaymentDialog, ReceiptDialog } from '@/components/pos/payment-dialog';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -13,6 +14,11 @@ import { formatDateTime } from '@/lib/format';
 import { newRequestId } from '@/lib/request-id';
 import type { CashSession, PaymentResult, PosCatalogCategory, Quote, Sale } from '@/lib/types';
 import { useApi } from '@/lib/use-api';
+import { type HardwareOutcome, runDrawerOpening } from '@/lib/hardware/jobs';
+import { useDeviceTerminal, useOnline, useWakeLock } from '@/lib/hardware/use-terminal';
+import type { PosTerminal } from '@/lib/types';
+import { SelectField } from '@/components/ui/field';
+import Link from 'next/link';
 
 const toApiError = (e: unknown) =>
   e instanceof ApiError ? e : new ApiError(0, 'NETWORK', 'Connexion au serveur impossible.');
@@ -140,6 +146,12 @@ function Terminal({
   onSessionChange: () => void;
 }) {
   const catalog = useApi<PosCatalogCategory[]>(`/pos/catalog?establishmentId=${establishmentId}`);
+  const device = useDeviceTerminal(establishmentId);
+  const online = useOnline();
+  const canOpenDrawer = useCan('drawer.open_manual');
+  const canManageHardware = useCan('hardware.manage');
+  const [manualDrawer, setManualDrawer] = useState(false);
+  useWakeLock(true);
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [quote, setQuote] = useState<{
@@ -249,7 +261,9 @@ function Terminal({
   }
 
   const total = quote.data?.total;
-  const canCheckout = cart.length > 0 && !!quote.data && !quote.loading && !checkout.loading;
+  // Hors connexion, l'encaissement est suspendu : aucune vente n'est enregistrée localement.
+  const canCheckout =
+    online && cart.length > 0 && !!quote.data && !quote.loading && !checkout.loading;
 
   return (
     <>
@@ -279,6 +293,63 @@ function Terminal({
           </Button>
         </div>
       </div>
+
+      <div className="flex flex-wrap items-center gap-3 text-sm">
+        {device.terminals.length > 1 ? (
+          <div className="w-56">
+            <SelectField
+              label="Poste de caisse"
+              value={device.terminal?.id ?? ''}
+              onChange={(e) => device.select(e.target.value || null)}
+              options={[
+                { value: '', label: 'Choisir un poste…' },
+                ...device.terminals.map((t) => ({ value: t.id, label: t.name })),
+              ]}
+            />
+          </div>
+        ) : device.terminal ? (
+          <span
+            className="rounded-xl border border-line bg-surface px-3 py-2"
+            data-testid="device-terminal"
+          >
+            Poste : <strong>{device.terminal.name}</strong>
+          </span>
+        ) : (
+          !device.loading && (
+            <span className="text-muted">
+              Aucun poste de caisse : impression et tiroir désactivés.
+              {canManageHardware && (
+                <Link
+                  href="/app/caisse/materiel"
+                  className="ml-1 font-semibold text-forest underline"
+                >
+                  Configurer le matériel
+                </Link>
+              )}
+            </span>
+          )
+        )}
+        {canOpenDrawer && device.terminal?.drawerEnabled && (
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={() => setManualDrawer(true)}
+            icon={<Vault className="h-4 w-4" />}
+          >
+            Ouvrir le tiroir
+          </Button>
+        )}
+      </div>
+
+      {!online && (
+        <div
+          role="alert"
+          className="flex items-center gap-2 rounded-xl border border-terracotta/40 bg-terracotta-light/60 px-4 py-3 text-sm font-semibold text-terracotta-dark"
+        >
+          <WifiOff className="h-5 w-5" aria-hidden /> Hors connexion : l’encaissement est suspendu
+          jusqu’au retour du réseau. Aucune vente n’est perdue.
+        </div>
+      )}
 
       <div className="grid gap-3 pb-24 lg:grid-cols-[minmax(0,1fr)_380px] lg:pb-0">
         <section aria-label="Articles" className="min-w-0">
@@ -481,6 +552,7 @@ function Terminal({
       {receipt && (
         <ReceiptDialog
           result={receipt}
+          terminal={device.terminal}
           onClose={() => {
             setReceipt(null);
             onSessionChange();
@@ -499,6 +571,9 @@ function Terminal({
             </Button>
           </div>
         </Dialog>
+      )}
+      {manualDrawer && device.terminal && (
+        <ManualDrawerDialog terminal={device.terminal} onClose={() => setManualDrawer(false)} />
       )}
       {closing && (
         <CloseSessionDialog
@@ -632,6 +707,66 @@ function CloseSessionDialog({
           </Button>
           <Button type="submit" loading={loading} disabled={amount === null}>
             Valider la fermeture
+          </Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+/** Ouverture manuelle du tiroir : réservée aux responsables, justification obligatoire, auditée. */
+function ManualDrawerDialog({ terminal, onClose }: { terminal: PosTerminal; onClose: () => void }) {
+  const [justification, setJustification] = useState('');
+  const [outcome, setOutcome] = useState<HardwareOutcome | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    setLoading(true);
+    setOutcome(
+      await runDrawerOpening({ terminalId: terminal.id, reason: 'MANUAL', justification }),
+    );
+    setLoading(false);
+  }
+
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title="Ouvrir le tiroir-caisse"
+      description={`Poste ${terminal.name} — l’ouverture est enregistrée dans le journal d’audit.`}
+    >
+      <form onSubmit={onSubmit} className="space-y-4">
+        <div>
+          <label htmlFor="drawer-justification" className="block text-sm font-medium">
+            Justification
+          </label>
+          <textarea
+            id="drawer-justification"
+            value={justification}
+            onChange={(e) => setJustification(e.target.value)}
+            rows={3}
+            maxLength={200}
+            className="mt-1.5 block w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 focus:border-forest focus:outline-none focus:ring-2 focus:ring-forest/20"
+            placeholder="Ex. dépôt du fond de caisse, échange de monnaie…"
+          />
+        </div>
+        {outcome?.status === 'SUCCEEDED' && <Alert tone="success">Tiroir ouvert.</Alert>}
+        {outcome?.status === 'FAILED' && (
+          <Alert tone="error" title="Ouverture impossible">
+            {outcome.message}
+          </Alert>
+        )}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Fermer
+          </Button>
+          <Button
+            type="submit"
+            loading={loading}
+            disabled={justification.trim().length < 5 || outcome?.status === 'SUCCEEDED'}
+          >
+            Ouvrir le tiroir
           </Button>
         </div>
       </form>

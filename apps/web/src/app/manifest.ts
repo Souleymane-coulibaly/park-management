@@ -8,6 +8,8 @@ export default function manifest(): MetadataRoute.Manifest {
     description: 'Logiciel de gestion pour parcs et restaurants.',
     start_url: '/app',
     display: 'standalone',
+    // Caisse utilisable en portrait comme en paysage sur tablette.
+    orientation: 'any',
     background_color: '#F6F0E5',
     theme_color: '#176B53',
     lang: 'fr',
