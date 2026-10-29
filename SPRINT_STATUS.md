@@ -1,17 +1,17 @@
 # Ocall Park — suivi des sprints
 
-| Sprint | Périmètre                                         | Branche           | Statut                               |
-| ------ | ------------------------------------------------- | ----------------- | ------------------------------------ |
-| 1      | Socle SaaS multi-tenant, frontend, établissements | `claude/sprint-1` | ✅ Validé                            |
-| 2      | Caisse POS restaurant                             | `claude/sprint-2` | 🟡 Terminé, en attente de validation |
-| 3      | —                                                 | —                 | ⛔ Non démarré (accord requis)       |
+| Sprint | Périmètre                                         | Branche           | Statut      |
+| ------ | ------------------------------------------------- | ----------------- | ----------- |
+| 1      | Socle SaaS multi-tenant, frontend, établissements | `claude/sprint-1` | ✅ Validé   |
+| 2      | Caisse POS restaurant                             | `claude/sprint-2` | ✅ Validé   |
+| 3      | POS Android, impression thermique, tiroir-caisse  | `claude/sprint-3` | 🔵 En cours |
 
 Environnements : base Neon de **développement** (préservée), branche Neon **`test`** réservée aux
 tests automatisés, base de **production non configurée**. Aucune fusion dans `main`, aucun déploiement.
 
 ---
 
-## Sprint 2 — Caisse POS
+## Sprint 2 — Caisse POS (validé)
 
 ### Fonctionnalités réalisées
 
