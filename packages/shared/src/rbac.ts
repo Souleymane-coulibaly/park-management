@@ -48,6 +48,9 @@ export const Permission = {
   SALE_READ_ALL: 'sale.read_all',
   SALE_CANCEL: 'sale.cancel',
   CASH_SUPERVISE: 'cash.supervise',
+  HARDWARE_MANAGE: 'hardware.manage',
+  RECEIPT_REPRINT: 'receipt.reprint',
+  DRAWER_OPEN_MANUAL: 'drawer.open_manual',
 } as const;
 export type Permission = (typeof Permission)[keyof typeof Permission];
 export const PERMISSIONS: readonly Permission[] = Object.values(Permission);
@@ -71,6 +74,9 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'sale.read_all': 'Consulter toutes les ventes',
   'sale.cancel': 'Annuler une vente non payée',
   'cash.supervise': 'Superviser les sessions de caisse',
+  'hardware.manage': 'Configurer les postes, imprimantes et tiroirs-caisses',
+  'receipt.reprint': 'Réimprimer un ticket (duplicata)',
+  'drawer.open_manual': 'Ouvrir manuellement le tiroir-caisse',
 };
 
 const P = Permission;
@@ -90,6 +96,8 @@ export const ROLE_PERMISSIONS: Record<MemberRole, readonly Permission[]> = {
     P.SALE_READ_ALL,
     P.SALE_CANCEL,
     P.CASH_SUPERVISE,
+    P.RECEIPT_REPRINT,
+    P.DRAWER_OPEN_MANUAL,
   ],
   // Un caissier encaisse et ne voit que ses propres ventes et sessions.
   CASHIER: [...OPERATOR_BASE, P.CATALOG_READ, P.POS_SELL],
