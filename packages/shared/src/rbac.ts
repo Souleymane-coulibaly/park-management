@@ -42,6 +42,12 @@ export const Permission = {
   ROLE_ASSIGN: 'role.assign',
   SUBSCRIPTION_READ: 'subscription.read',
   AUDIT_READ: 'audit.read',
+  CATALOG_READ: 'catalog.read',
+  CATALOG_MANAGE: 'catalog.manage',
+  POS_SELL: 'pos.sell',
+  SALE_READ_ALL: 'sale.read_all',
+  SALE_CANCEL: 'sale.cancel',
+  CASH_SUPERVISE: 'cash.supervise',
 } as const;
 export type Permission = (typeof Permission)[keyof typeof Permission];
 export const PERMISSIONS: readonly Permission[] = Object.values(Permission);
@@ -59,6 +65,12 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'role.assign': 'Attribuer les rôles',
   'subscription.read': "Consulter l'abonnement",
   'audit.read': "Consulter le journal d'audit",
+  'catalog.read': 'Consulter le catalogue',
+  'catalog.manage': 'Gérer le catalogue et les tarifs',
+  'pos.sell': 'Encaisser des ventes (caisse POS)',
+  'sale.read_all': 'Consulter toutes les ventes',
+  'sale.cancel': 'Annuler une vente non payée',
+  'cash.supervise': 'Superviser les sessions de caisse',
 };
 
 const P = Permission;
@@ -68,9 +80,20 @@ const OPERATOR_BASE: readonly Permission[] = [P.DASHBOARD_READ, P.ORGANIZATION_R
 export const ROLE_PERMISSIONS: Record<MemberRole, readonly Permission[]> = {
   OWNER: PERMISSIONS,
   ADMIN: PERMISSIONS.filter((p) => p !== P.ORGANIZATION_CHANGE_BUSINESS_TYPE),
-  SUPERVISOR: [...OPERATOR_BASE, P.ESTABLISHMENT_READ, P.EMPLOYEE_READ, P.ROLE_READ],
-  CASHIER: OPERATOR_BASE,
-  KITCHEN: OPERATOR_BASE,
+  SUPERVISOR: [
+    ...OPERATOR_BASE,
+    P.ESTABLISHMENT_READ,
+    P.EMPLOYEE_READ,
+    P.ROLE_READ,
+    P.CATALOG_READ,
+    P.POS_SELL,
+    P.SALE_READ_ALL,
+    P.SALE_CANCEL,
+    P.CASH_SUPERVISE,
+  ],
+  // Un caissier encaisse et ne voit que ses propres ventes et sessions.
+  CASHIER: [...OPERATOR_BASE, P.CATALOG_READ, P.POS_SELL],
+  KITCHEN: [...OPERATOR_BASE, P.CATALOG_READ],
   GATE_AGENT: OPERATOR_BASE,
 };
 
