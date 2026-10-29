@@ -69,6 +69,14 @@ model Organization {
   assignments    EstablishmentAssignment[]
   subscription   Subscription?
   auditLogs      AuditLog[]
+  categories     ProductCategory[]
+  products       Product[]
+  variants       ProductVariant[]
+  variantPrices  VariantPrice[]
+  cashSessions   CashSession[]
+  sales          Sale[]
+  saleLines      SaleLine[]
+  payments       Payment[]
 
   @@index([status])
   @@index([businessType])
@@ -85,11 +93,16 @@ model Establishment {
   phone          String?
   timezone       String       @default("Africa/Bamako")
   isActive       Boolean      @default(true)
+  /// Compteur des numéros de vente de l'établissement, incrémenté de façon atomique.
+  saleSeq        Int          @default(0)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  organization Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  assignments  EstablishmentAssignment[]
+  organization  Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignments   EstablishmentAssignment[]
+  variantPrices VariantPrice[]
+  cashSessions  CashSession[]
+  sales         Sale[]
 
   @@unique([organizationId, name])
   @@index([organizationId, isActive])
@@ -132,6 +145,12 @@ model OrganizationMembership {
   user         User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
   assignments  EstablishmentAssignment[]
   sessions     Session[]
+
+  cashSessionsOpened CashSession[] @relation("CashSessionOpenedBy")
+  cashSessionsClosed CashSession[] @relation("CashSessionClosedBy")
+  sales              Sale[]        @relation("SaleCashier")
+  salesCancelled     Sale[]        @relation("SaleCancelledBy")
+  paymentsReceived   Payment[]     @relation("PaymentReceivedBy")
 
   @@unique([organizationId, userId])
   @@index([userId])
@@ -255,4 +274,230 @@ model AuditLog {
 
   @@index([organizationId, createdAt])
   @@index([actorUserId])
+}
+
+// ─── Sprint 2 : catalogue, caisse POS, ventes et paiements ───
+
+enum CashSessionStatus {
+  OPEN
+  CLOSED
+}
+
+enum SaleStatus {
+  OPEN
+  CANCELLED
+}
+
+/// Statut de paiement, indépendant du statut de préparation.
+enum SalePaymentStatus {
+  UNPAID
+  PAID
+}
+
+/// Statut de préparation cuisine. Un paiement ne le modifie JAMAIS : seul un envoi explicite
+/// en cuisine (module KDS, sprint ultérieur) pourra le faire évoluer.
+enum PreparationStatus {
+  NOT_SENT
+  SENT
+  READY
+  SERVED
+}
+
+enum PaymentMethod {
+  CASH
+  WAVE
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+model ProductCategory {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  name           String
+  sortOrder      Int      @default(0)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  products     Product[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, isActive])
+}
+
+model Product {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  categoryId     String   @db.Uuid
+  name           String
+  description    String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category     ProductCategory  @relation(fields: [categoryId], references: [id], onDelete: NoAction)
+  variants     ProductVariant[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, categoryId])
+}
+
+/// Déclinaison vendable d'un produit (ex. « Standard », « Grand modèle »). Tout produit en a au moins une.
+/// Une variante utilisée par une vente n'est jamais supprimée : elle est désactivée.
+model ProductVariant {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  productId      String   @db.Uuid
+  name           String
+  sortOrder      Int      @default(0)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  product      Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  prices       VariantPrice[]
+  saleLines    SaleLine[]
+
+  @@unique([productId, name])
+  @@index([organizationId])
+}
+
+/// Tarif d'une variante dans un établissement (montant entier en FCFA, TTC).
+model VariantPrice {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  variantId       String   @db.Uuid
+  establishmentId String   @db.Uuid
+  price           Int
+  isAvailable     Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  variant       ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  establishment Establishment  @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+
+  @@unique([variantId, establishmentId])
+  @@index([organizationId, establishmentId])
+}
+
+/// Session de caisse d'un employé dans un établissement : fond de caisse, espèces attendues,
+/// espèces comptées et écart à la fermeture.
+model CashSession {
+  id              String            @id @default(uuid()) @db.Uuid
+  organizationId  String            @db.Uuid
+  establishmentId String            @db.Uuid
+  openedById      String            @db.Uuid
+  status          CashSessionStatus @default(OPEN)
+  openingFloat    Int
+  openedAt        DateTime          @default(now())
+  closedById      String?           @db.Uuid
+  closedAt        DateTime?
+  expectedCash    Int?
+  countedCash     Int?
+  /// countedCash - expectedCash : négatif = manque, positif = excédent.
+  variance        Int?
+  closingNote     String?
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  organization  Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment           @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  openedBy      OrganizationMembership  @relation("CashSessionOpenedBy", fields: [openedById], references: [id], onDelete: NoAction)
+  closedBy      OrganizationMembership? @relation("CashSessionClosedBy", fields: [closedById], references: [id], onDelete: NoAction)
+  sales         Sale[]
+  payments      Payment[]
+
+  @@index([organizationId, establishmentId, status])
+  @@index([openedById, status])
+}
+
+model Sale {
+  id                String            @id @default(uuid()) @db.Uuid
+  organizationId    String            @db.Uuid
+  establishmentId   String            @db.Uuid
+  cashSessionId     String            @db.Uuid
+  cashierId         String            @db.Uuid
+  /// Numéro séquentiel par établissement.
+  number            Int
+  status            SaleStatus        @default(OPEN)
+  paymentStatus     SalePaymentStatus @default(UNPAID)
+  preparationStatus PreparationStatus @default(NOT_SENT)
+  /// Total TTC en FCFA, calculé par le serveur à partir des tarifs de l'établissement.
+  total             Int
+  /// Clé d'idempotence fournie par la caisse : une nouvelle tentative ne crée pas de doublon.
+  clientRequestId   String?
+  cancelledAt       DateTime?
+  cancelledById     String?           @db.Uuid
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  organization  Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment           @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  cashSession   CashSession             @relation(fields: [cashSessionId], references: [id], onDelete: Cascade)
+  cashier       OrganizationMembership  @relation("SaleCashier", fields: [cashierId], references: [id], onDelete: NoAction)
+  cancelledBy   OrganizationMembership? @relation("SaleCancelledBy", fields: [cancelledById], references: [id], onDelete: NoAction)
+  lines         SaleLine[]
+  payments      Payment[]
+
+  @@unique([establishmentId, number])
+  @@unique([organizationId, clientRequestId])
+  @@index([organizationId, createdAt])
+  @@index([cashSessionId])
+  @@index([cashierId, createdAt])
+}
+
+/// Ligne de vente : libellés et prix figés au moment de la vente.
+model SaleLine {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  saleId         String @db.Uuid
+  variantId      String @db.Uuid
+  productName    String
+  variantName    String
+  unitPrice      Int
+  quantity       Int
+  lineTotal      Int
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sale         Sale           @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  variant      ProductVariant @relation(fields: [variantId], references: [id], onDelete: NoAction)
+
+  @@index([saleId])
+  @@index([organizationId])
+}
+
+model Payment {
+  id                String        @id @default(uuid()) @db.Uuid
+  organizationId    String        @db.Uuid
+  saleId            String        @db.Uuid
+  cashSessionId     String        @db.Uuid
+  receivedById      String        @db.Uuid
+  method            PaymentMethod
+  status            PaymentStatus
+  amount            Int
+  /// Espèces remises par le client (paiement en espèces uniquement).
+  amountTendered    Int?
+  changeGiven       Int?
+  /// Référence du prestataire (Wave), renseignée uniquement par une notification vérifiée.
+  providerReference String?
+  clientRequestId   String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sale         Sale                   @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  cashSession  CashSession            @relation(fields: [cashSessionId], references: [id], onDelete: Cascade)
+  receivedBy   OrganizationMembership @relation("PaymentReceivedBy", fields: [receivedById], references: [id], onDelete: NoAction)
+
+  @@unique([organizationId, clientRequestId])
+  @@index([saleId])
+  @@index([cashSessionId, method, status])
 }
