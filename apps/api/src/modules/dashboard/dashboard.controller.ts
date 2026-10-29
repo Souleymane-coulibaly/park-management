@@ -1,6 +1,11 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import { activitiesOf, hasPermission } from '@ocall/shared';
+import {
+  activitiesOf,
+  coversActivity,
+  hasOrganizationWideScope,
+  hasPermission,
+} from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { type AuthContext, requireTenant } from '../../common/auth-context';
 import { CurrentAuth, RequirePermission } from '../../common/decorators';
@@ -65,13 +70,53 @@ export class DashboardController {
         })
       : null;
 
+    const restaurantRevenue =
+      coversActivity(businessType, 'RESTAURANT') && hasPermission(role, 'sale.read_all')
+        ? await this.restaurantRevenue(
+            tenant.membership.organizationId,
+            tenant.membership.timezone,
+            hasOrganizationWideScope(role) ? null : tenant.membership.id,
+          )
+        : null;
+
     return {
-      // Les revenus Parc et Restaurant seront séparés par activité dès l'arrivée des modules de vente.
+      // Revenus séparés par activité : Restaurant (caisse POS) disponible, Parc avec la billetterie.
+      revenue: { RESTAURANT: restaurantRevenue, PARK: null },
       activities: activitiesOf(businessType),
       establishments: { total: establishmentsTotal, active: establishmentsActive },
       employees,
       subscription,
       recentActivity,
+    };
+  }
+
+  /**
+   * Chiffre d'affaires restaurant encaissé (ventes payées, non annulées), aujourd'hui et sur
+   * 30 jours glissants. « Aujourd'hui » suit le fuseau horaire de l'organisation.
+   * Pour un superviseur, limité aux établissements qui lui sont affectés.
+   */
+  private async restaurantRevenue(
+    organizationId: string,
+    timezone: string,
+    assignedMembershipId: string | null,
+  ) {
+    const [row] = await this.prisma.$queryRaw<
+      { today: bigint | null; last30: bigint | null; count30: bigint }[]
+    >`
+      SELECT
+        SUM(s."total") FILTER (WHERE s."createdAt" >= (date_trunc('day', now() AT TIME ZONE ${timezone}) AT TIME ZONE ${timezone})) AS today,
+        SUM(s."total") AS last30,
+        COUNT(*) AS count30
+      FROM "Sale" s
+      WHERE s."organizationId" = ${organizationId}::uuid
+        AND s."status" = 'OPEN' AND s."paymentStatus" = 'PAID'
+        AND s."createdAt" >= now() - interval '30 days'
+        AND (${assignedMembershipId}::uuid IS NULL OR s."establishmentId" IN (
+          SELECT a."establishmentId" FROM "EstablishmentAssignment" a WHERE a."membershipId" = ${assignedMembershipId}::uuid))`;
+    return {
+      today: Number(row?.today ?? 0),
+      last30Days: Number(row?.last30 ?? 0),
+      paidSalesLast30Days: Number(row?.count30 ?? 0),
     };
   }
 }

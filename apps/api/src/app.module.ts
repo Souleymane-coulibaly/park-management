@@ -12,13 +12,16 @@ import { HttpExceptionFilter } from './common/http-exception.filter';
 import { throttlerOptions } from './common/throttling';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { CatalogModule } from './modules/catalog/catalog.module';
 import { BusinessModulesModule } from './modules/business-modules/business-modules.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
 import { EmployeesModule } from './modules/employees/employees.module';
 import { EstablishmentsModule } from './modules/establishments/establishments.module';
 import { HealthController } from './modules/health/health.controller';
 import { OrganizationsModule } from './modules/organizations/organizations.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 import { PlatformModule } from './modules/platform/platform.module';
+import { PosModule } from './modules/pos/pos.module';
 import { RolesModule } from './modules/roles/roles.module';
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 
@@ -41,6 +44,9 @@ import { SubscriptionsModule } from './modules/subscriptions/subscriptions.modul
     BusinessModulesModule,
     DashboardModule,
     PlatformModule,
+    PaymentsModule,
+    CatalogModule,
+    PosModule,
   ],
   controllers: [HealthController],
   providers: [

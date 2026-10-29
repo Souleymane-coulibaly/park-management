@@ -82,12 +82,31 @@ export async function login(
   return { agent: a, status: res.status, body: res.body };
 }
 
-/** Supprime toutes les organisations et comptes créés par cette exécution. */
+/** Organisations de test : « Test <libellé> <RUN> », RUN étant 8 caractères hexadécimaux. */
+const TEST_ORG_NAME = /^Test .+ [0-9a-f]{8}$/;
+/** Au-delà de ce délai, une organisation de test est un reste d'exécution interrompue. */
+const STALE_AFTER_MS = 60 * 60 * 1000;
+
+/**
+ * Supprime les organisations et comptes créés par cette exécution, ainsi que les restes d'une
+ * exécution interrompue (processus arrêté avant son nettoyage). Ne s'exécute que sur la base
+ * de test : createTestApp() a refusé de démarrer sur toute autre base.
+ */
 export async function cleanup(prisma: PrismaService): Promise<void> {
-  const orgs = await prisma.organization.findMany({
-    where: { name: { endsWith: RUN } },
-    select: { id: true },
+  const stale = await prisma.organization.findMany({
+    where: {
+      name: { startsWith: 'Test ' },
+      createdAt: { lt: new Date(Date.now() - STALE_AFTER_MS) },
+    },
+    select: { id: true, name: true },
   });
+  const orgs = [
+    ...(await prisma.organization.findMany({
+      where: { name: { endsWith: RUN } },
+      select: { id: true },
+    })),
+    ...stale.filter((o) => TEST_ORG_NAME.test(o.name)),
+  ];
   const orgIds = orgs.map((o) => o.id);
   const members = await prisma.organizationMembership.findMany({
     where: { organizationId: { in: orgIds } },

@@ -377,8 +377,11 @@ describe('Sprint 1 — socle SaaS (intégration)', () => {
 
     it("l'accès aux modules est vérifié côté serveur selon le métier", async () => {
       await restoB.agent.get('/api/v1/modules/ticketing').expect(403);
+      // Sprint 2 : la caisse est disponible ; la cuisine (KDS) reste annoncée « à venir ».
       const pos = await restoB.agent.get('/api/v1/modules/pos').expect(200);
-      expect(pos.body.status).toBe('upcoming');
+      expect(pos.body.status).toBe('available');
+      const kitchen = await restoB.agent.get('/api/v1/modules/kitchen').expect(200);
+      expect(kitchen.body.status).toBe('upcoming');
       await restoB.agent.get('/api/v1/modules/inconnu').expect(404);
     });
   });
