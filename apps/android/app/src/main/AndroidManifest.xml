@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Imprimantes Bluetooth : Android 12+ (BLUETOOTH_CONNECT), versions antérieures (BLUETOOTH). -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+
+    <!-- Matériel facultatif : l'application s'installe aussi sur une tablette sans USB hôte ni Bluetooth. -->
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false" />
+
+    <application
+        android:allowBackup="false"
+        android:label="Ocall Park Caisse"
+        android:supportsRtl="false"
+        android:usesCleartextTraffic="false"
+        android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
+            android:exported="true"
+            android:screenOrientation="fullUser"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
