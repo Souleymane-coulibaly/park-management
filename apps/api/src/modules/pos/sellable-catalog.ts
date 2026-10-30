@@ -9,6 +9,8 @@ export interface SellableCategory {
     id: string;
     name: string;
     description: string | null;
+    /** Photo (URL https) ; null si aucune. */
+    imageUrl: string | null;
     variants: { id: string; name: string; price: number }[];
   }[];
 }
@@ -35,6 +37,7 @@ export async function loadSellableCatalog(
           id: true,
           name: true,
           description: true,
+          imageUrl: true,
           variants: {
             where: {
               isActive: true,
@@ -61,6 +64,7 @@ export async function loadSellableCatalog(
           id: p.id,
           name: p.name,
           description: p.description,
+          imageUrl: p.imageUrl,
           variants: p.variants.map((v) => ({ id: v.id, name: v.name, price: v.prices[0]!.price })),
         })),
     }))

@@ -11,12 +11,16 @@ import {
   IsUUID,
   Length,
   Max,
+  Matches,
   MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
 import { MAX_AMOUNT } from '@ocall/shared';
 
+/** Photo : chaîne vide → null (suppression de la photo). */
+const trimOrNullImage = ({ value }: { value: unknown }) =>
+  typeof value === 'string' ? value.trim() || null : value;
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
 export class CreateCategoryDto {
@@ -112,6 +116,12 @@ export class CreateProductDto {
   @MaxLength(300)
   description?: string;
 
+  @ApiPropertyOptional({ description: 'Photo du produit : URL https (500 caractères au plus).' })
+  @IsOptional()
+  @Transform(trimOrNullImage)
+  @Matches(/^https:\/\/\S{4,492}$/, { message: 'La photo doit être une adresse https.' })
+  imageUrl?: string | null;
+
   @ApiProperty()
   @IsUUID('4')
   categoryId: string;
@@ -139,6 +149,12 @@ export class UpdateProductDto {
   @IsString()
   @MaxLength(300)
   description?: string;
+
+  @ApiPropertyOptional({ description: 'Photo du produit : URL https (500 caractères au plus).' })
+  @IsOptional()
+  @Transform(trimOrNullImage)
+  @Matches(/^https:\/\/\S{4,492}$/, { message: 'La photo doit être une adresse https.' })
+  imageUrl?: string | null;
 
   @ApiPropertyOptional()
   @IsOptional()

@@ -20,7 +20,7 @@ import {
   imports: [PosModule],
   controllers: [OrdersController, KitchenController, DiningController, PublicOrderingController],
   providers: [DiningService, RestaurantOrdersService, QrOrdersService, RestaurantDashboardService],
-  // Les réservations réutilisent le contrôle des tables et des zones.
-  exports: [DiningService],
+  // Les réservations réutilisent le contrôle des tables ; les bornes, le parcours des demandes clients.
+  exports: [DiningService, QrOrdersService],
 })
 export class RestaurantModule {}

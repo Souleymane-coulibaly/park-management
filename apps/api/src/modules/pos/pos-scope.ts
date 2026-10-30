@@ -111,7 +111,9 @@ export async function lockRow(
     | 'DiningTable'
     | 'DiningZone'
     | 'QrOrderRequest'
-    | 'StockItem',
+    | 'StockItem'
+    | 'KioskDevice'
+    | 'Customer',
   id: string,
 ): Promise<void> {
   // Nom de table issu d'une liste fermée : aucune donnée utilisateur n'est interpolée.

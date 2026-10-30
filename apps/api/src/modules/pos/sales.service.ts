@@ -12,6 +12,7 @@ import type { TenantContext } from '../../common/auth-context';
 import { PaymentMethodsService } from '../payments/payment-methods.service';
 import { TicketIssuanceService } from '../ticket-issuance/ticket-issuance.service';
 import { RestaurantEventsService } from '../realtime/restaurant-events.service';
+import { LoyaltyEarningService } from '../loyalty-earning/loyalty-earning.service';
 import { StockConsumptionService } from '../stock-consumption/stock-consumption.service';
 import { recordOrderEvent } from './order-events';
 import type { CancelSaleDto, CreateSaleDto, PaySaleDto, QuoteDto, SalesQueryDto } from './pos.dto';
@@ -48,6 +49,9 @@ export const SALE_SELECT = {
   cashSessionId: true,
   establishment: { select: { id: true, name: true } },
   table: { select: { id: true, name: true } },
+  loyaltyDiscount: true,
+  loyaltyPointsRedeemed: true,
+  customer: { select: { id: true, firstName: true, lastName: true, phone: true } },
   zone: { select: { id: true, name: true } },
   cashier: { select: { id: true, user: { select: { firstName: true, lastName: true } } } },
   lines: {
@@ -115,6 +119,7 @@ export class SalesService {
     private readonly ticketIssuance: TicketIssuanceService,
     private readonly stockConsumption: StockConsumptionService,
     private readonly events: RestaurantEventsService,
+    private readonly loyalty: LoyaltyEarningService,
   ) {}
 
   /** Aperçu des montants d'un panier, sans rien enregistrer. */
@@ -373,6 +378,8 @@ export class SalesService {
           });
           await this.stockConsumption.consumeForSale(tx, id, auth.membership.id);
         }
+        // Fidélité : points crédités une seule fois, sur le montant réellement payé (Parc ou Restaurant).
+        await this.loyalty.onPaidSale(tx, id, auth.membership.id);
         await this.audit.record(
           {
             organizationId,
@@ -444,6 +451,8 @@ export class SalesService {
           message: 'Seule une vente non payée peut être annulée.',
         });
       }
+      // Des points utilisés sur cette vente non payée sont recrédités.
+      await this.loyalty.reverseRedemption(tx, id, auth.membership.id);
       await tx.sale.update({
         where: { id },
         data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledById: auth.membership.id },

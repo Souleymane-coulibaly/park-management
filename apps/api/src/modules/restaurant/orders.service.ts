@@ -185,6 +185,13 @@ export class RestaurantOrdersService {
           message: 'La commande est déjà en cuisine : ses articles ne peuvent plus être modifiés.',
         });
       }
+      if (dto.lines !== undefined && sale.loyaltyDiscount > 0) {
+        throw new ConflictException({
+          code: 'LOYALTY_APPLIED',
+          message:
+            'Des points de fidélité sont utilisés : retirez la remise avant de modifier les articles.',
+        });
+      }
       const data: Prisma.SaleUncheckedUpdateInput = {};
       if (dto.tableId !== undefined || dto.zoneId !== undefined) {
         const location = await this.dining.resolveLocation(
@@ -393,6 +400,7 @@ export class RestaurantOrdersService {
         total: true,
         tableId: true,
         zoneId: true,
+        loyaltyDiscount: true,
       },
     });
   }

@@ -9,6 +9,7 @@ import { randomBytes } from 'node:crypto';
 import { Prisma } from '@ocall/database';
 import {
   DINING_QR_TOKEN_PATTERN,
+  KIOSK_MAX_ORDERS_PER_10_MIN,
   MAX_PENDING_QR_REQUESTS_PER_POINT,
   QR_REQUEST_PENDING_WINDOW_MINUTES,
   type QrOrderStatus,
@@ -45,6 +46,36 @@ const ALREADY_DECIDED = {
   code: 'QR_ORDER_ALREADY_DECIDED',
   message: 'Cette demande a déjà été traitée.',
 };
+
+/** Borne d'origine d'une commande libre-service. */
+export interface KioskOrigin {
+  organizationId: string;
+  establishmentId: string;
+  establishmentName: string;
+  deviceId: string;
+  deviceName: string;
+  sessionId: string;
+}
+
+const REQUEST_RESULT = {
+  id: true,
+  publicToken: true,
+  status: true,
+  estimatedTotal: true,
+  displayNumber: true,
+} as const;
+
+const toRequestResult = (r: {
+  publicToken: string;
+  status: QrOrderStatus;
+  estimatedTotal: number;
+  displayNumber: number | null;
+}) => ({
+  publicToken: r.publicToken,
+  status: r.status,
+  estimatedTotal: r.estimatedTotal,
+  displayNumber: r.displayNumber,
+});
 
 /** Jeton de suivi remis au client : 128 bits aléatoires. */
 const newPublicToken = () => randomBytes(16).toString('base64url');
@@ -99,7 +130,34 @@ export class QrOrdersService {
   }
 
   async submit(qrToken: string, dto: PublicOrderDto) {
-    const point = await this.findPoint(qrToken);
+    return this.createRequest(await this.findPoint(qrToken), dto, null);
+  }
+
+  /**
+   * Commande d'une borne libre-service : même parcours qu'une demande QR (validation puis
+   * encaissement à la caisse, jamais de paiement ni de préparation automatique). Une session de borne
+   * = une commande au plus ; le client reçoit un numéro à présenter à la caisse.
+   */
+  async submitFromKiosk(kiosk: KioskOrigin, dto: PublicOrderDto) {
+    return this.createRequest(
+      {
+        organizationId: kiosk.organizationId,
+        establishmentId: kiosk.establishmentId,
+        establishmentName: kiosk.establishmentName,
+        tableId: null,
+        zoneId: null,
+        label: `Borne · ${kiosk.deviceName}`,
+      },
+      dto,
+      kiosk,
+    );
+  }
+
+  private async createRequest(
+    point: OrderingPoint,
+    dto: PublicOrderDto,
+    kiosk: KioskOrigin | null,
+  ) {
     const replay = await this.findReplay(point, dto.clientRequestId);
     if (replay) return replay;
 
@@ -121,6 +179,7 @@ export class QrOrdersService {
 
     try {
       const created = await this.prisma.$transaction(async (tx) => {
+        if (kiosk) return this.insertKioskRequest(tx, point, dto, kiosk, lines, priced.total);
         // Le verrou du point de commande rend le plafond de demandes en attente strict.
         if (point.tableId) await lockRow(tx, 'DiningTable', point.tableId);
         else await lockRow(tx, 'DiningZone', point.zoneId!);
@@ -157,7 +216,7 @@ export class QrOrdersService {
             estimatedTotal: priced.total,
             clientRequestId: dto.clientRequestId,
           },
-          select: { id: true, publicToken: true, status: true, estimatedTotal: true },
+          select: REQUEST_RESULT,
         });
       });
       this.events.publish({
@@ -167,18 +226,83 @@ export class QrOrdersService {
         type: 'qr.requested',
         requestId: created.id,
       });
-      return {
-        publicToken: created.publicToken,
-        status: created.status,
-        estimatedTotal: created.estimatedTotal,
-      };
+      return toRequestResult(created);
     } catch (error) {
       if (isUniqueViolation(error)) {
         const again = await this.findReplay(point, dto.clientRequestId);
         if (again) return again;
+        // Seconde commande dans la même session de borne (clé d'unicité de la session).
+        if (kiosk) throw this.kioskSessionClosed();
       }
       throw error;
     }
+  }
+
+  /** Borne : session valide, plafond anti-abus, numéro affiché, session close dans la même transaction. */
+  private async insertKioskRequest(
+    tx: Prisma.TransactionClient,
+    point: OrderingPoint,
+    dto: PublicOrderDto,
+    kiosk: KioskOrigin,
+    lines: RequestLine[],
+    estimatedTotal: number,
+  ) {
+    await lockRow(tx, 'KioskDevice', kiosk.deviceId);
+    const session = await tx.kioskSession.findFirst({
+      where: {
+        id: kiosk.sessionId,
+        deviceId: kiosk.deviceId,
+        endedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      select: { id: true },
+    });
+    if (!session) throw this.kioskSessionClosed();
+    const recent = await tx.qrOrderRequest.count({
+      where: {
+        kioskDeviceId: kiosk.deviceId,
+        createdAt: { gte: new Date(Date.now() - 10 * 60_000) },
+      },
+    });
+    if (recent >= KIOSK_MAX_ORDERS_PER_10_MIN) {
+      throw new HttpException(
+        {
+          code: 'KIOSK_RATE_LIMITED',
+          message: 'Trop de commandes sur cette borne en peu de temps. Adressez-vous au personnel.',
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    const { orderRequestSeq } = await tx.establishment.update({
+      where: { id: point.establishmentId },
+      data: { orderRequestSeq: { increment: 1 } },
+      select: { orderRequestSeq: true },
+    });
+    await tx.kioskSession.update({ where: { id: session.id }, data: { endedAt: new Date() } });
+    return tx.qrOrderRequest.create({
+      data: {
+        organizationId: point.organizationId,
+        establishmentId: point.establishmentId,
+        publicToken: newPublicToken(),
+        source: 'KIOSK',
+        kioskDeviceId: kiosk.deviceId,
+        kioskSessionId: session.id,
+        displayNumber: orderRequestSeq,
+        customerName: dto.customerName ?? null,
+        notes: dto.notes ?? null,
+        lines: lines as unknown as Prisma.InputJsonValue,
+        estimatedTotal,
+        clientRequestId: dto.clientRequestId,
+      },
+      select: REQUEST_RESULT,
+    });
+  }
+
+  private kioskSessionClosed() {
+    return new ConflictException({
+      code: 'KIOSK_SESSION_CLOSED',
+      message: 'Cette commande est terminée. Touchez l’écran pour en commencer une nouvelle.',
+    });
   }
 
   /** Suivi par le client : statut de la demande puis de la commande (préparation, paiement). */
@@ -262,14 +386,19 @@ export class QrOrdersService {
         rejectedReason: true,
         createdAt: true,
         saleId: true,
+        source: true,
+        displayNumber: true,
+        kioskDevice: { select: { name: true } },
         table: { select: { id: true, name: true } },
         zone: { select: { id: true, name: true } },
       },
     });
-    return rows.map(({ lines, ...r }) => ({
+    return rows.map(({ lines, kioskDevice, ...r }) => ({
       ...r,
       lines: lines as unknown as RequestLine[],
-      location: locationLabel(r.zone?.name ?? null, r.table?.name ?? null),
+      location: kioskDevice
+        ? `Borne · ${kioskDevice.name}`
+        : locationLabel(r.zone?.name ?? null, r.table?.name ?? null),
     }));
   }
 
@@ -296,7 +425,12 @@ export class QrOrdersService {
       establishmentId: request.establishmentId,
       activity: 'RESTAURANT',
       clientRequestId: request.id,
-      order: { channel: 'QR', tableId: request.tableId, zoneId: request.zoneId, notes },
+      order: {
+        channel: request.source === 'KIOSK' ? 'KIOSK' : 'QR',
+        tableId: request.tableId,
+        zoneId: request.zoneId,
+        notes,
+      },
       price: (tx, organizationId) =>
         this.pricing.price(
           tx,
@@ -450,13 +584,7 @@ export class QrOrdersService {
           clientRequestId,
         },
       },
-      select: {
-        publicToken: true,
-        status: true,
-        estimatedTotal: true,
-        tableId: true,
-        zoneId: true,
-      },
+      select: { ...REQUEST_RESULT, tableId: true, zoneId: true },
     });
     if (!existing) return null;
     if (existing.tableId !== point.tableId || existing.zoneId !== point.zoneId) {
@@ -465,11 +593,7 @@ export class QrOrdersService {
         message: 'Clé de requête déjà utilisée.',
       });
     }
-    return {
-      publicToken: existing.publicToken,
-      status: existing.status,
-      estimatedTotal: existing.estimatedTotal,
-    };
+    return toRequestResult(existing);
   }
 
   private async findForStaff(auth: TenantContext, id: string) {
@@ -487,6 +611,7 @@ export class QrOrdersService {
         notes: true,
         lines: true,
         estimatedTotal: true,
+        source: true,
       },
     });
     if (!request) throw new NotFoundException(REQUEST_NOT_FOUND);

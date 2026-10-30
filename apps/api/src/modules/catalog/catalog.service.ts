@@ -126,6 +126,7 @@ export class CatalogService {
           categoryId: dto.categoryId,
           name: dto.name,
           description: dto.description,
+          imageUrl: dto.imageUrl ?? null,
         },
       });
       await this.syncVariants(tx, organizationId, product.id, dto.variants);
