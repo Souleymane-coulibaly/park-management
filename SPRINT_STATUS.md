@@ -7,6 +7,7 @@
 | 3      | POS Android, impression thermique, tiroir-caisse              | `claude/sprint-3` | ✅ Validé (validation matérielle à faire)         |
 | 4      | Billetterie Parc, QR codes, contrôle d’accès                  | `claude/sprint-4` | ✅ CP-03 : GO SOUS RÉSERVES (A1, A2, A5 ouvertes) |
 | 5      | Restaurant : commandes, KDS, QR, tables, stocks, réservations | `claude/sprint-5` | 🟡 Terminé — local, push à autoriser              |
+| 6      | Bornes de commande, CRM, fidélité, planning du personnel      | `claude/sprint-6` | 🟡 En cours — tests base bloqués (Neon `test`)    |
 
 Environnements : base Neon de **développement** (préservée), branche Neon **`test`** réservée aux
 tests automatisés, base de **production non configurée**. Aucune fusion dans `main`, aucun déploiement.
@@ -19,7 +20,63 @@ Checkpoints Codex :
   30/10/2026, réserves maintenues.
 - Le Sprint 6 est démarré sans audit CP-04, également sur décision du commanditaire : **CP-04 est
   intégré au CP-05**, qui couvrira les Sprints 1 à 6. Préparation :
-  [CP-04-preparation.md](docs/checkpoints/CP-04-preparation.md).
+  [CP-04-preparation.md](docs/checkpoints/CP-04-preparation.md) et
+  [CP-05-preparation.md](docs/checkpoints/CP-05-preparation.md).
+
+---
+
+## Sprint 6 — Bornes de commande, CRM, fidélité, planning (en cours, non poussé)
+
+Documentation : [docs/BORNES-CRM-FIDELITE-PLANNING.md](docs/BORNES-CRM-FIDELITE-PLANNING.md).
+
+### Fonctionnalités réalisées
+
+1. **Bornes libre-service** (`/kiosk`, administration `/app/bornes`)
+   - Appairage par code à usage unique (15 min).
+   - Jeton d'appareil haché dans un cookie `httpOnly` limité aux routes de la borne ; révocation
+     immédiate.
+   - Catalogue avec photos, variantes, quantités, instructions.
+   - Une commande par session, numéro affiché, retour automatique à l'accueil.
+   - Perte de connexion gérée, commandes répétées bloquées.
+   - Commande en attente de paiement à la caisse, sans paiement simulé ni préparation automatique.
+2. **CRM** (`/app/clients`)
+   - Fiches facultatives avec consentement, recherche et filtres.
+   - Historique, visites, dépenses (responsables) ; accès restreint du caissier.
+   - Anonymisation sur demande, règle de conservation de 36 mois.
+3. **Fidélité Parc et Restaurant**
+   - Deux soldes indépendants, sans transfert ; règles configurables.
+   - Crédit uniquement à la confirmation du paiement, une seule fois.
+   - Utilisation en remise calculée par le serveur, sans solde négatif (contrainte CHECK en base).
+   - Corrections auditées ; annulations recréditées.
+4. **Planning du personnel** (`/app/personnel/planning`)
+   - Postes configurables, créneaux, vues jour, semaine et mois.
+   - Chevauchements refusés sous verrou ; planning personnel visible par chaque employé.
+   - Pas de pointage, d'absences, de congés ni de paie.
+
+**Migration** `20261030142337_bornes_crm_fidelite_planning` : additive, avec deux contraintes CHECK.
+
+- Appliquée sur `test`, puis sur la base de développement.
+- Comptages des 36 tables existantes identiques avant et après ; 8 tables nouvelles, vides.
+
+### Tests
+
+| Suite                                                                           | Résultat                                                          |
+| ------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| Unitaires (shared 87, database 13, api 11)                                      | 111/111                                                           |
+| Lint, Prettier, TypeScript strict, build                                        | OK                                                                |
+| Intégration Sprint 6 (`sprint6-kiosk-crm-planning.integration.spec.ts`, 20 cas) | **Non exécutée** : base Neon `test` injoignable (voir ci-dessous) |
+| Régression intégration Sprints 1 à 6, E2E Sprint 6 et régression E2E            | **En attente** du rétablissement de la base `test`                |
+
+**Incident — branche Neon `test` injoignable** (30/10/2026, à partir d'environ 14 h 39).
+
+- La branche ne répond plus, ni par le pooler ni par l'accès direct, alors que le réseau (DNS, TCP)
+  et la base de développement répondent.
+- C'était déjà le cas d'environ 13 h 06 à 14 h 21.
+- La première exécution de l'intégration du Sprint 6 a donc échoué au démarrage, sans exécuter
+  aucun test : `test-logs/integration-s6-2026-10-30T14-39-16-150Z.log`.
+- Cause probable : quota de calcul des branches secondaires de l'offre Neon. À vérifier dans la
+  console Neon (anomalie A11 de CP-05).
+- Les tests ne sont jamais lancés sur la base de développement.
 
 ---
 
