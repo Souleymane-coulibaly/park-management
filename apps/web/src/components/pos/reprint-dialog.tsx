@@ -8,13 +8,20 @@ import { Alert } from '@/components/ui/states';
 import { type HardwareOutcome, runPrintJob } from '@/lib/hardware/jobs';
 import type { PosTerminal } from '@/lib/types';
 
-/** Réimpression contrôlée : motif obligatoire, ticket marqué DUPLICATA, action auditée. */
+/**
+ * Réimpression contrôlée : motif obligatoire, ticket marqué DUPLICATA, action auditée.
+ * Billetterie : `ticketId` limite la réimpression à un seul billet de la vente.
+ */
 export function ReprintDialog({
   saleId,
+  ticketId,
+  label = 'le ticket',
   terminal,
   onClose,
 }: {
   saleId: string;
+  ticketId?: string;
+  label?: string;
   terminal: PosTerminal;
   onClose: () => void;
 }) {
@@ -25,7 +32,9 @@ export function ReprintDialog({
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
     setLoading(true);
-    setOutcome(await runPrintJob({ terminalId: terminal.id, kind: 'REPRINT', saleId, reason }));
+    setOutcome(
+      await runPrintJob({ terminalId: terminal.id, kind: 'REPRINT', saleId, ticketId, reason }),
+    );
     setLoading(false);
   }
 
@@ -33,8 +42,8 @@ export function ReprintDialog({
     <Dialog
       open
       onClose={onClose}
-      title="Réimprimer le ticket"
-      description="Le ticket portera la mention DUPLICATA."
+      title={`Réimprimer ${label}`}
+      description="L’impression portera la mention DUPLICATA."
     >
       <form onSubmit={onSubmit} className="space-y-4">
         <InputField

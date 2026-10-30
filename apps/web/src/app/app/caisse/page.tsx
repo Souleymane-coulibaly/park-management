@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { History, Store } from 'lucide-react';
 import { AccessDenied } from '@/components/app/access-denied';
+import { useRememberedChoice } from '@/components/pos/cash-session';
 import { useCan } from '@/components/app/session-context';
 import { Card } from '@/components/ui/card';
 import { SelectField } from '@/components/ui/field';
@@ -18,30 +18,10 @@ const STORAGE_KEY = 'ocp.pos.establishment';
 export default function CaissePage() {
   const canSell = useCan('pos.sell');
   const establishments = useApi<PosEstablishment[]>(canSell ? '/pos/establishments' : null);
-  const [selected, setSelected] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (establishments.state !== 'success') return;
-    const list = establishments.data;
-    let remembered: string | null = null;
-    try {
-      remembered = localStorage.getItem(STORAGE_KEY);
-    } catch {
-      remembered = null;
-    }
-    setSelected(
-      (current) => current ?? list.find((e) => e.id === remembered)?.id ?? list[0]?.id ?? null,
-    );
-  }, [establishments]);
-
-  function choose(id: string) {
-    setSelected(id);
-    try {
-      localStorage.setItem(STORAGE_KEY, id);
-    } catch {
-      // Stockage indisponible (navigation privée) : le choix vaut pour la page en cours.
-    }
-  }
+  const [selected, choose] = useRememberedChoice(
+    STORAGE_KEY,
+    establishments.state === 'success' ? establishments.data.map((e) => e.id) : null,
+  );
 
   if (!canSell) return <AccessDenied />;
   if (establishments.state === 'loading') return <LoadingState label="Préparation de la caisse…" />;

@@ -55,10 +55,14 @@ function StepRow({
 export function AfterPaymentHardware({
   result,
   terminal,
+  document = 'ticket',
 }: {
   result: PaymentResult;
   terminal: PosTerminal | null;
+  /** Ce qui est imprimé : le ticket de caisse, ou les billets d'entrée (billetterie). */
+  document?: 'ticket' | 'billets';
 }) {
+  const noun = document === 'billets' ? 'les billets' : 'le ticket';
   const canReprint = useCan('receipt.reprint');
   const [drawer, setDrawer] = useState<Step>(null);
   const [print, setPrint] = useState<Step>(null);
@@ -131,7 +135,7 @@ export function AfterPaymentHardware({
         />
         <StepRow
           icon={<Printer className="h-5 w-5" />}
-          label={`Ticket (${terminal.name})`}
+          label={`${document === 'billets' ? 'Billets' : 'Ticket'} (${terminal.name})`}
           step={print}
           testId="print-step"
         />
@@ -144,7 +148,7 @@ export function AfterPaymentHardware({
             onClick={() => void printReceipt(newRequestId())}
             icon={print ? <RotateCw className="h-4 w-4" /> : <Printer className="h-4 w-4" />}
           >
-            {print ? 'Réessayer l’impression' : 'Imprimer le ticket'}
+            {print ? 'Réessayer l’impression' : `Imprimer ${noun}`}
           </Button>
         )}
         {canReprint && print?.status === 'SUCCEEDED' && (

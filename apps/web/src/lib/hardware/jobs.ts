@@ -41,6 +41,8 @@ export async function runPrintJob(body: {
   terminalId: string;
   kind: 'RECEIPT' | 'REPRINT' | 'TEST';
   saleId?: string;
+  /** Billetterie : réimpression d'un seul billet de la vente. */
+  ticketId?: string;
   reason?: string;
   clientRequestId?: string;
 }): Promise<HardwareOutcome> {

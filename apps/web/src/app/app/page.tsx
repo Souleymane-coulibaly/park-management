@@ -18,7 +18,6 @@ import {
   type MemberRole,
 } from '@ocall/shared';
 import { useSession } from '@/components/app/session-context';
-import { UpcomingBadge } from '@/components/ui/badge';
 import { ButtonLink } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { KpiCard } from '@/components/ui/kpi-card';
@@ -29,8 +28,8 @@ import type { DashboardSummary } from '@/lib/types';
 import { useApi } from '@/lib/use-api';
 
 const REVENUE_SOURCES = {
-  PARK: { label: 'Revenus Parc', module: 'la Billetterie' },
-  RESTAURANT: { label: 'Revenus Restaurant', module: 'la Caisse POS' },
+  PARK: { label: 'Revenus Parc' },
+  RESTAURANT: { label: 'Revenus Restaurant' },
 } as const;
 
 export default function DashboardPage() {
@@ -129,25 +128,17 @@ function DashboardContent({ data }: { data: DashboardSummary }) {
               </Card>
             );
           }
+          // Revenus absents : le membre n'a pas la permission de consulter toutes les ventes.
           return (
             <Card key={activity}>
               <CardHeader
                 title={source.label}
-                description="Chiffre d’affaires par jour, semaine et mois."
-                action={activity === 'PARK' ? <UpcomingBadge /> : undefined}
+                description="Chiffre d’affaires par jour et sur 30 jours."
               />
               <EmptyState
                 icon={<TrendingUp className="h-7 w-7" />}
-                title={
-                  activity === 'PARK'
-                    ? 'Aucune vente enregistrée'
-                    : 'Revenus réservés aux responsables'
-                }
-                description={
-                  activity === 'PARK'
-                    ? `Les revenus apparaîtront ici dès la mise en service de ${source.module}. Aucune donnée n’est affichée tant qu’elle n’existe pas.`
-                    : 'Le chiffre d’affaires est visible par les propriétaires, administrateurs et superviseurs.'
-                }
+                title="Revenus réservés aux responsables"
+                description="Le chiffre d’affaires est visible par les propriétaires, administrateurs et superviseurs."
               />
             </Card>
           );

@@ -1,4 +1,13 @@
-import type { BusinessType, MemberRole, Permission, SubscriptionStatus } from '@ocall/shared';
+import type {
+  BusinessType,
+  MemberRole,
+  OpeningVerdict,
+  Permission,
+  ScanRefusalReason,
+  SubscriptionStatus,
+  TicketKind,
+  TicketStatus,
+} from '@ocall/shared';
 
 /** Contrats des réponses de l'API v1 consommées par le frontend. */
 export interface Me {
@@ -223,6 +232,7 @@ export interface Sale {
   createdAt: string;
   cancelledAt: string | null;
   cashSessionId: string;
+  activity: 'RESTAURANT' | 'PARK';
   establishment: { id: string; name: string };
   cashier: { id: string; name: string };
   lines: QuoteLine[];
@@ -292,6 +302,7 @@ export interface PrintJobView {
   createdAt: string;
   completedAt: string | null;
   saleId: string | null;
+  ticketId: string | null;
   saleNumber: number | null;
   terminalName: string;
   requestedByName: string;
@@ -324,4 +335,137 @@ export interface DrawerEventResponse {
   printer: HardwareTarget;
   command: { pin: 2 | 5 } | null;
   alreadyIssued: boolean;
+}
+
+// ─── Sprint 4 : billetterie du parc et contrôle d'accès ───
+
+export interface ParkEstablishment {
+  id: string;
+  name: string;
+  timezone: string;
+}
+
+export interface TicketCategory {
+  id: string;
+  establishmentId: string;
+  kind: TicketKind;
+  name: string;
+  description: string | null;
+  price: number;
+  peopleIncluded: number;
+  conditions: string | null;
+  availableFrom: string | null;
+  availableUntil: string | null;
+  validityDays: number;
+  sortOrder: number;
+  isActive: boolean;
+}
+
+export interface TicketCatalog {
+  today: string;
+  openToday: boolean;
+  status: OpeningVerdict;
+  categories: TicketCategory[];
+}
+
+export interface TicketQuoteLine {
+  ticketCategoryId: string;
+  peoplePerUnit: number;
+  visitorNames: string[];
+  productName: string;
+  variantName: string;
+  unitPrice: number;
+  quantity: number;
+  lineTotal: number;
+}
+
+export interface TicketQuote {
+  lines: TicketQuoteLine[];
+  total: number;
+}
+
+export interface IssuedTicket {
+  id: string;
+  visitorName: string;
+  status: TicketStatus;
+  pricePaid: number;
+  validFrom: string;
+  validUntil: string;
+  usedAt: string | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  qr: string;
+  ticketCategory: { id: string; name: string; kind: TicketKind };
+}
+
+export interface ParkSchedule {
+  timezone: string;
+  today: string;
+  status: OpeningVerdict;
+  openToday: boolean;
+  weekly: { weekday: number; isClosed: boolean; opensAt: string | null; closesAt: string | null }[];
+  exceptions: {
+    id: string;
+    date: string;
+    isClosed: boolean;
+    opensAt: string | null;
+    closesAt: string | null;
+    label: string | null;
+  }[];
+}
+
+export interface TicketScanView {
+  id: string;
+  establishmentId: string;
+  result: 'ACCEPTED' | 'REFUSED';
+  refusalReason: ScanRefusalReason | null;
+  entryPoint: string;
+  createdAt: string;
+  scannedById: string;
+  scannedBy: string;
+  ticket: {
+    id: string;
+    visitorName: string;
+    categoryName: string;
+    kind: TicketKind;
+    status: TicketStatus;
+    validUntil: string;
+    usedAt: string | null;
+  } | null;
+}
+
+export interface ParkDayStats {
+  date: string;
+  ticketsSold: number;
+  cancelled: number;
+  unused: number;
+  entries: number;
+  refused: number;
+  revenue: number;
+  paidSales: number;
+}
+
+export interface ParkDashboard {
+  establishment: ParkEstablishment;
+  today: ParkDayStats;
+  yesterday: ParkDayStats;
+  openToday: boolean;
+  status: OpeningVerdict;
+  byCategory: {
+    ticketCategoryId: string;
+    name: string;
+    kind: TicketKind;
+    tickets: number;
+    amount: number;
+  }[];
+  byHour: { hour: number; sold: number; entries: number }[];
+  recentScans: {
+    id: string;
+    result: 'ACCEPTED' | 'REFUSED';
+    refusalReason: ScanRefusalReason | null;
+    entryPoint: string;
+    createdAt: string;
+    visitorName: string | null;
+    categoryName: string | null;
+  }[];
 }
