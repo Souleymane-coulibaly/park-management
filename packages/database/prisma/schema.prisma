@@ -85,6 +85,14 @@ model Organization {
   ticketScans      TicketScan[]
   parkSchedules    ParkOpeningSchedule[]
   parkExceptions   ParkCalendarException[]
+  orderEvents      OrderEvent[]
+  diningZones      DiningZone[]
+  diningTables     DiningTable[]
+  qrOrderRequests  QrOrderRequest[]
+  stockItems       StockItem[]
+  stockMovements   StockMovement[]
+  recipeComponents RecipeComponent[]
+  reservations     Reservation[]
 
   @@index([status])
   @@index([businessType])
@@ -119,6 +127,13 @@ model Establishment {
   ticketScans      TicketScan[]
   parkSchedules    ParkOpeningSchedule[]
   parkExceptions   ParkCalendarException[]
+  orderEvents      OrderEvent[]
+  diningZones      DiningZone[]
+  diningTables     DiningTable[]
+  qrOrderRequests  QrOrderRequest[]
+  stockItems       StockItem[]
+  stockMovements   StockMovement[]
+  reservations     Reservation[]
 
   @@unique([organizationId, name])
   @@index([organizationId, isActive])
@@ -162,15 +177,19 @@ model OrganizationMembership {
   assignments  EstablishmentAssignment[]
   sessions     Session[]
 
-  cashSessionsOpened CashSession[] @relation("CashSessionOpenedBy")
-  cashSessionsClosed CashSession[] @relation("CashSessionClosedBy")
-  sales              Sale[]        @relation("SaleCashier")
-  salesCancelled     Sale[]        @relation("SaleCancelledBy")
-  paymentsReceived   Payment[]     @relation("PaymentReceivedBy")
-  printJobs          PrintJob[]    @relation("PrintJobRequestedBy")
-  drawerEvents       DrawerEvent[] @relation("DrawerEventRequestedBy")
-  ticketScans        TicketScan[]  @relation("TicketScanAgent")
-  ticketsCancelled   Ticket[]      @relation("TicketCancelledBy")
+  cashSessionsOpened CashSession[]    @relation("CashSessionOpenedBy")
+  cashSessionsClosed CashSession[]    @relation("CashSessionClosedBy")
+  sales              Sale[]           @relation("SaleCashier")
+  salesCancelled     Sale[]           @relation("SaleCancelledBy")
+  paymentsReceived   Payment[]        @relation("PaymentReceivedBy")
+  printJobs          PrintJob[]       @relation("PrintJobRequestedBy")
+  drawerEvents       DrawerEvent[]    @relation("DrawerEventRequestedBy")
+  ticketScans        TicketScan[]     @relation("TicketScanAgent")
+  ticketsCancelled   Ticket[]         @relation("TicketCancelledBy")
+  orderEvents        OrderEvent[]     @relation("OrderEventActor")
+  qrOrdersDecided    QrOrderRequest[] @relation("QrOrderDecidedBy")
+  stockMovements     StockMovement[]  @relation("StockMovementActor")
+  reservationsMade   Reservation[]    @relation("ReservationCreatedBy")
 
   @@unique([organizationId, userId])
   @@index([userId])
@@ -319,13 +338,22 @@ enum SalePaymentStatus {
   PAID
 }
 
-/// Statut de préparation cuisine. Un paiement ne le modifie JAMAIS : seul un envoi explicite
-/// en cuisine (module KDS, sprint ultérieur) pourra le faire évoluer.
+/// Statut de préparation cuisine. Un paiement ne le modifie JAMAIS : seul l'envoi explicite
+/// en cuisine (« Envoyer en cuisine ») le fait quitter NOT_SENT.
 enum PreparationStatus {
   NOT_SENT
   SENT
+  IN_PREPARATION
   READY
   SERVED
+}
+
+/// Canal de commande d'une vente de restaurant.
+enum OrderChannel {
+  DINE_IN
+  TAKEAWAY
+  COUNTER
+  QR
 }
 
 enum PaymentMethod {
@@ -385,10 +413,11 @@ model ProductVariant {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  product      Product        @relation(fields: [productId], references: [id], onDelete: Cascade)
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  product      Product           @relation(fields: [productId], references: [id], onDelete: Cascade)
   prices       VariantPrice[]
   saleLines    SaleLine[]
+  recipes      RecipeComponent[]
 
   @@unique([productId, name])
   @@index([organizationId])
@@ -445,42 +474,62 @@ model CashSession {
 }
 
 model Sale {
-  id                String            @id @default(uuid()) @db.Uuid
-  organizationId    String            @db.Uuid
-  establishmentId   String            @db.Uuid
-  cashSessionId     String            @db.Uuid
-  cashierId         String            @db.Uuid
+  id                   String            @id @default(uuid()) @db.Uuid
+  organizationId       String            @db.Uuid
+  establishmentId      String            @db.Uuid
+  cashSessionId        String            @db.Uuid
+  cashierId            String            @db.Uuid
   /// Numéro séquentiel par établissement.
-  number            Int
+  number               Int
   /// Restaurant (caisse) ou parc (billetterie) : même moteur de vente et de paiement.
-  activity          SaleActivity      @default(RESTAURANT)
-  status            SaleStatus        @default(OPEN)
-  paymentStatus     SalePaymentStatus @default(UNPAID)
-  preparationStatus PreparationStatus @default(NOT_SENT)
+  activity             SaleActivity      @default(RESTAURANT)
+  status               SaleStatus        @default(OPEN)
+  paymentStatus        SalePaymentStatus @default(UNPAID)
+  preparationStatus    PreparationStatus @default(NOT_SENT)
   /// Total TTC en FCFA, calculé par le serveur à partir des tarifs de l'établissement.
-  total             Int
+  total                Int
   /// Clé d'idempotence fournie par la caisse : une nouvelle tentative ne crée pas de doublon.
-  clientRequestId   String?
-  cancelledAt       DateTime?
-  cancelledById     String?           @db.Uuid
-  createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt
+  clientRequestId      String?
+  cancelledAt          DateTime?
+  cancelledById        String?           @db.Uuid
+  /// Restaurant : canal de commande (null pour la billetterie et les ventes antérieures au Sprint 5).
+  channel              OrderChannel?
+  tableId              String?           @db.Uuid
+  zoneId               String?           @db.Uuid
+  /// Instructions de préparation pour toute la commande.
+  notes                String?
+  /// Horodatage du cycle de préparation (temps d'attente et de préparation).
+  sentToKitchenAt      DateTime?
+  preparationStartedAt DateTime?
+  readyAt              DateTime?
+  servedAt             DateTime?
+  /// Déduction des ingrédients réalisée (une seule fois par vente : envoi en cuisine ou paiement).
+  stockDeductedAt      DateTime?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
 
-  organization  Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  establishment Establishment           @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
-  cashSession   CashSession             @relation(fields: [cashSessionId], references: [id], onDelete: Cascade)
-  cashier       OrganizationMembership  @relation("SaleCashier", fields: [cashierId], references: [id], onDelete: NoAction)
-  cancelledBy   OrganizationMembership? @relation("SaleCancelledBy", fields: [cancelledById], references: [id], onDelete: NoAction)
-  lines         SaleLine[]
-  payments      Payment[]
-  printJobs     PrintJob[]
-  tickets       Ticket[]
+  organization   Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment  Establishment           @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  cashSession    CashSession             @relation(fields: [cashSessionId], references: [id], onDelete: Cascade)
+  cashier        OrganizationMembership  @relation("SaleCashier", fields: [cashierId], references: [id], onDelete: NoAction)
+  cancelledBy    OrganizationMembership? @relation("SaleCancelledBy", fields: [cancelledById], references: [id], onDelete: NoAction)
+  table          DiningTable?            @relation(fields: [tableId], references: [id], onDelete: NoAction)
+  zone           DiningZone?             @relation(fields: [zoneId], references: [id], onDelete: NoAction)
+  lines          SaleLine[]
+  payments       Payment[]
+  printJobs      PrintJob[]
+  tickets        Ticket[]
+  events         OrderEvent[]
+  qrRequest      QrOrderRequest?
+  stockMovements StockMovement[]
 
   @@unique([establishmentId, number])
   @@unique([organizationId, clientRequestId])
   @@index([organizationId, createdAt])
   @@index([cashSessionId])
   @@index([cashierId, createdAt])
+  @@index([establishmentId, preparationStatus])
+  @@index([tableId])
 }
 
 /// Ligne de vente : libellés et prix figés au moment de la vente.
@@ -501,6 +550,11 @@ model SaleLine {
   peoplePerUnit    Int      @default(1)
   /// Billetterie : prénoms des visiteurs, un par billet individuel, saisis avant le paiement.
   visitorNames     String[] @default([])
+  /// Restaurant : instruction de préparation de la ligne (ex. « sans oignon »).
+  notes            String?
+  /// Rang de la ligne dans la saisie : ordre stable des tickets, billets et écrans (0 pour les
+  /// lignes antérieures, alors départagées par identifiant).
+  lineNo           Int      @default(0)
 
   organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   sale           Sale            @relation(fields: [saleId], references: [id], onDelete: Cascade)
@@ -555,6 +609,8 @@ enum PrintJobKind {
   RECEIPT
   REPRINT
   TEST
+  /// Ticket cuisine (sans prix), après l'envoi explicite en cuisine.
+  KITCHEN
 }
 
 enum HardwareJobStatus {
@@ -584,6 +640,8 @@ model PosTerminal {
   drawerEnabled     Boolean           @default(false)
   /// Broche du connecteur de tiroir (2 ou 5).
   drawerPin         Int               @default(2)
+  /// Imprimante de la cuisine : reçoit les tickets cuisine de l'établissement.
+  kitchenPrinter    Boolean           @default(false)
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
 
@@ -826,4 +884,258 @@ model ParkCalendarException {
 
   @@unique([establishmentId, date])
   @@index([organizationId])
+}
+
+// ─── Sprint 5 : restaurant — commandes, cuisine, QR, tables, stocks, réservations ───
+
+/// Historique d'une commande de restaurant : création, modification, envoi en cuisine, préparation,
+/// service, paiement, annulation. En ajout seul.
+model OrderEvent {
+  id                String             @id @default(uuid()) @db.Uuid
+  organizationId    String             @db.Uuid
+  establishmentId   String             @db.Uuid
+  saleId            String             @db.Uuid
+  /// created, updated, sent_to_kitchen, preparation_started, ready, served, paid, cancelled, qr_accepted
+  type              String
+  fromStatus        PreparationStatus?
+  toStatus          PreparationStatus?
+  actorMembershipId String?            @db.Uuid
+  metadata          Json?
+  createdAt         DateTime           @default(now())
+
+  organization  Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment           @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  sale          Sale                    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  actor         OrganizationMembership? @relation("OrderEventActor", fields: [actorMembershipId], references: [id], onDelete: NoAction)
+
+  @@index([saleId, createdAt])
+  @@index([organizationId, createdAt])
+}
+
+enum DiningZoneKind {
+  ROOM
+  TERRACE
+  POOLSIDE
+  CUSTOM
+}
+
+/// Zone de service (salle, terrasse, bord de piscine…). Facultative : un restaurant peut n'en avoir aucune.
+model DiningZone {
+  id              String         @id @default(uuid()) @db.Uuid
+  organizationId  String         @db.Uuid
+  establishmentId String         @db.Uuid
+  name            String
+  kind            DiningZoneKind @default(ROOM)
+  sortOrder       Int            @default(0)
+  isActive        Boolean        @default(true)
+  /// Jeton aléatoire de 128 bits du QR code de zone (commande sans table précise).
+  qrToken         String         @unique
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  organization  Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment    @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  tables        DiningTable[]
+  sales         Sale[]
+  qrRequests    QrOrderRequest[]
+  reservations  Reservation[]
+
+  @@unique([establishmentId, name])
+  @@index([organizationId])
+}
+
+model DiningTable {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  establishmentId String   @db.Uuid
+  zoneId          String?  @db.Uuid
+  name            String
+  seats           Int      @default(4)
+  /// false = hors service : aucune commande QR ni réservation.
+  isActive        Boolean  @default(true)
+  /// Jeton aléatoire de 128 bits du QR code de table : seul contenu de l'URL publique.
+  qrToken         String   @unique
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization  Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment    @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  zone          DiningZone?      @relation(fields: [zoneId], references: [id], onDelete: NoAction)
+  sales         Sale[]
+  qrRequests    QrOrderRequest[]
+  reservations  Reservation[]
+
+  @@unique([establishmentId, name])
+  @@index([organizationId])
+  @@index([zoneId])
+}
+
+enum QrOrderStatus {
+  PENDING_VALIDATION
+  ACCEPTED
+  REJECTED
+}
+
+/// Demande de commande envoyée par un client depuis un QR code. Elle n'est ni payée ni envoyée en
+/// cuisine : un employé la valide (elle devient alors une vente non payée, non envoyée) ou la refuse.
+model QrOrderRequest {
+  id              String        @id @default(uuid()) @db.Uuid
+  organizationId  String        @db.Uuid
+  establishmentId String        @db.Uuid
+  tableId         String?       @db.Uuid
+  zoneId          String?       @db.Uuid
+  /// Jeton aléatoire remis au client pour suivre sa demande (aucun compte requis).
+  publicToken     String        @unique
+  status          QrOrderStatus @default(PENDING_VALIDATION)
+  customerName    String?
+  notes           String?
+  /// Lignes demandées (variante, quantité, instruction) avec libellés et prix indicatifs du moment.
+  lines           Json
+  /// Total indicatif calculé par le serveur ; la vente est revalorisée à la validation.
+  estimatedTotal  Int
+  /// Clé d'idempotence générée par la page du client : un double envoi ne crée pas de doublon.
+  clientRequestId String
+  rejectedReason  String?
+  decidedById     String?       @db.Uuid
+  decidedAt       DateTime?
+  saleId          String?       @unique @db.Uuid
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  organization  Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment           @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  table         DiningTable?            @relation(fields: [tableId], references: [id], onDelete: NoAction)
+  zone          DiningZone?             @relation(fields: [zoneId], references: [id], onDelete: NoAction)
+  decidedBy     OrganizationMembership? @relation("QrOrderDecidedBy", fields: [decidedById], references: [id], onDelete: NoAction)
+  sale          Sale?                   @relation(fields: [saleId], references: [id], onDelete: SetNull)
+
+  @@unique([establishmentId, clientRequestId])
+  @@index([establishmentId, status, createdAt])
+  @@index([tableId, status])
+  @@index([zoneId, status])
+}
+
+enum StockUnit {
+  UNIT
+  G
+  KG
+  ML
+  CL
+  L
+}
+
+enum StockMovementKind {
+  IN
+  OUT
+  ADJUSTMENT
+  SALE
+}
+
+/// Article ou ingrédient en stock dans un établissement.
+model StockItem {
+  id              String    @id @default(uuid()) @db.Uuid
+  organizationId  String    @db.Uuid
+  establishmentId String    @db.Uuid
+  name            String
+  unit            StockUnit
+  quantity        Decimal   @default(0) @db.Decimal(14, 3)
+  /// Seuil d'alerte (même unité) ; null = pas d'alerte.
+  alertThreshold  Decimal?  @db.Decimal(14, 3)
+  /// Coût d'achat unitaire facultatif (FCFA) ; jamais estimé s'il est inconnu.
+  unitCost        Int?
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  organization  Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment     @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  movements     StockMovement[]
+  recipes       RecipeComponent[]
+
+  @@unique([establishmentId, name])
+  @@index([organizationId, establishmentId, isActive])
+}
+
+/// Mouvement de stock en ajout seul. La clé d'idempotence empêche toute double déduction.
+model StockMovement {
+  id                String            @id @default(uuid()) @db.Uuid
+  organizationId    String            @db.Uuid
+  establishmentId   String            @db.Uuid
+  stockItemId       String            @db.Uuid
+  kind              StockMovementKind
+  /// Variation signée (positive = entrée, négative = sortie).
+  quantity          Decimal           @db.Decimal(14, 3)
+  quantityAfter     Decimal           @db.Decimal(14, 3)
+  unitCost          Int?
+  reason            String?
+  saleId            String?           @db.Uuid
+  actorMembershipId String?           @db.Uuid
+  /// « sale:<vente>:<article> » pour une vente, « req:<clé client> » pour une saisie.
+  idempotencyKey    String
+  createdAt         DateTime          @default(now())
+
+  organization  Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment           @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  stockItem     StockItem               @relation(fields: [stockItemId], references: [id], onDelete: Cascade)
+  sale          Sale?                   @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  actor         OrganizationMembership? @relation("StockMovementActor", fields: [actorMembershipId], references: [id], onDelete: NoAction)
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([stockItemId, createdAt])
+  @@index([saleId])
+}
+
+/// Recette simple : quantité d'un ingrédient consommée par unité vendue d'une variante.
+model RecipeComponent {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  variantId      String   @db.Uuid
+  stockItemId    String   @db.Uuid
+  quantity       Decimal  @db.Decimal(14, 3)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  variant      ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  stockItem    StockItem      @relation(fields: [stockItemId], references: [id], onDelete: Cascade)
+
+  @@unique([variantId, stockItemId])
+  @@index([organizationId])
+  @@index([stockItemId])
+}
+
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+
+model Reservation {
+  id              String            @id @default(uuid()) @db.Uuid
+  organizationId  String            @db.Uuid
+  establishmentId String            @db.Uuid
+  tableId         String?           @db.Uuid
+  zoneId          String?           @db.Uuid
+  customerName    String
+  /// Facultatif.
+  customerPhone   String?
+  partySize       Int
+  startsAt        DateTime
+  endsAt          DateTime
+  status          ReservationStatus @default(PENDING)
+  notes           String?
+  createdById     String            @db.Uuid
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  organization  Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment          @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  table         DiningTable?           @relation(fields: [tableId], references: [id], onDelete: NoAction)
+  zone          DiningZone?            @relation(fields: [zoneId], references: [id], onDelete: NoAction)
+  createdBy     OrganizationMembership @relation("ReservationCreatedBy", fields: [createdById], references: [id], onDelete: NoAction)
+
+  @@index([establishmentId, startsAt])
+  @@index([tableId, startsAt])
 }

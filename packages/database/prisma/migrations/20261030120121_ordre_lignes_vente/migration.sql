@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "SaleLine" ADD COLUMN     "lineNo" INTEGER NOT NULL DEFAULT 0;
+
