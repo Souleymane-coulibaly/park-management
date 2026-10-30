@@ -62,6 +62,14 @@ export const Permission = {
   STOCK_MOVE: 'stock.move',
   STOCK_MANAGE: 'stock.manage',
   RESERVATION_MANAGE: 'reservation.manage',
+  KIOSK_MANAGE: 'kiosk.manage',
+  CUSTOMER_READ: 'customer.read',
+  CUSTOMER_MANAGE: 'customer.manage',
+  CUSTOMER_HISTORY: 'customer.history',
+  CUSTOMER_ERASE: 'customer.erase',
+  LOYALTY_CONFIGURE: 'loyalty.configure',
+  LOYALTY_ADJUST: 'loyalty.adjust',
+  PLANNING_MANAGE: 'planning.manage',
 } as const;
 export type Permission = (typeof Permission)[keyof typeof Permission];
 export const PERMISSIONS: readonly Permission[] = Object.values(Permission);
@@ -99,6 +107,14 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'stock.move': 'Saisir les entrées et sorties de stock',
   'stock.manage': 'Gérer les articles, recettes et inventaires',
   'reservation.manage': 'Gérer les réservations',
+  'kiosk.manage': 'Gérer les bornes de commande (appairage, révocation)',
+  'customer.read': 'Rechercher un client et consulter ses points',
+  'customer.manage': 'Créer et modifier des fiches clients',
+  'customer.history': 'Consulter la liste complète, l’historique et les dépenses des clients',
+  'customer.erase': 'Anonymiser des clients (suppression, conservation)',
+  'loyalty.configure': 'Configurer les programmes de fidélité',
+  'loyalty.adjust': 'Corriger manuellement des points de fidélité',
+  'planning.manage': 'Gérer le planning et les postes du personnel',
 };
 
 const P = Permission;
@@ -128,6 +144,10 @@ export const ROLE_PERMISSIONS: Record<MemberRole, readonly Permission[]> = {
     P.STOCK_READ,
     P.STOCK_MOVE,
     P.RESERVATION_MANAGE,
+    P.CUSTOMER_READ,
+    P.CUSTOMER_MANAGE,
+    P.CUSTOMER_HISTORY,
+    P.PLANNING_MANAGE,
   ],
   // Un caissier encaisse, envoie ses commandes en cuisine et ne voit que ses propres ventes et sessions.
   CASHIER: [
@@ -136,6 +156,8 @@ export const ROLE_PERMISSIONS: Record<MemberRole, readonly Permission[]> = {
     P.POS_SELL,
     P.ORDER_SEND_KITCHEN,
     P.RESERVATION_MANAGE,
+    P.CUSTOMER_READ,
+    P.CUSTOMER_MANAGE,
   ],
   // La cuisine voit les commandes envoyées et fait avancer la préparation ; elle n'encaisse pas.
   KITCHEN: [...OPERATOR_BASE, P.CATALOG_READ, P.KITCHEN_VIEW, P.KITCHEN_UPDATE, P.STOCK_READ],

@@ -7,3 +7,4 @@ export * from './pos';
 export * from './hardware';
 export * from './park';
 export * from './restaurant';
+export * from './crm';

@@ -21,6 +21,8 @@ export interface ReceiptData {
     unitPrice: number;
     lineTotal: number;
   }[];
+  /** Remise fidélité déjà déduite du total (0 si aucune). */
+  loyaltyDiscount?: number;
   total: number;
   payment: {
     method: 'CASH' | 'WAVE';
@@ -71,6 +73,9 @@ export function layoutReceipt(data: ReceiptData, paperWidth: PaperWidth): Receip
     });
   }
   out.push(separator(w));
+  if (data.loyaltyDiscount) {
+    out.push({ text: columns('Remise fidélité', `-${formatXof(data.loyaltyDiscount)}`, w) });
+  }
   out.push({
     text: columns('TOTAL', formatXof(data.total), Math.floor(w / 2)),
     bold: true,

@@ -5,7 +5,7 @@
 
 // ─── Commandes ───
 
-export const ORDER_CHANNELS = ['DINE_IN', 'TAKEAWAY', 'COUNTER', 'QR'] as const;
+export const ORDER_CHANNELS = ['DINE_IN', 'TAKEAWAY', 'COUNTER', 'QR', 'KIOSK'] as const;
 export type OrderChannel = (typeof ORDER_CHANNELS)[number];
 /** Canaux qu'un employé choisit à la caisse ; QR est réservé aux demandes clients validées. */
 export const STAFF_ORDER_CHANNELS = ['DINE_IN', 'TAKEAWAY', 'COUNTER'] as const;
@@ -16,6 +16,7 @@ export const ORDER_CHANNEL_LABELS: Record<OrderChannel, string> = {
   TAKEAWAY: 'À emporter',
   COUNTER: 'Comptoir',
   QR: 'QR code client',
+  KIOSK: 'Borne de commande',
 };
 
 /** Longueur maximale d'une instruction de préparation (ligne ou commande). */
@@ -77,6 +78,10 @@ export const KITCHEN_VISIBLE_STATUSES = ['SENT', 'IN_PREPARATION', 'READY'] as c
 
 export const QR_ORDER_STATUSES = ['PENDING_VALIDATION', 'ACCEPTED', 'REJECTED'] as const;
 export type QrOrderStatus = (typeof QR_ORDER_STATUSES)[number];
+
+/** Origine d'une demande client : QR code de table ou de zone, ou borne libre-service. */
+export const ORDER_REQUEST_SOURCES = ['QR', 'KIOSK'] as const;
+export type OrderRequestSource = (typeof ORDER_REQUEST_SOURCES)[number];
 
 export const QR_ORDER_STATUS_LABELS: Record<QrOrderStatus, string> = {
   PENDING_VALIDATION: 'En attente de validation',
