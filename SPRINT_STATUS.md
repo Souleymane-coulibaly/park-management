@@ -79,13 +79,22 @@ appliquée** : en attente de la base `test`.
 
 **Incident — branche Neon `test` injoignable** (30/10/2026, à partir d'environ 14 h 39).
 
-- La branche ne répond plus, ni par le pooler ni par l'accès direct, alors que le réseau (DNS, TCP)
-  et la base de développement répondent.
+- La connexion échoue, par le pooler comme par l'accès direct, alors que la base de développement
+  répond.
 - C'était déjà le cas d'environ 13 h 06 à 14 h 21.
 - La première exécution de l'intégration du Sprint 6 a donc échoué au démarrage, sans exécuter
   aucun test : `test-logs/integration-s6-2026-10-30T14-39-16-150Z.log`.
-- Cause probable : quota de calcul des branches secondaires de l'offre Neon. À vérifier dans la
-  console Neon (anomalie A11 de CP-05).
+- **Cause établie le 30/10/2026 (diagnostic lecture seule)** : ce n'est ni le réseau ni un quota.
+  - Le serveur répond : TCP en IPv4 et IPv6, TLS, puis demande d'authentification SCRAM.
+  - Le message « Can't reach database server » de Prisma venait de son délai de connexion de 5 s,
+    dépassé pendant le réveil du calcul.
+  - Avec un délai de 60 s, l'erreur réelle apparaît : **authentification refusée** pour le rôle
+    sur la branche `test`, par le pooler comme par l'accès direct.
+  - Le même rôle et le même mot de passe sont acceptés par la base de développement : le mot de
+    passe du rôle a donc changé sur la branche `test`.
+  - Correctif : dans la console Neon, mettre à jour la chaîne de connexion de la branche `test`
+    dans `apps/api/.env` (`TEST_DATABASE_URL`, `TEST_DIRECT_URL`). Action réservée au
+    commanditaire : aucune modification n'est faite sur Neon depuis le poste.
 - Les tests ne sont jamais lancés sur la base de développement.
 
 ---
