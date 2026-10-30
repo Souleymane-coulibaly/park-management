@@ -1,8 +1,8 @@
 'use client';
 
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, type ReactNode, useState } from 'react';
 import { Banknote, CheckCircle2, Smartphone } from 'lucide-react';
-import { formatSaleNumber, formatXof } from '@ocall/shared';
+import { PREPARATION_STATUS_LABELS, formatSaleNumber, formatXof } from '@ocall/shared';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { Alert, ApiErrorAlert } from '@/components/ui/states';
@@ -163,10 +163,13 @@ export function ReceiptDialog({
   result,
   terminal,
   onClose,
+  extra,
 }: {
   result: PaymentResult;
   terminal: PosTerminal | null;
   onClose: () => void;
+  /** Actions complémentaires (ex. envoi explicite en cuisine), affichées avant « Nouvelle vente ». */
+  extra?: ReactNode;
 }) {
   const { sale, payment } = result;
   return (
@@ -194,9 +197,13 @@ export function ReceiptDialog({
           </div>
         </dl>
         <AfterPaymentHardware result={result} terminal={terminal} />
-        <Alert tone="info">
-          Préparation : non envoyée en cuisine. Le paiement ne déclenche jamais la préparation.
-        </Alert>
+        {sale.activity === 'RESTAURANT' && (
+          <Alert tone="info">
+            Préparation : {PREPARATION_STATUS_LABELS[sale.preparationStatus].toLowerCase()}. Le
+            paiement ne déclenche jamais la préparation.
+          </Alert>
+        )}
+        {extra}
         <Button size="lg" className="w-full" onClick={onClose}>
           Nouvelle vente
         </Button>

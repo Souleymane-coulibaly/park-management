@@ -57,6 +57,22 @@ const ACTION_LABELS: Record<string, string> = {
   'drawer.manual_open_requested': 'Ouverture manuelle du tiroir',
   'drawer.opened': 'Tiroir ouvert',
   'drawer.open_failed': 'Échec d’ouverture du tiroir',
+  'order.updated': 'Commande modifiée',
+  'order.sent_to_kitchen': 'Commande envoyée en cuisine',
+  'qr_order.accepted': 'Demande QR validée',
+  'qr_order.rejected': 'Demande QR refusée',
+  'dining.zone_created': 'Zone créée',
+  'dining.zone_updated': 'Zone modifiée',
+  'dining.table_created': 'Table créée',
+  'dining.table_updated': 'Table modifiée',
+  'dining.qr_regenerated': 'QR code régénéré',
+  'stock.item_created': 'Article de stock créé',
+  'stock.item_updated': 'Article de stock modifié',
+  'stock.adjusted': 'Inventaire ajusté',
+  'stock.recipe_updated': 'Recette modifiée',
+  'reservation.created': 'Réservation créée',
+  'reservation.updated': 'Réservation modifiée',
+  'reservation.status_changed': 'Statut de réservation modifié',
 };
 
 export const actionLabel = (action: string) => ACTION_LABELS[action] ?? action;

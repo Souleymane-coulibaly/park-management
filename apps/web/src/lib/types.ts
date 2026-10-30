@@ -1,10 +1,18 @@
 import type {
   BusinessType,
+  DiningZoneKind,
   MemberRole,
   OpeningVerdict,
+  OrderChannel,
   Permission,
+  PreparationStatus,
+  QrOrderStatus,
+  ReservationStatus,
   ScanRefusalReason,
+  StockMovementKind,
+  StockUnit,
   SubscriptionStatus,
+  TableStatus,
   TicketKind,
   TicketStatus,
 } from '@ocall/shared';
@@ -205,6 +213,8 @@ export interface QuoteLine {
   unitPrice: number;
   quantity: number;
   lineTotal: number;
+  /** Restaurant : instruction de préparation. */
+  notes?: string | null;
 }
 
 export interface Quote {
@@ -227,15 +237,23 @@ export interface Sale {
   number: number;
   status: 'OPEN' | 'CANCELLED';
   paymentStatus: 'UNPAID' | 'PAID';
-  preparationStatus: 'NOT_SENT' | 'SENT' | 'READY' | 'SERVED';
+  preparationStatus: PreparationStatus;
   total: number;
   createdAt: string;
   cancelledAt: string | null;
   cashSessionId: string;
   activity: 'RESTAURANT' | 'PARK';
+  channel: OrderChannel | null;
+  notes: string | null;
+  sentToKitchenAt: string | null;
+  preparationStartedAt: string | null;
+  readyAt: string | null;
+  servedAt: string | null;
   establishment: { id: string; name: string };
+  table: { id: string; name: string } | null;
+  zone: { id: string; name: string } | null;
   cashier: { id: string; name: string };
-  lines: QuoteLine[];
+  lines: (QuoteLine & { id: string })[];
   payments: SalePayment[];
 }
 
@@ -283,6 +301,7 @@ export interface PosTerminal {
   autoPrintReceipt: boolean;
   drawerEnabled: boolean;
   drawerPin: number;
+  kitchenPrinter: boolean;
   establishment: { id: string; name: string };
 }
 
@@ -467,5 +486,196 @@ export interface ParkDashboard {
     createdAt: string;
     visitorName: string | null;
     categoryName: string | null;
+  }[];
+}
+
+// ─── Sprint 5 : restaurant ───
+
+export type { OrderChannel, PreparationStatus };
+
+export interface RestaurantEstablishment {
+  id: string;
+  name: string;
+}
+
+export interface OrderEvent {
+  type: string;
+  fromStatus: PreparationStatus | null;
+  toStatus: PreparationStatus | null;
+  createdAt: string;
+  metadata: Record<string, unknown> | null;
+  actorName: string | null;
+}
+
+export type OrderDetail = Sale & { events: OrderEvent[] };
+
+export interface TransitionResult<T> {
+  changed: boolean;
+  order: T;
+}
+
+/** Commande vue par la cuisine : aucun prix. */
+export interface KitchenOrder {
+  id: string;
+  number: number;
+  channel: OrderChannel | null;
+  notes: string | null;
+  preparationStatus: PreparationStatus;
+  sentToKitchenAt: string | null;
+  preparationStartedAt: string | null;
+  readyAt: string | null;
+  table: { name: string } | null;
+  zone: { name: string } | null;
+  lines: {
+    id: string;
+    productName: string;
+    variantName: string;
+    quantity: number;
+    notes: string | null;
+  }[];
+}
+
+export interface DiningZone {
+  id: string;
+  name: string;
+  kind: DiningZoneKind;
+  sortOrder: number;
+  isActive: boolean;
+  qrPath: string;
+}
+
+export interface DiningTable {
+  id: string;
+  name: string;
+  seats: number;
+  isActive: boolean;
+  zoneId: string | null;
+  status: TableStatus;
+  activeOrders: number;
+  qrPath: string;
+}
+
+export interface DiningOverview {
+  zones: DiningZone[];
+  tables: DiningTable[];
+}
+
+export interface QrRequestLine {
+  variantId: string;
+  quantity: number;
+  notes: string | null;
+  productName: string;
+  variantName: string;
+  unitPrice: number;
+}
+
+export interface QrRequest {
+  id: string;
+  status: QrOrderStatus;
+  customerName: string | null;
+  notes: string | null;
+  lines: QrRequestLine[];
+  estimatedTotal: number;
+  rejectedReason: string | null;
+  createdAt: string;
+  saleId: string | null;
+  location: string;
+}
+
+export interface PublicMenu {
+  establishmentName: string;
+  location: string;
+  categories: {
+    id: string;
+    name: string;
+    products: {
+      id: string;
+      name: string;
+      description: string | null;
+      variants: { id: string; name: string; price: number }[];
+    }[];
+  }[];
+}
+
+export interface PublicOrderStatus {
+  status: QrOrderStatus;
+  rejectedReason: string | null;
+  estimatedTotal: number;
+  createdAt: string;
+  establishmentName: string;
+  location: string;
+  lines: { productName: string; variantName: string; quantity: number; notes: string | null }[];
+  order: {
+    number: number;
+    cancelled: boolean;
+    total: number;
+    paymentStatus: 'UNPAID' | 'PAID';
+    preparationStatus: PreparationStatus;
+  } | null;
+}
+
+export interface StockItem {
+  id: string;
+  name: string;
+  unit: StockUnit;
+  quantity: number;
+  alertThreshold: number | null;
+  unitCost: number | null;
+  isActive: boolean;
+  low: boolean;
+  updatedAt: string;
+}
+
+export interface StockMovement {
+  id: string;
+  kind: StockMovementKind;
+  quantity: number;
+  quantityAfter: number;
+  unitCost: number | null;
+  reason: string | null;
+  saleId: string | null;
+  saleNumber: number | null;
+  createdAt: string;
+  actorName: string | null;
+  stockItem: { id: string; name: string; unit: StockUnit };
+}
+
+export interface Recipe {
+  variantId: string;
+  components: { stockItemId: string; name: string; unit: StockUnit; quantity: number }[];
+}
+
+export interface Reservation {
+  id: string;
+  customerName: string;
+  customerPhone: string | null;
+  partySize: number;
+  startsAt: string;
+  endsAt: string;
+  status: ReservationStatus;
+  notes: string | null;
+  createdAt: string;
+  table: { id: string; name: string } | null;
+  zone: { id: string; name: string } | null;
+}
+
+export interface RestaurantDashboard {
+  date: string;
+  establishment: { id: string; name: string };
+  revenueCollected: number;
+  paidSales: number;
+  orders: number;
+  averageBasket: number | null;
+  waiting: number;
+  inPreparation: number;
+  qrPending: number;
+  averagePreparationMinutes: number | null;
+  topProducts: { productName: string; quantity: number; revenue: number }[];
+  stockAlerts: {
+    id: string;
+    name: string;
+    unit: StockUnit;
+    quantity: number;
+    alertThreshold: number;
   }[];
 }

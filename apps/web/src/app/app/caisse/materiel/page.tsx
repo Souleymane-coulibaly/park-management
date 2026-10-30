@@ -309,6 +309,7 @@ function TerminalDialog({
     autoPrintReceipt: terminal?.autoPrintReceipt ?? true,
     drawerEnabled: terminal?.drawerEnabled ?? false,
     drawerPin: String(terminal?.drawerPin ?? 2),
+    kitchenPrinter: terminal?.kitchenPrinter ?? false,
     isActive: terminal?.isActive ?? true,
   });
   const [error, setError] = useState<ApiError | null>(null);
@@ -337,6 +338,7 @@ function TerminalDialog({
       autoPrintReceipt: form.autoPrintReceipt,
       drawerEnabled: form.printerConnection === 'NONE' ? false : form.drawerEnabled,
       drawerPin: Number(form.drawerPin),
+      kitchenPrinter: form.printerConnection === 'NONE' ? false : form.kitchenPrinter,
     };
     try {
       if (terminal)
@@ -431,6 +433,15 @@ function TerminalDialog({
                 onChange={(e) => setForm((f) => ({ ...f, drawerEnabled: e.target.checked }))}
               />
               Tiroir-caisse relié à l’imprimante
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-forest"
+                checked={form.kitchenPrinter}
+                onChange={(e) => setForm((f) => ({ ...f, kitchenPrinter: e.target.checked }))}
+              />
+              Imprimante de la cuisine (tickets cuisine, sans prix)
             </label>
             {form.drawerEnabled && (
               <SelectField

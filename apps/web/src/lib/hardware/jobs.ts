@@ -39,7 +39,8 @@ async function report(
 
 export async function runPrintJob(body: {
   terminalId: string;
-  kind: 'RECEIPT' | 'REPRINT' | 'TEST';
+  /** KITCHEN : ticket cuisine (sans prix), après l'envoi explicite en cuisine. */
+  kind: 'RECEIPT' | 'REPRINT' | 'TEST' | 'KITCHEN';
   saleId?: string;
   /** Billetterie : réimpression d'un seul billet de la vente. */
   ticketId?: string;

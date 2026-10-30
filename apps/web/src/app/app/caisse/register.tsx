@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Minus, Plus, ShoppingBasket, Trash2 } from 'lucide-react';
+import { ChefHat, Minus, Plus, ShoppingBasket, StickyNote, Trash2 } from 'lucide-react';
 import { formatSaleNumber, formatXof } from '@ocall/shared';
+import { useCan } from '@/components/app/session-context';
 import {
   CashSessionGate,
   DeviceBar,
@@ -11,6 +12,13 @@ import {
   toApiError,
 } from '@/components/pos/cash-session';
 import { PaymentDialog, ReceiptDialog } from '@/components/pos/payment-dialog';
+import { type SendResult, sendToKitchen } from '@/components/restaurant/kitchen-actions';
+import {
+  DEFAULT_ORDER_OPTIONS,
+  LineNoteDialog,
+  type OrderOptions,
+  OrderOptionsBar,
+} from '@/components/restaurant/order-options';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
@@ -37,9 +45,15 @@ interface CartLine {
   productName: string;
   variantName: string;
   quantity: number;
+  /** Instruction de préparation : deux lignes du même article diffèrent par leur instruction. */
+  notes: string;
 }
 
+const lineKey = (l: Pick<CartLine, 'variantId' | 'notes'>) => `${l.variantId}|${l.notes}`;
+
 type ProductTile = PosCatalogCategory['products'][number];
+/** Ce qui suit l'enregistrement de la commande : encaissement, envoi en cuisine ou rien. */
+type Checkout = 'pay' | 'kitchen' | 'save';
 
 function Terminal({
   establishmentId,
@@ -53,28 +67,38 @@ function Terminal({
   const catalog = useApi<PosCatalogCategory[]>(`/pos/catalog?establishmentId=${establishmentId}`);
   const device = useDeviceTerminal(establishmentId);
   const online = useOnline();
+  const canSend = useCan('order.send_kitchen');
   useWakeLock(true);
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [cart, setCart] = useState<CartLine[]>([]);
+  const [options, setOptions] = useState<OrderOptions>(DEFAULT_ORDER_OPTIONS);
   const [quote, setQuote] = useState<{
     data: Quote | null;
     error: ApiError | null;
     loading: boolean;
   }>({ data: null, error: null, loading: false });
   const [picker, setPicker] = useState<ProductTile | null>(null);
-  // Clé d'idempotence du panier courant : renouvelée après chaque vente enregistrée.
+  const [noteFor, setNoteFor] = useState<CartLine | null>(null);
+  // Clé d'idempotence du panier courant : renouvelée après chaque commande enregistrée.
   const [saleRequestId, setSaleRequestId] = useState(newRequestId);
-  const [checkout, setCheckout] = useState<{ loading: boolean; error: ApiError | null }>({
-    loading: false,
-    error: null,
-  });
+  const [checkout, setCheckout] = useState<{
+    loading: Checkout | null;
+    error: ApiError | null;
+  }>({ loading: null, error: null });
   const [payingSale, setPayingSale] = useState<Sale | null>(null);
   const [receipt, setReceipt] = useState<PaymentResult | null>(null);
-  const [unpaidNotice, setUnpaidNotice] = useState<Sale | null>(null);
+  const [savedOrder, setSavedOrder] = useState<{ sale: Sale; sent: SendResult | null } | null>(
+    null,
+  );
 
   const categories = catalog.state === 'success' ? catalog.data : [];
   const activeCategory = categories.find((c) => c.id === categoryId) ?? categories[0];
-  const cartKey = useMemo(() => JSON.stringify(cart.map((l) => [l.variantId, l.quantity])), [cart]);
+  const apiLines = cart.map((l) => ({
+    variantId: l.variantId,
+    quantity: l.quantity,
+    ...(l.notes ? { notes: l.notes } : {}),
+  }));
+  const cartKey = useMemo(() => JSON.stringify(cart.map((l) => [lineKey(l), l.quantity])), [cart]);
 
   // Les montants affichés viennent du serveur (devis recalculé à chaque modification du panier).
   useEffect(() => {
@@ -85,13 +109,7 @@ function Terminal({
     let cancelled = false;
     setQuote((q) => ({ ...q, loading: true }));
     const timer = setTimeout(() => {
-      api<Quote>('/pos/quote', {
-        method: 'POST',
-        body: {
-          establishmentId,
-          lines: cart.map((l) => ({ variantId: l.variantId, quantity: l.quantity })),
-        },
-      })
+      api<Quote>('/pos/quote', { method: 'POST', body: { establishmentId, lines: apiLines } })
         .then((data) => !cancelled && setQuote({ data, error: null, loading: false }))
         .catch(
           (e: unknown) =>
@@ -107,10 +125,10 @@ function Terminal({
 
   function add(product: ProductTile, variant: ProductTile['variants'][number]) {
     setCart((lines) => {
-      const existing = lines.find((l) => l.variantId === variant.id);
+      const existing = lines.find((l) => l.variantId === variant.id && l.notes === '');
       if (existing)
         return lines.map((l) =>
-          l.variantId === variant.id ? { ...l, quantity: Math.min(l.quantity + 1, 999) } : l,
+          l === existing ? { ...l, quantity: Math.min(l.quantity + 1, 999) } : l,
         );
       return [
         ...lines,
@@ -119,6 +137,7 @@ function Terminal({
           productName: product.name,
           variantName: variant.name,
           quantity: 1,
+          notes: '',
         },
       ];
     });
@@ -129,42 +148,62 @@ function Terminal({
     else setPicker(product);
   }
 
-  function changeQuantity(variantId: string, delta: number) {
+  function changeQuantity(key: string, delta: number) {
     setCart((lines) =>
       lines.flatMap((l) => {
-        if (l.variantId !== variantId) return [l];
+        if (lineKey(l) !== key) return [l];
         const quantity = Math.min(l.quantity + delta, 999);
         return quantity > 0 ? [{ ...l, quantity }] : [];
       }),
     );
   }
 
-  async function startCheckout() {
+  /** Change l'instruction d'une ligne ; fusionne avec une ligne identique (même article, même note). */
+  function setNote(target: CartLine, notes: string) {
+    setCart((lines) => {
+      const others = lines.filter((l) => l !== target);
+      const twin = others.find((l) => l.variantId === target.variantId && l.notes === notes);
+      if (twin)
+        return others.map((l) =>
+          l === twin ? { ...l, quantity: l.quantity + target.quantity } : l,
+        );
+      return lines.map((l) => (l === target ? { ...l, notes } : l));
+    });
+  }
+
+  async function submit(next: Checkout) {
     if (!quote.data || quote.loading) return;
-    setCheckout({ loading: true, error: null });
+    setCheckout({ loading: next, error: null });
     try {
-      const sale = await api<Sale>('/sales', {
+      const sale = await api<Sale>('/orders', {
         method: 'POST',
         body: {
           establishmentId,
+          channel: options.channel,
+          ...(options.tableId ? { tableId: options.tableId } : {}),
+          ...(options.notes.trim() ? { notes: options.notes.trim() } : {}),
           clientRequestId: saleRequestId,
-          lines: cart.map((l) => ({ variantId: l.variantId, quantity: l.quantity })),
+          lines: apiLines,
         },
       });
-      // La vente est enregistrée : le panier repart de zéro, même si l'encaissement est reporté.
+      // La commande est enregistrée : le panier repart de zéro, quelle que soit la suite.
       setCart([]);
+      setOptions(DEFAULT_ORDER_OPTIONS);
       setSaleRequestId(newRequestId());
-      setCheckout({ loading: false, error: null });
-      setPayingSale(sale);
+      if (next === 'pay') setPayingSale(sale);
+      else if (next === 'kitchen') {
+        const sent = await sendToKitchen(sale.id, establishmentId).catch(() => null);
+        setSavedOrder({ sale: sent?.order ?? sale, sent });
+      } else setSavedOrder({ sale, sent: null });
+      setCheckout({ loading: null, error: null });
     } catch (e) {
-      setCheckout({ loading: false, error: toApiError(e) });
+      setCheckout({ loading: null, error: toApiError(e) });
     }
   }
 
   const total = quote.data?.total;
   // Hors connexion, l'encaissement est suspendu : aucune vente n'est enregistrée localement.
-  const canCheckout =
-    online && cart.length > 0 && !!quote.data && !quote.loading && !checkout.loading;
+  const ready = online && cart.length > 0 && !!quote.data && !quote.loading && !checkout.loading;
 
   return (
     <>
@@ -240,7 +279,7 @@ function Terminal({
         <aside aria-label="Ticket" className="lg:sticky lg:top-20 lg:self-start">
           <Card className="flex flex-col">
             <div className="flex items-center justify-between border-b border-line/70 px-4 py-3">
-              <h2 className="font-semibold">Ticket</h2>
+              <h2 className="font-semibold">Commande</h2>
               {cart.length > 0 && (
                 <Button
                   variant="ghost"
@@ -252,6 +291,11 @@ function Terminal({
                 </Button>
               )}
             </div>
+            <OrderOptionsBar
+              establishmentId={establishmentId}
+              value={options}
+              onChange={setOptions}
+            />
             {cart.length === 0 ? (
               <p className="px-4 py-10 text-center text-sm text-muted">
                 Touchez un article pour l’ajouter.
@@ -259,20 +303,31 @@ function Terminal({
             ) : (
               <ul className="max-h-[50vh] divide-y divide-line/70 overflow-y-auto">
                 {cart.map((l) => {
-                  const priced = quote.data?.lines.find((q) => q.variantId === l.variantId);
+                  const key = lineKey(l);
+                  const priced = quote.data?.lines.find(
+                    (q) => q.variantId === l.variantId && (q.notes ?? '') === l.notes,
+                  );
                   return (
-                    <li key={l.variantId} className="flex items-center gap-2 px-4 py-3">
+                    <li key={key} className="flex items-center gap-2 px-4 py-3">
                       <div className="min-w-0 flex-1">
                         <p className="truncate font-medium">{l.productName}</p>
                         <p className="text-xs text-muted">
                           {l.variantName}
                           {priced && ` · ${formatXof(priced.unitPrice)}`}
                         </p>
+                        <button
+                          type="button"
+                          onClick={() => setNoteFor(l)}
+                          className={`mt-0.5 inline-flex items-center gap-1 text-xs font-semibold ${l.notes ? 'text-terracotta-dark' : 'text-forest'}`}
+                        >
+                          <StickyNote className="h-3.5 w-3.5" aria-hidden />
+                          {l.notes || 'Ajouter une instruction'}
+                        </button>
                       </div>
                       <div className="flex items-center gap-1">
                         <button
                           type="button"
-                          onClick={() => changeQuantity(l.variantId, -1)}
+                          onClick={() => changeQuantity(key, -1)}
                           className="grid h-11 w-11 place-items-center rounded-xl border border-line"
                           aria-label={`Retirer un ${l.productName}`}
                         >
@@ -283,7 +338,7 @@ function Terminal({
                         </span>
                         <button
                           type="button"
-                          onClick={() => changeQuantity(l.variantId, 1)}
+                          onClick={() => changeQuantity(key, 1)}
                           className="grid h-11 w-11 place-items-center rounded-xl border border-line"
                           aria-label={`Ajouter un ${l.productName}`}
                         >
@@ -310,30 +365,65 @@ function Terminal({
               <Button
                 size="lg"
                 className="hidden w-full lg:inline-flex"
-                onClick={startCheckout}
-                disabled={!canCheckout}
-                loading={checkout.loading}
+                onClick={() => submit('pay')}
+                disabled={!ready}
+                loading={checkout.loading === 'pay'}
               >
                 Encaisser
               </Button>
+              <div className="hidden gap-2 lg:grid lg:grid-cols-2">
+                {canSend && (
+                  <Button
+                    variant="secondary"
+                    icon={<ChefHat className="h-4 w-4" />}
+                    onClick={() => submit('kitchen')}
+                    disabled={!ready}
+                    loading={checkout.loading === 'kitchen'}
+                  >
+                    Envoyer en cuisine
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  className={canSend ? '' : 'col-span-2'}
+                  onClick={() => submit('save')}
+                  disabled={!ready}
+                  loading={checkout.loading === 'save'}
+                >
+                  Enregistrer
+                </Button>
+              </div>
             </div>
           </Card>
         </aside>
       </div>
 
-      {/* Barre fixe sur tablette en portrait et mobile : total et encaissement toujours accessibles. */}
-      <div className="fixed inset-x-0 bottom-0 z-20 flex items-center justify-between gap-3 border-t border-line bg-surface px-4 py-3 shadow-lift lg:hidden">
+      {/* Barre fixe sur tablette en portrait et mobile : total et actions toujours accessibles. */}
+      <div className="fixed inset-x-0 bottom-0 z-20 flex items-center justify-between gap-2 border-t border-line bg-surface px-4 py-3 shadow-lift lg:hidden">
         <span className="font-display text-2xl font-bold">
           {total !== undefined ? formatXof(total) : '—'}
         </span>
-        <Button
-          size="lg"
-          onClick={startCheckout}
-          disabled={!canCheckout}
-          loading={checkout.loading}
-        >
-          Encaisser
-        </Button>
+        <div className="flex gap-2">
+          {canSend && (
+            <Button
+              variant="secondary"
+              size="lg"
+              aria-label="Envoyer en cuisine"
+              icon={<ChefHat className="h-5 w-5" />}
+              onClick={() => submit('kitchen')}
+              disabled={!ready}
+              loading={checkout.loading === 'kitchen'}
+            />
+          )}
+          <Button
+            size="lg"
+            onClick={() => submit('pay')}
+            disabled={!ready}
+            loading={checkout.loading === 'pay'}
+          >
+            Encaisser
+          </Button>
+        </div>
       </div>
 
       {picker && (
@@ -362,11 +452,23 @@ function Terminal({
         </Dialog>
       )}
 
+      {noteFor && (
+        <LineNoteDialog
+          title={`${noteFor.productName} (${noteFor.variantName})`}
+          initial={noteFor.notes}
+          onClose={() => setNoteFor(null)}
+          onSave={(note) => {
+            setNote(noteFor, note);
+            setNoteFor(null);
+          }}
+        />
+      )}
+
       {payingSale && (
         <PaymentDialog
           sale={payingSale}
           onClose={() => {
-            setUnpaidNotice(payingSale);
+            setSavedOrder({ sale: payingSale, sent: null });
             setPayingSale(null);
             onSessionChange();
           }}
@@ -384,21 +486,136 @@ function Terminal({
             setReceipt(null);
             onSessionChange();
           }}
+          extra={
+            canSend &&
+            receipt.sale.activity === 'RESTAURANT' &&
+            receipt.sale.preparationStatus === 'NOT_SENT' ? (
+              <KitchenButton
+                sale={receipt.sale}
+                establishmentId={establishmentId}
+                onSent={(sale) => setReceipt({ ...receipt, sale })}
+              />
+            ) : undefined
+          }
         />
       )}
-      {unpaidNotice && (
-        <Dialog open onClose={() => setUnpaidNotice(null)} title="Vente enregistrée, non payée">
-          <div className="space-y-4">
-            <Alert tone="info">
-              La vente n° {formatSaleNumber(unpaidNotice.number)} ({formatXof(unpaidNotice.total)})
-              est enregistrée. Vous pourrez l’encaisser depuis l’historique des ventes.
-            </Alert>
-            <Button className="w-full" onClick={() => setUnpaidNotice(null)}>
-              Compris
-            </Button>
-          </div>
-        </Dialog>
+      {savedOrder && (
+        <SavedOrderDialog
+          saved={savedOrder}
+          establishmentId={establishmentId}
+          canSend={canSend}
+          onPay={(sale) => {
+            setSavedOrder(null);
+            setPayingSale(sale);
+          }}
+          onClose={() => {
+            setSavedOrder(null);
+            onSessionChange();
+          }}
+        />
       )}
     </>
+  );
+}
+
+/** Envoi explicite en cuisine depuis la caisse (après encaissement ou enregistrement). */
+function KitchenButton({
+  sale,
+  establishmentId,
+  onSent,
+}: {
+  sale: Sale;
+  establishmentId: string;
+  onSent: (sale: Sale, result: SendResult) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+  return (
+    <div className="space-y-2">
+      <ApiErrorAlert error={error} />
+      <Button
+        variant="secondary"
+        className="w-full"
+        icon={<ChefHat className="h-4 w-4" />}
+        loading={loading}
+        onClick={async () => {
+          setLoading(true);
+          setError(null);
+          try {
+            const result = await sendToKitchen(sale.id, establishmentId);
+            onSent(result.order, result);
+          } catch (e) {
+            setError(toApiError(e));
+          } finally {
+            setLoading(false);
+          }
+        }}
+      >
+        Envoyer en cuisine
+      </Button>
+    </div>
+  );
+}
+
+function SavedOrderDialog({
+  saved,
+  establishmentId,
+  canSend,
+  onPay,
+  onClose,
+}: {
+  saved: { sale: Sale; sent: SendResult | null };
+  establishmentId: string;
+  canSend: boolean;
+  onPay: (sale: Sale) => void;
+  onClose: () => void;
+}) {
+  const [state, setState] = useState(saved);
+  const { sale, sent } = state;
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title={`Commande n° ${formatSaleNumber(sale.number)} enregistrée`}
+      description={formatXof(sale.total)}
+    >
+      <div className="space-y-4">
+        <Alert tone={sale.preparationStatus === 'NOT_SENT' ? 'info' : 'success'}>
+          {sale.preparationStatus === 'NOT_SENT'
+            ? 'Non envoyée en cuisine.'
+            : 'Envoyée en cuisine.'}{' '}
+          {sale.paymentStatus === 'PAID'
+            ? 'Payée.'
+            : 'Non payée : vous pourrez l’encaisser plus tard.'}
+        </Alert>
+        {sent?.print && (
+          <Alert tone={sent.print.status === 'SUCCEEDED' ? 'success' : 'error'}>
+            {sent.print.status === 'SUCCEEDED'
+              ? 'Ticket cuisine imprimé.'
+              : `Ticket cuisine non imprimé : ${sent.print.message ?? 'erreur'}. La commande reste en cuisine.`}
+          </Alert>
+        )}
+        {canSend && sale.preparationStatus === 'NOT_SENT' && (
+          <KitchenButton
+            sale={sale}
+            establishmentId={establishmentId}
+            onSent={(next, result) => setState({ sale: next, sent: result })}
+          />
+        )}
+        <div className="grid gap-2 sm:grid-cols-2">
+          {sale.paymentStatus === 'UNPAID' && (
+            <Button variant="accent" onClick={() => onPay(sale)}>
+              Encaisser maintenant
+            </Button>
+          )}
+          <Button
+            className={sale.paymentStatus === 'UNPAID' ? '' : 'sm:col-span-2'}
+            onClick={onClose}
+          >
+            Nouvelle commande
+          </Button>
+        </div>
+      </div>
+    </Dialog>
   );
 }
