@@ -64,22 +64,27 @@ model Organization {
   createdAt    DateTime           @default(now())
   updatedAt    DateTime           @updatedAt
 
-  establishments Establishment[]
-  memberships    OrganizationMembership[]
-  assignments    EstablishmentAssignment[]
-  subscription   Subscription?
-  auditLogs      AuditLog[]
-  categories     ProductCategory[]
-  products       Product[]
-  variants       ProductVariant[]
-  variantPrices  VariantPrice[]
-  cashSessions   CashSession[]
-  sales          Sale[]
-  saleLines      SaleLine[]
-  payments       Payment[]
-  posTerminals   PosTerminal[]
-  printJobs      PrintJob[]
-  drawerEvents   DrawerEvent[]
+  establishments   Establishment[]
+  memberships      OrganizationMembership[]
+  assignments      EstablishmentAssignment[]
+  subscription     Subscription?
+  auditLogs        AuditLog[]
+  categories       ProductCategory[]
+  products         Product[]
+  variants         ProductVariant[]
+  variantPrices    VariantPrice[]
+  cashSessions     CashSession[]
+  sales            Sale[]
+  saleLines        SaleLine[]
+  payments         Payment[]
+  posTerminals     PosTerminal[]
+  printJobs        PrintJob[]
+  drawerEvents     DrawerEvent[]
+  ticketCategories TicketCategory[]
+  tickets          Ticket[]
+  ticketScans      TicketScan[]
+  parkSchedules    ParkOpeningSchedule[]
+  parkExceptions   ParkCalendarException[]
 
   @@index([status])
   @@index([businessType])
@@ -101,14 +106,19 @@ model Establishment {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  organization  Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  assignments   EstablishmentAssignment[]
-  variantPrices VariantPrice[]
-  cashSessions  CashSession[]
-  sales         Sale[]
-  posTerminals  PosTerminal[]
-  printJobs     PrintJob[]
-  drawerEvents  DrawerEvent[]
+  organization     Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignments      EstablishmentAssignment[]
+  variantPrices    VariantPrice[]
+  cashSessions     CashSession[]
+  sales            Sale[]
+  posTerminals     PosTerminal[]
+  printJobs        PrintJob[]
+  drawerEvents     DrawerEvent[]
+  ticketCategories TicketCategory[]
+  tickets          Ticket[]
+  ticketScans      TicketScan[]
+  parkSchedules    ParkOpeningSchedule[]
+  parkExceptions   ParkCalendarException[]
 
   @@unique([organizationId, name])
   @@index([organizationId, isActive])
@@ -159,6 +169,8 @@ model OrganizationMembership {
   paymentsReceived   Payment[]     @relation("PaymentReceivedBy")
   printJobs          PrintJob[]    @relation("PrintJobRequestedBy")
   drawerEvents       DrawerEvent[] @relation("DrawerEventRequestedBy")
+  ticketScans        TicketScan[]  @relation("TicketScanAgent")
+  ticketsCancelled   Ticket[]      @relation("TicketCancelledBy")
 
   @@unique([organizationId, userId])
   @@index([userId])
@@ -289,6 +301,11 @@ model AuditLog {
 enum CashSessionStatus {
   OPEN
   CLOSED
+}
+
+enum SaleActivity {
+  RESTAURANT
+  PARK
 }
 
 enum SaleStatus {
@@ -435,6 +452,8 @@ model Sale {
   cashierId         String            @db.Uuid
   /// Numéro séquentiel par établissement.
   number            Int
+  /// Restaurant (caisse) ou parc (billetterie) : même moteur de vente et de paiement.
+  activity          SaleActivity      @default(RESTAURANT)
   status            SaleStatus        @default(OPEN)
   paymentStatus     SalePaymentStatus @default(UNPAID)
   preparationStatus PreparationStatus @default(NOT_SENT)
@@ -455,6 +474,7 @@ model Sale {
   lines         SaleLine[]
   payments      Payment[]
   printJobs     PrintJob[]
+  tickets       Ticket[]
 
   @@unique([establishmentId, number])
   @@unique([organizationId, clientRequestId])
@@ -465,19 +485,28 @@ model Sale {
 
 /// Ligne de vente : libellés et prix figés au moment de la vente.
 model SaleLine {
-  id             String @id @default(uuid()) @db.Uuid
-  organizationId String @db.Uuid
-  saleId         String @db.Uuid
-  variantId      String @db.Uuid
-  productName    String
-  variantName    String
-  unitPrice      Int
-  quantity       Int
-  lineTotal      Int
+  id               String   @id @default(uuid()) @db.Uuid
+  organizationId   String   @db.Uuid
+  saleId           String   @db.Uuid
+  /// Article de restaurant (null pour une ligne de billetterie).
+  variantId        String?  @db.Uuid
+  /// Catégorie de billet (null pour une ligne de restaurant).
+  ticketCategoryId String?  @db.Uuid
+  productName      String
+  variantName      String
+  unitPrice        Int
+  quantity         Int
+  lineTotal        Int
+  /// Billetterie : nombre de billets individuels par unité (1, ou 5 pour une formule famille de 5).
+  peoplePerUnit    Int      @default(1)
+  /// Billetterie : prénoms des visiteurs, un par billet individuel, saisis avant le paiement.
+  visitorNames     String[] @default([])
 
-  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  sale         Sale           @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  variant      ProductVariant @relation(fields: [variantId], references: [id], onDelete: NoAction)
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sale           Sale            @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  variant        ProductVariant? @relation(fields: [variantId], references: [id], onDelete: NoAction)
+  ticketCategory TicketCategory? @relation(fields: [ticketCategoryId], references: [id], onDelete: NoAction)
+  tickets        Ticket[]
 
   @@index([saleId])
   @@index([organizationId])
@@ -574,6 +603,8 @@ model PrintJob {
   establishmentId String            @db.Uuid
   terminalId      String            @db.Uuid
   saleId          String?           @db.Uuid
+  /// Réimpression d'un seul billet (null = toute la vente).
+  ticketId        String?           @db.Uuid
   kind            PrintJobKind
   status          HardwareJobStatus @default(PENDING)
   paperWidth      Int
@@ -622,4 +653,177 @@ model DrawerEvent {
 
   @@unique([organizationId, clientRequestId])
   @@index([terminalId, createdAt])
+}
+
+// ─── Sprint 4 : billetterie Parc, QR codes et contrôle d'accès ───
+
+enum TicketKind {
+  ADULT
+  CHILD
+  FAMILY
+  GROUP
+  CUSTOM
+}
+
+enum TicketStatus {
+  VALID
+  USED
+  EXPIRED
+  CANCELLED
+}
+
+enum TicketScanResult {
+  ACCEPTED
+  REFUSED
+}
+
+enum TicketScanRefusal {
+  ALREADY_USED
+  EXPIRED
+  CANCELLED
+  UNKNOWN
+  OTHER_ESTABLISHMENT
+  PARK_CLOSED
+  NOT_YET_VALID
+}
+
+/// Catégorie de billet d'un établissement (Adulte, Enfant, Famille…). Jamais supprimée : désactivée.
+model TicketCategory {
+  id              String     @id @default(uuid()) @db.Uuid
+  organizationId  String     @db.Uuid
+  establishmentId String     @db.Uuid
+  kind            TicketKind
+  name            String
+  description     String?
+  /// Prix TTC en FCFA d'une unité (une formule famille compte pour une unité).
+  price           Int
+  /// Nombre de billets individuels émis par unité vendue (famille de 5 = 5).
+  peopleIncluded  Int        @default(1)
+  conditions      String?
+  /// Fenêtre de vente (dates locales incluses) ; null = sans limite.
+  availableFrom   DateTime?  @db.Date
+  availableUntil  DateTime?  @db.Date
+  /// Durée de validité d'un billet, en jours à compter du jour de la visite.
+  validityDays    Int        @default(1)
+  sortOrder       Int        @default(0)
+  isActive        Boolean    @default(true)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  saleLines     SaleLine[]
+  tickets       Ticket[]
+
+  @@unique([establishmentId, name])
+  @@index([organizationId, establishmentId, isActive])
+}
+
+/// Billet individuel émis après paiement confirmé. Le QR code ne contient que le jeton.
+model Ticket {
+  id               String       @id @default(uuid()) @db.Uuid
+  organizationId   String       @db.Uuid
+  establishmentId  String       @db.Uuid
+  saleId           String       @db.Uuid
+  saleLineId       String       @db.Uuid
+  ticketCategoryId String       @db.Uuid
+  /// Rang du billet dans la ligne de vente : garantit qu'une émission n'est jamais faite deux fois.
+  position         Int
+  visitorName      String
+  /// Jeton aléatoire de 128 bits (base64url) : seul contenu du QR code.
+  token            String       @unique
+  status           TicketStatus @default(VALID)
+  /// Part du prix payé attribuée à ce billet (FCFA).
+  pricePaid        Int
+  validFrom        DateTime
+  validUntil       DateTime
+  usedAt           DateTime?
+  cancelledAt      DateTime?
+  cancelledById    String?      @db.Uuid
+  cancelReason     String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  organization   Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment  Establishment           @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  sale           Sale                    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  saleLine       SaleLine                @relation(fields: [saleLineId], references: [id], onDelete: Cascade)
+  ticketCategory TicketCategory          @relation(fields: [ticketCategoryId], references: [id], onDelete: NoAction)
+  cancelledBy    OrganizationMembership? @relation("TicketCancelledBy", fields: [cancelledById], references: [id], onDelete: NoAction)
+  scans          TicketScan[]            @relation("TicketScans")
+  acceptedScan   TicketScan?             @relation("TicketAcceptedScan")
+
+  @@unique([saleLineId, position])
+  @@index([organizationId, establishmentId, createdAt])
+  @@index([saleId])
+  @@index([establishmentId, status, validUntil])
+}
+
+/// Passage au contrôle d'accès, accepté ou refusé (historique complet des scans).
+model TicketScan {
+  id                  String             @id @default(uuid()) @db.Uuid
+  organizationId      String             @db.Uuid
+  /// Établissement du point de contrôle (celui de l'agent).
+  establishmentId     String             @db.Uuid
+  /// Billet reconnu (null si inconnu ou d'une autre organisation).
+  ticketId            String?            @db.Uuid
+  /// Renseigné uniquement pour un scan accepté : unique, une seule entrée par billet en base.
+  acceptedForTicketId String?            @unique @db.Uuid
+  result              TicketScanResult
+  refusalReason       TicketScanRefusal?
+  entryPoint          String
+  scannedById         String             @db.Uuid
+  clientRequestId     String?
+  createdAt           DateTime           @default(now())
+
+  organization   Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment  Establishment          @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  ticket         Ticket?                @relation("TicketScans", fields: [ticketId], references: [id], onDelete: Cascade)
+  acceptedTicket Ticket?                @relation("TicketAcceptedScan", fields: [acceptedForTicketId], references: [id], onDelete: Cascade)
+  scannedBy      OrganizationMembership @relation("TicketScanAgent", fields: [scannedById], references: [id], onDelete: NoAction)
+
+  @@unique([organizationId, clientRequestId])
+  @@index([establishmentId, createdAt])
+  @@index([ticketId])
+}
+
+/// Horaire hebdomadaire du parc (n'affecte jamais le restaurant d'un établissement mixte).
+model ParkOpeningSchedule {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  establishmentId String   @db.Uuid
+  /// 0 = dimanche … 6 = samedi.
+  weekday         Int
+  isClosed        Boolean  @default(false)
+  /// « HH:MM », heure locale de l'établissement.
+  opensAt         String?
+  closesAt        String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+
+  @@unique([establishmentId, weekday])
+  @@index([organizationId])
+}
+
+/// Date particulière : fermeture exceptionnelle, horaires spéciaux, créneau ou évènement.
+model ParkCalendarException {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  establishmentId String   @db.Uuid
+  date            DateTime @db.Date
+  isClosed        Boolean  @default(false)
+  opensAt         String?
+  closesAt        String?
+  label           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+
+  @@unique([establishmentId, date])
+  @@index([organizationId])
 }
