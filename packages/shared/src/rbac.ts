@@ -75,6 +75,9 @@ export const Permission = {
   ANALYTICS_READ: 'analytics.read',
   ANALYTICS_MARGINS: 'analytics.margins',
   ANALYTICS_EXPORT: 'analytics.export',
+  SITE_MANAGE: 'site.manage',
+  SITE_PUBLISH: 'site.publish',
+  SITE_DOMAIN: 'site.domain',
 } as const;
 export type Permission = (typeof Permission)[keyof typeof Permission];
 export const PERMISSIONS: readonly Permission[] = Object.values(Permission);
@@ -125,6 +128,9 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'analytics.read': 'Consulter les analyses et statistiques',
   'analytics.margins': 'Consulter les coûts matière et marges estimées',
   'analytics.export': 'Exporter les analyses (CSV)',
+  'site.manage': 'Modifier le site vitrine (brouillon, médias, menu public)',
+  'site.publish': 'Publier ou dépublier le site vitrine',
+  'site.domain': 'Gérer le nom de domaine du site vitrine',
 };
 
 const P = Permission;
@@ -133,7 +139,10 @@ const OPERATOR_BASE: readonly Permission[] = [P.DASHBOARD_READ, P.ORGANIZATION_R
 /** Matrice RBAC unique : appliquée par l'API, reflétée par le frontend. */
 export const ROLE_PERMISSIONS: Record<MemberRole, readonly Permission[]> = {
   OWNER: PERMISSIONS,
-  ADMIN: PERMISSIONS.filter((p) => p !== P.ORGANIZATION_CHANGE_BUSINESS_TYPE),
+  // Le nom de domaine engage l'organisation : réservé au propriétaire.
+  ADMIN: PERMISSIONS.filter(
+    (p) => p !== P.ORGANIZATION_CHANGE_BUSINESS_TYPE && p !== P.SITE_DOMAIN,
+  ),
   SUPERVISOR: [
     ...OPERATOR_BASE,
     P.ESTABLISHMENT_READ,

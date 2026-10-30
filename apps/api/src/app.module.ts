@@ -12,6 +12,7 @@ import { HttpExceptionFilter } from './common/http-exception.filter';
 import { throttlerOptions } from './common/throttling';
 import { AiModule } from './modules/ai/ai.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
+import { PublicSitesModule } from './modules/public-sites/public-sites.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
@@ -71,6 +72,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     PlanningModule,
     AiModule,
     AnalyticsModule,
+    PublicSitesModule,
   ],
   controllers: [HealthController],
   providers: [

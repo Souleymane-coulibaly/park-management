@@ -15,7 +15,14 @@ export class SubscriptionsController {
   plans() {
     return this.prisma.subscriptionPlan.findMany({
       where: { isActive: true },
-      select: { id: true, businessType: true, name: true, monthlyPrice: true, currency: true },
+      select: {
+        id: true,
+        businessType: true,
+        name: true,
+        monthlyPrice: true,
+        setupFee: true,
+        currency: true,
+      },
       orderBy: { monthlyPrice: 'asc' },
     });
   }

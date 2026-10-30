@@ -194,7 +194,12 @@ export class PlatformService {
           targetType: 'SubscriptionPlan',
           targetId: id,
           metadata: {
-            before: { name: plan.name, monthlyPrice: plan.monthlyPrice, isActive: plan.isActive },
+            before: {
+              name: plan.name,
+              monthlyPrice: plan.monthlyPrice,
+              setupFee: plan.setupFee,
+              isActive: plan.isActive,
+            },
             after: { ...dto },
           },
         },

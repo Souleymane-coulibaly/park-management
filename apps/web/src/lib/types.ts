@@ -1,4 +1,9 @@
 import type {
+  SiteContent,
+  SiteDomainStatus,
+  SiteMediaKind,
+  SiteStatus,
+  SiteTheme,
   AiFeature,
   BusinessType,
   DiningZoneKind,
@@ -92,6 +97,8 @@ export interface Plan {
   businessType: BusinessType;
   name: string;
   monthlyPrice: number;
+  /** Frais de mise en service unique (FCFA), réglés hors plateforme. */
+  setupFee: number;
   currency: string;
   isActive?: boolean;
 }
@@ -929,4 +936,62 @@ export interface VoiceOrderDraft {
     tableNotFound: boolean;
   } | null;
   saleId: string | null;
+}
+
+// ─── Sites vitrines (Sprint 10) ───
+
+export interface SiteDomainView {
+  id: string;
+  hostname: string;
+  status: SiteDomainStatus;
+  verifiedAt: string | null;
+  activatedAt: string | null;
+  lastCheckedAt: string | null;
+  lastError: string | null;
+  dns: { txtName: string; txtValue: string; cnameName: string; cnameTarget: string | null };
+}
+
+export interface SiteEditorView {
+  id: string;
+  establishment: { id: string; name: string; businessType: BusinessType };
+  slug: string;
+  status: SiteStatus;
+  isOnline: boolean;
+  theme: SiteTheme;
+  primaryColor: string;
+  draft: SiteContent;
+  draftUpdatedAt: string;
+  publishedAt: string | null;
+  hasUnpublishedChanges: boolean;
+  publicUrl: string;
+  fallbackUrl: string;
+  availableByPlan: boolean;
+  domains: SiteDomainView[];
+  warnings?: string[];
+}
+
+export interface SiteOverviewEntry {
+  id: string;
+  name: string;
+  businessType: BusinessType;
+  suggestedSlug: string;
+  site: { id: string; slug: string; isOnline: boolean; publishedAt: string | null } | null;
+}
+
+export interface SiteMediaView {
+  id: string;
+  kind: SiteMediaKind;
+  mimeType: string;
+  bytes: number;
+  width: number;
+  height: number;
+  alt: string;
+  isPublished: boolean;
+  createdAt: string;
+  url: string;
+}
+
+export interface SiteCatalogOptions {
+  products: { id: string; name: string; category: string; price: number }[];
+  tickets: { id: string; name: string; price: number; peopleIncluded: number }[];
 }

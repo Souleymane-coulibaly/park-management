@@ -63,6 +63,11 @@ export default async function TarifsPage() {
                     / mois
                   </span>
                 </p>
+                {plan.setupFee > 0 && (
+                  <p className={`mt-1 text-sm ${featured ? 'text-ivory/80' : 'text-muted'}`}>
+                    + {formatXof(plan.setupFee)} de mise en service (une seule fois)
+                  </p>
+                )}
                 <ul className="mt-6 flex-1 space-y-2.5 text-sm">
                   {[
                     'Gestion des établissements et des employés',

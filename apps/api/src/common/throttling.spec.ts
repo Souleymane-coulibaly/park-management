@@ -1,7 +1,7 @@
 import type { ExecutionContext } from '@nestjs/common';
 import type { ThrottlerOptions } from '@nestjs/throttler';
 import { loadConfig } from '../config/app-config';
-import { PublicOrderRoute, SensitiveRoute, throttlerOptions } from './throttling';
+import { PublicOrderRoute, PublicSiteRoute, SensitiveRoute, throttlerOptions } from './throttling';
 
 class Routes {
   @PublicOrderRoute()
@@ -13,8 +13,13 @@ class Routes {
   other() {}
 }
 
-const contextFor = (handler: () => void) =>
-  ({ getHandler: () => handler }) as unknown as ExecutionContext;
+@PublicSiteRoute()
+class PublicSiteRoutes {
+  page() {}
+}
+
+const contextFor = (handler: () => void, cls: object = Routes) =>
+  ({ getHandler: () => handler, getClass: () => cls }) as unknown as ExecutionContext;
 
 describe('limites de requêtes par IP', () => {
   const config = loadConfig({ DATABASE_URL: 'postgres://test', PUBLIC_ORDER_THROTTLE_LIMIT: '7' });
@@ -35,6 +40,12 @@ describe('limites de requêtes par IP', () => {
     const skip = byName('sensitive').skipIf as (c: ExecutionContext) => boolean;
     expect(skip(contextFor(routes.login))).toBe(false);
     expect(skip(contextFor(routes.publicOrder))).toBe(true);
+  });
+
+  it('API publique des sites : limite dédiée, marqueur posé sur la classe', () => {
+    const skip = byName('publicSite').skipIf as (c: ExecutionContext) => boolean;
+    expect(skip(contextFor(new PublicSiteRoutes().page, PublicSiteRoutes))).toBe(false);
+    expect(skip(contextFor(routes.other))).toBe(true);
   });
 
   it('valeur par défaut : 30 demandes par IP sur 10 minutes', () => {

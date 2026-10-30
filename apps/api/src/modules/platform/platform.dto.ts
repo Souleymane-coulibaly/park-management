@@ -90,6 +90,13 @@ export class UpdatePlanDto {
   @Max(100_000_000)
   monthlyPrice?: number;
 
+  @ApiPropertyOptional({ description: 'Frais de mise en service unique, entier en FCFA.' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100_000_000)
+  setupFee?: number;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsBoolean()

@@ -69,6 +69,9 @@ model Organization {
   assignments          EstablishmentAssignment[]
   subscription         Subscription?
   subscriptionPayments SubscriptionPayment[]
+  publicSites          PublicSite[]
+  publicSiteMedia      PublicSiteMedia[]
+  publicSiteDomains    PublicSiteDomain[]
   auditLogs            AuditLog[]
   categories           ProductCategory[]
   products             Product[]
@@ -153,6 +156,7 @@ model Establishment {
   aiUsages         AiUsage[]
   aiImports        AiImport[]
   voiceOrderDrafts VoiceOrderDraft[]
+  publicSite       PublicSite?
 
   @@unique([organizationId, name])
   @@index([organizationId, isActive])
@@ -285,6 +289,8 @@ model SubscriptionPlan {
   businessType BusinessType @unique
   name         String
   monthlyPrice Int
+  /// Frais de mise en service unique (FCFA), réglés hors plateforme (Sprint 10).
+  setupFee     Int          @default(0)
   currency     String       @default("XOF") @db.Char(3)
   isActive     Boolean      @default(true)
   createdAt    DateTime     @default(now())
@@ -1612,4 +1618,105 @@ model VoiceOrderDraft {
 
   @@index([organizationId, createdAt])
   @@index([expiresAt])
+}
+
+// ─── Sites vitrines publics (Sprint 10) ───
+
+enum SiteTheme {
+  CLASSIC
+  MODERN
+  WARM
+}
+
+enum SiteMediaKind {
+  LOGO
+  COVER
+  GALLERY
+}
+
+enum SiteDomainStatus {
+  PENDING
+  VERIFYING
+  VERIFIED
+  ACTIVE
+  ERROR
+}
+
+/// Site vitrine d'un établissement. Le brouillon et la version publiée sont séparés : le public ne
+/// lit que `published`, copie figée à la publication (aucune donnée interne : ni coût, ni stock,
+/// ni vente, ni personnel). Le contenu est conservé lors d'une suspension.
+model PublicSite {
+  id              String    @id @default(uuid()) @db.Uuid
+  organizationId  String    @db.Uuid
+  establishmentId String    @unique @db.Uuid
+  /// Adresse publique unique (`/e/<slug>`, `<slug>.<domaine Ocall>`).
+  slug            String    @unique
+  /// Site en ligne (publié et non désactivé). Faux = dépublié, contenu conservé.
+  isOnline        Boolean   @default(false)
+  theme           SiteTheme @default(CLASSIC)
+  primaryColor    String    @default("#176B53") @db.Char(7)
+  /// Contenu en cours d'édition (SiteContent), jamais exposé publiquement.
+  draft           Json
+  draftUpdatedAt  DateTime  @default(now())
+  /// Dernière version publiée (PublishedSite) ; null si jamais publiée.
+  published       Json?
+  publishedAt     DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  organization  Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment      @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  media         PublicSiteMedia[]
+  domains       PublicSiteDomain[]
+
+  @@index([organizationId])
+  @@index([isOnline])
+}
+
+/// Image d'un site (logo, couverture, galerie), type et dimensions vérifiés à la réception.
+/// Servie publiquement uniquement si elle figure dans la version publiée (`isPublished`).
+model PublicSiteMedia {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid
+  siteId         String        @db.Uuid
+  kind           SiteMediaKind
+  /// Clé dans le stockage d'objets (aléatoire, jamais dérivée du nom du fichier envoyé).
+  storageKey     String        @unique
+  mimeType       String
+  bytes          Int
+  width          Int
+  height         Int
+  alt            String        @default("")
+  isPublished    Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  site         PublicSite   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([siteId])
+  @@index([organizationId])
+}
+
+/// Domaine personnalisé d'un site. Jamais actif sans preuve de propriété (TXT) puis contrôle HTTPS
+/// réel ; un domaine n'appartient qu'à un seul site (unicité en base).
+model PublicSiteDomain {
+  id                String           @id @default(uuid()) @db.Uuid
+  organizationId    String           @db.Uuid
+  siteId            String           @db.Uuid
+  hostname          String           @unique
+  status            SiteDomainStatus @default(PENDING)
+  /// Valeur attendue dans l'enregistrement TXT `_ocallpark-verify.<hostname>`.
+  verificationToken String
+  verifiedAt        DateTime?
+  activatedAt       DateTime?
+  lastCheckedAt     DateTime?
+  lastError         String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  site         PublicSite   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([siteId])
+  @@index([status])
 }

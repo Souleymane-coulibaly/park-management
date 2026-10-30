@@ -1,17 +1,18 @@
 # Ocall Park — suivi des sprints
 
-| Sprint | Périmètre                                                     | Branche           | Statut                                            |
-| ------ | ------------------------------------------------------------- | ----------------- | ------------------------------------------------- |
-| 1      | Socle SaaS multi-tenant, frontend, établissements             | `claude/sprint-1` | ✅ Validé                                         |
-| 2      | Caisse POS restaurant                                         | `claude/sprint-2` | ✅ Validé                                         |
-| 3      | POS Android, impression thermique, tiroir-caisse              | `claude/sprint-3` | ✅ Validé (validation matérielle à faire)         |
-| 4      | Billetterie Parc, QR codes, contrôle d’accès                  | `claude/sprint-4` | ✅ CP-03 : GO SOUS RÉSERVES (A1, A2, A5 ouvertes) |
-| 5      | Restaurant : commandes, KDS, QR, tables, stocks, réservations | `claude/sprint-5` | 🟡 Terminé — local, push à autoriser              |
-| 6      | Bornes de commande, CRM, fidélité, planning du personnel      | `claude/sprint-6` | 🟡 En cours — tests base bloqués (Neon `test`)    |
-| 7      | Paiement des abonnements (CinetPay)                           | —                 | ⏸️ Reporté par le commanditaire (plan présenté)   |
-| 8      | IA : import de carte, copilote, commande vocale               | `claude/sprint-8` | 🟡 En cours — tests base bloqués (Neon `test`)    |
-| 9A     | Analyses : CA, produits × heures, parc, marges, exports CSV   | `claude/sprint-9` | 🟡 En cours — tests base bloqués (Neon `test`)    |
-| 9B     | Copilote enrichi, statistiques SaaS, règlements d’abonnement  | `claude/sprint-9` | 🟡 En cours — tests base bloqués (Neon `test`)    |
+| Sprint | Périmètre                                                     | Branche            | Statut                                            |
+| ------ | ------------------------------------------------------------- | ------------------ | ------------------------------------------------- |
+| 1      | Socle SaaS multi-tenant, frontend, établissements             | `claude/sprint-1`  | ✅ Validé                                         |
+| 2      | Caisse POS restaurant                                         | `claude/sprint-2`  | ✅ Validé                                         |
+| 3      | POS Android, impression thermique, tiroir-caisse              | `claude/sprint-3`  | ✅ Validé (validation matérielle à faire)         |
+| 4      | Billetterie Parc, QR codes, contrôle d’accès                  | `claude/sprint-4`  | ✅ CP-03 : GO SOUS RÉSERVES (A1, A2, A5 ouvertes) |
+| 5      | Restaurant : commandes, KDS, QR, tables, stocks, réservations | `claude/sprint-5`  | 🟡 Terminé — local, push à autoriser              |
+| 6      | Bornes de commande, CRM, fidélité, planning du personnel      | `claude/sprint-6`  | 🟡 En cours — tests base bloqués (Neon `test`)    |
+| 7      | Paiement des abonnements (CinetPay)                           | —                  | ⏸️ Reporté par le commanditaire (plan présenté)   |
+| 8      | IA : import de carte, copilote, commande vocale               | `claude/sprint-8`  | 🟡 En cours — tests base bloqués (Neon `test`)    |
+| 9A     | Analyses : CA, produits × heures, parc, marges, exports CSV   | `claude/sprint-9`  | 🟡 En cours — tests base bloqués (Neon `test`)    |
+| 9B     | Copilote enrichi, statistiques SaaS, règlements d’abonnement  | `claude/sprint-9`  | 🟡 En cours — tests base bloqués (Neon `test`)    |
+| 10     | Sites vitrines publics, domaines, tarifs SaaS                 | `claude/sprint-10` | 🟡 En cours — tests base bloqués (Neon `test`)    |
 
 Environnements : base Neon de **développement** (préservée), branche Neon **`test`** réservée aux
 tests automatisés, base de **production non configurée**. Aucune fusion dans `main`, aucun déploiement.
@@ -34,6 +35,63 @@ Checkpoints Codex :
   (copilote, Super Admin), démarré à la demande du commanditaire le 30/10/2026 ; exports en **CSV uniquement** (Excel et PDF
   reportés, aucune nouvelle dépendance). CP-08 couvrira les Sprints 1 à 9 :
   [CP-08-preparation.md](docs/checkpoints/CP-08-preparation.md).
+- Le Sprint 10 est démarré **sans CP-08** : le Sprint 9 n'est donc pas validé. Sur décision du
+  commanditaire, il est commité localement (`69f4b96`, non poussé) et sert de base à
+  `claude/sprint-10`. Préparation : [CP-09-preparation.md](docs/checkpoints/CP-09-preparation.md).
+
+---
+
+## Sprint 10 — Sites vitrines publics, domaines et tarifs SaaS (en cours, non commité)
+
+Documentation : [docs/SITES-VITRINES.md](docs/SITES-VITRINES.md) (architecture, DNS, hébergement,
+vérifications réelles) et [docs/GUIDE-SITE-VITRINE.md](docs/GUIDE-SITE-VITRINE.md) (guide utilisateur).
+
+### Fonctionnalités réalisées
+
+- Module `public-sites` :
+  - un site par établissement, **brouillon et publié séparés** ;
+  - la publication fige textes, images, menu et tarifs **explicitement** choisis, sans aucune donnée
+    interne ;
+  - aperçu du brouillon et dépublication avec contenu conservé.
+- Éditeur `/app/site-web` (contenu, photos, menu et tarifs, apparence, nom de domaine) :
+  - 3 thèmes, couleur au contraste vérifié, ordre et masquage des sections ;
+  - sections selon le métier (Parc, Restaurant, Parc + Restaurant).
+- Pages publiques `/e/<slug>` :
+  - responsive, accessibles, mises en cache et régénérées à la publication ;
+  - liens Appeler, WhatsApp et Itinéraire, sans script tiers ;
+  - aucune vente, réservation, commande ni paiement.
+- Routage par hôte : sous-domaines Ocall (si activés) et domaines personnalisés **ACTIFS**,
+  redirection canonique 301, espaces privés introuvables sur un hôte de site.
+- Domaines personnalisés :
+  - preuve de propriété par TXT, activation par le Super Admin après contrôle HTTPS réel
+    (`/admin/domaines`) ;
+  - statuts PENDING / VERIFYING / VERIFIED / ACTIVE / ERROR, unicité, journalisation.
+- SEO : titre, description, Open Graph, `canonical`, JSON-LD (Restaurant / AmusementPark),
+  `sitemap.xml` et `robots.txt` selon l'hôte ; brouillons et sites suspendus jamais indexés.
+- Médias : type et dimensions lus dans le contenu (JPEG, PNG, WebP), 5 Mo, stockage local ou
+  compatible S3 (**Cloudflare R2** retenu ; bucket non créé).
+- Abonnement : organisation suspendue ou abonnement expiré → site hors ligne, contenu conservé.
+- Tarifs SaaS : colonne frais de mise en service. Restaurant et Parc : 250 000 + 15 000 FCFA par
+  mois ; Parc + Restaurant : 350 000 + 25 000 FCFA par mois. Affichés sur la page Tarifs et
+  modifiables par le Super Admin.
+- Migration `20261030230000_sites_vitrines` : 3 tables, colonne `setupFee`, 3 CHECK, mise à jour des
+  3 offres. **Non appliquée.**
+
+### Tests
+
+- Unitaires : shared 127/127, API 62/62, database 13/13. Typecheck, lint, Prettier, build,
+  `migrate:check` : OK.
+- **Vérification hors ligne** avec le vrai client Prisma (PostgreSQL embarqué jetable, toutes les
+  migrations, hors dépôt, aucune base Neon) : **50/50 conforme**. Elle couvre les tests 1 à 21, 24
+  et 25, ainsi que les tarifs migrés.
+- `apps/api/test/sprint10-sites.integration.spec.ts` et `e2e/sprint10-sites.spec.ts` (mobile, SEO,
+  données structurées) : **écrits, non exécutés** (A11).
+- Vérifications réelles DNS, HTTPS et domaines : **non réalisées**, aucun domaine acquis
+  (`ocallpark.com` absent du DNS au 30/10/2026). Protocole : SITES-VITRINES.md § 7.
+
+### Limites connues
+
+A30 à A36 : voir [CP-09-preparation.md](docs/checkpoints/CP-09-preparation.md).
 
 ---
 

@@ -9,6 +9,7 @@ const NAV: NavItem[] = [
   { key: 'platform-organizations', label: 'Organisations', href: '/admin/organisations' },
   { key: 'platform-subscriptions', label: 'Abonnements et offres', href: '/admin/abonnements' },
   { key: 'platform-payments', label: 'Règlements', href: '/admin/reglements' },
+  { key: 'platform-domains', label: 'Domaines', href: '/admin/domaines' },
   { key: 'platform-stats', label: 'Statistiques SaaS', href: '/admin/statistiques' },
 ];
 

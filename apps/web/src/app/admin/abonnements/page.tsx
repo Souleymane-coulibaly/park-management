@@ -92,18 +92,24 @@ export default function AdminAbonnementsPage() {
 
 function PlanEditor({ plan, onSaved }: { plan: Plan; onSaved: () => void }) {
   const [price, setPrice] = useState(String(plan.monthlyPrice));
+  const [setup, setSetup] = useState(String(plan.setupFee));
   const [error, setError] = useState<ApiError | null>(null);
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(false);
   const value = Number(price);
-  const valid = Number.isInteger(value) && value >= 0;
+  const setupValue = Number(setup);
+  const valid =
+    Number.isInteger(value) && value >= 0 && Number.isInteger(setupValue) && setupValue >= 0;
 
   async function save() {
     setLoading(true);
     setError(null);
     setSaved(false);
     try {
-      await api(`/platform/plans/${plan.id}`, { method: 'PATCH', body: { monthlyPrice: value } });
+      await api(`/platform/plans/${plan.id}`, {
+        method: 'PATCH',
+        body: { monthlyPrice: value, setupFee: setupValue },
+      });
       setSaved(true);
       onSaved();
     } catch (e) {
@@ -128,6 +134,14 @@ function PlanEditor({ plan, onSaved }: { plan: Plan; onSaved: () => void }) {
         onChange={(e) => setPrice(e.target.value)}
         error={valid ? undefined : 'Montant entier positif attendu.'}
       />
+      <InputField
+        label="Mise en service (FCFA, une fois)"
+        type="number"
+        min={0}
+        step={5000}
+        value={setup}
+        onChange={(e) => setSetup(e.target.value)}
+      />
       <ApiErrorAlert error={error} />
       {saved && <Alert tone="success">Prix enregistré.</Alert>}
       <Button
@@ -135,7 +149,7 @@ function PlanEditor({ plan, onSaved }: { plan: Plan; onSaved: () => void }) {
         variant="secondary"
         onClick={save}
         loading={loading}
-        disabled={!valid || value === plan.monthlyPrice}
+        disabled={!valid || (value === plan.monthlyPrice && setupValue === plan.setupFee)}
         icon={<Save className="h-4 w-4" />}
       >
         Enregistrer

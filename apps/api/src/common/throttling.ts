@@ -6,6 +6,7 @@ const SENSITIVE_ROUTE = 'sensitiveRoute';
 const PUBLIC_ORDER_ROUTE = 'publicOrderRoute';
 const ANALYTICS_ROUTE = 'analyticsRoute';
 const EXPORT_ROUTE = 'exportRoute';
+const PUBLIC_SITE_ROUTE = 'publicSiteRoute';
 
 /** Marque une route sensible (connexion, inscription, mot de passe) : limite stricte par IP. */
 export const SensitiveRoute = () => SetMetadata(SENSITIVE_ROUTE, true);
@@ -19,8 +20,17 @@ export const AnalyticsRoute = () => SetMetadata(ANALYTICS_ROUTE, true);
 /** Marque un export de données : limite stricte par IP. */
 export const ExportRoute = () => SetMetadata(EXPORT_ROUTE, true);
 
+/**
+ * Marque l'API publique des sites vitrines : limite dédiée par IP. Les pages sont servies depuis
+ * le cache du frontend : l'API n'est sollicitée qu'à la régénération et pour les images.
+ */
+export const PublicSiteRoute = () => SetMetadata(PUBLIC_SITE_ROUTE, true);
+
 function hasFlag(context: ExecutionContext, flag: string): boolean {
-  return Reflect.getMetadata(flag, context.getHandler()) === true;
+  return (
+    Reflect.getMetadata(flag, context.getHandler()) === true ||
+    Reflect.getMetadata(flag, context.getClass()) === true
+  );
 }
 
 /**
@@ -58,6 +68,12 @@ export function throttlerOptions(config: AppConfig): ThrottlerModuleOptions {
         ttl: 10 * 60_000,
         limit: 30,
         skipIf: (context) => !hasFlag(context, EXPORT_ROUTE),
+      },
+      {
+        name: 'publicSite',
+        ttl: 60_000,
+        limit: 1200,
+        skipIf: (context) => !hasFlag(context, PUBLIC_SITE_ROUTE),
       },
     ],
     errorMessage: 'Trop de requêtes. Réessayez dans quelques instants.',

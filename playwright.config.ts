@@ -44,6 +44,8 @@ export default defineConfig({
         DIRECT_URL: testDb.directUrl,
         AI_PROVIDER: 'simulated',
         AI_REAL_CALLS_ENABLED: 'false',
+        SITES_DOMAIN_VERIFIER: 'simulated',
+        MEDIA_STORAGE: 'local',
       },
       reuseExistingServer: false,
       timeout: 120_000,

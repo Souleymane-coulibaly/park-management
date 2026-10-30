@@ -1,4 +1,5 @@
 import { type AiConfig, loadAiConfig } from '../modules/ai/ai.config';
+import { type SitesConfig, loadSitesConfig } from '../modules/public-sites/sites.config';
 
 /**
  * Configuration typée, lue une seule fois depuis l'environnement.
@@ -24,6 +25,8 @@ export interface AppConfig {
   realtimeHeartbeatMs: number;
   /** Fournisseur IA, modèles et garde-fous des appels réels (Sprint 8). */
   ai: AiConfig;
+  /** Sites vitrines : adresses publiques, domaines, stockage des médias (Sprint 10). */
+  sites: SitesConfig;
 }
 
 export const APP_CONFIG = Symbol('APP_CONFIG');
@@ -68,5 +71,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     publicOrderThrottleLimit: int(env, 'PUBLIC_ORDER_THROTTLE_LIMIT', 30),
     realtimeHeartbeatMs: int(env, 'REALTIME_HEARTBEAT_MS', 25_000),
     ai: loadAiConfig(env, nodeEnv),
+    sites: loadSitesConfig(env, nodeEnv),
   };
 }

@@ -20,6 +20,7 @@ describe('navigation par métier', () => {
       'Contrôle des entrées',
       'Clients et fidélité',
       'Planning',
+      'Site web',
       'Analyses',
       'Copilote IA',
       'Employés',
@@ -40,6 +41,7 @@ describe('navigation par métier', () => {
       'Bornes de commande',
       'Clients et fidélité',
       'Planning',
+      'Site web',
       'Analyses',
       'Copilote IA',
       'Employés',
@@ -52,7 +54,7 @@ describe('navigation par métier', () => {
     expect(nav).toEqual(
       expect.arrayContaining(['Billetterie', 'Contrôle des entrées', 'Caisse POS', 'Cuisine KDS']),
     );
-    expect(nav).toHaveLength(17);
+    expect(nav).toHaveLength(18);
   });
 
   it('masque Employés à un caissier', () => {

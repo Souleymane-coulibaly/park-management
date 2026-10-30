@@ -4,6 +4,7 @@ import {
   Boxes,
   Building2,
   CreditCard,
+  Globe,
   CalendarClock,
   CalendarDays,
   Calculator,
@@ -36,6 +37,7 @@ const ICONS: Record<string, LucideIcon> = {
   crm: HeartHandshake,
   'hr-planning': CalendarDays,
   analytics: BarChart3,
+  site: Globe,
   copilot: Sparkles,
   employees: Users,
   settings: Settings,
@@ -44,6 +46,7 @@ const ICONS: Record<string, LucideIcon> = {
   'platform-subscriptions': CreditCard,
   'platform-payments': Receipt,
   'platform-stats': BarChart3,
+  'platform-domains': Globe,
 };
 
 export function ModuleIcon({

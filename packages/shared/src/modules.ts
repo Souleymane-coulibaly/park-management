@@ -140,6 +140,16 @@ export const MODULES: readonly ModuleDefinition[] = [
     href: '/app/personnel/planning',
   },
   {
+    key: 'site',
+    label: 'Site web',
+    description:
+      'Site vitrine public de chaque établissement : présentation, photos, horaires, menu et tarifs indicatifs.',
+    status: 'available',
+    activities: [],
+    permission: 'site.manage',
+    href: '/app/site-web',
+  },
+  {
     key: 'analytics',
     label: 'Analyses',
     description:
