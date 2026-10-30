@@ -104,7 +104,14 @@ export function visibleCashSessionsWhere(auth: TenantContext): Prisma.CashSessio
  */
 export async function lockRow(
   tx: Prisma.TransactionClient,
-  table: 'Sale' | 'CashSession' | 'OrganizationMembership',
+  table:
+    | 'Sale'
+    | 'CashSession'
+    | 'OrganizationMembership'
+    | 'DiningTable'
+    | 'DiningZone'
+    | 'QrOrderRequest'
+    | 'StockItem',
   id: string,
 ): Promise<void> {
   // Nom de table issu d'une liste fermée : aucune donnée utilisateur n'est interpolée.

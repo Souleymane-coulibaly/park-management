@@ -18,6 +18,7 @@ import {
   SalesQueryDto,
 } from './pos.dto';
 import { findSellingEstablishment } from './pos-scope';
+import { loadSellableCatalog } from './sellable-catalog';
 import { SalesService } from './sales.service';
 
 @ApiTags('Caisse POS')
@@ -50,54 +51,11 @@ export class PosController {
   async catalog(@CurrentAuth() auth: AuthContext, @Query() query: EstablishmentQueryDto) {
     const tenant = requireTenant(auth);
     await findSellingEstablishment(this.prisma, tenant, query.establishmentId, 'RESTAURANT');
-    const categories = await this.prisma.productCategory.findMany({
-      where: { organizationId: tenant.membership.organizationId, isActive: true },
-      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-      select: {
-        id: true,
-        name: true,
-        products: {
-          where: { isActive: true },
-          orderBy: { name: 'asc' },
-          select: {
-            id: true,
-            name: true,
-            variants: {
-              where: {
-                isActive: true,
-                prices: { some: { establishmentId: query.establishmentId, isAvailable: true } },
-              },
-              orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-              select: {
-                id: true,
-                name: true,
-                prices: {
-                  where: { establishmentId: query.establishmentId },
-                  select: { price: true },
-                },
-              },
-            },
-          },
-        },
-      },
-    });
-    return categories
-      .map((c) => ({
-        id: c.id,
-        name: c.name,
-        products: c.products
-          .filter((p) => p.variants.length > 0)
-          .map((p) => ({
-            id: p.id,
-            name: p.name,
-            variants: p.variants.map((v) => ({
-              id: v.id,
-              name: v.name,
-              price: v.prices[0]!.price,
-            })),
-          })),
-      }))
-      .filter((c) => c.products.length > 0);
+    return loadSellableCatalog(
+      this.prisma,
+      tenant.membership.organizationId,
+      query.establishmentId,
+    );
   }
 
   /** Montants d'un panier calculés par le serveur (aucun enregistrement). */

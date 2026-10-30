@@ -5,12 +5,15 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@ocall/database';
-import { type Activity, computeChange } from '@ocall/shared';
+import { type Activity, type OrderChannel, computeChange } from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
 import type { TenantContext } from '../../common/auth-context';
 import { PaymentMethodsService } from '../payments/payment-methods.service';
 import { TicketIssuanceService } from '../ticket-issuance/ticket-issuance.service';
+import { RestaurantEventsService } from '../realtime/restaurant-events.service';
+import { StockConsumptionService } from '../stock-consumption/stock-consumption.service';
+import { recordOrderEvent } from './order-events';
 import type { CancelSaleDto, CreateSaleDto, PaySaleDto, QuoteDto, SalesQueryDto } from './pos.dto';
 import {
   findSellingEstablishment,
@@ -20,7 +23,13 @@ import {
 } from './pos-scope';
 import { type PricedSale, SalePricingService } from './sale-pricing.service';
 
-const SALE_SELECT = {
+/** Ordre de saisie des lignes (puis identifiant pour les lignes antérieures au Sprint 5). */
+export const SALE_LINE_ORDER: Prisma.SaleLineOrderByWithRelationInput[] = [
+  { lineNo: 'asc' },
+  { id: 'asc' },
+];
+
+export const SALE_SELECT = {
   id: true,
   number: true,
   status: true,
@@ -28,14 +37,25 @@ const SALE_SELECT = {
   preparationStatus: true,
   total: true,
   activity: true,
+  channel: true,
+  notes: true,
+  sentToKitchenAt: true,
+  preparationStartedAt: true,
+  readyAt: true,
+  servedAt: true,
   createdAt: true,
   cancelledAt: true,
   cashSessionId: true,
   establishment: { select: { id: true, name: true } },
+  table: { select: { id: true, name: true } },
+  zone: { select: { id: true, name: true } },
   cashier: { select: { id: true, user: { select: { firstName: true, lastName: true } } } },
   lines: {
+    orderBy: SALE_LINE_ORDER,
     select: {
+      id: true,
       variantId: true,
+      notes: true,
       ticketCategoryId: true,
       peoplePerUnit: true,
       visitorNames: true,
@@ -64,7 +84,7 @@ type SaleRow = Prisma.SaleGetPayload<{ select: typeof SALE_SELECT }>;
 
 const NOT_FOUND = { code: 'SALE_NOT_FOUND', message: 'Vente introuvable.' };
 
-function toSale({ cashier, ...sale }: SaleRow) {
+export function toSale({ cashier, ...sale }: SaleRow) {
   return {
     ...sale,
     cashier: { id: cashier.id, name: `${cashier.user.firstName} ${cashier.user.lastName}` },
@@ -93,6 +113,8 @@ export class SalesService {
     private readonly pricing: SalePricingService,
     private readonly paymentMethods: PaymentMethodsService,
     private readonly ticketIssuance: TicketIssuanceService,
+    private readonly stockConsumption: StockConsumptionService,
+    private readonly events: RestaurantEventsService,
   ) {}
 
   /** Aperçu des montants d'un panier, sans rien enregistrer. */
@@ -111,6 +133,7 @@ export class SalesService {
     return this.createSale(auth, {
       establishmentId: dto.establishmentId,
       activity: 'RESTAURANT',
+      order: { channel: 'COUNTER' },
       clientRequestId: dto.clientRequestId,
       price: (tx, organizationId) =>
         this.pricing.price(tx, organizationId, dto.establishmentId, dto.lines),
@@ -129,6 +152,15 @@ export class SalesService {
       activity: Activity;
       clientRequestId?: string;
       price: (tx: Prisma.TransactionClient, organizationId: string) => Promise<PricedSale>;
+      /** Restaurant : canal, table ou zone, instructions générales. */
+      order?: {
+        channel: OrderChannel;
+        tableId?: string | null;
+        zoneId?: string | null;
+        notes?: string | null;
+      };
+      /** Étape supplémentaire dans la même transaction (ex. validation d'une demande QR). */
+      afterCreate?: (tx: Prisma.TransactionClient, saleId: string) => Promise<void>;
     },
   ) {
     const organizationId = auth.membership.organizationId;
@@ -159,11 +191,27 @@ export class SalesService {
             cashierId: auth.membership.id,
             number: saleSeq,
             activity: params.activity,
+            channel: params.order?.channel ?? null,
+            tableId: params.order?.tableId ?? null,
+            zoneId: params.order?.zoneId ?? null,
+            notes: params.order?.notes ?? null,
             total: priced.total,
             clientRequestId: params.clientRequestId,
-            lines: { create: priced.lines.map((l) => ({ ...l, organizationId })) },
+            lines: { create: priced.lines.map((l, lineNo) => ({ ...l, lineNo, organizationId })) },
           },
         });
+        if (params.activity === 'RESTAURANT') {
+          await recordOrderEvent(tx, {
+            organizationId,
+            establishmentId: establishment.id,
+            saleId: sale.id,
+            type: 'created',
+            toStatus: 'NOT_SENT',
+            actorMembershipId: auth.membership.id,
+            metadata: { channel: params.order?.channel ?? null, total: priced.total },
+          });
+        }
+        if (params.afterCreate) await params.afterCreate(tx, sale.id);
         await this.audit.record(
           {
             organizationId,
@@ -182,6 +230,15 @@ export class SalesService {
         );
         return sale.id;
       });
+      if (params.activity === 'RESTAURANT') {
+        this.events.publish({
+          organizationId,
+          establishmentId: establishment.id,
+          topics: ['orders'],
+          type: 'order.created',
+          saleId: id,
+        });
+      }
       return this.get(auth, id);
     } catch (error) {
       // Deux envois simultanés de la même vente : le second renvoie la vente déjà créée.
@@ -246,7 +303,7 @@ export class SalesService {
     }
 
     try {
-      const paymentId = await this.prisma.$transaction(async (tx) => {
+      const paid = await this.prisma.$transaction(async (tx) => {
         const visible = await tx.sale.findFirst({
           where: { ...visibleSalesWhere(auth), id },
           select: { id: true },
@@ -303,6 +360,19 @@ export class SalesService {
         // Billetterie : les billets (et leurs QR codes) ne sont émis qu'ici, dans la transaction du
         // paiement confirmé. Un paiement rejoué ne repasse jamais par ce point (vente déjà payée).
         if (sale.activity === 'PARK') await this.ticketIssuance.issueForPaidSale(tx, auth, id);
+        // Restaurant : historique de la commande et déduction des ingrédients si elle n'a pas déjà eu
+        // lieu à l'envoi en cuisine (idempotent). Le statut de préparation reste inchangé.
+        if (sale.activity === 'RESTAURANT') {
+          await recordOrderEvent(tx, {
+            organizationId,
+            establishmentId: sale.establishmentId,
+            saleId: id,
+            type: 'paid',
+            actorMembershipId: auth.membership.id,
+            metadata: { amount: sale.total, method: 'CASH' },
+          });
+          await this.stockConsumption.consumeForSale(tx, id, auth.membership.id);
+        }
         await this.audit.record(
           {
             organizationId,
@@ -320,9 +390,22 @@ export class SalesService {
           },
           tx,
         );
-        return payment.id;
+        return {
+          paymentId: payment.id,
+          activity: sale.activity,
+          establishmentId: sale.establishmentId,
+        };
       });
-      return this.paymentResult(auth, id, paymentId);
+      if (paid.activity === 'RESTAURANT') {
+        this.events.publish({
+          organizationId,
+          establishmentId: paid.establishmentId,
+          topics: ['orders'],
+          type: 'order.paid',
+          saleId: id,
+        });
+      }
+      return this.paymentResult(auth, id, paid.paymentId);
     } catch (error) {
       // Même paiement envoyé deux fois en même temps : le second attend le verrou de la vente puis la
       // trouve payée (ou bute sur la clé unique) ; il renvoie alors le paiement déjà enregistré.
@@ -337,7 +420,7 @@ export class SalesService {
   /** Annulation d'une vente non payée (une vente payée ne s'annule pas : le remboursement viendra plus tard). */
   async cancel(auth: TenantContext, id: string, dto: CancelSaleDto) {
     const organizationId = auth.membership.organizationId;
-    await this.prisma.$transaction(async (tx) => {
+    const cancelled = await this.prisma.$transaction(async (tx) => {
       const visible = await tx.sale.findFirst({
         where: { ...visibleSalesWhere(auth), id },
         select: { id: true },
@@ -346,7 +429,14 @@ export class SalesService {
       await lockRow(tx, 'Sale', id);
       const sale = await tx.sale.findUniqueOrThrow({
         where: { id },
-        select: { status: true, paymentStatus: true, number: true },
+        select: {
+          status: true,
+          paymentStatus: true,
+          number: true,
+          activity: true,
+          establishmentId: true,
+          preparationStatus: true,
+        },
       });
       if (sale.status !== 'OPEN' || sale.paymentStatus !== 'UNPAID') {
         throw new ConflictException({
@@ -369,7 +459,29 @@ export class SalesService {
         },
         tx,
       );
+      if (sale.activity === 'RESTAURANT') {
+        await recordOrderEvent(tx, {
+          organizationId,
+          establishmentId: sale.establishmentId,
+          saleId: id,
+          type: 'cancelled',
+          fromStatus: sale.preparationStatus,
+          actorMembershipId: auth.membership.id,
+          metadata: { reason: dto.reason ?? null },
+        });
+      }
+      return sale;
     });
+    if (cancelled.activity === 'RESTAURANT') {
+      // Une commande déjà envoyée disparaît aussi de l'écran cuisine.
+      this.events.publish({
+        organizationId,
+        establishmentId: cancelled.establishmentId,
+        topics: cancelled.preparationStatus === 'NOT_SENT' ? ['orders'] : ['orders', 'kitchen'],
+        type: 'order.cancelled',
+        saleId: id,
+      });
+    }
     return this.get(auth, id);
   }
 

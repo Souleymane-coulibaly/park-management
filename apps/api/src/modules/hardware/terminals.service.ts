@@ -23,6 +23,7 @@ export const TERMINAL_SELECT = {
   autoPrintReceipt: true,
   drawerEnabled: true,
   drawerPin: true,
+  kitchenPrinter: true,
   establishment: { select: { id: true, name: true } },
 } as const;
 
@@ -93,6 +94,7 @@ export class TerminalsService {
           paperWidth: dto.paperWidth,
           autoPrintReceipt: dto.autoPrintReceipt,
           drawerPin: dto.drawerPin,
+          kitchenPrinter: dto.kitchenPrinter,
           ...config,
         },
         select: TERMINAL_SELECT,
@@ -125,6 +127,7 @@ export class TerminalsService {
           paperWidth: dto.paperWidth,
           autoPrintReceipt: dto.autoPrintReceipt,
           drawerPin: dto.drawerPin,
+          kitchenPrinter: dto.kitchenPrinter,
           ...config,
         },
         select: TERMINAL_SELECT,

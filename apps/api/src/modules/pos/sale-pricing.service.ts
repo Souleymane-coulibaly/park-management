@@ -10,6 +10,8 @@ export interface PricedSaleLine {
   ticketCategoryId?: string;
   peoplePerUnit?: number;
   visitorNames?: string[];
+  /** Restaurant : instruction de préparation de la ligne. */
+  notes?: string | null;
   productName: string;
   variantName: string;
   unitPrice: number;
@@ -37,13 +39,16 @@ export class SalePricingService {
     establishmentId: string,
     lines: CartLineDto[],
   ): Promise<PricedSale> {
-    const ids = lines.map((l) => l.variantId);
-    if (new Set(ids).size !== ids.length) {
+    // Un même article peut figurer sur deux lignes seulement si leurs instructions diffèrent
+    // (« burger » et « burger sans oignon ») ; sinon les quantités doivent être regroupées.
+    const keys = lines.map((l) => `${l.variantId}|${l.notes?.trim() ?? ''}`);
+    if (new Set(keys).size !== keys.length) {
       throw new BadRequestException({
         code: 'DUPLICATE_LINE',
         message: 'Un même article apparaît sur plusieurs lignes : regroupez les quantités.',
       });
     }
+    const ids = [...new Set(lines.map((l) => l.variantId))];
 
     // Variantes vendables : de l'organisation, actives, produit et catégorie actifs, tarif disponible.
     const variants = await db.productVariant.findMany({
@@ -78,6 +83,7 @@ export class SalePricingService {
         variantName: v.name,
         unitPrice: v.prices[0]!.price,
         quantity: l.quantity,
+        notes: l.notes?.trim() || null,
       };
     });
     let totals;

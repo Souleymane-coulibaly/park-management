@@ -52,6 +52,11 @@ export class CreateTerminalDto {
   @IsOptional()
   @IsIn([2, 5])
   drawerPin?: 2 | 5;
+
+  @ApiPropertyOptional({ default: false, description: 'Imprimante des tickets cuisine.' })
+  @IsOptional()
+  @IsBoolean()
+  kitchenPrinter?: boolean;
 }
 
 export class UpdateTerminalDto {
@@ -98,6 +103,11 @@ export class UpdateTerminalDto {
   @IsOptional()
   @IsIn([2, 5])
   drawerPin?: 2 | 5;
+
+  @ApiPropertyOptional({ description: 'Imprimante des tickets cuisine.' })
+  @IsOptional()
+  @IsBoolean()
+  kitchenPrinter?: boolean;
 }
 
 export class TerminalsQueryDto {
@@ -112,9 +122,12 @@ export class CreatePrintJobDto {
   @IsUUID('4')
   terminalId: string;
 
-  @ApiProperty({ enum: ['RECEIPT', 'REPRINT', 'TEST'] })
-  @IsIn(['RECEIPT', 'REPRINT', 'TEST'])
-  kind: 'RECEIPT' | 'REPRINT' | 'TEST';
+  @ApiProperty({
+    enum: ['RECEIPT', 'REPRINT', 'TEST', 'KITCHEN'],
+    description: 'KITCHEN : ticket cuisine sans prix, après l’envoi explicite en cuisine.',
+  })
+  @IsIn(['RECEIPT', 'REPRINT', 'TEST', 'KITCHEN'])
+  kind: 'RECEIPT' | 'REPRINT' | 'TEST' | 'KITCHEN';
 
   @ApiPropertyOptional({ description: 'Obligatoire pour un ticket ou une réimpression.' })
   @IsOptional()

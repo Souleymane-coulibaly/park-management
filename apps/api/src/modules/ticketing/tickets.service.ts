@@ -27,7 +27,7 @@ export class TicketsService {
     const now = new Date();
     const tickets = await this.prisma.ticket.findMany({
       where: { saleId },
-      orderBy: [{ saleLine: { id: 'asc' } }, { position: 'asc' }],
+      orderBy: [{ saleLine: { lineNo: 'asc' } }, { saleLine: { id: 'asc' } }, { position: 'asc' }],
       select: {
         id: true,
         visitorName: true,

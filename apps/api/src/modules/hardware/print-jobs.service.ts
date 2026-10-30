@@ -7,9 +7,11 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@ocall/database';
 import {
+  ORDER_CHANNEL_LABELS,
   type PaperWidth,
   type ReceiptLine,
   encodeReceiptLines,
+  layoutKitchenTicket,
   hasOrganizationWideScope,
   hasPermission,
   layoutReceipt,
@@ -90,6 +92,13 @@ export class PrintJobsService {
         message: 'Le test d’impression est réservé à la configuration du matériel.',
       });
     }
+    if (dto.kind === 'KITCHEN' && !hasPermission(auth.membership.role, 'order.send_kitchen')) {
+      throw new ForbiddenException({
+        code: 'FORBIDDEN',
+        message:
+          'Le ticket cuisine est réservé aux employés qui envoient les commandes en cuisine.',
+      });
+    }
     if (dto.kind === 'REPRINT') {
       if (!hasPermission(auth.membership.role, 'receipt.reprint')) {
         throw new ForbiddenException({
@@ -143,7 +152,7 @@ export class PrintJobsService {
             clientRequestId: dto.clientRequestId,
           },
         });
-        if (dto.kind !== 'RECEIPT') {
+        if (dto.kind === 'REPRINT' || dto.kind === 'TEST') {
           await this.audit.record(
             {
               organizationId: auth.membership.organizationId,
@@ -253,7 +262,7 @@ export class PrintJobsService {
     auth: TenantContext,
     terminal: TerminalRow,
     saleId: string,
-    kind: 'RECEIPT' | 'REPRINT' | 'TEST',
+    kind: 'RECEIPT' | 'REPRINT' | 'TEST' | 'KITCHEN',
   ) {
     const sale = await tx.sale.findFirst({
       where: { ...visibleSalesWhere(auth), id: saleId },
@@ -264,13 +273,47 @@ export class PrintJobsService {
     await lockRow(tx, 'Sale', saleId);
     const current = await tx.sale.findUniqueOrThrow({
       where: { id: saleId },
-      select: { status: true, paymentStatus: true, establishmentId: true },
+      select: {
+        status: true,
+        paymentStatus: true,
+        establishmentId: true,
+        activity: true,
+        preparationStatus: true,
+      },
     });
     if (current.establishmentId !== terminal.establishment.id) {
       throw new BadRequestException({
         code: 'TERMINAL_ESTABLISHMENT_MISMATCH',
         message: 'Ce poste n’appartient pas à l’établissement de la vente.',
       });
+    }
+    if (kind === 'KITCHEN') {
+      // Ticket cuisine : uniquement après l'envoi explicite en cuisine, indépendamment du paiement.
+      if (
+        current.activity !== 'RESTAURANT' ||
+        current.status !== 'OPEN' ||
+        current.preparationStatus === 'NOT_SENT'
+      ) {
+        throw new ConflictException({
+          code: 'ORDER_NOT_SENT',
+          message: 'Le ticket cuisine s’imprime après l’envoi de la commande en cuisine.',
+        });
+      }
+      const pending = await tx.printJob.count({
+        where: {
+          saleId,
+          kind: 'KITCHEN',
+          status: 'PENDING',
+          createdAt: { gte: new Date(Date.now() - 30_000) },
+        },
+      });
+      if (pending > 0) {
+        throw new ConflictException({
+          code: 'PRINT_IN_PROGRESS',
+          message: 'Une impression de ce ticket est déjà en cours.',
+        });
+      }
+      return;
     }
     if (current.status !== 'OPEN' || current.paymentStatus !== 'PAID') {
       throw new ConflictException({
@@ -323,9 +366,11 @@ export class PrintJobsService {
   private async withPayload(auth: TenantContext, jobId: string, terminal: TerminalRow) {
     const job = await this.get(auth, jobId);
     const paperWidth = (job.paperWidth === 58 ? 58 : 80) as PaperWidth;
-    const lines = job.saleId
-      ? await this.saleReceipt(job.saleId, paperWidth, job.kind === 'REPRINT', job.ticketId)
-      : layoutTestPage(terminal.name, terminal.establishment.name, paperWidth, job.createdAt);
+    const lines = !job.saleId
+      ? layoutTestPage(terminal.name, terminal.establishment.name, paperWidth, job.createdAt)
+      : job.kind === 'KITCHEN'
+        ? await this.kitchenTicket(job.saleId, job.id, paperWidth)
+        : await this.saleReceipt(job.saleId, paperWidth, job.kind === 'REPRINT', job.ticketId);
     const pending = job.status === 'PENDING';
     return {
       job,
@@ -335,6 +380,53 @@ export class PrintJobsService {
       preview: previewLines(lines, paperWidth),
       alreadyCompleted: !pending,
     };
+  }
+
+  /**
+   * Ticket cuisine : articles, quantités, variantes, instructions, table ou zone, heure d'envoi.
+   * Aucun prix. Après une première impression réussie, le ticket porte la mention RÉIMPRESSION.
+   */
+  private async kitchenTicket(
+    saleId: string,
+    jobId: string,
+    paperWidth: PaperWidth,
+  ): Promise<ReceiptLine[]> {
+    const [sale, printedBefore] = await Promise.all([
+      this.prisma.sale.findUniqueOrThrow({
+        where: { id: saleId },
+        select: {
+          number: true,
+          channel: true,
+          notes: true,
+          sentToKitchenAt: true,
+          createdAt: true,
+          establishment: { select: { name: true, timezone: true } },
+          table: { select: { name: true } },
+          zone: { select: { name: true } },
+          lines: {
+            orderBy: [{ lineNo: 'asc' }, { id: 'asc' }],
+            select: { productName: true, variantName: true, quantity: true, notes: true },
+          },
+        },
+      }),
+      this.prisma.printJob.count({
+        where: { saleId, kind: 'KITCHEN', status: 'SUCCEEDED', id: { not: jobId } },
+      }),
+    ]);
+    return layoutKitchenTicket(
+      {
+        establishmentName: sale.establishment.name,
+        timezone: sale.establishment.timezone,
+        saleNumber: sale.number,
+        channelLabel: ORDER_CHANNEL_LABELS[sale.channel ?? 'COUNTER'],
+        location: [sale.zone?.name, sale.table?.name].filter(Boolean).join(' · ') || null,
+        sentAt: (sale.sentToKitchenAt ?? sale.createdAt).toISOString(),
+        notes: sale.notes,
+        lines: sale.lines,
+        duplicate: printedBefore > 0,
+      },
+      paperWidth,
+    );
   }
 
   private async saleReceipt(
@@ -354,6 +446,7 @@ export class PrintJobsService {
         establishment: { select: { name: true, timezone: true } },
         cashier: { select: { user: { select: { firstName: true, lastName: true } } } },
         lines: {
+          orderBy: [{ lineNo: 'asc' }, { id: 'asc' }],
           select: {
             productName: true,
             variantName: true,
@@ -373,7 +466,11 @@ export class PrintJobsService {
     if (sale.activity === 'PARK') {
       const tickets = await this.prisma.ticket.findMany({
         where: { saleId, ...(ticketId ? { id: ticketId } : {}), status: { not: 'CANCELLED' } },
-        orderBy: [{ saleLine: { id: 'asc' } }, { position: 'asc' }],
+        orderBy: [
+          { saleLine: { lineNo: 'asc' } },
+          { saleLine: { id: 'asc' } },
+          { position: 'asc' },
+        ],
         select: {
           id: true,
           visitorName: true,

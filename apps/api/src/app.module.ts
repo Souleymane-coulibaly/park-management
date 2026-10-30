@@ -23,7 +23,11 @@ import { OrganizationsModule } from './modules/organizations/organizations.modul
 import { PaymentsModule } from './modules/payments/payments.module';
 import { PlatformModule } from './modules/platform/platform.module';
 import { PosModule } from './modules/pos/pos.module';
+import { RealtimeModule } from './modules/realtime/realtime.module';
+import { ReservationsModule } from './modules/reservations/reservations.module';
+import { RestaurantModule } from './modules/restaurant/restaurant.module';
 import { RolesModule } from './modules/roles/roles.module';
+import { StockModule } from './modules/stock/stock.module';
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 import { TicketingModule } from './modules/ticketing/ticketing.module';
 
@@ -36,6 +40,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     }),
     PrismaModule,
     CommonModule,
+    RealtimeModule,
     AuthModule,
     OrganizationsModule,
     EstablishmentsModule,
@@ -51,6 +56,9 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     PosModule,
     HardwareModule,
     TicketingModule,
+    RestaurantModule,
+    StockModule,
+    ReservationsModule,
   ],
   controllers: [HealthController],
   providers: [

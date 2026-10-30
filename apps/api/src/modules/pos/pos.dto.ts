@@ -18,6 +18,7 @@ import {
 import {
   MAX_AMOUNT,
   MAX_LINE_QUANTITY,
+  MAX_NOTE_LENGTH,
   MAX_SALE_LINES,
   PAYMENT_METHODS,
   type PaymentMethod,
@@ -36,6 +37,15 @@ export class CartLineDto {
   @Min(1)
   @Max(MAX_LINE_QUANTITY)
   quantity: number;
+
+  @ApiPropertyOptional({
+    description: 'Restaurant : instruction de préparation (ex. « sans oignon »).',
+  })
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(MAX_NOTE_LENGTH)
+  notes?: string;
 }
 
 export class QuoteDto {

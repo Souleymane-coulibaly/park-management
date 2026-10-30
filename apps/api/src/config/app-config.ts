@@ -16,6 +16,10 @@ export interface AppConfig {
   swaggerEnabled: boolean;
   /** Nombre de proxys de confiance devant l'API (Railway, proxy Next.js) pour déterminer l'IP réelle. */
   trustProxyHops: number;
+  /** Demandes de commande publiques (QR code) acceptées par IP sur 10 minutes. */
+  publicOrderThrottleLimit: number;
+  /** Intervalle des battements des flux temps réel (et de revérification de la session), en ms. */
+  realtimeHeartbeatMs: number;
 }
 
 export const APP_CONFIG = Symbol('APP_CONFIG');
@@ -57,5 +61,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     passwordResetTtlMinutes: int(env, 'PASSWORD_RESET_TTL_MINUTES', 30),
     swaggerEnabled: env.SWAGGER_ENABLED ? env.SWAGGER_ENABLED === 'true' : nodeEnv !== 'production',
     trustProxyHops: int(env, 'TRUST_PROXY_HOPS', 1),
+    publicOrderThrottleLimit: int(env, 'PUBLIC_ORDER_THROTTLE_LIMIT', 30),
+    realtimeHeartbeatMs: int(env, 'REALTIME_HEARTBEAT_MS', 25_000),
   };
 }
