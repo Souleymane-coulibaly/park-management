@@ -1,12 +1,12 @@
 'use client';
 
 import { type FormEvent, useState } from 'react';
-import { BookOpen, Pencil, Plus, Power, Tags, Trash2 } from 'lucide-react';
+import { BookOpen, Pencil, Plus, Power, Sparkles, Tags, Trash2 } from 'lucide-react';
 import { coversActivity, formatXof } from '@ocall/shared';
 import { AccessDenied } from '@/components/app/access-denied';
 import { useCan } from '@/components/app/session-context';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { Button, ButtonLink } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
 import { InputField, SelectField } from '@/components/ui/field';
@@ -65,13 +65,18 @@ export default function CataloguePage() {
         description="Produits, variantes et tarifs par établissement. Les prix sont en FCFA, TTC."
         action={
           canManage && (
-            <Button
-              onClick={() => setProductDialog('new')}
-              disabled={categoryList.length === 0}
-              icon={<Plus className="h-4 w-4" />}
-            >
-              Nouveau produit
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <ButtonLink href="/app/catalogue/import-ia" variant="secondary">
+                <Sparkles className="h-4 w-4" aria-hidden /> Importer une carte (IA)
+              </ButtonLink>
+              <Button
+                onClick={() => setProductDialog('new')}
+                disabled={categoryList.length === 0}
+                icon={<Plus className="h-4 w-4" />}
+              >
+                Nouveau produit
+              </Button>
+            </div>
           )
         }
       />

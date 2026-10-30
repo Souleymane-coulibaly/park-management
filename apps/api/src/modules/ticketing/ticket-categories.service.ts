@@ -66,7 +66,15 @@ export class TicketCategoriesService {
     return rows.map(toCategory);
   }
 
-  async create(auth: TenantContext, dto: CreateTicketCategoryDto) {
+  /**
+   * `inactive` : catégorie créée désactivée (import IA) ; elle ne se vend qu'après activation
+   * explicite par un responsable.
+   */
+  async create(
+    auth: TenantContext,
+    dto: CreateTicketCategoryDto,
+    options: { inactive?: boolean; source?: string } = {},
+  ) {
     const establishment = await this.schedule.findParkEstablishment(auth, dto.establishmentId);
     assertWindow(dto.availableFrom, dto.availableUntil);
     const organizationId = auth.membership.organizationId;
@@ -86,6 +94,7 @@ export class TicketCategoriesService {
             availableUntil: dateOrNull(dto.availableUntil),
             validityDays: dto.validityDays ?? 1,
             sortOrder: dto.sortOrder ?? 0,
+            ...(options.inactive ? { isActive: false } : {}),
           },
           select: CATEGORY_SELECT,
         });
@@ -96,7 +105,12 @@ export class TicketCategoriesService {
             action: 'ticket_category.created',
             targetType: 'TicketCategory',
             targetId: created.id,
-            metadata: { name: created.name, kind: created.kind, price: created.price },
+            metadata: {
+              name: created.name,
+              kind: created.kind,
+              price: created.price,
+              ...(options.source ? { source: options.source } : {}),
+            },
           },
           tx,
         );

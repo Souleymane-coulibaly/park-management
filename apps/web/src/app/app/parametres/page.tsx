@@ -9,6 +9,7 @@ import {
   History,
   KeyRound,
   ShieldCheck,
+  Sparkles,
   UserCog,
 } from 'lucide-react';
 import type { Permission } from '@ocall/shared';
@@ -50,6 +51,13 @@ const SECTIONS: {
     description: 'Offre souscrite et statut.',
     icon: <CreditCard className="h-5 w-5" />,
     permission: 'subscription.read',
+  },
+  {
+    href: '/app/parametres/ia',
+    title: 'Intelligence artificielle',
+    description: 'Fonctionnalités IA, plafonds, conservation et consommation estimée.',
+    icon: <Sparkles className="h-5 w-5" />,
+    permission: 'ai.manage',
   },
   {
     href: '/app/journal',

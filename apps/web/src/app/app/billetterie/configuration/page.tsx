@@ -1,7 +1,7 @@
 'use client';
 
 import { type FormEvent, useState } from 'react';
-import { CalendarX, Pencil, Plus, Ticket, Trash2 } from 'lucide-react';
+import { CalendarX, Pencil, Plus, Sparkles, Ticket, Trash2 } from 'lucide-react';
 import { TICKET_KINDS, TICKET_KIND_LABELS, type TicketKind, formatXof } from '@ocall/shared';
 import { AccessDenied } from '@/components/app/access-denied';
 import { useCan } from '@/components/app/session-context';
@@ -10,7 +10,7 @@ import { ParkEstablishmentScope } from '@/components/park/park-establishment';
 import { ParkNav } from '@/components/park/park-nav';
 import { toApiError } from '@/components/pos/cash-session';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
+import { Button, ButtonLink } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
 import { InputField, SelectField } from '@/components/ui/field';
@@ -28,7 +28,12 @@ export default function BilletterieConfigurationPage() {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold">Tarifs et horaires du parc</h1>
-        <ParkNav />
+        <div className="flex flex-wrap items-center gap-2">
+          <ButtonLink href="/app/billetterie/import-ia" variant="secondary" size="sm">
+            <Sparkles className="h-4 w-4" aria-hidden /> Importer une grille (IA)
+          </ButtonLink>
+          <ParkNav />
+        </div>
       </div>
       <ParkEstablishmentScope source="/ticketing/establishments">
         {(park) => (

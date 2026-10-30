@@ -8,6 +8,8 @@
 | 4      | Billetterie Parc, QR codes, contrôle d’accès                  | `claude/sprint-4` | ✅ CP-03 : GO SOUS RÉSERVES (A1, A2, A5 ouvertes) |
 | 5      | Restaurant : commandes, KDS, QR, tables, stocks, réservations | `claude/sprint-5` | 🟡 Terminé — local, push à autoriser              |
 | 6      | Bornes de commande, CRM, fidélité, planning du personnel      | `claude/sprint-6` | 🟡 En cours — tests base bloqués (Neon `test`)    |
+| 7      | Paiement des abonnements (CinetPay)                           | —                 | ⏸️ Reporté par le commanditaire (plan présenté)   |
+| 8      | IA : import de carte, copilote, commande vocale               | `claude/sprint-8` | 🟡 En cours — tests base bloqués (Neon `test`)    |
 
 Environnements : base Neon de **développement** (préservée), branche Neon **`test`** réservée aux
 tests automatisés, base de **production non configurée**. Aucune fusion dans `main`, aucun déploiement.
@@ -22,6 +24,52 @@ Checkpoints Codex :
   intégré au CP-05**, qui couvrira les Sprints 1 à 6. Préparation :
   [CP-04-preparation.md](docs/checkpoints/CP-04-preparation.md) et
   [CP-05-preparation.md](docs/checkpoints/CP-05-preparation.md).
+- Le Sprint 7 (CinetPay) a été **reporté** par le commanditaire le 30/10/2026, après présentation du
+  plan ; le Sprint 8 a été démarré à sa demande, sans CP-05 ni CP-06 (aucun rapport CP-06 n'existe).
+  Préparation : [CP-07-preparation.md](docs/checkpoints/CP-07-preparation.md).
+
+---
+
+## Sprint 8 — Intelligence artificielle : import de carte, copilote, commande vocale (en cours, non poussé)
+
+Documentation : [docs/INTELLIGENCE-ARTIFICIELLE.md](docs/INTELLIGENCE-ARTIFICIELLE.md). Branche
+`claude/sprint-8`, créée depuis `claude/sprint-6` (`6daaddc`) : les Sprints 5 et 6, dont dépendent les
+commandes et les stocks, ne sont pas validés.
+
+**Fournisseur** : OpenAI, choisi par le commanditaire — GPT-5 pour le texte et l'image,
+`gpt-transcribe` pour la voix (GPT-5 ne transcrit pas). Abstraction `AiProvider` ; fournisseur simulé
+pour les tests. **Aucun appel réel n'a été fait** (pas de clé ni d'autorisation).
+
+### Fonctionnalités réalisées
+
+1. **Import IA de carte** (`/app/catalogue/import-ia`) et **de grille tarifaire** (`/app/billetterie/import-ia`)
+   - Photo, image ou PDF (10 Mo), type vérifié par signature ; fichier jamais conservé (empreinte gardée).
+   - Revalidation serveur : prix absent jamais inventé, prix non lu retiré, prix ambigu signalé, doublons.
+   - Revue ligne par ligne, publication confirmée, sans écrasement ; billets importés désactivés.
+2. **Copilote analytique** (`/app/copilot`)
+   - 7 fonctions de lecture prédéfinies ; établissement imposé par le serveur ; périodes fermées.
+   - Chiffres du serveur affichés ; phrase de l'IA écartée si elle cite un chiffre absent des données.
+3. **Commande vocale** (écran Commandes)
+   - Enregistrement sur geste explicite, transcription, panier rapproché du catalogue réel.
+   - Confirmation humaine obligatoire ; commande non payée, non envoyée en cuisine, prix serveur.
+4. **Coûts et quotas** (`/app/parametres/ia`)
+   - Fonctionnalités désactivables, plafond mensuel (réservé sous verrou), alerte, coûts **estimés**.
+   - Conservation configurable des résultats et transcriptions, purge.
+
+**Migration** `20261030164331_intelligence_artificielle` : additive, 3 contraintes CHECK.
+`db:migrate:check` OK. **Pas encore appliquée** (base `test` injoignable).
+
+### Tests
+
+| Suite                                                                               | Résultat                                                                             |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Unitaires (shared 103, database 13, api 26)                                         | 142/142 — dont règles IA (formats, périodes, coûts, revalidation, arguments stricts) |
+| Lint, Prettier, TypeScript strict, build                                            | OK                                                                                   |
+| Injection de dépendances NestJS (module complet, sans base)                         | OK                                                                                   |
+| Intégration Sprint 8 (`sprint8-ia.integration.spec.ts`, tests 1 à 21) — **simulés** | **Non exécutée** : base Neon `test` injoignable                                      |
+| E2E Sprint 8 (`e2e/sprint8-ia.spec.ts`) — **simulé**                                | **Non exécuté** (même cause)                                                         |
+| Test 22 : régression Sprints 1 à 6 (le Sprint 7 n'a pas de code)                    | **En attente** de la base `test`                                                     |
+| Tests réels avec OpenAI                                                             | **Non exécutés** : non autorisés (coûts), aucune clé                                 |
 
 ---
 

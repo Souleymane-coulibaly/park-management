@@ -25,11 +25,25 @@ export async function api<T>(
   path: string,
   init: { method?: string; body?: unknown } = {},
 ): Promise<T> {
-  const res = await fetch(`/api/v1${path}`, {
+  return send<T>(path, {
     method: init.method ?? 'GET',
-    credentials: 'same-origin',
     headers: init.body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
     body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
+  });
+}
+
+/**
+ * Envoi d'un fichier (photo, PDF, enregistrement vocal) en multipart : le navigateur fixe
+ * lui-même l'en-tête Content-Type et sa limite.
+ */
+export function apiUpload<T>(path: string, form: FormData): Promise<T> {
+  return send<T>(path, { method: 'POST', body: form });
+}
+
+async function send<T>(path: string, init: RequestInit): Promise<T> {
+  const res = await fetch(`/api/v1${path}`, {
+    ...init,
+    credentials: 'same-origin',
     cache: 'no-store',
   });
   if (res.status === 204) return undefined as T;

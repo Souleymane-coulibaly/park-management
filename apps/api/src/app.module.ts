@@ -10,6 +10,7 @@ import { OriginGuard } from './common/guards/origin.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 import { HttpExceptionFilter } from './common/http-exception.filter';
 import { throttlerOptions } from './common/throttling';
+import { AiModule } from './modules/ai/ai.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
@@ -67,6 +68,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     CrmModule,
     LoyaltyModule,
     PlanningModule,
+    AiModule,
   ],
   controllers: [HealthController],
   providers: [

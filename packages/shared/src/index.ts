@@ -8,3 +8,4 @@ export * from './hardware';
 export * from './park';
 export * from './restaurant';
 export * from './crm';
+export * from './ai';

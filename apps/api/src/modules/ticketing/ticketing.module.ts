@@ -23,5 +23,6 @@ import { TicketsService } from './tickets.service';
     AccessControlService,
     TicketingDashboardService,
   ],
+  exports: [TicketCategoriesService],
 })
 export class TicketingModule {}

@@ -15,6 +15,7 @@ import {
   Receipt,
   ScanLine,
   Settings,
+  Sparkles,
   Ticket,
   Users,
 } from 'lucide-react';
@@ -33,6 +34,7 @@ const ICONS: Record<string, LucideIcon> = {
   kiosks: MonitorSmartphone,
   crm: HeartHandshake,
   'hr-planning': CalendarDays,
+  copilot: Sparkles,
   employees: Users,
   settings: Settings,
   'platform-overview': LayoutDashboard,

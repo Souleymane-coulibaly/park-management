@@ -3,13 +3,15 @@
 Logiciel SaaS B2B de gestion pour les établissements africains : **parcs aquatiques et espaces de
 loisirs**, **restaurants**, ou **les deux**. Lancement au Mali, en français, prix en FCFA (XOF).
 
-> Statut : **Sprint 6 (en cours)** — socle SaaS (Sprint 1), caisse POS restaurant (Sprint 2), POS Android avec
+> Statut : **Sprint 8 (en cours)** — socle SaaS (Sprint 1), caisse POS restaurant (Sprint 2), POS Android avec
 > impression thermique ESC/POS et tiroir-caisse (Sprint 3, validation sur matériel réel à faire),
 > billetterie du parc avec QR codes et contrôle d'accès (Sprint 4,
 > [docs/BILLETTERIE-PARC.md](docs/BILLETTERIE-PARC.md)), restaurant : commandes, cuisine KDS en
 > temps réel, commandes QR, tables, stocks, réservations et tickets cuisine (Sprint 5,
 > [docs/RESTAURANT.md](docs/RESTAURANT.md)), bornes de commande, CRM, fidélité et planning du personnel
-> (Sprint 6, [docs/BORNES-CRM-FIDELITE-PLANNING.md](docs/BORNES-CRM-FIDELITE-PLANNING.md)).
+> (Sprint 6, [docs/BORNES-CRM-FIDELITE-PLANNING.md](docs/BORNES-CRM-FIDELITE-PLANNING.md)), intelligence
+> artificielle : import de carte, copilote analytique, commande vocale (Sprint 8,
+> [docs/INTELLIGENCE-ARTIFICIELLE.md](docs/INTELLIGENCE-ARTIFICIELLE.md)).
 > Suivi détaillé : [SPRINT_STATUS.md](SPRINT_STATUS.md).
 
 ## Architecture

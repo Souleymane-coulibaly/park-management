@@ -70,6 +70,8 @@ export const Permission = {
   LOYALTY_CONFIGURE: 'loyalty.configure',
   LOYALTY_ADJUST: 'loyalty.adjust',
   PLANNING_MANAGE: 'planning.manage',
+  AI_COPILOT: 'ai.copilot',
+  AI_MANAGE: 'ai.manage',
 } as const;
 export type Permission = (typeof Permission)[keyof typeof Permission];
 export const PERMISSIONS: readonly Permission[] = Object.values(Permission);
@@ -115,6 +117,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'loyalty.configure': 'Configurer les programmes de fidélité',
   'loyalty.adjust': 'Corriger manuellement des points de fidélité',
   'planning.manage': 'Gérer le planning et les postes du personnel',
+  'ai.copilot': 'Interroger le copilote analytique (lecture seule)',
+  'ai.manage': "Configurer l'IA : fonctionnalités, quotas, conservation, consommation",
 };
 
 const P = Permission;
@@ -148,6 +152,7 @@ export const ROLE_PERMISSIONS: Record<MemberRole, readonly Permission[]> = {
     P.CUSTOMER_MANAGE,
     P.CUSTOMER_HISTORY,
     P.PLANNING_MANAGE,
+    P.AI_COPILOT,
   ],
   // Un caissier encaisse, envoie ses commandes en cuisine et ne voit que ses propres ventes et sessions.
   CASHIER: [

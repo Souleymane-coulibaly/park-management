@@ -140,6 +140,16 @@ export const MODULES: readonly ModuleDefinition[] = [
     href: '/app/personnel/planning',
   },
   {
+    key: 'copilot',
+    label: 'Copilote IA',
+    description:
+      'Questions en français sur votre activité, en lecture seule, calculées sur vos données réelles.',
+    status: 'available',
+    activities: [],
+    permission: 'ai.copilot',
+    href: '/app/copilot',
+  },
+  {
     key: 'employees',
     label: 'Employés',
     description: 'Comptes nominatifs, rôles et affectations.',

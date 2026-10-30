@@ -3,6 +3,7 @@
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { ChefHat, Plus, QrCode, Receipt } from 'lucide-react';
 import { formatKioskNumber, formatSaleNumber, formatXof } from '@ocall/shared';
+import { VoiceOrderButton } from '@/components/ai/voice-order-dialog';
 import { AccessDenied } from '@/components/app/access-denied';
 import { useCan } from '@/components/app/session-context';
 import { CashSessionGate, OfflineBanner, SessionBar } from '@/components/pos/cash-session';
@@ -146,9 +147,19 @@ function OrdersBoard({ establishmentId }: { establishmentId: string }) {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <LiveIndicator status={live} />
-        <ButtonLink href="/app/caisse" size="sm">
-          <Plus className="h-4 w-4" aria-hidden /> Nouvelle commande
-        </ButtonLink>
+        <div className="flex flex-wrap items-center gap-2">
+          <VoiceOrderButton
+            establishmentId={establishmentId}
+            onCreated={(saleId) => {
+              setNotice('Commande vocale enregistrée : non payée, non envoyée en cuisine.');
+              reloadAll();
+              setDetail(saleId);
+            }}
+          />
+          <ButtonLink href="/app/caisse" size="sm">
+            <Plus className="h-4 w-4" aria-hidden /> Nouvelle commande
+          </ButtonLink>
+        </div>
       </div>
       {!online && (
         <OfflineBanner>

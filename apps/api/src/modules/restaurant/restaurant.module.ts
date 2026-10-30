@@ -21,6 +21,6 @@ import {
   controllers: [OrdersController, KitchenController, DiningController, PublicOrderingController],
   providers: [DiningService, RestaurantOrdersService, QrOrdersService, RestaurantDashboardService],
   // Les réservations réutilisent le contrôle des tables ; les bornes, le parcours des demandes clients.
-  exports: [DiningService, QrOrdersService],
+  exports: [DiningService, QrOrdersService, RestaurantOrdersService],
 })
 export class RestaurantModule {}

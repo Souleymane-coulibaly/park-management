@@ -1,3 +1,5 @@
+import { type AiConfig, loadAiConfig } from '../modules/ai/ai.config';
+
 /**
  * Configuration typée, lue une seule fois depuis l'environnement.
  * Toute valeur manquante ou invalide arrête le démarrage plutôt que de dégrader la sécurité.
@@ -20,6 +22,8 @@ export interface AppConfig {
   publicOrderThrottleLimit: number;
   /** Intervalle des battements des flux temps réel (et de revérification de la session), en ms. */
   realtimeHeartbeatMs: number;
+  /** Fournisseur IA, modèles et garde-fous des appels réels (Sprint 8). */
+  ai: AiConfig;
 }
 
 export const APP_CONFIG = Symbol('APP_CONFIG');
@@ -63,5 +67,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     trustProxyHops: int(env, 'TRUST_PROXY_HOPS', 1),
     publicOrderThrottleLimit: int(env, 'PUBLIC_ORDER_THROTTLE_LIMIT', 30),
     realtimeHeartbeatMs: int(env, 'REALTIME_HEARTBEAT_MS', 25_000),
+    ai: loadAiConfig(env, nodeEnv),
   };
 }

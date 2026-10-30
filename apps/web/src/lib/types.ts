@@ -1,6 +1,8 @@
 import type {
+  AiFeature,
   BusinessType,
   DiningZoneKind,
+  ImportIssue,
   MemberRole,
   OpeningVerdict,
   OrderChannel,
@@ -802,4 +804,129 @@ export interface StaffAssignment {
   establishment: { id: string; name: string };
   position: { id: string; name: string; kind: StaffPosition['kind'] };
   employee: { membershipId: string; role: MemberRole; name: string };
+}
+
+// ─── Sprint 8 : intelligence artificielle ───
+
+export interface AiStatus {
+  configured: boolean;
+  simulated: boolean;
+  features: Record<AiFeature, boolean>;
+  usage: { used: number; limit: number; alert: boolean; exceeded: boolean };
+}
+
+export interface AiSettings {
+  catalogImportEnabled: boolean;
+  ticketImportEnabled: boolean;
+  copilotEnabled: boolean;
+  voiceOrderEnabled: boolean;
+  monthlyCallLimit: number;
+  alertPercent: number;
+  retentionDays: number;
+}
+
+export interface AiUsageReport {
+  since: string;
+  provider: string | null;
+  usdXofRate: number;
+  costIsEstimate: true;
+  unestimatedCalls: number;
+  rows: Array<{
+    feature: AiFeature;
+    establishmentId: string | null;
+    establishmentName: string | null;
+    status: 'PENDING' | 'SUCCEEDED' | 'FAILED';
+    calls: number;
+    inputTokens: number;
+    outputTokens: number;
+    audioSeconds: number;
+    estimatedCostMicroUsd: number;
+    estimatedCostXof: number;
+  }>;
+}
+
+export interface AiImportCatalogLine {
+  index: number;
+  name: string;
+  description: string | null;
+  category: string | null;
+  sourceText: string;
+  availability: 'available' | 'unavailable' | null;
+  variants: Array<{ name: string; price: number | null; priceText: string | null }>;
+  issues: ImportIssue[];
+  duplicateOf: { id: string; name: string } | null;
+}
+
+export interface AiImportTicketLine {
+  index: number;
+  name: string;
+  kind: TicketKind;
+  price: number | null;
+  priceText: string | null;
+  peopleIncluded: number;
+  conditions: string | null;
+  sourceText: string;
+  issues: ImportIssue[];
+  duplicateOf: { id: string; name: string } | null;
+}
+
+export interface AiImport<L = AiImportCatalogLine | AiImportTicketLine> {
+  id: string;
+  kind: 'CATALOG' | 'TICKETS';
+  status: 'ANALYZED' | 'FAILED' | 'PUBLISHED' | 'DISCARDED';
+  establishmentId: string;
+  establishmentName: string;
+  fileName: string;
+  mimeType: string;
+  fileSize: number;
+  result: { readable: boolean; currency: string | null; warnings: string[]; lines: L[] } | null;
+  publication: {
+    created: Array<{ index: number; id: string; name: string }>;
+    skipped: number[];
+    error?: string;
+  } | null;
+  errorCode: string | null;
+  createdAt: string;
+  publishedAt: string | null;
+  expiresAt: string;
+  purgedAt: string | null;
+}
+
+export interface CopilotResult {
+  tool: string;
+  title: string;
+  period: { label: string; from: string; to: string } | null;
+  data: Record<string, unknown>;
+  missing: string[];
+}
+
+export interface CopilotAnswer {
+  question: string;
+  establishment: { id: string; name: string };
+  answer: string;
+  grounded: boolean;
+  results: CopilotResult[];
+  rejected: Array<{ name: string; reason: string }>;
+}
+
+export interface VoiceOrderDraft {
+  id: string;
+  establishmentId: string;
+  status: 'DRAFT' | 'CONFIRMED' | 'DISCARDED';
+  transcript: string | null;
+  proposal: {
+    lines: Array<{
+      heard: string;
+      variantId: string | null;
+      label: string | null;
+      unitPrice: number | null;
+      quantity: number | null;
+      note: string | null;
+      issues: Array<'PRODUCT_NOT_FOUND' | 'QUANTITY_UNCERTAIN' | 'UNCERTAIN'>;
+    }>;
+    table: { id: string; name: string } | null;
+    tableHeard: string | null;
+    tableNotFound: boolean;
+  } | null;
+  saleId: string | null;
 }

@@ -100,6 +100,10 @@ model Organization {
   loyaltyTransactions LoyaltyTransaction[]
   staffPositions      StaffPosition[]
   staffAssignments    StaffAssignment[]
+  aiSettings          AiSettings?
+  aiUsages            AiUsage[]
+  aiImports           AiImport[]
+  voiceOrderDrafts    VoiceOrderDraft[]
 
   @@index([status])
   @@index([businessType])
@@ -145,6 +149,9 @@ model Establishment {
   reservations     Reservation[]
   kioskDevices     KioskDevice[]
   staffAssignments StaffAssignment[]
+  aiUsages         AiUsage[]
+  aiImports        AiImport[]
+  voiceOrderDrafts VoiceOrderDraft[]
 
   @@unique([organizationId, name])
   @@index([organizationId, isActive])
@@ -206,6 +213,10 @@ model OrganizationMembership {
   loyaltyTransactions     LoyaltyTransaction[] @relation("LoyaltyActor")
   staffAssignments        StaffAssignment[]    @relation("StaffAssignee")
   staffAssignmentsCreated StaffAssignment[]    @relation("StaffAssignmentCreatedBy")
+  aiUsages                AiUsage[]            @relation("AiUsageActor")
+  aiImportsCreated        AiImport[]           @relation("AiImportCreatedBy")
+  aiImportsPublished      AiImport[]           @relation("AiImportPublishedBy")
+  voiceOrderDrafts        VoiceOrderDraft[]    @relation("VoiceOrderDraftCreatedBy")
 
   @@unique([organizationId, userId])
   @@index([userId])
@@ -1396,4 +1407,143 @@ model StaffAssignment {
 
   @@index([organizationId, establishmentId, startsAt])
   @@index([membershipId, startsAt])
+}
+
+// ─── Sprint 8 : intelligence artificielle (import de carte, copilote, commande vocale) ───
+
+enum AiFeature {
+  CATALOG_IMPORT
+  TICKET_IMPORT
+  COPILOT
+  VOICE_ORDER
+}
+
+/// PENDING = appel réservé sur le quota avant l'envoi au fournisseur (protège des appels simultanés).
+enum AiCallStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+}
+
+enum AiImportKind {
+  CATALOG
+  TICKETS
+}
+
+enum AiImportStatus {
+  ANALYZED
+  FAILED
+  PUBLISHED
+  DISCARDED
+}
+
+enum VoiceOrderStatus {
+  DRAFT
+  CONFIRMED
+  DISCARDED
+}
+
+/// Réglages IA d'une organisation : chaque fonctionnalité est désactivable, plafond mensuel d'appels,
+/// seuil d'alerte et durée de conservation des transcriptions et résultats d'import.
+model AiSettings {
+  organizationId       String   @id @db.Uuid
+  catalogImportEnabled Boolean  @default(true)
+  ticketImportEnabled  Boolean  @default(true)
+  copilotEnabled       Boolean  @default(true)
+  voiceOrderEnabled    Boolean  @default(true)
+  monthlyCallLimit     Int      @default(500)
+  alertPercent         Int      @default(80)
+  retentionDays        Int      @default(30)
+  updatedAt            DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+/// Une ligne par appel au fournisseur IA : consommation mesurée et coût ESTIMÉ (micro-dollars).
+/// Aucun contenu (question, fichier, audio) n'y est enregistré.
+model AiUsage {
+  id                    String       @id @default(uuid()) @db.Uuid
+  organizationId        String       @db.Uuid
+  establishmentId       String?      @db.Uuid
+  membershipId          String?      @db.Uuid
+  feature               AiFeature
+  provider              String
+  model                 String
+  status                AiCallStatus @default(PENDING)
+  inputTokens           Int          @default(0)
+  cachedInputTokens     Int          @default(0)
+  outputTokens          Int          @default(0)
+  audioSeconds          Int?
+  /// null = coût non estimable (modèle sans tarif connu), jamais présenté comme nul.
+  estimatedCostMicroUsd Int?
+  latencyMs             Int?
+  errorCode             String?
+  createdAt             DateTime     @default(now())
+
+  organization  Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment?          @relation(fields: [establishmentId], references: [id], onDelete: SetNull)
+  membership    OrganizationMembership? @relation("AiUsageActor", fields: [membershipId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, feature, createdAt])
+}
+
+/// Import IA d'une carte (restaurant) ou d'une grille tarifaire (parc). Le fichier n'est jamais
+/// conservé : seuls son empreinte, ses métadonnées et le résultat de l'analyse le sont, et le
+/// résultat est effacé à l'échéance de conservation.
+model AiImport {
+  id              String         @id @default(uuid()) @db.Uuid
+  organizationId  String         @db.Uuid
+  establishmentId String         @db.Uuid
+  kind            AiImportKind
+  status          AiImportStatus
+  fileName        String
+  mimeType        String
+  fileSize        Int
+  fileSha256      String
+  /// Résultat de l'analyse (lignes détectées, incertitudes, doublons) ; null après purge.
+  result          Json?
+  /// Bilan de la publication (éléments créés, lignes ignorées).
+  publication     Json?
+  errorCode       String?
+  createdById     String         @db.Uuid
+  publishedById   String?        @db.Uuid
+  createdAt       DateTime       @default(now())
+  publishedAt     DateTime?
+  expiresAt       DateTime
+  purgedAt        DateTime?
+
+  organization  Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment           @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  createdBy     OrganizationMembership  @relation("AiImportCreatedBy", fields: [createdById], references: [id], onDelete: NoAction)
+  publishedBy   OrganizationMembership? @relation("AiImportPublishedBy", fields: [publishedById], references: [id], onDelete: NoAction)
+
+  @@index([organizationId, createdAt])
+  @@index([expiresAt])
+}
+
+/// Brouillon de commande vocale : transcription et panier proposé, en attente de validation humaine.
+/// L'audio n'est jamais conservé. La confirmation crée une commande non payée, non envoyée en cuisine.
+model VoiceOrderDraft {
+  id              String           @id @default(uuid()) @db.Uuid
+  organizationId  String           @db.Uuid
+  establishmentId String           @db.Uuid
+  createdById     String           @db.Uuid
+  status          VoiceOrderStatus @default(DRAFT)
+  /// null après purge.
+  transcript      String?
+  /// Panier proposé (lignes, incertitudes, table) ; null après purge.
+  proposal        Json?
+  saleId          String?          @unique @db.Uuid
+  createdAt       DateTime         @default(now())
+  confirmedAt     DateTime?
+  expiresAt       DateTime
+  purgedAt        DateTime?
+
+  organization  Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment          @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  createdBy     OrganizationMembership @relation("VoiceOrderDraftCreatedBy", fields: [createdById], references: [id], onDelete: NoAction)
+
+  @@index([organizationId, createdAt])
+  @@index([expiresAt])
 }

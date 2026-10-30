@@ -38,7 +38,13 @@ export default defineConfig({
       command: 'node dist/main.js',
       cwd: 'apps/api',
       url: 'http://localhost:4000/api/v1/health',
-      env: { DATABASE_URL: testDb.databaseUrl, DIRECT_URL: testDb.directUrl },
+      // IA : fournisseur simulé uniquement (aucun appel réel, aucun coût) pendant les tests E2E.
+      env: {
+        DATABASE_URL: testDb.databaseUrl,
+        DIRECT_URL: testDb.directUrl,
+        AI_PROVIDER: 'simulated',
+        AI_REAL_CALLS_ENABLED: 'false',
+      },
       reuseExistingServer: false,
       timeout: 120_000,
     },
