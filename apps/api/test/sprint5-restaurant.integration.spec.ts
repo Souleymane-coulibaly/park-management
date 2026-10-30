@@ -279,8 +279,13 @@ describe('Sprint 5 — restaurant (intégration)', () => {
   }, 300_000);
 
   afterAll(async () => {
-    await cleanup(prisma);
-    await app.close();
+    // L'application est toujours fermée, même si le nettoyage échoue (base injoignable) : sinon le
+    // processus Jest resterait ouvert indéfiniment.
+    try {
+      if (prisma) await cleanup(prisma);
+    } finally {
+      await app?.close();
+    }
   });
 
   describe('commandes', () => {
@@ -463,7 +468,7 @@ describe('Sprint 5 — restaurant (intégration)', () => {
       await kds.waitFor((m) => m.type === 'ready');
     });
 
-    afterAll(() => kds.close());
+    afterAll(() => kds?.close());
 
     it('6. le paiement n’envoie jamais une commande en cuisine', async () => {
       const order = (
