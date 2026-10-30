@@ -16,6 +16,7 @@ import {
   type SiteContent,
   type SiteMediaKind,
   inspectImage,
+  withContentDefaults,
 } from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
@@ -197,9 +198,17 @@ export class SiteMediaService {
           'Image affichée sur le site en ligne : retirez-la du brouillon et publiez avant de la supprimer.',
       });
     }
-    const draft = site.draft as unknown as SiteContent;
+    const draft = withContentDefaults(site.draft as unknown as SiteContent);
     const cleaned: SiteContent = {
       ...draft,
+      // Image retirée partout : galerie, attractions, restaurant.
+      attractions: draft.attractions.map((a) =>
+        a.mediaId === mediaId ? { ...a, mediaId: null } : a,
+      ),
+      restaurant: {
+        ...draft.restaurant,
+        mediaIds: draft.restaurant.mediaIds.filter((m) => m !== mediaId),
+      },
       media: {
         logoId: draft.media.logoId === mediaId ? null : draft.media.logoId,
         coverId: draft.media.coverId === mediaId ? null : draft.media.coverId,

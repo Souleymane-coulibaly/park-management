@@ -41,6 +41,32 @@ Checkpoints Codex :
 
 ---
 
+## Intervention — Thème Ocall Aqua Premium des sites vitrines (non commité)
+
+Branche `claude/site-aqua-premium`, créée depuis `claude/sprint-10` (`bee25ec`). Le travail en cours
+du Sprint 11A est mis de côté localement (`git stash`, sur `claude/sprint-11`).
+
+- Analyse d'Aqua Folie (structure, couleurs, polices, technique) ; aucun élément protégé repris.
+- Thème **OCALL AQUA PREMIUM** intégré au module du Sprint 10 (pas de second module) : accueil
+  immersif, chiffres clés, attractions en photos, galerie, tarifs, horaires, restaurant, carte au
+  clic, WhatsApp permanent, pied de page. Registre de thèmes extensible ; Aqua Family, Aqua Luxury et
+  Aqua Tropical annoncés, non développés.
+- Éditeur : catalogue des thèmes, couleur d'accent, étiquettes, chiffres clés, photo par attraction,
+  restaurant, **aperçu instantané**.
+- Images optimisées par Next.js (`sharp` 0.33.5, version figée).
+- Migration additive `20261031000000_theme_aqua_premium`, **non appliquée**.
+- Tests :
+  - unitaires : shared 130/130, API 62/62 ;
+  - lint, type-check, build : OK ;
+  - vérification hors ligne avec le vrai client Prisma : thème 14/14, régression des sites 50/50 ;
+  - vérification visuelle sur bureau (1440 px) et mobile (390 px) avec une page de démonstration
+    temporaire, supprimée ensuite : pas de débordement ; deux défauts corrigés (grille des chiffres
+    clés, texte tronqué sur mobile).
+- Non fait : tests sur la base Neon `test` (inaccessible) ; aucun formulaire de contact (choix du
+  commanditaire).
+
+---
+
 ## Sprint 10 — Sites vitrines publics, domaines et tarifs SaaS (en cours, non commité)
 
 Documentation : [docs/SITES-VITRINES.md](docs/SITES-VITRINES.md) (architecture, DNS, hébergement,

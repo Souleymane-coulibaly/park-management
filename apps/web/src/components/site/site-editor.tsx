@@ -8,15 +8,19 @@ import {
   SITE_DOMAIN_STATUS_LABELS,
   SITE_SECTION_LABELS,
   SITE_STATUS_LABELS,
-  SITE_THEMES,
-  SITE_THEME_LABELS,
+  SITE_DEFAULT_ACCENT,
+  SITE_LIMITS,
+  SITE_THEME_CATALOG,
+  type PublishedSite,
   type SiteContent,
+  type SiteTheme,
   type SiteMediaKind,
   type SiteSection,
   formatXof,
   sectionsFor,
 } from '@ocall/shared';
 import { useCan } from '@/components/app/session-context';
+import { SiteView } from '@/components/site/site-view';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader } from '@/components/ui/card';
@@ -28,6 +32,76 @@ import type { SiteCatalogOptions, SiteEditorView, SiteMediaView } from '@/lib/ty
 import { useApi } from '@/lib/use-api';
 
 type Tab = 'content' | 'media' | 'offer' | 'look' | 'domain';
+type Look = { theme: SiteTheme; primaryColor: string; accentColor: string | null };
+
+/**
+ * Aperçu instantané construit dans le navigateur à partir du brouillon non enregistré (mêmes
+ * composants que le site public). Approximation : la version publiée est construite par le
+ * serveur (produits devenus indisponibles écartés, descriptions des produits).
+ */
+function draftToPreview(
+  view: SiteEditorView,
+  draft: SiteContent,
+  look: Look,
+  media: SiteMediaView[],
+  options: SiteCatalogOptions | null,
+): PublishedSite {
+  const m = (id: string | null) => {
+    const x = id ? media.find((y) => y.id === id) : undefined;
+    return x ? { url: x.url, alt: x.alt, width: x.width, height: x.height } : null;
+  };
+  const groups = new Map<string, PublishedSite['menu'][number]['items']>();
+  for (const item of draft.menu) {
+    const p = options?.products.find((x) => x.id === item.productId);
+    if (!p) continue;
+    groups.set(p.category, [
+      ...(groups.get(p.category) ?? []),
+      { name: p.name, description: null, price: item.displayPrice ?? p.price },
+    ]);
+  }
+  const { menu: _m, tickets: _t, media: _media, attractions, restaurant, ...texts } = draft;
+  void _m;
+  void _t;
+  void _media;
+  return {
+    slug: view.slug,
+    businessType: view.establishment.businessType,
+    theme: look.theme,
+    primaryColor: look.primaryColor,
+    accentColor: look.accentColor ?? undefined,
+    publishedAt: new Date().toISOString(),
+    content: {
+      ...texts,
+      attractions: attractions.map((a) => ({
+        name: a.name,
+        description: a.description,
+        image: m(a.mediaId),
+      })),
+      restaurant: {
+        description: restaurant.description,
+        photos: restaurant.mediaIds.map(m).filter((x): x is NonNullable<typeof x> => x !== null),
+      },
+    },
+    logo: m(draft.media.logoId),
+    cover: m(draft.media.coverId),
+    gallery: draft.media.galleryIds.map(m).filter((x): x is NonNullable<typeof x> => x !== null),
+    menu: [...groups.entries()].map(([category, items]) => ({ category, items })),
+    tickets: draft.tickets.flatMap((t) => {
+      const o = options?.tickets.find((x) => x.id === t.ticketCategoryId);
+      return o
+        ? [
+            {
+              name: o.name,
+              description: null,
+              conditions: null,
+              price: t.displayPrice ?? o.price,
+              peopleIncluded: o.peopleIncluded,
+            },
+          ]
+        : [];
+    }),
+  };
+}
 
 const TEXTAREA =
   'block w-full rounded-xl border border-line bg-surface px-3.5 py-2.5 text-[15px] text-charcoal focus:border-forest focus:outline-none focus:ring-2 focus:ring-forest/20';
@@ -76,15 +150,24 @@ export function SiteEditor({ siteId }: { siteId: string }) {
   const [notice, setNotice] = useState<string | null>(null);
   const canPublish = useCan('site.publish');
   const canDomain = useCan('site.domain');
+  const media = useApi<SiteMediaView[]>(`/sites/${siteId}/media`);
+  const options = useApi<SiteCatalogOptions>(`/sites/${siteId}/catalog-options`);
+  const [look, setLook] = useState<Look | null>(null);
+  const [livePreview, setLivePreview] = useState(true);
 
   useEffect(() => {
     if (site.state === 'success') {
       setView(site.data);
       setDraft(site.data.draft);
+      setLook({
+        theme: site.data.theme,
+        primaryColor: site.data.primaryColor,
+        accentColor: site.data.accentColor,
+      });
     }
   }, [site]);
 
-  if (site.state === 'loading' || !view || !draft) return <LoadingState />;
+  if (site.state === 'loading' || !view || !draft || !look) return <LoadingState />;
   if (site.state === 'error') return <ErrorState error={site.error} onRetry={site.reload} />;
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(view.draft);
@@ -242,30 +325,82 @@ export function SiteEditor({ siteId }: { siteId: string }) {
           ))}
       </nav>
 
-      {tab === 'content' && (
-        <ContentTab draft={draft} set={set} businessType={view.establishment.businessType} />
-      )}
-      {tab === 'media' && <MediaTab siteId={siteId} draft={draft} set={set} />}
-      {tab === 'offer' && (
-        <OfferTab
-          siteId={siteId}
-          draft={draft}
-          set={set}
-          businessType={view.establishment.businessType}
-        />
-      )}
-      {tab === 'look' && (
-        <LookTab
-          view={view}
-          draft={draft}
-          set={set}
-          onSaved={(v) => {
-            setView(v);
-            setNotice('Apparence enregistrée (appliquée à la prochaine publication).');
-          }}
-        />
-      )}
-      {tab === 'domain' && <DomainTab view={view} onChange={(v) => setView(v)} />}
+      <div className="flex justify-end">
+        <label className="hidden items-center gap-2 text-sm xl:flex">
+          <input
+            type="checkbox"
+            className="h-5 w-5 accent-forest"
+            checked={livePreview}
+            onChange={(e) => setLivePreview(e.target.checked)}
+          />
+          Aperçu instantané
+        </label>
+      </div>
+      <div
+        className={livePreview ? 'xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] xl:gap-5' : ''}
+      >
+        <div className="min-w-0 space-y-4">
+          {tab === 'content' && (
+            <ContentTab
+              draft={draft}
+              set={set}
+              businessType={view.establishment.businessType}
+              media={media.state === 'success' ? media.data : []}
+            />
+          )}
+          {tab === 'media' && (
+            <MediaTab
+              siteId={siteId}
+              draft={draft}
+              set={set}
+              media={media}
+              businessType={view.establishment.businessType}
+            />
+          )}
+          {tab === 'offer' && (
+            <OfferTab
+              siteId={siteId}
+              draft={draft}
+              set={set}
+              businessType={view.establishment.businessType}
+            />
+          )}
+          {tab === 'look' && (
+            <LookTab
+              view={view}
+              draft={draft}
+              set={set}
+              look={look}
+              setLook={setLook}
+              onSaved={(v) => {
+                setView(v);
+                setNotice('Apparence enregistrée (appliquée à la prochaine publication).');
+              }}
+            />
+          )}
+          {tab === 'domain' && <DomainTab view={view} onChange={(v) => setView(v)} />}
+        </div>
+        {livePreview && (
+          <aside
+            className="sticky top-4 hidden max-h-[85vh] self-start overflow-auto rounded-2xl border border-line bg-white shadow-card xl:block"
+            aria-label="Aperçu instantané du brouillon"
+            data-testid="site-live-preview"
+          >
+            <p className="sticky top-0 z-50 bg-savanna px-4 py-1.5 text-center text-xs font-semibold text-charcoal">
+              Aperçu instantané (non enregistré, non publié)
+            </p>
+            <SiteView
+              site={draftToPreview(
+                view,
+                draft,
+                look,
+                media.state === 'success' ? media.data : [],
+                options.state === 'success' ? options.data : null,
+              )}
+            />
+          </aside>
+        )}
+      </div>
 
       {tab !== 'domain' && (
         <div className="sticky bottom-3 z-10 flex justify-end">
@@ -304,14 +439,60 @@ function ContentTab({
   draft,
   set,
   businessType,
+  media,
 }: {
   draft: SiteContent;
   set: (p: Partial<SiteContent>) => void;
   businessType: SiteEditorView['establishment']['businessType'];
+  media: SiteMediaView[];
 }) {
   const park = businessType !== 'RESTAURANT';
+  const hasRestaurant = businessType !== 'PARK';
+  const photos = media.filter((x) => x.kind === 'GALLERY');
+  const facts = [
+    ...draft.keyFacts,
+    ...Array.from({ length: SITE_LIMITS.keyFacts }, () => ({ label: '', value: '' })),
+  ].slice(0, SITE_LIMITS.keyFacts);
   return (
     <div className="space-y-4">
+      <Section
+        title="Accueil"
+        description="Étiquettes affichées sur la grande photo, et chiffres clés sous l’accueil (thème Aqua Premium). Sans chiffres saisis, le site affiche le tarif d’entrée le plus bas et les horaires."
+      >
+        <TextArea
+          label={`Étiquettes (une par ligne, ${SITE_LIMITS.heroHighlights} au plus)`}
+          rows={3}
+          value={draft.heroHighlights.join('\n')}
+          onChange={(v) =>
+            set({ heroHighlights: v.split('\n').slice(0, SITE_LIMITS.heroHighlights) })
+          }
+          hint="Ex. Familles · Anniversaires · Sécurité · Restauration"
+        />
+        <div className="grid gap-2 sm:grid-cols-2">
+          {facts.map((f, i) => (
+            <div key={i} className="grid grid-cols-2 gap-2">
+              <InputField
+                label={`Chiffre clé ${i + 1} : libellé`}
+                value={f.label}
+                maxLength={SITE_LIMITS.keyFactLength}
+                onChange={(e) => {
+                  const next = facts.map((x, j) => (j === i ? { ...x, label: e.target.value } : x));
+                  set({ keyFacts: next.filter((x) => x.label || x.value) });
+                }}
+              />
+              <InputField
+                label="Valeur"
+                value={f.value}
+                maxLength={SITE_LIMITS.keyFactLength}
+                onChange={(e) => {
+                  const next = facts.map((x, j) => (j === i ? { ...x, value: e.target.value } : x));
+                  set({ keyFacts: next.filter((x) => x.label || x.value) });
+                }}
+              />
+            </div>
+          ))}
+        </div>
+      </Section>
       <Section title="Présentation">
         <InputField
           label="Nom public"
@@ -481,30 +662,113 @@ function ContentTab({
       {park && (
         <Section
           title="Attractions et activités"
-          description="Une attraction par ligne : « Nom — description »."
+          description="Nom, courte description et photo facultative de chaque attraction."
         >
-          <TextArea
-            label="Attractions"
-            rows={6}
-            value={draft.attractions
-              .map((a) => (a.description ? `${a.name} — ${a.description}` : a.name))
-              .join('\n')}
-            onChange={(v) =>
+          <ul className="space-y-3" data-testid="site-attractions">
+            {draft.attractions.map((a, i) => (
+              <li
+                key={i}
+                className="grid gap-2 rounded-xl border border-line p-3 sm:grid-cols-[1fr_1fr_12rem_auto] sm:items-end"
+              >
+                <InputField
+                  label="Nom"
+                  value={a.name}
+                  maxLength={SITE_LIMITS.attractionName}
+                  onChange={(e) =>
+                    set({
+                      attractions: draft.attractions.map((x, j) =>
+                        j === i ? { ...x, name: e.target.value } : x,
+                      ),
+                    })
+                  }
+                />
+                <InputField
+                  label="Description"
+                  value={a.description}
+                  maxLength={SITE_LIMITS.attractionDescription}
+                  onChange={(e) =>
+                    set({
+                      attractions: draft.attractions.map((x, j) =>
+                        j === i ? { ...x, description: e.target.value } : x,
+                      ),
+                    })
+                  }
+                />
+                <SelectField
+                  label="Photo"
+                  value={a.mediaId ?? ''}
+                  onChange={(e) =>
+                    set({
+                      attractions: draft.attractions.map((x, j) =>
+                        j === i ? { ...x, mediaId: e.target.value || null } : x,
+                      ),
+                    })
+                  }
+                  options={[
+                    { value: '', label: 'Aucune' },
+                    ...photos.map((p, k) => ({ value: p.id, label: p.alt || `Photo ${k + 1}` })),
+                  ]}
+                />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label={`Retirer ${a.name || 'l’attraction'}`}
+                  icon={<Trash2 className="h-4 w-4" />}
+                  onClick={() => set({ attractions: draft.attractions.filter((_, j) => j !== i) })}
+                />
+              </li>
+            ))}
+          </ul>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={draft.attractions.length >= SITE_LIMITS.attractions}
+            onClick={() =>
               set({
-                attractions: v
-                  .split('\n')
-                  .slice(0, 30)
-                  .map((line) => {
-                    const [name, ...rest] = line.split(' — ');
-                    return { name: name ?? '', description: rest.join(' — ') };
-                  }),
+                attractions: [...draft.attractions, { name: '', description: '', mediaId: null }],
               })
             }
-          />
+          >
+            Ajouter une attraction
+          </Button>
+          <p className="text-sm text-muted">
+            Les photos proposées sont celles de l’onglet Photos (type « Galerie »).
+          </p>
           <TextArea
             label="Informations de sécurité"
             value={draft.safetyInfo}
             onChange={(v) => set({ safetyInfo: v })}
+          />
+        </Section>
+      )}
+      {hasRestaurant && (
+        <Section
+          title="Restaurant"
+          description="Texte et photos de la section restaurant ; le menu se choisit dans l’onglet Menu et tarifs."
+        >
+          <label className="flex items-center gap-2 text-sm font-medium">
+            <input
+              type="checkbox"
+              className="h-5 w-5 accent-forest"
+              checked={!draft.sections.hidden.includes('menu')}
+              onChange={(e) =>
+                set({
+                  sections: {
+                    ...draft.sections,
+                    hidden: e.target.checked
+                      ? draft.sections.hidden.filter((x) => x !== 'menu')
+                      : [...draft.sections.hidden, 'menu'],
+                  },
+                })
+              }
+            />
+            Afficher la section restaurant
+          </label>
+          <TextArea
+            label="Présentation du restaurant"
+            value={draft.restaurant.description}
+            max={SITE_LIMITS.text}
+            onChange={(v) => set({ restaurant: { ...draft.restaurant, description: v } })}
           />
         </Section>
       )}
@@ -523,12 +787,15 @@ function MediaTab({
   siteId,
   draft,
   set,
+  media,
+  businessType,
 }: {
   siteId: string;
   draft: SiteContent;
   set: (p: Partial<SiteContent>) => void;
+  media: ReturnType<typeof useApi<SiteMediaView[]>>;
+  businessType: SiteEditorView['establishment']['businessType'];
 }) {
-  const media = useApi<SiteMediaView[]>(`/sites/${siteId}/media`);
   const [kind, setKind] = useState<SiteMediaKind>('GALLERY');
   const [alt, setAlt] = useState('');
   const [file, setFile] = useState<File | null>(null);
@@ -568,6 +835,11 @@ function MediaTab({
           logoId: draft.media.logoId === id ? null : draft.media.logoId,
           coverId: draft.media.coverId === id ? null : draft.media.coverId,
           galleryIds: draft.media.galleryIds.filter((g) => g !== id),
+        },
+        attractions: draft.attractions.map((a) => (a.mediaId === id ? { ...a, mediaId: null } : a)),
+        restaurant: {
+          ...draft.restaurant,
+          mediaIds: draft.restaurant.mediaIds.filter((m) => m !== id),
         },
       });
       media.reload();
@@ -657,10 +929,32 @@ function MediaTab({
                   {{ LOGO: 'Logo', COVER: 'Couverture', GALLERY: 'Galerie' }[m.kind]} · {m.width}×
                   {m.height}
                 </span>
-                <span className="flex gap-1">
+                <span className="flex flex-wrap justify-end gap-1">
                   <Button size="sm" variant="secondary" onClick={() => toggle(m)}>
                     {used(m) ? 'Retirer' : 'Utiliser'}
                   </Button>
+                  {m.kind === 'GALLERY' && businessType !== 'PARK' && (
+                    <Button
+                      size="sm"
+                      variant={draft.restaurant.mediaIds.includes(m.id) ? 'primary' : 'secondary'}
+                      disabled={
+                        !draft.restaurant.mediaIds.includes(m.id) &&
+                        draft.restaurant.mediaIds.length >= SITE_LIMITS.restaurantPhotos
+                      }
+                      onClick={() =>
+                        set({
+                          restaurant: {
+                            ...draft.restaurant,
+                            mediaIds: draft.restaurant.mediaIds.includes(m.id)
+                              ? draft.restaurant.mediaIds.filter((x) => x !== m.id)
+                              : [...draft.restaurant.mediaIds, m.id],
+                          },
+                        })
+                      }
+                    >
+                      Restaurant
+                    </Button>
+                  )}
                   <Button
                     size="sm"
                     variant="ghost"
@@ -829,15 +1123,20 @@ function LookTab({
   view,
   draft,
   set,
+  look,
+  setLook,
   onSaved,
 }: {
   view: SiteEditorView;
   draft: SiteContent;
   set: (p: Partial<SiteContent>) => void;
+  look: Look;
+  setLook: (l: Look) => void;
   onSaved: (v: SiteEditorView) => void;
 }) {
-  const [theme, setTheme] = useState(view.theme);
-  const [color, setColor] = useState(view.primaryColor);
+  const { theme, primaryColor: color, accentColor } = look;
+  const setTheme = (t: SiteTheme) => setLook({ ...look, theme: t });
+  const setColor = (c: string) => setLook({ ...look, primaryColor: c });
   const [slug, setSlug] = useState(view.slug);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
@@ -865,7 +1164,12 @@ function LookTab({
       onSaved(
         await api<SiteEditorView>(`/sites/${view.id}/settings`, {
           method: 'PUT',
-          body: { theme, primaryColor: color, ...(slug !== view.slug ? { slug } : {}) },
+          body: {
+            theme,
+            primaryColor: color,
+            accentColor,
+            ...(slug !== view.slug ? { slug } : {}),
+          },
         }),
       );
     } catch (e) {
@@ -878,13 +1182,50 @@ function LookTab({
   return (
     <div className="space-y-4">
       <Section title="Thème, couleur et adresse">
+        <fieldset>
+          <legend className="mb-2 text-sm font-medium">Thème</legend>
+          <ul className="grid gap-2 sm:grid-cols-2" data-testid="site-themes">
+            {SITE_THEME_CATALOG.map((t) => (
+              <li key={t.key}>
+                <label
+                  className={`flex h-full items-start gap-3 rounded-xl border p-3 ${theme === t.key ? 'border-forest ring-2 ring-forest/30' : 'border-line'} ${t.available ? 'cursor-pointer' : 'opacity-55'}`}
+                >
+                  <input
+                    type="radio"
+                    name="site-theme"
+                    className="mt-1 h-4 w-4 accent-forest"
+                    disabled={!t.available}
+                    checked={theme === t.key}
+                    onChange={() => setTheme(t.key as SiteTheme)}
+                  />
+                  <span>
+                    <span className="block font-semibold">
+                      {t.label} {!t.available && <Badge>À venir</Badge>}
+                    </span>
+                    <span className="block text-sm text-muted">{t.description}</span>
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        </fieldset>
         <div className="grid gap-3 sm:grid-cols-3">
-          <SelectField
-            label="Thème"
-            value={theme}
-            onChange={(e) => setTheme(e.target.value as typeof theme)}
-            options={SITE_THEMES.map((t) => ({ value: t, label: SITE_THEME_LABELS[t] }))}
-          />
+          <label className="block space-y-1.5">
+            <span className="block text-sm font-medium">Couleur d’accent</span>
+            <span className="flex items-center gap-2">
+              <input
+                type="color"
+                value={accentColor ?? SITE_DEFAULT_ACCENT}
+                onChange={(e) => setLook({ ...look, accentColor: e.target.value })}
+                className="h-11 w-14 rounded-lg border border-line"
+                aria-label="Couleur d’accent"
+              />
+              <code className="text-sm">{accentColor ?? `${SITE_DEFAULT_ACCENT} (défaut)`}</code>
+            </span>
+            <span className="block text-sm text-muted">
+              Boutons et chiffres clés (thème Aqua Premium) : couleur claire.
+            </span>
+          </label>
           <label className="block space-y-1.5">
             <span className="block text-sm font-medium">Couleur principale</span>
             <span className="flex items-center gap-2">

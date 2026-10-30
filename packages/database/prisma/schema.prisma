@@ -1626,6 +1626,8 @@ enum SiteTheme {
   CLASSIC
   MODERN
   WARM
+  /// Thème premium « Ocall Aqua Premium » (parcs aquatiques).
+  AQUA_PREMIUM
 }
 
 enum SiteMediaKind {
@@ -1655,6 +1657,8 @@ model PublicSite {
   isOnline        Boolean   @default(false)
   theme           SiteTheme @default(CLASSIC)
   primaryColor    String    @default("#176B53") @db.Char(7)
+  /// Couleur d'accent (thème Aqua Premium), texte sombre lisible dessus ; null = défaut du thème.
+  accentColor     String?   @db.Char(7)
   /// Contenu en cours d'édition (SiteContent), jamais exposé publiquement.
   draft           Json
   draftUpdatedAt  DateTime  @default(now())

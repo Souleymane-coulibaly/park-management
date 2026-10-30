@@ -959,6 +959,7 @@ export interface SiteEditorView {
   isOnline: boolean;
   theme: SiteTheme;
   primaryColor: string;
+  accentColor: string | null;
   draft: SiteContent;
   draftUpdatedAt: string;
   publishedAt: string | null;

@@ -216,16 +216,56 @@ export function normalizeCustomDomain(
 
 // ─── Thèmes et sections ───
 
-export const SITE_THEMES = ['CLASSIC', 'MODERN', 'WARM'] as const;
+/** Thèmes sélectionnables (valeurs enregistrées en base). */
+export const SITE_THEMES = ['CLASSIC', 'MODERN', 'WARM', 'AQUA_PREMIUM'] as const;
 export type SiteTheme = (typeof SITE_THEMES)[number];
 
 export const SITE_THEME_LABELS: Record<SiteTheme, string> = {
   CLASSIC: 'Classique — sobre, fond clair',
   MODERN: 'Moderne — grandes images, titres marqués',
   WARM: 'Chaleureux — fond ivoire, accents terre cuite',
+  AQUA_PREMIUM: 'Ocall Aqua Premium — immersif, pour parcs aquatiques',
 };
 
+/**
+ * Catalogue des thèmes, y compris ceux annoncés mais pas encore développés (non sélectionnables).
+ * Ajouter un thème : une valeur d'énumération, un composant de rendu, une entrée ici.
+ */
+export const SITE_THEME_CATALOG: readonly {
+  key: string;
+  label: string;
+  description: string;
+  available: boolean;
+}[] = [
+  {
+    key: 'AQUA_PREMIUM',
+    label: 'Ocall Aqua Premium',
+    description: 'Accueil plein écran, attractions en photos, bouton WhatsApp permanent.',
+    available: true,
+  },
+  { key: 'CLASSIC', label: 'Classique', description: 'Sobre, fond clair.', available: true },
+  {
+    key: 'MODERN',
+    label: 'Moderne',
+    description: 'Grandes images, titres marqués.',
+    available: true,
+  },
+  {
+    key: 'WARM',
+    label: 'Chaleureux',
+    description: 'Fond ivoire, accents terre cuite.',
+    available: true,
+  },
+  { key: 'AQUA_FAMILY', label: 'Aqua Family', description: 'À venir.', available: false },
+  { key: 'AQUA_LUXURY', label: 'Aqua Luxury', description: 'À venir.', available: false },
+  { key: 'AQUA_TROPICAL', label: 'Aqua Tropical', description: 'À venir.', available: false },
+];
+
 export const SITE_DEFAULT_COLOR = '#176B53';
+/** Couleur d'accent par défaut (thème Aqua Premium) : boutons et chiffres clés à texte sombre. */
+export const SITE_DEFAULT_ACCENT = '#F5C94B';
+/** Texte sombre posé sur la couleur d'accent. */
+export const SITE_ACCENT_TEXT = '#0B1F2E';
 
 /** Couleur hexadécimale #RRGGBB. */
 export const isHexColor = (v: string) => /^#[0-9a-fA-F]{6}$/.test(v);
@@ -249,6 +289,11 @@ export function contrastRatio(a: string, b: string): number {
  */
 export function isAccessibleBrandColor(hex: string): boolean {
   return isHexColor(hex) && contrastRatio(hex, '#FFFFFF') >= 4.5;
+}
+
+/** Couleur d'accent utilisable : texte sombre lisible dessus (contraste ≥ 4,5:1). */
+export function isAccessibleAccentColor(hex: string): boolean {
+  return isHexColor(hex) && contrastRatio(hex, SITE_ACCENT_TEXT) >= 4.5;
 }
 
 export const SITE_SECTIONS = [
@@ -312,6 +357,11 @@ export const SITE_LIMITS = {
   menuItems: 200,
   ticketItems: 30,
   altText: 140,
+  heroHighlights: 4,
+  highlightLength: 40,
+  keyFacts: 4,
+  keyFactLength: 30,
+  restaurantPhotos: 6,
 } as const;
 
 export interface SiteHours {
@@ -338,7 +388,8 @@ export interface SiteContent {
   hours: SiteHours[];
   hoursNote: string;
   services: string[];
-  attractions: { name: string; description: string }[];
+  /** Attractions ; photo facultative (image de la galerie du site). */
+  attractions: { name: string; description: string; mediaId: string | null }[];
   safetyInfo: string;
   practicalInfo: string;
   /** Produits publiés au menu (rien n'est publié par défaut) ; prix indicatif facultatif. */
@@ -347,6 +398,47 @@ export interface SiteContent {
   tickets: { ticketCategoryId: string; displayPrice: number | null }[];
   media: { logoId: string | null; coverId: string | null; galleryIds: string[] };
   sections: { order: SiteSection[]; hidden: SiteSection[] };
+  /** Étiquettes affichées sur la photo d'accueil (ex. « Familles », « Anniversaires »). */
+  heroHighlights: string[];
+  /** Chiffres clés sous l'accueil (ex. « Entrée » / « 3 000 FCFA »), saisis par l'établissement. */
+  keyFacts: { label: string; value: string }[];
+  /** Section restaurant : texte et photos (images de la galerie du site). */
+  restaurant: { description: string; mediaIds: string[] };
+}
+
+/** Champs ajoutés après le Sprint 10 : valeurs par défaut pour les contenus antérieurs. */
+export const SITE_CONTENT_DEFAULTS: Pick<
+  SiteContent,
+  'heroHighlights' | 'keyFacts' | 'restaurant'
+> = {
+  heroHighlights: [],
+  keyFacts: [],
+  restaurant: { description: '', mediaIds: [] },
+};
+
+/** Complète un contenu enregistré avant l'ajout des champs du thème premium (lecture seule). */
+export function withContentDefaults(raw: SiteContent): SiteContent {
+  return {
+    ...SITE_CONTENT_DEFAULTS,
+    ...raw,
+    attractions: (raw.attractions ?? []).map((a) => ({ ...a, mediaId: a.mediaId ?? null })),
+    restaurant: raw.restaurant ?? SITE_CONTENT_DEFAULTS.restaurant,
+  };
+}
+
+/** Identifiants des images utilisées par un contenu (logo, couverture, galerie, attractions, restaurant). */
+export function contentMediaIds(c: SiteContent): string[] {
+  return [
+    ...new Set(
+      [
+        c.media.logoId,
+        c.media.coverId,
+        ...c.media.galleryIds,
+        ...c.attractions.map((a) => a.mediaId),
+        ...c.restaurant.mediaIds,
+      ].filter((x): x is string => !!x),
+    ),
+  ];
 }
 
 export function emptySiteContent(name: string, businessType: BusinessType): SiteContent {
@@ -377,6 +469,9 @@ export function emptySiteContent(name: string, businessType: BusinessType): Site
     tickets: [],
     media: { logoId: null, coverId: null, galleryIds: [] },
     sections: { order: sectionsFor(businessType), hidden: [] },
+    heroHighlights: [],
+    keyFacts: [],
+    restaurant: { description: '', mediaIds: [] },
   };
 }
 
@@ -421,6 +516,9 @@ export function validateSiteContent(
     'tickets',
     'media',
     'sections',
+    'heroHighlights',
+    'keyFacts',
+    'restaurant',
   ];
   for (const k of Object.keys(input))
     if (!KEYS.includes(k as keyof SiteContent)) errors.push(`Champ inconnu : ${k}.`);
@@ -543,7 +641,85 @@ export function validateSiteContent(
         );
         continue;
       }
-      attractions.push({ name, description });
+      // Photo facultative (absente des contenus antérieurs).
+      let attractionMedia: string | null = null;
+      if (a.mediaId !== undefined && a.mediaId !== null) {
+        if (typeof a.mediaId === 'string' && UUID.test(a.mediaId)) attractionMedia = a.mediaId;
+        else errors.push(`Attraction « ${name.slice(0, 30)} » : photo invalide.`);
+      }
+      attractions.push({ name, description, mediaId: attractionMedia });
+    }
+  }
+
+  // ─── Champs du thème premium (facultatifs : absents des contenus antérieurs) ───
+  const heroHighlights: string[] = [];
+  if (input.heroHighlights !== undefined) {
+    const v = input.heroHighlights;
+    if (
+      !Array.isArray(v) ||
+      v.length > SITE_LIMITS.heroHighlights ||
+      !v.every((x) => typeof x === 'string')
+    ) {
+      errors.push(`heroHighlights : ${SITE_LIMITS.heroHighlights} étiquettes au plus.`);
+    } else {
+      for (const x of (v as string[]).map((t) => t.trim()).filter(Boolean)) {
+        if (x.length > SITE_LIMITS.highlightLength || CONTROL.test(x)) {
+          errors.push(
+            `Étiquette « ${x.slice(0, 20)} » : ${SITE_LIMITS.highlightLength} caractères au plus.`,
+          );
+        } else heroHighlights.push(x);
+      }
+    }
+  }
+  const keyFacts: SiteContent['keyFacts'] = [];
+  if (input.keyFacts !== undefined) {
+    const v = input.keyFacts;
+    if (!Array.isArray(v) || v.length > SITE_LIMITS.keyFacts) {
+      errors.push(`keyFacts : ${SITE_LIMITS.keyFacts} chiffres clés au plus.`);
+    } else {
+      for (const f of v) {
+        if (!isObj(f) || typeof f.label !== 'string' || typeof f.value !== 'string') {
+          errors.push('Chiffre clé invalide.');
+          continue;
+        }
+        const label = f.label.trim();
+        const value = f.value.trim();
+        if (!label && !value) continue;
+        if (
+          !label ||
+          !value ||
+          label.length > SITE_LIMITS.keyFactLength ||
+          value.length > SITE_LIMITS.keyFactLength ||
+          CONTROL.test(label + value)
+        ) {
+          errors.push(
+            `Chiffre clé « ${label.slice(0, 20)} » : libellé et valeur obligatoires, ${SITE_LIMITS.keyFactLength} caractères au plus.`,
+          );
+          continue;
+        }
+        keyFacts.push({ label, value });
+      }
+    }
+  }
+  const restaurant: SiteContent['restaurant'] = { description: '', mediaIds: [] };
+  if (input.restaurant !== undefined) {
+    const r = input.restaurant;
+    if (!isObj(r) || typeof r.description !== 'string' || !Array.isArray(r.mediaIds)) {
+      errors.push('restaurant : description et photos attendues.');
+    } else {
+      restaurant.description = r.description.trim();
+      if (
+        restaurant.description.length > SITE_LIMITS.text ||
+        CONTROL.test(restaurant.description)
+      ) {
+        errors.push(`restaurant : ${SITE_LIMITS.text} caractères au plus.`);
+      }
+      if (
+        r.mediaIds.length > SITE_LIMITS.restaurantPhotos ||
+        !r.mediaIds.every((m) => typeof m === 'string' && UUID.test(m))
+      ) {
+        errors.push(`restaurant : ${SITE_LIMITS.restaurantPhotos} photos au plus.`);
+      } else restaurant.mediaIds = [...new Set(r.mediaIds as string[])];
     }
   }
 
@@ -634,6 +810,9 @@ export function validateSiteContent(
       order: validOrder ? (order as SiteSection[]) : allowed,
       hidden: [...new Set(hidden as SiteSection[])],
     },
+    heroHighlights,
+    keyFacts,
+    restaurant,
   };
   if ((content.latitude === null) !== (content.longitude === null)) {
     errors.push('Coordonnées : latitude et longitude vont ensemble.');
@@ -724,8 +903,23 @@ export interface PublishedSite {
   businessType: BusinessType;
   theme: SiteTheme;
   primaryColor: string;
+  /** Couleur d'accent (thème Aqua Premium) ; absente des versions publiées avant ce thème. */
+  accentColor?: string;
   publishedAt: string;
-  content: Omit<SiteContent, 'menu' | 'tickets' | 'media'>;
+  /**
+   * Textes publiés. Les photos d'attractions et du restaurant y sont résolues en URL publiques
+   * (aucun identifiant de média). Les champs du thème premium sont absents des versions publiées
+   * avant son introduction : le rendu les traite comme vides.
+   */
+  content: Omit<
+    SiteContent,
+    'menu' | 'tickets' | 'media' | 'attractions' | 'restaurant' | 'heroHighlights' | 'keyFacts'
+  > & {
+    attractions: { name: string; description: string; image?: PublishedMedia | null }[];
+    heroHighlights?: string[];
+    keyFacts?: { label: string; value: string }[];
+    restaurant?: { description: string; photos: PublishedMedia[] };
+  };
   logo: PublishedMedia | null;
   cover: PublishedMedia | null;
   gallery: PublishedMedia[];

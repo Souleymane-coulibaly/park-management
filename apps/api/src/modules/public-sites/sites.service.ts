@@ -17,12 +17,15 @@ import {
   type SiteStatus,
   type SiteTheme,
   canonicalSiteUrl,
+  contentMediaIds,
   emptySiteContent,
+  isAccessibleAccentColor,
   isAccessibleBrandColor,
   siteSlugError,
   slugFromHost,
   slugify,
   validateSiteContent,
+  withContentDefaults,
 } from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
@@ -56,6 +59,7 @@ const SITE_SELECT = {
   isOnline: true,
   theme: true,
   primaryColor: true,
+  accentColor: true,
   draft: true,
   draftUpdatedAt: true,
   publishedAt: true,
@@ -115,7 +119,8 @@ export class SitesService {
       isOnline: site.isOnline,
       theme: site.theme,
       primaryColor: site.primaryColor,
-      draft: site.draft as unknown as SiteContent,
+      accentColor: site.accentColor,
+      draft: withContentDefaults(site.draft as unknown as SiteContent),
       draftUpdatedAt: site.draftUpdatedAt.toISOString(),
       publishedAt: site.publishedAt?.toISOString() ?? null,
       hasUnpublishedChanges: !site.publishedAt || site.draftUpdatedAt > site.publishedAt,
@@ -271,10 +276,9 @@ export class SitesService {
       });
     }
     const content = result.content;
-    // Médias : uniquement ceux de ce site, du bon type.
-    const ids = [content.media.logoId, content.media.coverId, ...content.media.galleryIds].filter(
-      Boolean,
-    ) as string[];
+    // Médias : uniquement ceux de ce site, du bon type (photos d'attractions et du restaurant :
+    // images de la galerie du site).
+    const ids = contentMediaIds(content);
     if (ids.length) {
       const media = await this.prisma.publicSiteMedia.findMany({
         where: { siteId, id: { in: ids } },
@@ -284,7 +288,11 @@ export class SitesService {
       const wrong =
         (content.media.logoId && kindOf.get(content.media.logoId) !== 'LOGO') ||
         (content.media.coverId && kindOf.get(content.media.coverId) !== 'COVER') ||
-        content.media.galleryIds.some((g) => kindOf.get(g) !== 'GALLERY');
+        [
+          ...content.media.galleryIds,
+          ...content.attractions.flatMap((a) => (a.mediaId ? [a.mediaId] : [])),
+          ...content.restaurant.mediaIds,
+        ].some((g) => kindOf.get(g) !== 'GALLERY');
       if (wrong)
         throw new BadRequestException({
           code: 'SITE_MEDIA_INVALID',
@@ -302,10 +310,17 @@ export class SitesService {
   async updateSettings(
     tenant: TenantContext,
     siteId: string,
-    dto: { slug?: string; theme?: SiteTheme; primaryColor?: string },
+    dto: { slug?: string; theme?: SiteTheme; primaryColor?: string; accentColor?: string | null },
   ) {
     const site = await this.findSite(tenant, siteId);
     if (dto.slug !== undefined) this.assertSlug(dto.slug);
+    if (dto.accentColor && !isAccessibleAccentColor(dto.accentColor)) {
+      throw new BadRequestException({
+        code: 'ACCENT_NOT_ACCESSIBLE',
+        message:
+          'Couleur d’accent trop sombre : le texte foncé posé dessus serait illisible (contraste 4,5:1 minimum).',
+      });
+    }
     if (dto.primaryColor !== undefined && !isAccessibleBrandColor(dto.primaryColor)) {
       throw new BadRequestException({
         code: 'COLOR_NOT_ACCESSIBLE',
@@ -323,6 +338,9 @@ export class SitesService {
             ...(dto.primaryColor !== undefined
               ? { primaryColor: dto.primaryColor.toUpperCase() }
               : {}),
+            ...(dto.accentColor !== undefined
+              ? { accentColor: dto.accentColor ? dto.accentColor.toUpperCase() : null }
+              : {}),
             draftUpdatedAt: new Date(),
           },
         });
@@ -334,7 +352,12 @@ export class SitesService {
             targetType: 'PublicSite',
             targetId: siteId,
             metadata: {
-              from: { slug: site.slug, theme: site.theme, primaryColor: site.primaryColor },
+              from: {
+                slug: site.slug,
+                theme: site.theme,
+                primaryColor: site.primaryColor,
+                accentColor: site.accentColor,
+              },
               to: dto,
             },
           },
@@ -359,13 +382,11 @@ export class SitesService {
     site: SiteRow,
     mediaUrl: (m: { id: string; storageKey: string }) => string,
   ): Promise<{ published: PublishedSite; warnings: string[]; mediaIds: string[] }> {
-    const draft = site.draft as unknown as SiteContent;
+    const draft = withContentDefaults(site.draft as unknown as SiteContent);
     const warnings: string[] = [];
     const establishmentId = site.establishmentId;
 
-    const ids = [draft.media.logoId, draft.media.coverId, ...draft.media.galleryIds].filter(
-      Boolean,
-    ) as string[];
+    const ids = contentMediaIds(draft);
     const media = ids.length
       ? await db.publicSiteMedia.findMany({
           where: { siteId: site.id, id: { in: ids } },
@@ -454,16 +475,30 @@ export class SitesService {
       });
     }
 
-    const { menu: _m, tickets: _t, media: _media, ...content } = draft;
+    const { menu: _m, tickets: _t, media: _media, attractions, restaurant, ...texts } = draft;
     void _m;
     void _t;
     void _media;
+    // Photos résolues en URL publiques : aucun identifiant de média dans la version publiée.
+    const content: PublishedSite['content'] = {
+      ...texts,
+      attractions: attractions.map((a) => ({
+        name: a.name,
+        description: a.description,
+        image: toPublished(a.mediaId),
+      })),
+      restaurant: {
+        description: restaurant.description,
+        photos: restaurant.mediaIds.map(toPublished).filter((m): m is PublishedMedia => m !== null),
+      },
+    };
     return {
       published: {
         slug: site.slug,
         businessType: site.establishment.businessType as BusinessType,
         theme: site.theme,
         primaryColor: site.primaryColor,
+        ...(site.accentColor ? { accentColor: site.accentColor } : {}),
         publishedAt: new Date().toISOString(),
         content,
         logo: toPublished(draft.media.logoId),

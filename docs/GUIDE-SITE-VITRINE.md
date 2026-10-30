@@ -34,6 +34,21 @@ Le site est créé en **brouillon** : personne ne le voit tant que vous ne l'ave
 
 Cliquez sur **Enregistrer le brouillon** : vos changements restent invisibles du public.
 
+### Thème Ocall Aqua Premium (parcs aquatiques)
+
+Dans **Apparence**, choisissez « Ocall Aqua Premium », puis une couleur principale et une couleur
+d'accent (pour les boutons et les chiffres clés). Dans **Contenu** :
+
+- **Accueil** : jusqu'à 4 étiquettes (ex. Familles, Anniversaires) et 4 chiffres clés (ex. Entrée /
+  3 000 FCFA). Sans chiffres clés, le site affiche votre tarif d'entrée le plus bas et vos horaires.
+- **Attractions** : un nom, une courte description et une photo (choisie parmi les photos de type
+  « Galerie »).
+- **Restaurant** : un texte et jusqu'à 6 photos (bouton « Restaurant » dans l'onglet Photos). La case
+  « Afficher la section restaurant » permet de la masquer.
+
+Sur un grand écran, l'**aperçu instantané** affiche votre site à côté du formulaire pendant que vous
+écrivez.
+
 ## 3. Prévisualiser et publier
 
 - **Prévisualiser** affiche le site tel qu'il sera, avec un bandeau « Aperçu ».

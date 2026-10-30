@@ -9,6 +9,7 @@ import {
   Length,
   Matches,
   MaxLength,
+  ValidateIf,
 } from 'class-validator';
 import {
   SITE_DOMAIN_STATUSES,
@@ -57,6 +58,16 @@ export class UpdateSiteSettingsDto {
   @IsOptional()
   @Matches(/^#[0-9a-fA-F]{6}$/)
   primaryColor?: string;
+
+  @ApiPropertyOptional({
+    example: '#F5C94B',
+    nullable: true,
+    description: 'null = défaut du thème.',
+  })
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @Matches(/^#[0-9a-fA-F]{6}$/)
+  accentColor?: string | null;
 }
 
 export class UploadSiteMediaDto {

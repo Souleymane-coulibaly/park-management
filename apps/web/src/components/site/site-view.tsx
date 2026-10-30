@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react';
+import { AquaPremium } from './themes/aqua-premium';
 import {
   Clock,
   Facebook,
@@ -28,6 +29,7 @@ import {
  */
 
 const THEMES = {
+  AQUA_PREMIUM: { page: '', band: '', card: '' },
   CLASSIC: {
     page: 'bg-white text-[#24352F]',
     band: 'bg-[#F7F5F0]',
@@ -44,6 +46,9 @@ const THEMES = {
 const digits = (phone: string) => phone.replace(/[^0-9]/g, '');
 
 export function SiteView({ site, banner }: { site: PublishedSite; banner?: ReactNode }) {
+  // Registre des thèmes : un composant par thème dédié ; les thèmes historiques partagent la mise
+  // en page ci-dessous.
+  if (site.theme === 'AQUA_PREMIUM') return <AquaPremium site={site} banner={banner} />;
   const c = site.content;
   const theme = THEMES[site.theme] ?? THEMES.CLASSIC;
   const allowed = sectionsFor(site.businessType);

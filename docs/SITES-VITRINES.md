@@ -179,7 +179,44 @@ ne prouvent rien sur la production. Pour chaque environnement :
   250 000 FCFA de mise en service + 15 000 FCFA par mois ; Parc + Restaurant 350 000 + 25 000 FCFA
   par mois.
 
-## 9. Limites connues
+## 9. Thèmes — Ocall Aqua Premium
+
+Registre des thèmes : une valeur d'énumération `SiteTheme`, un composant de rendu
+(`apps/web/src/components/site/themes/`) et une entrée dans `SITE_THEME_CATALOG`
+(`packages/shared/src/sites.ts`). Les thèmes Classique, Moderne et Chaleureux partagent la mise en
+page historique. **Aqua Family, Aqua Luxury et Aqua Tropical sont annoncés « à venir »** : ils sont
+visibles dans l'éditeur, mais ni sélectionnables ni développés.
+
+**Ocall Aqua Premium** reprend la structure et l'expérience d'un site de parc aquatique de
+référence (analyse d'Aqua Folie, Bamako), sans en copier ni le code, ni les textes, ni les images,
+ni le logo. Il comprend :
+
+- un en-tête fixe : ancres, bouton WhatsApp, menu mobile sans JavaScript ;
+- un accueil plein écran sur la photo de couverture, avec étiquettes et deux boutons ;
+- des chiffres clés saisis par l'établissement, ou déduits des tarifs et des horaires ;
+- les attractions **avec photo**, une galerie en mosaïque, les tarifs en cartes ;
+- les horaires avec le jour courant mis en évidence ;
+- un restaurant (texte, photos, menu) qu'on peut afficher ou masquer ;
+- une carte OpenStreetMap chargée **seulement au clic**, un bouton WhatsApp permanent sur mobile ;
+- un pied de page en colonnes.
+
+Personnalisation : couleur principale (texte blanc lisible) et couleur d'accent (texte sombre
+lisible, contraste minimal de 4,5:1 contrôlé par le serveur).
+
+L'éditeur propose un **aperçu instantané** à côté du formulaire, sur grand écran, construit à
+partir du brouillon non enregistré. L'aperçu complet reste construit par le serveur.
+
+**Images.** Les images publiées sont redimensionnées et converties (AVIF, WebP) par l'optimiseur
+d'images de Next.js (`sharp` 0.33.5, version figée), à la taille de chaque écran. Les images de
+l'aperçu, servies par une route authentifiée, ne sont pas optimisées. Le chargement est différé sauf
+pour la photo d'accueil.
+
+**Compatibilité.** Les nouveaux champs (étiquettes, chiffres clés, photo d'attraction, restaurant)
+sont facultatifs : les brouillons et versions publiées antérieurs restent valides et s'affichent à
+l'identique. Adresses, slugs et thèmes existants ne changent pas. Migration additive
+`20261031000000_theme_aqua_premium`.
+
+## 10. Limites connues
 
 - Les images ne sont ni redimensionnées ni recompressées (pas de bibliothèque d'image). Elles sont
   limitées à 5 Mo et 6 000 px. Les métadonnées EXIF (dont la position GPS éventuelle) sont

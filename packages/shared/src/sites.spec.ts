@@ -1,5 +1,9 @@
 import {
+  SITE_THEME_CATALOG,
   canonicalSiteUrl,
+  contentMediaIds,
+  isAccessibleAccentColor,
+  withContentDefaults,
   contrastRatio,
   emptySiteContent,
   hasPermission,
@@ -163,5 +167,70 @@ describe('Sites — permissions', () => {
       expect(hasPermission(role, 'site.manage')).toBe(false);
     }
     expect(navigationFor('PARK', 'OWNER').map((m) => m.key)).toContain('site');
+  });
+});
+
+describe('Sites — thème Ocall Aqua Premium (compatibilité et nouveaux champs)', () => {
+  const base = () => emptySiteContent('Parc Aqua', 'PARK_RESTAURANT');
+
+  it('un contenu enregistré avant le thème premium reste valide (champs absents → valeurs par défaut)', () => {
+    const legacy = { ...base() } as Record<string, unknown>;
+    delete legacy.heroHighlights;
+    delete legacy.keyFacts;
+    delete legacy.restaurant;
+    legacy.attractions = [{ name: 'Toboggan', description: 'Géant' }];
+    const r = validateSiteContent(legacy, 'PARK_RESTAURANT');
+    expect('content' in r && r.content).toMatchObject({
+      heroHighlights: [],
+      keyFacts: [],
+      restaurant: { description: '', mediaIds: [] },
+      attractions: [{ name: 'Toboggan', description: 'Géant', mediaId: null }],
+    });
+    expect(withContentDefaults(legacy as never).restaurant).toEqual({
+      description: '',
+      mediaIds: [],
+    });
+  });
+
+  it('étiquettes, chiffres clés, photos d’attractions et du restaurant validés', () => {
+    const photo = '0b2f6c1e-1d2a-4b4e-9a7c-2f1d3c4b5a69';
+    const ok = validateSiteContent(
+      {
+        ...base(),
+        heroHighlights: ['Familles', ' ', 'Anniversaires'],
+        keyFacts: [
+          { label: 'Entrée', value: '3 000 FCFA' },
+          { label: '', value: '' },
+        ],
+        attractions: [{ name: 'Toboggan', description: '', mediaId: photo }],
+        restaurant: { description: 'Grillades', mediaIds: [photo, photo] },
+      },
+      'PARK_RESTAURANT',
+    );
+    expect('content' in ok && ok.content).toMatchObject({
+      heroHighlights: ['Familles', 'Anniversaires'],
+      keyFacts: [{ label: 'Entrée', value: '3 000 FCFA' }],
+      restaurant: { mediaIds: [photo] },
+    });
+    expect('content' in ok && contentMediaIds(ok.content)).toEqual([photo]);
+    const errors = (patch: Record<string, unknown>) => {
+      const r = validateSiteContent({ ...base(), ...patch }, 'PARK_RESTAURANT');
+      return 'errors' in r ? r.errors.length : 0;
+    };
+    expect(errors({ heroHighlights: ['a', 'b', 'c', 'd', 'e'] })).toBe(1);
+    expect(errors({ keyFacts: [{ label: 'Entrée', value: '' }] })).toBe(1);
+    expect(errors({ attractions: [{ name: 'X', description: '', mediaId: 'pas-un-id' }] })).toBe(1);
+    expect(errors({ restaurant: { description: 'x', mediaIds: Array(7).fill(photo) } })).toBe(1);
+  });
+
+  it('catalogue des thèmes : Aqua Premium disponible, futurs thèmes annoncés non sélectionnables', () => {
+    expect(SITE_THEME_CATALOG.find((t) => t.key === 'AQUA_PREMIUM')?.available).toBe(true);
+    expect(SITE_THEME_CATALOG.filter((t) => !t.available).map((t) => t.key)).toEqual([
+      'AQUA_FAMILY',
+      'AQUA_LUXURY',
+      'AQUA_TROPICAL',
+    ]);
+    expect(isAccessibleAccentColor('#F5C94B')).toBe(true);
+    expect(isAccessibleAccentColor('#0B1F2E')).toBe(false);
   });
 });

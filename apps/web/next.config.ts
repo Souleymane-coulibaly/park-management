@@ -11,6 +11,18 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   transpilePackages: ['@ocall/shared'],
   /**
+   * Images des sites vitrines : redimensionnées et converties (AVIF/WebP) par l'optimiseur Next.js
+   * (sharp), à la taille de chaque écran — essentiel sur les connexions mobiles. Seules les images
+   * PUBLIÉES (route publique de l'API) sont optimisées ; l'aperçu authentifié reste non optimisé.
+   */
+  images: {
+    localPatterns: [{ pathname: '/api/v1/public/media/**' }],
+    formats: ['image/avif', 'image/webp'],
+    deviceSizes: [480, 640, 828, 1080, 1280, 1600, 1920],
+    imageSizes: [96, 160, 256, 384],
+    minimumCacheTTL: 86_400,
+  },
+  /**
    * Le navigateur appelle /api/v1/* sur le domaine du frontend : le cookie de session
    * reste « first-party » (SameSite=Lax) et l'API n'est jamais exposée en cross-site.
    */

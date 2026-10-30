@@ -66,3 +66,16 @@
     justify-content: center;
   }
 }
+
+/* Sites vitrines (thème Aqua Premium) : apparition douce de l'accueil, désactivée si l'utilisateur
+   préfère réduire les animations (classes motion-safe:). */
+@keyframes site-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
