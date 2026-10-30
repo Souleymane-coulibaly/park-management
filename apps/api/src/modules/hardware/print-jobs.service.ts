@@ -45,15 +45,19 @@ const JOB_SELECT = {
   terminal: { select: { name: true } },
   sale: { select: { number: true } },
   requestedBy: { select: { user: { select: { firstName: true, lastName: true } } } },
+  kioskDevice: { select: { name: true } },
 } as const;
 
 type JobRow = Prisma.PrintJobGetPayload<{ select: typeof JOB_SELECT }>;
 
-const toJob = ({ requestedBy, terminal, sale, ...job }: JobRow) => ({
+const toJob = ({ requestedBy, kioskDevice, terminal, sale, ...job }: JobRow) => ({
   ...job,
   terminalName: terminal.name,
   saleNumber: sale?.number ?? null,
-  requestedByName: `${requestedBy.user.firstName} ${requestedBy.user.lastName}`,
+  // Un ticket de borne n'est demandé par aucun employé : l'historique indique la borne.
+  requestedByName: requestedBy
+    ? `${requestedBy.user.firstName} ${requestedBy.user.lastName}`
+    : `Borne ${kioskDevice?.name ?? ''}`.trim(),
 });
 
 const NOT_FOUND = { code: 'PRINT_JOB_NOT_FOUND', message: 'Impression introuvable.' };

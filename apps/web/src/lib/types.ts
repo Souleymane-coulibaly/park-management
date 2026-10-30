@@ -6,6 +6,7 @@ import type {
   OrderChannel,
   Permission,
   PreparationStatus,
+  PrinterConnection,
   QrOrderStatus,
   ReservationStatus,
   ScanRefusalReason,
@@ -299,7 +300,7 @@ export interface PaymentMethodInfo {
 
 // ─── Sprint 3 : postes, impression et tiroir-caisse ───
 
-export type PrinterConnectionType = 'NONE' | 'SIMULATED' | 'NETWORK' | 'BLUETOOTH' | 'USB';
+export type PrinterConnectionType = PrinterConnection;
 
 export interface PosTerminal {
   id: string;
@@ -761,6 +762,8 @@ export interface KioskDevice {
   pairingCodeExpiresAt: string | null;
   createdAt: string;
   establishment: { id: string; name: string };
+  /** Imprimante des tickets de commande (poste de l'établissement), ou null. */
+  printerTerminal: { id: string; name: string; printerConnection: PrinterConnectionType } | null;
 }
 
 export interface KioskMenu {

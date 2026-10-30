@@ -16,6 +16,7 @@ import { type HardwareOutcome, runDrawerOpening } from '@/lib/hardware/jobs';
 import type { useDeviceTerminal } from '@/lib/hardware/use-terminal';
 import type { CashSession, PosTerminal } from '@/lib/types';
 import { useApi } from '@/lib/use-api';
+import { PairPrinterButton } from './pair-printer-button';
 
 /**
  * Briques communes aux écrans d'encaissement (caisse restaurant et billetterie du parc) :
@@ -249,6 +250,12 @@ export function DeviceBar({ device }: { device: ReturnType<typeof useDeviceTermi
             )}
           </span>
         )
+      )}
+      {device.terminal && (
+        <PairPrinterButton
+          connection={device.terminal.printerConnection}
+          address={device.terminal.printerAddress}
+        />
       )}
       {canOpenDrawer && device.terminal?.drawerEnabled && (
         <Button

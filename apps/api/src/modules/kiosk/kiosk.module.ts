@@ -28,7 +28,13 @@ import { loadSellableCatalog } from '../pos/sellable-catalog';
 import { PublicOrderDto } from '../restaurant/restaurant.dto';
 import { QrOrdersService } from '../restaurant/qr-orders.service';
 import { RestaurantModule } from '../restaurant/restaurant.module';
-import { CreateKioskDeviceDto, KioskDevicesQueryDto, PairKioskDto } from './kiosk.dto';
+import {
+  CreateKioskDeviceDto,
+  KioskDevicesQueryDto,
+  KioskPrintResultDto,
+  KioskPrinterDto,
+  PairKioskDto,
+} from './kiosk.dto';
 import { type KioskContext, KioskService, UNPAIRED } from './kiosk.service';
 
 /** Cookie du jeton d'appareil : httpOnly, limité aux routes de la borne. */
@@ -87,6 +93,18 @@ class KioskDevicesController {
     return this.kiosks.newPairing(requireTenant(auth), id);
   }
 
+  /** Imprimante des tickets de commande de la borne (poste du même établissement). */
+  @RequirePermission('kiosk.manage')
+  @HttpCode(200)
+  @Post(':id/printer')
+  printer(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: KioskPrinterDto,
+  ) {
+    return this.kiosks.setPrinter(requireTenant(auth), id, dto.terminalId ?? null);
+  }
+
   @RequirePermission('kiosk.manage')
   @HttpCode(200)
   @Post(':id/revoke')
@@ -128,8 +146,25 @@ class KioskController {
 
   @UseGuards(KioskGuard)
   @Get('me')
-  me(@CurrentKiosk() kiosk: KioskContext) {
-    return { deviceName: kiosk.deviceName, establishmentName: kiosk.establishmentName };
+  async me(@CurrentKiosk() kiosk: KioskContext) {
+    // Imprimante de la borne (type et filtre seulement) : la tablette l'associe une fois au navigateur.
+    const device = await this.prisma.kioskDevice.findUnique({
+      where: { id: kiosk.deviceId },
+      select: {
+        printerTerminal: {
+          select: { isActive: true, printerConnection: true, printerAddress: true },
+        },
+      },
+    });
+    const terminal = device?.printerTerminal;
+    return {
+      deviceName: kiosk.deviceName,
+      establishmentName: kiosk.establishmentName,
+      printer:
+        terminal?.isActive && terminal.printerConnection !== 'NONE'
+          ? { connection: terminal.printerConnection, address: terminal.printerAddress }
+          : null,
+    };
   }
 
   @UseGuards(KioskGuard)
@@ -154,12 +189,26 @@ class KioskController {
   /** Commande de la session : en attente de paiement à la caisse, jamais envoyée en cuisine. */
   @UseGuards(KioskGuard)
   @Post('sessions/:id/orders')
-  order(
+  async order(
     @CurrentKiosk() kiosk: KioskContext,
     @Param('id', ParseUUIDPipe) sessionId: string,
     @Body() dto: PublicOrderDto,
   ) {
-    return this.qr.submitFromKiosk({ ...kiosk, sessionId }, dto);
+    const order = await this.qr.submitFromKiosk({ ...kiosk, sessionId }, dto);
+    // Ticket de commande à imprimer par la borne, si elle a une imprimante (sinon null).
+    return { ...order, print: await this.kiosks.ticketFor(kiosk, sessionId) };
+  }
+
+  /** La borne rapporte le résultat de l'impression de son ticket (historique d'impression). */
+  @UseGuards(KioskGuard)
+  @HttpCode(200)
+  @Post('print-jobs/:id/result')
+  printResult(
+    @CurrentKiosk() kiosk: KioskContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: KioskPrintResultDto,
+  ) {
+    return this.kiosks.reportPrint(kiosk, id, dto);
   }
 
   @UseGuards(KioskGuard)

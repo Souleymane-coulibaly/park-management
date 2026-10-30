@@ -43,6 +43,13 @@ test.describe('Sprint 6 — bornes, CRM, fidélité, planning', () => {
       { isActive: true, earnAmountStep: 1000, redeemValue: 10, minRedeemPoints: 100 },
       'put',
     );
+    // Poste de caisse dont l'imprimante (simulée ici) imprimera les tickets de la borne.
+    await apiPost(page, '/pos-terminals', {
+      establishmentId: establishment.id,
+      name: 'Comptoir',
+      printerConnection: 'SIMULATED',
+      paperWidth: 58,
+    });
 
     // ─── Administration : création de la borne et code d'appairage ───
     await page.goto('/app/bornes');
@@ -53,6 +60,9 @@ test.describe('Sprint 6 — bornes, CRM, fidélité, planning', () => {
     const code = (await page.getByTestId('pairing-code').textContent())!.trim();
     expect(code).toMatch(/^[A-HJ-NP-Z2-9]{8}$/);
     await page.getByRole('button', { name: 'Fermer', exact: true }).last().click();
+    const printerSelect = page.getByLabel('Imprimante des tickets de Borne entrée');
+    await printerSelect.selectOption({ label: 'Ticket sur : Comptoir' });
+    await expect(printerSelect).toHaveValue(/.+/, NETWORK_WAIT);
 
     // ─── Tablette : appairage puis commande en libre-service ───
     const tabletContext = await browser.newContext({
@@ -79,6 +89,14 @@ test.describe('Sprint 6 — bornes, CRM, fidélité, planning', () => {
     const number = (await tablet.getByTestId('kiosk-number').textContent(NETWORK_WAIT))!.trim();
     expect(number).toMatch(/^B-\d{4}$/);
     await expect(tablet.getByText(/Présentez ce numéro à la caisse/)).toBeVisible();
+    // Ticket de commande imprimé par la borne (imprimante simulée) et historisé sur le poste.
+    await expect(tablet.getByText('Prenez votre ticket.')).toBeVisible(NETWORK_WAIT);
+    const terminals = await (await page.request.get('/api/v1/pos-terminals')).json();
+    const comptoir = terminals.find((t: { name: string }) => t.name === 'Comptoir');
+    const jobs = await (
+      await page.request.get(`/api/v1/print-jobs?terminalId=${comptoir.id}`)
+    ).json();
+    expect(jobs).toEqual([expect.objectContaining({ kind: 'KIOSK_TICKET', status: 'SUCCEEDED' })]);
     // La tablette n'a aucune session d'employé.
     const admin = await tabletContext.newPage();
     await admin.goto('/app');

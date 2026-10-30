@@ -255,3 +255,46 @@ export function layoutKitchenTicket(
   out.push(separator(w));
   return out;
 }
+
+export interface KioskTicketData {
+  establishmentName: string;
+  timezone: string;
+  /** Numéro affiché (« B-0042 »). */
+  number: string;
+  /** Date ISO de la commande. */
+  date: string;
+  lines: { productName: string; variantName: string; quantity: number; notes: string | null }[];
+  /** Total indicatif calculé par le serveur ; le montant définitif est celui de la caisse. */
+  estimatedTotal: number;
+}
+
+/**
+ * Ticket de commande d'une borne : numéro en très grand, articles, total indicatif et consigne de
+ * paiement à la caisse. Ce n'est PAS un reçu de paiement (aucun paiement n'a eu lieu).
+ */
+export function layoutKioskTicket(data: KioskTicketData, paperWidth: PaperWidth): ReceiptLine[] {
+  const w = charsPerLine(paperWidth);
+  const out: ReceiptLine[] = [];
+  for (const t of wrap(data.establishmentName, w))
+    out.push({ text: t, align: 'center', bold: true });
+  out.push({ text: formatDate(data.date, data.timezone), align: 'center' });
+  out.push(separator(w));
+  out.push({ text: 'VOTRE NUMÉRO', align: 'center' });
+  out.push({ text: data.number, align: 'center', bold: true, large: true });
+  out.push(separator(w));
+  for (const l of data.lines) {
+    for (const t of wrap(`${l.quantity} x ${l.productName} (${l.variantName})`, w))
+      out.push({ text: t });
+    if (l.notes) for (const t of wrap(`  >> ${l.notes}`, w)) out.push({ text: t });
+  }
+  out.push(separator(w));
+  out.push({ text: columns('Total indicatif', formatXof(data.estimatedTotal), w), bold: true });
+  // Lignes centrées repliées à la largeur du papier (58 mm : 16 caractères en gros, 32 en normal).
+  for (const t of wrap('À RÉGLER À LA CAISSE', Math.floor(w / 2)))
+    out.push({ text: t, align: 'center', bold: true, large: true });
+  for (const t of wrap('Présentez ce ticket au personnel.', w))
+    out.push({ text: t, align: 'center' });
+  for (const t of wrap('Ce ticket n’est pas un reçu de paiement.', w))
+    out.push({ text: t, align: 'center' });
+  return out;
+}

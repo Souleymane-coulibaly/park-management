@@ -13,11 +13,13 @@ import {
 import {
   PRINTER_CONNECTIONS,
   PRINTER_CONNECTION_LABELS,
+  isBrowserConnection,
   validatePrinterAddress,
 } from '@ocall/shared';
 import { AccessDenied } from '@/components/app/access-denied';
 import { useCan } from '@/components/app/session-context';
 import { Badge } from '@/components/ui/badge';
+import { PairPrinterButton } from '@/components/pos/pair-printer-button';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
@@ -47,6 +49,10 @@ const ADDRESS_HINTS: Partial<Record<PrinterConnectionType, string>> = {
   NETWORK: 'IPv4 du réseau local et port d’impression, ex. 192.168.1.50:9100',
   BLUETOOTH: 'Adresse MAC de l’imprimante appairée, ex. 00:11:22:33:44:55',
   USB: 'vendorId:productId en hexadécimal, ex. 04B8:0202',
+  WEBUSB:
+    'Facultatif : vendorId:productId pour ne proposer que cette imprimante. Associez-la ensuite sur chaque appareil (bouton « Associer l’imprimante »).',
+  WEBBLUETOOTH:
+    'Facultatif : début du nom Bluetooth de l’imprimante (ex. MTP). Imprimantes BLE uniquement ; associez-la ensuite sur l’appareil.',
 };
 
 /** Configuration du matériel de caisse : postes, imprimantes thermiques et tiroirs-caisses. */
@@ -162,6 +168,12 @@ export default function MaterielPage() {
                     {t.printerAddress && (
                       <span className="font-mono text-xs text-muted">{t.printerAddress}</span>
                     )}
+                    <span className="mt-1 block">
+                      <PairPrinterButton
+                        connection={t.printerConnection}
+                        address={t.printerAddress}
+                      />
+                    </span>
                   </Td>
                   <Td>{t.paperWidth} mm</Td>
                   <Td>{t.drawerEnabled ? `Broche ${t.drawerPin}` : '—'}</Td>
@@ -321,6 +333,8 @@ function TerminalDialog({
   }, [terminal, form.establishmentId, establishments]);
   const [loading, setLoading] = useState(false);
   const needsAddress = !['NONE', 'SIMULATED'].includes(form.printerConnection);
+  // Navigateur (WebUSB, Web Bluetooth) : l'imprimante est choisie sur l'appareil, l'adresse est facultative.
+  const addressRequired = needsAddress && !isBrowserConnection(form.printerConnection);
   const addressError =
     needsAddress && form.printerAddress
       ? validatePrinterAddress(form.printerConnection, form.printerAddress)
@@ -402,7 +416,7 @@ function TerminalDialog({
             onChange={(e) => setForm((f) => ({ ...f, printerAddress: e.target.value }))}
             hint={ADDRESS_HINTS[form.printerConnection]}
             error={addressError ?? undefined}
-            required
+            required={addressRequired}
           />
         )}
         {form.printerConnection !== 'NONE' && (

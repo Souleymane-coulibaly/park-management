@@ -14,7 +14,7 @@ import { InputField } from '@/components/ui/field';
 import { Alert, ApiErrorAlert, EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
 import { type ApiError, api } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
-import type { KioskDevice } from '@/lib/types';
+import type { KioskDevice, PosTerminal } from '@/lib/types';
 import { useApi } from '@/lib/use-api';
 
 const STATUS: Record<
@@ -44,10 +44,28 @@ export default function BornesPage() {
 
 function Devices({ establishmentId }: { establishmentId: string }) {
   const devices = useApi<KioskDevice[]>(`/kiosk-devices?establishmentId=${establishmentId}`);
+  const terminals = useApi<PosTerminal[]>(`/pos-terminals?establishmentId=${establishmentId}`);
+  const printers =
+    terminals.state === 'success'
+      ? terminals.data.filter((t) => t.isActive && t.printerConnection !== 'NONE')
+      : [];
   const [creating, setCreating] = useState(false);
   const [code, setCode] = useState<{ name: string; code: string } | null>(null);
   const [revoking, setRevoking] = useState<KioskDevice | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
+
+  async function setPrinter(device: KioskDevice, terminalId: string) {
+    setError(null);
+    try {
+      await api(`/kiosk-devices/${device.id}/printer`, {
+        method: 'POST',
+        body: { terminalId: terminalId || null },
+      });
+      devices.reload();
+    } catch (e) {
+      setError(e as ApiError);
+    }
+  }
 
   async function newCode(device: KioskDevice) {
     setError(null);
@@ -65,11 +83,19 @@ function Devices({ establishmentId }: { establishmentId: string }) {
   return (
     <div className="space-y-3">
       <Alert tone="info">
-        Sur la tablette, ouvrez <strong>/kiosk</strong> en plein écran (mode kiosque ou épinglage
-        d’écran) et saisissez le code d’appairage. Les commandes de la borne arrivent dans «
-        Commandes » comme demandes à valider : elles se règlent à la caisse et ne partent jamais
-        seules en cuisine.
+        Sur la tablette, ouvrez l’adresse <strong>/kiosk</strong> (bouton ci-dessous) en plein écran
+        (mode kiosque ou épinglage d’écran) et saisissez le code d’appairage. Les commandes de la
+        borne arrivent dans « Commandes » comme demandes à valider : elles se règlent à la caisse et
+        ne partent jamais seules en cuisine.
       </Alert>
+      <a
+        href="/kiosk"
+        target="_blank"
+        rel="noopener"
+        className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-line bg-surface px-4 text-sm font-semibold hover:border-forest"
+      >
+        <MonitorSmartphone className="h-4 w-4" aria-hidden /> Ouvrir la borne sur cet appareil
+      </a>
       <ApiErrorAlert error={error} />
       <Card>
         <CardHeader
@@ -106,6 +132,22 @@ function Devices({ establishmentId }: { establishmentId: string }) {
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  <label className="text-sm">
+                    <span className="sr-only">Imprimante des tickets de {d.name}</span>
+                    <select
+                      aria-label={`Imprimante des tickets de ${d.name}`}
+                      className="min-h-9 rounded-xl border border-line bg-surface px-2 text-sm"
+                      value={d.printerTerminal?.id ?? ''}
+                      onChange={(e) => setPrinter(d, e.target.value)}
+                    >
+                      <option value="">Sans ticket imprimé</option>
+                      {printers.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          Ticket sur : {t.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <Badge tone={STATUS[d.status].tone}>{STATUS[d.status].label}</Badge>
                   <Button
                     size="sm"

@@ -8,6 +8,7 @@
 | Application web : caisse, impression, tiroir | ✅ Implémentée, testée en E2E **avec l'imprimante « Simulation »**                               |
 | Encodeur ESC/POS (58 / 80 mm, accents PC858) | ✅ Implémenté et testé unitairement (octets et mise en page)                                     |
 | Connecteur Android (WebView + pont, Kotlin)  | ⚠️ Écrit, **non compilé et non testé** : aucun SDK Android dans l'environnement de développement |
+| Impression directe navigateur (WebUSB / BLE) | ⚠️ Implémentée (Sprint 6), **non validée sur matériel** : voir §5 bis                            |
 | Impression réelle USB / Bluetooth / réseau   | ⚠️ **Non validée** : aucune imprimante physique disponible                                       |
 | Ouverture réelle d'un tiroir-caisse          | ⚠️ **Non validée** : aucun tiroir physique disponible                                            |
 
@@ -85,12 +86,47 @@ ses tickets et déclenche l'ouverture automatique de ses paiements en espèces.
 Toute imprimante thermique compatible **ESC/POS** (jeu de commandes Epson), en 58 mm (32 caractères)
 ou 80 mm (48 caractères), avec la page de code **PC858** (accents français et €).
 
-| Connexion  | Adresse saisie                        | Prérequis                                                  |
-| ---------- | ------------------------------------- | ---------------------------------------------------------- |
-| Réseau     | `192.168.1.50:9100` (port facultatif) | Imprimante et tablette sur le même réseau local, IP fixe   |
-| Bluetooth  | `00:11:22:33:44:55`                   | Imprimante appairée dans les réglages Android (profil SPP) |
-| USB        | `04B8:0202` (vendorId:productId)      | Câble OTG ; autorisation USB acceptée sur la tablette      |
-| Simulation | —                                     | Aucun matériel : tests et démonstrations uniquement        |
+| Connexion                  | Adresse saisie                        | Prérequis                                                  |
+| -------------------------- | ------------------------------------- | ---------------------------------------------------------- |
+| Réseau                     | `192.168.1.50:9100` (port facultatif) | Imprimante et tablette sur le même réseau local, IP fixe   |
+| Bluetooth                  | `00:11:22:33:44:55`                   | Imprimante appairée dans les réglages Android (profil SPP) |
+| USB                        | `04B8:0202` (vendorId:productId)      | Câble OTG ; autorisation USB acceptée sur la tablette      |
+| USB (navigateur)           | vide, ou `04b8:0202` pour restreindre | Chrome Android ou ordinateur, câble OTG ; voir §5 bis      |
+| Bluetooth BLE (navigateur) | vide, ou début du nom (`MTP-II`)      | Imprimante BLE, Chrome ; voir §5 bis                       |
+| Simulation                 | —                                     | Aucun matériel : tests et démonstrations uniquement        |
+
+## 5 bis. Impression directe depuis le navigateur (PWA, Sprint 6)
+
+Sans connecteur Android, l'application installée (PWA) ou Chrome peut piloter une imprimante :
+
+- **USB** par WebUSB (Chrome Android avec câble OTG, ou Chrome sur ordinateur) ;
+- **Bluetooth Low Energy** par Web Bluetooth.
+
+Elle sert la caisse, la billetterie, la cuisine et le ticket de commande de la borne.
+
+1. Dans « Matériel », choisissez la connexion « USB — navigateur (PWA, WebUSB) » ou
+   « Bluetooth BLE — navigateur (PWA) ». L'identifiant est facultatif.
+2. Sur **chaque** appareil, touchez « Associer l'imprimante » : le navigateur exige ce geste et
+   affiche son sélecteur. Le bouton est présent dans la barre de la caisse, la page Matériel et
+   l'accueil de la borne.
+3. Les impressions suivent ensuite le même circuit que les autres connexions :
+   - le serveur autorise, produit le flux ESC/POS et historise ;
+   - le navigateur contrôle le flux (`validatePrintBytes` : 64 Kio au plus, aucune séquence de
+     tiroir), l'envoie par paquets, puis rapporte le résultat.
+4. Le tiroir-caisse : l'impulsion `ESC p` est générée **par l'application**, seulement après
+   l'autorisation du serveur (`POST /drawer-events`), jamais transmise depuis le serveur.
+
+Limites connues :
+
+- **Pas encore validé sur une imprimante physique.** Le protocole du §7 s'applique.
+- **Bluetooth « classique » (SPP)** : la plupart des imprimantes portables bon marché ne sont pas
+  accessibles depuis un navigateur. **Port réseau 9100** : idem. Ces deux cas exigent le connecteur
+  Android.
+- **BLE** : les services de données ne sont pas normalisés. Cinq profils courants sont essayés (dont
+  `18f0`, `ff00`, `49535343`) ; une imprimante hors liste n'est pas reconnue. Selon le navigateur,
+  il peut falloir réassocier l'imprimante après un rechargement de la page.
+- **iOS / Safari** : ni WebUSB ni Web Bluetooth. L'application l'indique au lieu du bouton.
+- Le navigateur exige HTTPS (ou `localhost`).
 
 ## 6. Mode simulation
 

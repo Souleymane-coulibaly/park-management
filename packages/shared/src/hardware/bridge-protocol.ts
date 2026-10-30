@@ -8,17 +8,33 @@
  */
 import { containsDrawerKick, fromBase64 } from './escpos';
 
-export const PRINTER_CONNECTIONS = ['NONE', 'SIMULATED', 'NETWORK', 'BLUETOOTH', 'USB'] as const;
+export const PRINTER_CONNECTIONS = [
+  'NONE',
+  'SIMULATED',
+  'NETWORK',
+  'BLUETOOTH',
+  'USB',
+  'WEBUSB',
+  'WEBBLUETOOTH',
+] as const;
 export type PrinterConnection = (typeof PRINTER_CONNECTIONS)[number];
 /** Connexions physiques, gérées par le connecteur Android. */
 export type PhysicalConnection = 'NETWORK' | 'BLUETOOTH' | 'USB';
+/** Connexions pilotées directement par le navigateur (PWA), sans connecteur natif. */
+export type BrowserConnection = 'WEBUSB' | 'WEBBLUETOOTH';
+
+export function isBrowserConnection(c: PrinterConnection): c is BrowserConnection {
+  return c === 'WEBUSB' || c === 'WEBBLUETOOTH';
+}
 
 export const PRINTER_CONNECTION_LABELS: Record<PrinterConnection, string> = {
   NONE: 'Aucune imprimante',
   SIMULATED: 'Simulation (aucun matériel)',
-  NETWORK: 'Réseau (Ethernet / Wi-Fi, port 9100)',
-  BLUETOOTH: 'Bluetooth',
-  USB: 'USB',
+  NETWORK: 'Réseau (Ethernet / Wi-Fi, port 9100, connecteur Android)',
+  BLUETOOTH: 'Bluetooth classique (connecteur Android)',
+  USB: 'USB (connecteur Android)',
+  WEBUSB: 'USB — navigateur (PWA, WebUSB)',
+  WEBBLUETOOTH: 'Bluetooth BLE — navigateur (PWA)',
 };
 
 export interface PrinterTarget {
@@ -64,6 +80,15 @@ export function validatePrinterAddress(
 ): string | null {
   if (connection === 'NONE' || connection === 'SIMULATED') return null;
   const value = (address ?? '').trim();
+  // Navigateur : l'imprimante est choisie sur l'appareil ; l'identifiant sert seulement de filtre.
+  if (connection === 'WEBUSB') {
+    return !value || /^[0-9A-F]{4}:[0-9A-F]{4}$/i.test(value)
+      ? null
+      : 'Identifiant USB invalide : vendorId:productId en hexadécimal (ex. 04B8:0202), ou vide.';
+  }
+  if (connection === 'WEBBLUETOOTH') {
+    return value.length <= 40 ? null : 'Nom Bluetooth trop long (40 caractères au plus).';
+  }
   if (!value) return 'Adresse de l’imprimante obligatoire.';
   switch (connection) {
     case 'NETWORK': {
@@ -107,9 +132,26 @@ export function validateHardwareCommand(command: HardwareCommand): string | null
     } catch {
       return 'Flux d’impression illisible.';
     }
-    if (bytes.length === 0 || bytes.length > MAX_PRINT_BYTES)
-      return 'Taille du flux d’impression invalide.';
-    if (containsDrawerKick(bytes)) return 'Un flux d’impression ne peut pas ouvrir le tiroir.';
+    return validatePrintBytes(bytes);
   }
   return null;
+}
+
+/**
+ * Contrôle d'un flux d'impression avant envoi à l'imprimante, par le connecteur Android comme par le
+ * navigateur : taille bornée et aucune commande d'ouverture du tiroir cachée dans le flux.
+ */
+export function validatePrintBytes(bytes: Uint8Array): string | null {
+  if (bytes.length === 0 || bytes.length > MAX_PRINT_BYTES)
+    return 'Taille du flux d’impression invalide.';
+  if (containsDrawerKick(bytes)) return 'Un flux d’impression ne peut pas ouvrir le tiroir.';
+  return null;
+}
+
+/** Découpe un flux en paquets (Bluetooth BLE : quelques centaines d'octets par écriture). */
+export function chunkBytes(bytes: Uint8Array, size: number): Uint8Array[] {
+  if (!Number.isInteger(size) || size <= 0) throw new RangeError('Taille de paquet invalide.');
+  const chunks: Uint8Array[] = [];
+  for (let i = 0; i < bytes.length; i += size) chunks.push(bytes.subarray(i, i + size));
+  return chunks;
 }

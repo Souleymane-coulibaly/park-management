@@ -354,6 +354,156 @@ describe('Sprint 6 — bornes, CRM, fidélité, planning (intégration)', () => 
       expect(parkOnly.status).toBe(400);
       expect(parkOnly.body.code).toBe('ESTABLISHMENT_NOT_RESTAURANT');
     });
+
+    it('ticket de commande imprimé par la borne : imprimante contrôlée, historisé, sans réimpression', async () => {
+      // Imprimantes pilotées par le navigateur (PWA) : identifiant facultatif, contrôlé s'il est fourni.
+      const webUsb = (
+        await resto.agent
+          .post(api('/pos-terminals'))
+          .send({
+            establishmentId: estR1,
+            name: 'Borne USB',
+            printerConnection: 'WEBUSB',
+            paperWidth: 58,
+          })
+          .expect(201)
+      ).body;
+      expect(webUsb).toMatchObject({ printerConnection: 'WEBUSB', printerAddress: null });
+      await resto.agent
+        .post(api('/pos-terminals'))
+        .send({
+          establishmentId: estR1,
+          name: 'Borne BLE',
+          printerConnection: 'WEBBLUETOOTH',
+          printerAddress: 'MTP',
+        })
+        .expect(201);
+      await resto.agent
+        .post(api('/pos-terminals'))
+        .send({
+          establishmentId: estR1,
+          name: 'Borne USB 2',
+          printerConnection: 'WEBUSB',
+          printerAddress: 'imprimante',
+        })
+        .expect(400);
+      const noPrinter = (
+        await resto.agent
+          .post(api('/pos-terminals'))
+          .send({ establishmentId: estR1, name: 'Sans imprimante' })
+          .expect(201)
+      ).body;
+      const annex = (
+        await resto.agent
+          .post(api('/pos-terminals'))
+          .send({ establishmentId: estR2, name: 'Annexe', printerConnection: 'SIMULATED' })
+          .expect(201)
+      ).body;
+      const simulated = (
+        await resto.agent
+          .post(api('/pos-terminals'))
+          .send({
+            establishmentId: estR1,
+            name: 'Ticket borne',
+            printerConnection: 'SIMULATED',
+            paperWidth: 58,
+          })
+          .expect(201)
+      ).body;
+      // Contrôles : même établissement, imprimante configurée, droits.
+      await resto.agent
+        .post(api(`/kiosk-devices/${kioskId}/printer`))
+        .send({ terminalId: annex.id })
+        .expect(404);
+      const none = await resto.agent
+        .post(api(`/kiosk-devices/${kioskId}/printer`))
+        .send({ terminalId: noPrinter.id });
+      expect(none.body.code).toBe('PRINTER_NOT_CONFIGURED');
+      await supervisor
+        .post(api(`/kiosk-devices/${kioskId}/printer`))
+        .send({ terminalId: simulated.id })
+        .expect(403);
+      const set = (
+        await resto.agent
+          .post(api(`/kiosk-devices/${kioskId}/printer`))
+          .send({ terminalId: simulated.id })
+          .expect(200)
+      ).body;
+      expect(set.printerTerminal).toMatchObject({ id: simulated.id, name: 'Ticket borne' });
+      expect((await kioskAgent.get(api('/kiosk/me')).expect(200)).body.printer).toEqual({
+        connection: 'SIMULATED',
+        address: null,
+      });
+
+      const session = (await kioskAgent.post(api('/kiosk/sessions')).expect(201)).body;
+      const body = {
+        clientRequestId: randomUUID(),
+        lines: [{ variantId: poulet, quantity: 2, notes: 'Sans piment' }],
+      };
+      const created = (
+        await kioskAgent
+          .post(api(`/kiosk/sessions/${session.id}/orders`))
+          .send(body)
+          .expect(201)
+      ).body;
+      expect(created.print).toMatchObject({ printer: { connection: 'SIMULATED' }, paperWidth: 58 });
+      expect(created.print.data).toEqual(expect.any(String));
+      const preview = created.print.preview.join('\n');
+      expect(preview).toContain(`B-${String(created.displayNumber).padStart(4, '0')}`);
+      expect(preview).toContain('2 x Poulet braisé');
+      expect(preview).toContain('pas un reçu');
+      expect(created.print.preview.every((l: string) => l.length <= 32)).toBe(true);
+      // Une autre borne ne peut pas rapporter le résultat de ce ticket.
+      const other = (
+        await resto.agent
+          .post(api('/kiosk-devices'))
+          .send({ establishmentId: estR1, name: 'Borne bar' })
+          .expect(201)
+      ).body;
+      const otherTablet = agent(app);
+      await otherTablet.post(api('/kiosk/pair')).send({ code: other.pairingCode }).expect(200);
+      await otherTablet
+        .post(api(`/kiosk/print-jobs/${created.print.jobId}/result`))
+        .send({ status: 'SUCCEEDED' })
+        .expect(404);
+      await kioskAgent
+        .post(api(`/kiosk/print-jobs/${created.print.jobId}/result`))
+        .send({ status: 'SUCCEEDED' })
+        .expect(200);
+      // Renvoi réseau de la même commande : même ticket, sans nouveau flux (pas de réimpression).
+      const replay = (
+        await kioskAgent
+          .post(api(`/kiosk/sessions/${session.id}/orders`))
+          .send(body)
+          .expect(201)
+      ).body;
+      expect(replay.print.jobId).toBe(created.print.jobId);
+      expect(replay.print.data).toBeNull();
+      // Historique d'impression du poste : ticket de borne, attribué à la borne, sans employé.
+      const jobs = (
+        await resto.agent.get(api(`/print-jobs?terminalId=${simulated.id}`)).expect(200)
+      ).body;
+      expect(jobs).toEqual([
+        expect.objectContaining({
+          kind: 'KIOSK_TICKET',
+          status: 'SUCCEEDED',
+          requestedByName: 'Borne Borne entrée',
+        }),
+      ]);
+      // Retrait de l'imprimante : plus de ticket.
+      await resto.agent
+        .post(api(`/kiosk-devices/${kioskId}/printer`))
+        .send({ terminalId: null })
+        .expect(200);
+      const s2 = (await kioskAgent.post(api('/kiosk/sessions')).expect(201)).body;
+      const plain = (
+        await kioskAgent
+          .post(api(`/kiosk/sessions/${s2.id}/orders`))
+          .send({ clientRequestId: randomUUID(), lines: [{ variantId: jus, quantity: 1 }] })
+          .expect(201)
+      ).body;
+      expect(plain.print).toBeNull();
+    });
   });
 
   describe('CRM', () => {

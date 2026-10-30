@@ -1,5 +1,11 @@
 import {
+  chunkBytes,
   computeEarnedPoints,
+  isBrowserConnection,
+  layoutKioskTicket,
+  previewLines,
+  validatePrintBytes,
+  validatePrinterAddress,
   customerDisplayName,
   decideRedemption,
   formatKioskNumber,
@@ -95,5 +101,56 @@ describe('droits du Sprint 6', () => {
   it('bornes : uniquement pour une activité restaurant ; planning visible par tous les employés', () => {
     expect(navigationFor('PARK', 'OWNER').map((m) => m.key)).not.toContain('kiosks');
     expect(navigationFor('RESTAURANT', 'KITCHEN').map((m) => m.key)).toContain('hr-planning');
+  });
+});
+
+describe('impression depuis le navigateur et ticket de borne', () => {
+  it('connexions navigateur : identifiant facultatif, contrôlé s’il est fourni', () => {
+    expect(validatePrinterAddress('WEBUSB', '')).toBeNull();
+    expect(validatePrinterAddress('WEBUSB', '04B8:0202')).toBeNull();
+    expect(validatePrinterAddress('WEBUSB', 'imprimante')).not.toBeNull();
+    expect(validatePrinterAddress('WEBBLUETOOTH', 'MTP-II')).toBeNull();
+    expect(isBrowserConnection('WEBUSB')).toBe(true);
+    expect(isBrowserConnection('USB')).toBe(false);
+  });
+
+  it('flux contrôlé (taille, aucune ouverture de tiroir) et découpé en paquets', () => {
+    expect(validatePrintBytes(new Uint8Array([0x1b, 0x40, 0x41]))).toBeNull();
+    expect(validatePrintBytes(new Uint8Array([0x1b, 0x70, 0x00, 0x19, 0xfa]))).not.toBeNull();
+    expect(validatePrintBytes(new Uint8Array())).not.toBeNull();
+    const chunks = chunkBytes(new Uint8Array(450), 180);
+    expect(chunks.map((c) => c.length)).toEqual([180, 180, 90]);
+  });
+
+  it('ticket de borne : numéro, articles, total indicatif, paiement à la caisse', () => {
+    const text = previewLines(
+      layoutKioskTicket(
+        {
+          establishmentName: 'Maquis du Fleuve',
+          timezone: 'Africa/Bamako',
+          number: 'B-0042',
+          date: '2026-10-30T12:00:00.000Z',
+          lines: [
+            {
+              productName: 'Poulet braisé',
+              variantName: 'Standard',
+              quantity: 2,
+              notes: 'Sans piment',
+            },
+          ],
+          estimatedTotal: 8000,
+        },
+        58,
+      ),
+      58,
+    ).join('\n');
+    expect(text).toContain('B-0042');
+    expect(text).toContain('2 x Poulet braisé');
+    expect(text).toContain('>> Sans piment');
+    expect(text).toMatch(/8\s000 FCFA/);
+    expect(text.replace(/\s+/g, ' ')).toContain('À RÉGLER À LA CAISSE');
+    expect(text.replace(/\s+/g, ' ')).toContain('pas un reçu de paiement');
+    // Aucune ligne ne dépasse la largeur du papier 58 mm.
+    expect(text.split(String.fromCharCode(10)).every((l) => l.length <= 32)).toBe(true);
   });
 });

@@ -5,26 +5,26 @@
  *
  * - Imprimante « Simulation » : aucun matériel ; le ticket est consigné en mémoire (et dans la
  *   console) pour les tests et les démonstrations. Ce n'est PAS une validation matérielle.
- * - Imprimante réseau, Bluetooth ou USB : transmise au connecteur Android natif (pont WebView
- *   `OcallHardware`). Sans connecteur (navigateur classique), l'impression est indisponible.
+ * - Imprimante réseau, Bluetooth classique ou USB : transmise au connecteur Android natif (pont
+ *   WebView `OcallHardware`).
+ * - Imprimante « USB — navigateur » (WebUSB) ou « Bluetooth BLE — navigateur » : pilotée directement
+ *   par la PWA, sans connecteur (browser-printers.ts).
  */
 import {
   type HardwareCommand,
   type HardwareResponse,
   type PrinterTarget,
+  fromBase64,
+  isBrowserConnection,
   validateHardwareCommand,
+  validatePrintBytes,
 } from '@ocall/shared';
 import type { HardwareTarget } from '@/lib/types';
 import { newRequestId } from '@/lib/request-id';
+import { drawerPulse, sendToBrowserPrinter } from './browser-printers';
+import { HardwareError } from './hardware-error';
 
-export class HardwareError extends Error {
-  constructor(
-    readonly code: string,
-    message: string,
-  ) {
-    super(message);
-  }
-}
+export { HardwareError };
 
 /** Objet injecté par le connecteur Android (androidx.webkit addWebMessageListener). */
 interface InjectedBridge {
@@ -155,6 +155,19 @@ export async function printOnDevice(
     console.info('[Simulation] Ticket imprimé :\n' + preview.join('\n'));
     return;
   }
+  if (isBrowserConnection(target.connection)) {
+    let bytes: Uint8Array;
+    try {
+      bytes = fromBase64(data);
+    } catch {
+      throw new HardwareError('INVALID_COMMAND', 'Flux d’impression illisible.');
+    }
+    // Mêmes contrôles que le connecteur Android : taille bornée, aucune ouverture de tiroir cachée.
+    const invalid = validatePrintBytes(bytes);
+    if (invalid) throw new HardwareError('INVALID_COMMAND', invalid);
+    await sendToBrowserPrinter(target.connection, target.address, bytes);
+    return;
+  }
   await runPhysical({ type: 'print', printer: physicalTarget(target), data });
 }
 
@@ -165,6 +178,11 @@ export async function openDrawerOnDevice(target: HardwareTarget, pin: 2 | 5): Pr
       throw new HardwareError('PRINTER_UNREACHABLE', 'Tiroir simulé indisponible (panne simulée).');
     simulated().drawerOpenings += 1;
     console.info('[Simulation] Ouverture du tiroir-caisse');
+    return;
+  }
+  if (isBrowserConnection(target.connection)) {
+    // Impulsion générée sur l'appareil, uniquement sur l'ordre autorisé par le serveur.
+    await sendToBrowserPrinter(target.connection, target.address, drawerPulse(pin));
     return;
   }
   await runPhysical({ type: 'openDrawer', printer: physicalTarget(target), pin });

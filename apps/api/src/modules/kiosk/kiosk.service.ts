@@ -12,7 +12,13 @@ import {
   KIOSK_PAIRING_TTL_MINUTES,
   KIOSK_SESSION_MINUTES,
   KIOSK_TOKEN_TTL_DAYS,
+  type PaperWidth,
   coversActivity,
+  encodeReceiptLines,
+  formatKioskNumber,
+  layoutKioskTicket,
+  previewLines,
+  toBase64,
 } from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
@@ -47,6 +53,7 @@ const DEVICE_SELECT = {
   pairingCodeExpiresAt: true,
   createdAt: true,
   establishment: { select: { id: true, name: true } },
+  printerTerminal: { select: { id: true, name: true, printerConnection: true } },
 } as const satisfies Prisma.KioskDeviceSelect;
 
 type DeviceRow = Prisma.KioskDeviceGetPayload<{ select: typeof DEVICE_SELECT }>;
@@ -182,6 +189,43 @@ export class KioskService {
     return { id, status: 'REVOKED' as const };
   }
 
+  /**
+   * Imprimante des tickets de commande de la borne : un poste du même établissement, actif, avec une
+   * imprimante configurée (USB ou Bluetooth du navigateur sur la tablette, simulation…).
+   */
+  async setPrinter(auth: TenantContext, id: string, terminalId: string | null) {
+    const device = await this.find(auth, id);
+    if (terminalId) {
+      const terminal = await this.prisma.posTerminal.findFirst({
+        where: {
+          id: terminalId,
+          organizationId: auth.membership.organizationId,
+          establishmentId: device.establishmentId,
+        },
+        select: { isActive: true, printerConnection: true },
+      });
+      if (!terminal) {
+        throw new NotFoundException({
+          code: 'TERMINAL_NOT_FOUND',
+          message: 'Poste introuvable dans cet établissement.',
+        });
+      }
+      if (!terminal.isActive || terminal.printerConnection === 'NONE') {
+        throw new ConflictException({
+          code: 'PRINTER_NOT_CONFIGURED',
+          message: 'Ce poste n’a pas d’imprimante active.',
+        });
+      }
+    }
+    const updated = await this.prisma.kioskDevice.update({
+      where: { id },
+      data: { printerTerminalId: terminalId },
+      select: DEVICE_SELECT,
+    });
+    await this.record(auth, 'kiosk.printer_set', id, { terminalId });
+    return toDevice(updated);
+  }
+
   // ─── Appareil ───
 
   /** Appairage : code valide et non expiré → jeton d'appareil (renvoyé une seule fois). */
@@ -308,6 +352,134 @@ export class KioskService {
       where: { id: sessionId, deviceId: kiosk.deviceId, endedAt: null },
       data: { endedAt: new Date() },
     });
+  }
+
+  /**
+   * Ticket de la commande de la session, si la borne a une imprimante : impression historisée
+   * (PrintJob KIOSK_TICKET, idempotente par commande) et flux ESC/POS à envoyer à l'imprimante. Une
+   * commande dont le ticket a déjà été traité ne renvoie pas de flux (pas de réimpression).
+   */
+  async ticketFor(kiosk: KioskContext, sessionId: string) {
+    const device = await this.prisma.kioskDevice.findUnique({
+      where: { id: kiosk.deviceId },
+      select: {
+        printerTerminal: {
+          select: {
+            id: true,
+            isActive: true,
+            printerConnection: true,
+            printerAddress: true,
+            paperWidth: true,
+            establishmentId: true,
+          },
+        },
+      },
+    });
+    const terminal = device?.printerTerminal;
+    if (!terminal || !terminal.isActive || terminal.printerConnection === 'NONE') return null;
+    if (terminal.establishmentId !== kiosk.establishmentId) return null;
+    const request = await this.prisma.qrOrderRequest.findUnique({
+      where: { kioskSessionId: sessionId },
+      select: {
+        id: true,
+        kioskDeviceId: true,
+        displayNumber: true,
+        lines: true,
+        estimatedTotal: true,
+        createdAt: true,
+        establishment: { select: { name: true, timezone: true } },
+      },
+    });
+    if (!request || request.kioskDeviceId !== kiosk.deviceId || request.displayNumber === null) {
+      return null;
+    }
+    const clientRequestId = `kiosk:${request.id}`;
+    const paperWidth = (terminal.paperWidth === 58 ? 58 : 80) as PaperWidth;
+    const where = {
+      organizationId_clientRequestId: { organizationId: kiosk.organizationId, clientRequestId },
+    };
+    let job = await this.prisma.printJob.findUnique({ where, select: { id: true, status: true } });
+    if (!job) {
+      try {
+        job = await this.prisma.printJob.create({
+          data: {
+            organizationId: kiosk.organizationId,
+            establishmentId: kiosk.establishmentId,
+            terminalId: terminal.id,
+            kind: 'KIOSK_TICKET',
+            paperWidth,
+            kioskDeviceId: kiosk.deviceId,
+            clientRequestId,
+          },
+          select: { id: true, status: true },
+        });
+      } catch (error) {
+        // Deux envois simultanés de la même commande : un seul ticket.
+        if (!isUniqueViolation(error)) throw error;
+        job = await this.prisma.printJob.findUniqueOrThrow({
+          where,
+          select: { id: true, status: true },
+        });
+      }
+    }
+    const requestLines = request.lines as unknown as {
+      productName: string;
+      variantName: string;
+      quantity: number;
+      notes: string | null;
+    }[];
+    const lines = layoutKioskTicket(
+      {
+        establishmentName: request.establishment.name,
+        timezone: request.establishment.timezone,
+        number: formatKioskNumber(request.displayNumber),
+        date: request.createdAt.toISOString(),
+        lines: requestLines.map((l) => ({
+          productName: l.productName,
+          variantName: l.variantName,
+          quantity: l.quantity,
+          notes: l.notes,
+        })),
+        estimatedTotal: request.estimatedTotal,
+      },
+      paperWidth,
+    );
+    return {
+      jobId: job.id,
+      printer: { connection: terminal.printerConnection, address: terminal.printerAddress },
+      paperWidth,
+      data: job.status === 'PENDING' ? toBase64(encodeReceiptLines(lines)) : null,
+      preview: previewLines(lines, paperWidth),
+    };
+  }
+
+  /** Résultat rapporté par la borne pour son propre ticket ; un résultat enregistré ne change plus. */
+  async reportPrint(
+    kiosk: KioskContext,
+    jobId: string,
+    result: { status: 'SUCCEEDED' | 'FAILED'; errorCode?: string; errorMessage?: string },
+  ) {
+    const job = await this.prisma.printJob.findFirst({
+      where: { id: jobId, kioskDeviceId: kiosk.deviceId, organizationId: kiosk.organizationId },
+      select: { status: true },
+    });
+    if (!job) {
+      throw new NotFoundException({
+        code: 'PRINT_JOB_NOT_FOUND',
+        message: 'Impression introuvable.',
+      });
+    }
+    if (job.status !== 'PENDING') return { jobId, status: job.status };
+    await this.prisma.printJob.updateMany({
+      where: { id: jobId, status: 'PENDING' },
+      data: {
+        status: result.status,
+        errorCode: result.status === 'FAILED' ? (result.errorCode ?? 'PRINT_FAILED') : null,
+        errorMessage: result.status === 'FAILED' ? (result.errorMessage ?? null) : null,
+        completedAt: new Date(),
+      },
+    });
+    return { jobId, status: result.status };
   }
 
   private newPairingCode() {

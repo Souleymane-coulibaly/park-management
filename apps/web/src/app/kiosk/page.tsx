@@ -12,9 +12,12 @@ import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { InputField } from '@/components/ui/field';
 import { Alert, LoadingState } from '@/components/ui/states';
+import { PairPrinterButton } from '@/components/pos/pair-printer-button';
+import { printOnDevice } from '@/lib/hardware/device';
+import { HardwareError } from '@/lib/hardware/hardware-error';
 import { useOnline } from '@/lib/hardware/use-terminal';
 import { newRequestId } from '@/lib/request-id';
-import type { KioskMenu } from '@/lib/types';
+import type { HardwareTarget, KioskMenu } from '@/lib/types';
 
 /** Erreur de la borne (jamais de redirection vers la connexion des employés). */
 class KioskError extends Error {
@@ -69,14 +72,28 @@ type Screen =
   | { kind: 'unpaired' }
   | { kind: 'home' }
   | { kind: 'ordering'; sessionId: string }
-  | { kind: 'done'; number: number; total: number };
+  | { kind: 'done'; number: number; total: number; print: PrintOutcome };
+
+/** Ticket imprimé par la borne : absent (pas d'imprimante), imprimé ou en échec. */
+type PrintOutcome = 'none' | 'printed' | 'failed';
+
+interface KioskDevice {
+  deviceName: string;
+  establishmentName: string;
+  printer: HardwareTarget | null;
+}
+
+interface KioskPrint {
+  jobId: string;
+  printer: HardwareTarget;
+  data: string | null;
+  preview: string[];
+}
 
 export default function KioskPage() {
   const online = useOnline();
   const [screen, setScreen] = useState<Screen>({ kind: 'loading' });
-  const [device, setDevice] = useState<{ deviceName: string; establishmentName: string } | null>(
-    null,
-  );
+  const [device, setDevice] = useState<KioskDevice | null>(null);
   const [menu, setMenu] = useState<KioskMenu | null>(null);
   const [error, setError] = useState<KioskError | null>(null);
 
@@ -137,7 +154,7 @@ export default function KioskPage() {
           menu={menu}
           sessionId={screen.sessionId}
           online={online}
-          onDone={(number, total) => setScreen({ kind: 'done', number, total })}
+          onDone={(number, total, print) => setScreen({ kind: 'done', number, total, print })}
           onAbandon={() => {
             void kioskApi(`/sessions/${screen.sessionId}/end`, { method: 'POST' }).catch(
               () => undefined,
@@ -150,6 +167,7 @@ export default function KioskPage() {
       )}
       {screen.kind === 'done' && (
         <Confirmation
+          print={screen.print}
           number={screen.number}
           total={screen.total}
           onHome={() => setScreen({ kind: 'home' })}
@@ -157,6 +175,31 @@ export default function KioskPage() {
       )}
     </>
   );
+}
+
+/**
+ * Impression du ticket de commande sur l'imprimante de la borne, puis compte rendu au serveur
+ * (historique d'impression). Un échec n'annule pas la commande : le numéro reste affiché.
+ */
+async function printTicket(print: KioskPrint | null): Promise<PrintOutcome> {
+  if (!print) return 'none';
+  if (!print.data) return 'printed';
+  let outcome: PrintOutcome = 'printed';
+  let failure: { errorCode: string; errorMessage: string } | null = null;
+  try {
+    await printOnDevice(print.printer, print.data, print.preview);
+  } catch (e) {
+    outcome = 'failed';
+    failure =
+      e instanceof HardwareError
+        ? { errorCode: e.code, errorMessage: e.message.slice(0, 300) }
+        : { errorCode: 'PRINT_FAILED', errorMessage: 'Impression impossible.' };
+  }
+  await kioskApi(`/print-jobs/${print.jobId}/result`, {
+    method: 'POST',
+    body: failure ? { status: 'FAILED', ...failure } : { status: 'SUCCEEDED' },
+  }).catch(() => undefined);
+  return outcome;
 }
 
 function Pairing({ onPaired }: { onPaired: () => void }) {
@@ -208,26 +251,39 @@ function Home({
   error,
   onStart,
 }: {
-  device: { deviceName: string; establishmentName: string } | null;
+  device: KioskDevice | null;
   error: KioskError | null;
   onStart: () => void;
 }) {
   return (
-    <button
-      type="button"
-      onClick={onStart}
-      className="flex min-h-screen w-full flex-col items-center justify-center gap-6 bg-forest p-8 text-center text-white"
-    >
-      <UtensilsCrossed className="h-16 w-16" aria-hidden />
-      <span className="text-4xl font-bold">{device?.establishmentName ?? 'Bienvenue'}</span>
-      <span className="rounded-2xl bg-savanna px-8 py-5 text-2xl font-bold text-charcoal">
-        Touchez pour commander
-      </span>
-      <span className="max-w-md text-sm opacity-90">
-        Le paiement se fait à la caisse avec votre numéro de commande.
-      </span>
-      {error && <span className="rounded-xl bg-terracotta px-4 py-2 text-sm">{error.message}</span>}
-    </button>
+    <div className="relative">
+      <button
+        type="button"
+        onClick={onStart}
+        className="flex min-h-screen w-full flex-col items-center justify-center gap-6 bg-forest p-8 text-center text-white"
+      >
+        <UtensilsCrossed className="h-16 w-16" aria-hidden />
+        <span className="text-4xl font-bold">{device?.establishmentName ?? 'Bienvenue'}</span>
+        <span className="rounded-2xl bg-savanna px-8 py-5 text-2xl font-bold text-charcoal">
+          Touchez pour commander
+        </span>
+        <span className="max-w-md text-sm opacity-90">
+          Le paiement se fait à la caisse avec votre numéro de commande.
+        </span>
+        {error && (
+          <span className="rounded-xl bg-terracotta px-4 py-2 text-sm">{error.message}</span>
+        )}
+      </button>
+      {/* Mise en service par le personnel : association de l'imprimante USB ou BLE à la tablette. */}
+      {device?.printer && (
+        <div className="absolute inset-x-0 bottom-3 flex justify-center">
+          <PairPrinterButton
+            connection={device.printer.connection}
+            address={device.printer.address}
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -242,7 +298,7 @@ function Ordering({
   menu: KioskMenu;
   sessionId: string;
   online: boolean;
-  onDone: (number: number, total: number) => void;
+  onDone: (number: number, total: number, print: PrintOutcome) => void;
   onAbandon: () => void;
   onUnpaired: () => void;
 }) {
@@ -311,22 +367,23 @@ function Ordering({
     setSending(true);
     setError(null);
     try {
-      const res = await kioskApi<{ displayNumber: number; estimatedTotal: number }>(
-        `/sessions/${sessionId}/orders`,
-        {
-          method: 'POST',
-          body: {
-            clientRequestId: requestId,
-            ...(name.trim() ? { customerName: name.trim() } : {}),
-            lines: cart.map((l) => ({
-              variantId: l.variantId,
-              quantity: l.quantity,
-              ...(l.notes ? { notes: l.notes } : {}),
-            })),
-          },
+      const res = await kioskApi<{
+        displayNumber: number;
+        estimatedTotal: number;
+        print: KioskPrint | null;
+      }>(`/sessions/${sessionId}/orders`, {
+        method: 'POST',
+        body: {
+          clientRequestId: requestId,
+          ...(name.trim() ? { customerName: name.trim() } : {}),
+          lines: cart.map((l) => ({
+            variantId: l.variantId,
+            quantity: l.quantity,
+            ...(l.notes ? { notes: l.notes } : {}),
+          })),
         },
-      );
-      onDone(res.displayNumber, res.estimatedTotal);
+      });
+      onDone(res.displayNumber, res.estimatedTotal, await printTicket(res.print));
     } catch (e) {
       const err = e as KioskError;
       if (err.status === 401) return onUnpaired();
@@ -537,10 +594,12 @@ function ProductDialog({
 function Confirmation({
   number,
   total,
+  print,
   onHome,
 }: {
   number: number;
   total: number;
+  print: PrintOutcome;
   onHome: () => void;
 }) {
   const [left, setLeft] = useState(KIOSK_CONFIRMATION_SECONDS);
@@ -565,6 +624,16 @@ function Confirmation({
         Présentez ce numéro à la caisse pour régler {formatXof(total)}. Votre commande sera préparée
         après validation.
       </p>
+      {print === 'printed' && (
+        <p className="rounded-xl bg-forest-light px-4 py-2 font-semibold text-forest-dark">
+          Prenez votre ticket.
+        </p>
+      )}
+      {print === 'failed' && (
+        <p className="rounded-xl bg-terracotta-light px-4 py-2 font-semibold text-terracotta-dark">
+          Le ticket n’a pas pu être imprimé : notez votre numéro.
+        </p>
+      )}
       <p className="text-sm text-muted">Retour à l’accueil dans {Math.max(0, left)} s</p>
     </button>
   );

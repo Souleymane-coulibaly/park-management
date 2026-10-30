@@ -62,6 +62,24 @@ Le champ « Photo (adresse https) » du catalogue accepte uniquement une URL htt
 plus. **Limite :** aucun stockage de fichiers n'est configuré, il n'y a donc pas d'envoi d'image
 depuis le poste.
 
+### Ticket de commande imprimé
+
+Dans `/app/bornes`, chaque borne peut être reliée à l'imprimante d'un poste de caisse du même
+établissement (« Ticket sur : … »). Une fois la commande validée, la borne imprime un ticket portant
+le numéro en grand, les articles, le total indicatif et la mention « Ticket de commande — pas un
+reçu », puis rapporte le résultat au serveur.
+
+- Le serveur produit le flux ESC/POS (`PrintJob` de type `KIOSK_TICKET`, attribué à la borne, sans
+  employé). La tablette ne fait que le transmettre à l'imprimante.
+- Pas de réimpression : un renvoi réseau de la même commande rend le même ticket, sans nouveau flux.
+- Un échec d'impression n'annule pas la commande. L'écran affiche « Le ticket n'a pas pu être
+  imprimé : notez votre numéro. » et l'échec reste dans l'historique du poste.
+- Contrôles : le poste doit être du même établissement (`404 TERMINAL_NOT_FOUND`) et avoir une
+  imprimante active (`409 PRINTER_NOT_CONFIGURED`). Une borne ne peut rapporter que ses propres
+  tickets (`404`). Le choix de l'imprimante est journalisé (`kiosk.printer_set`).
+- La tablette imprime soit directement depuis le navigateur (USB ou Bluetooth BLE, voir
+  `docs/MATERIEL-POS.md` §5 bis), soit par le connecteur Android.
+
 ## CRM (`/app/clients`)
 
 ### Fiches
@@ -176,11 +194,19 @@ ajoutées à la main.
   - `StaffAssignment.endsAt > startsAt`.
 - Les modèles de commandes, paiements, utilisateurs et établissements ne sont pas dupliqués.
 
+Migration `20261030152753_impression_pwa_ticket_borne`, additive :
+
+- valeurs d'énumération `PrinterConnection.WEBUSB`, `WEBBLUETOOTH` et `PrintJobKind.KIOSK_TICKET` ;
+- `KioskDevice.printerTerminalId` et `PrintJob.kioskDeviceId`, facultatifs (`ON DELETE SET NULL`) ;
+- `PrintJob.requestedById` devient facultatif : seul le ticket de borne n'a pas d'employé.
+
 ## API (`/api/v1`, Swagger)
 
 | Route                                                                                                      | Permission                            |
 | ---------------------------------------------------------------------------------------------------------- | ------------------------------------- |
 | `GET/POST /kiosk-devices`, `POST …/:id/pairing-code`, `POST …/:id/revoke`                                  | `kiosk.manage`                        |
+| `POST /kiosk-devices/:id/printer`                                                                          | `kiosk.manage`                        |
+| `POST /kiosk/print-jobs/:id/result`                                                                        | jeton d'appareil                      |
 | `POST /kiosk/pair`                                                                                         | public, limite stricte                |
 | `GET /kiosk/me`, `/kiosk/menu`, `POST /kiosk/sessions`, `…/:id/orders`, `…/:id/end`                        | jeton d'appareil                      |
 | `GET/POST /customers`, `GET/PATCH /customers/:id`                                                          | `customer.read` / `customer.manage`   |

@@ -630,6 +630,10 @@ enum PrinterConnection {
   NETWORK
   BLUETOOTH
   USB
+  /// Imprimante USB pilotée directement par le navigateur (PWA, WebUSB) : sans connecteur natif.
+  WEBUSB
+  /// Imprimante Bluetooth Low Energy pilotée par le navigateur (PWA, Web Bluetooth).
+  WEBBLUETOOTH
 }
 
 enum PrintJobKind {
@@ -638,6 +642,8 @@ enum PrintJobKind {
   TEST
   /// Ticket cuisine (sans prix), après l'envoi explicite en cuisine.
   KITCHEN
+  /// Ticket de commande imprimé par une borne libre-service (numéro à présenter à la caisse).
+  KIOSK_TICKET
 }
 
 enum HardwareJobStatus {
@@ -659,7 +665,8 @@ model PosTerminal {
   name              String
   isActive          Boolean           @default(true)
   printerConnection PrinterConnection @default(NONE)
-  /// Réseau : IPv4 locale[:port] ; Bluetooth : adresse MAC ; USB : vendorId:productId.
+  /// Réseau : IPv4 locale[:port] ; Bluetooth : adresse MAC ; USB et WebUSB : vendorId:productId
+  /// (facultatif en WebUSB) ; Web Bluetooth : nom de l'appareil (facultatif).
   printerAddress    String?
   /// Largeur du papier en mm : 58 ou 80.
   paperWidth        Int               @default(80)
@@ -676,6 +683,7 @@ model PosTerminal {
   establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
   printJobs     PrintJob[]
   drawerEvents  DrawerEvent[]
+  kiosks        KioskDevice[]
 
   @@unique([establishmentId, name])
   @@index([organizationId, establishmentId])
@@ -696,16 +704,20 @@ model PrintJob {
   reason          String?
   errorCode       String?
   errorMessage    String?
-  requestedById   String            @db.Uuid
+  /// Employé qui a demandé l'impression ; null pour un ticket imprimé par une borne.
+  requestedById   String?           @db.Uuid
+  /// Borne qui a imprimé le ticket (impressions KIOSK_TICKET).
+  kioskDeviceId   String?           @db.Uuid
   clientRequestId String?
   createdAt       DateTime          @default(now())
   completedAt     DateTime?
 
-  organization  Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  establishment Establishment          @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
-  terminal      PosTerminal            @relation(fields: [terminalId], references: [id], onDelete: Cascade)
-  sale          Sale?                  @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  requestedBy   OrganizationMembership @relation("PrintJobRequestedBy", fields: [requestedById], references: [id], onDelete: NoAction)
+  organization  Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment           @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  terminal      PosTerminal             @relation(fields: [terminalId], references: [id], onDelete: Cascade)
+  sale          Sale?                   @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  requestedBy   OrganizationMembership? @relation("PrintJobRequestedBy", fields: [requestedById], references: [id], onDelete: NoAction)
+  kioskDevice   KioskDevice?            @relation(fields: [kioskDeviceId], references: [id], onDelete: SetNull)
 
   @@unique([organizationId, clientRequestId])
   @@index([saleId])
@@ -1201,15 +1213,19 @@ model KioskDevice {
   pairedAt             DateTime?
   revokedAt            DateTime?
   lastSeenAt           DateTime?
+  /// Imprimante (poste de l'établissement) des tickets de commande de la borne ; null = pas de ticket.
+  printerTerminalId    String?   @db.Uuid
   createdById          String    @db.Uuid
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
-  organization  Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  establishment Establishment          @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
-  createdBy     OrganizationMembership @relation("KioskDeviceCreatedBy", fields: [createdById], references: [id], onDelete: NoAction)
-  sessions      KioskSession[]
-  orderRequests QrOrderRequest[]
+  organization    Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment   Establishment          @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  createdBy       OrganizationMembership @relation("KioskDeviceCreatedBy", fields: [createdById], references: [id], onDelete: NoAction)
+  printerTerminal PosTerminal?           @relation(fields: [printerTerminalId], references: [id], onDelete: SetNull)
+  sessions        KioskSession[]
+  orderRequests   QrOrderRequest[]
+  printJobs       PrintJob[]
 
   @@unique([establishmentId, name])
   @@index([organizationId])

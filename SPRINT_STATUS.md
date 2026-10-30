@@ -52,17 +52,27 @@ Documentation : [docs/BORNES-CRM-FIDELITE-PLANNING.md](docs/BORNES-CRM-FIDELITE-
    - Postes configurables, créneaux, vues jour, semaine et mois.
    - Chevauchements refusés sous verrou ; planning personnel visible par chaque employé.
    - Pas de pointage, d'absences, de congés ni de paie.
+5. **Impression directe PWA et ticket de borne** (extension approuvée en cours de sprint)
+   - Imprimantes USB (WebUSB) et Bluetooth BLE pilotées par le navigateur, sans connecteur
+     Android : caisse, billetterie, cuisine, borne. Association par geste sur chaque appareil.
+   - Ticket de commande imprimé par la borne (numéro, articles, total indicatif), historisé, sans
+     réimpression ; un échec n'annule pas la commande.
+   - Non validé sur imprimante physique (A16). Bluetooth classique et port 9100 : connecteur Android.
 
 **Migration** `20261030142337_bornes_crm_fidelite_planning` : additive, avec deux contraintes CHECK.
 
 - Appliquée sur `test`, puis sur la base de développement.
 - Comptages des 36 tables existantes identiques avant et après ; 8 tables nouvelles, vides.
 
+**Migration** `20261030152753_impression_pwa_ticket_borne` : additive (3 valeurs d'énumération,
+2 colonnes facultatives, `PrintJob.requestedById` facultatif). `db:migrate:check` OK. **Pas encore
+appliquée** : en attente de la base `test`.
+
 ### Tests
 
 | Suite                                                                           | Résultat                                                          |
 | ------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| Unitaires (shared 87, database 13, api 11)                                      | 111/111                                                           |
+| Unitaires (shared 90, database 13, api 11)                                      | 114/114                                                           |
 | Lint, Prettier, TypeScript strict, build                                        | OK                                                                |
 | Intégration Sprint 6 (`sprint6-kiosk-crm-planning.integration.spec.ts`, 20 cas) | **Non exécutée** : base Neon `test` injoignable (voir ci-dessous) |
 | Régression intégration Sprints 1 à 6, E2E Sprint 6 et régression E2E            | **En attente** du rétablissement de la base `test`                |
