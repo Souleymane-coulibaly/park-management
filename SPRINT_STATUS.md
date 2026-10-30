@@ -46,14 +46,14 @@ puis sur la base de développement (comptages inchangés). Documentation :
 
 ### Tests (branche Neon `test` uniquement)
 
-| Suite                                                    | Résultat        |
-| -------------------------------------------------------- | --------------- |
-| Unitaires (shared 67, database 13, api 8)                | 88/88           |
-| Intégration API — Sprint 4 (19 cas demandés + isolation) | 26/26           |
-| Intégration API — Sprints 1 à 4 (régression complète)    | 102/102         |
-| E2E Playwright — Sprints 1 à 4 (régression)              | voir ci-dessous |
-| Lint, Prettier, TypeScript strict, build                 | OK              |
-| Contrôle des migrations destructrices                    | OK              |
+| Suite                                                    | Résultat |
+| -------------------------------------------------------- | -------- |
+| Unitaires (shared 67, database 13, api 8)                | 88/88    |
+| Intégration API — Sprint 4 (19 cas demandés + isolation) | 26/26    |
+| Intégration API — Sprints 1 à 4 (régression complète)    | 102/102  |
+| E2E Playwright — Sprints 1 à 4 (régression)              | 20/20    |
+| Lint, Prettier, TypeScript strict, build                 | OK       |
+| Contrôle des migrations destructrices                    | OK       |
 
 ### Corrections et changements transverses
 
@@ -74,6 +74,11 @@ puis sur la base de développement (comptages inchangés). Documentation :
 
 ### Problèmes restants
 
+- **Arrêt des serveurs de test pendant une exécution E2E (2ᵉ occurrence, après celle du Sprint 3)** :
+  l'API puis le frontend ont cessé de répondre au milieu de l'exécution (1 échec réel, 10 échecs
+  `ERR_CONNECTION_REFUSED` en cascade), sans aucune sortie serveur ; aucun hook git ni autre processus
+  en cause identifié. Relance isolée : **20/20**. Journaux conservés :
+  `test-logs/e2e-2026-10-30T00-46-22-458Z.log` (incident), `test-logs/e2e-2026-10-30T00-50-04-235Z.log` (20/20).
 - Remboursement d'un billet annulé : hors périmètre.
 - Latence Neon `us-east-2` : encaissement de billets ≈ 5 s en test (≈ 12 allers-retours).
 

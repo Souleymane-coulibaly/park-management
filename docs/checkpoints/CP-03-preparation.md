@@ -21,7 +21,7 @@ pnpm db:migrate:check            # aucune migration destructrice
 pnpm test                        # unitaires (attendu : 88/88)
 pnpm db:migrate:deploy:test      # migrations en attente sur la branche test
 pnpm test:integration            # attendu : 102/102 — journal complet dans test-logs/
-pnpm build; pnpm test:e2e        # journal complet dans test-logs/ (résultat dans SPRINT_STATUS.md)
+pnpm build; pnpm test:e2e        # attendu : 20/20 — journal complet dans test-logs/
 ```
 
 ## Points à vérifier — Sprint 4 (billetterie et contrôle d'accès)
@@ -56,13 +56,14 @@ pnpm build; pnpm test:e2e        # journal complet dans test-logs/ (résultat da
 
 ## Points d'attention connus
 
-| Sujet                                                         | État                                                   | Référence                                            |
-| ------------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------- |
-| Scan caméra et impression des QR non testés sur matériel réel | Ouvert — validation sur tablette et imprimantes        | `docs/BILLETTERIE-PARC.md` (dernière section)        |
-| Connecteur Android non compilé (Sprint 3)                     | Ouvert — validation matérielle requise                 | `docs/MATERIEL-POS.md` §7                            |
-| Remboursement d'un billet annulé                              | Hors périmètre (annulation seule, auditée)             | `docs/BILLETTERIE-PARC.md`                           |
-| Transaction Prisma bloquée 732 s (Sprint 2, 1 occurrence)     | Non reproduit (Sprints 3 et 4) ; délai désormais borné | `test-logs/integration-2026-10-29T20-33-12-703Z.log` |
-| Latence Neon `us-east-2` (~300 ms par requête)                | Accepté en test ; région à choisir pour la production  | `docs/DEPLOIEMENT-RAILWAY.md` §8                     |
+| Sujet                                                              | État                                                      | Référence                                            |
+| ------------------------------------------------------------------ | --------------------------------------------------------- | ---------------------------------------------------- |
+| Scan caméra et impression des QR non testés sur matériel réel      | Ouvert — validation sur tablette et imprimantes           | `docs/BILLETTERIE-PARC.md` (dernière section)        |
+| Connecteur Android non compilé (Sprint 3)                          | Ouvert — validation matérielle requise                    | `docs/MATERIEL-POS.md` §7                            |
+| Remboursement d'un billet annulé                                   | Hors périmètre (annulation seule, auditée)                | `docs/BILLETTERIE-PARC.md`                           |
+| Transaction Prisma bloquée 732 s (Sprint 2, 1 occurrence)          | Non reproduit (Sprints 3 et 4) ; délai désormais borné    | `test-logs/integration-2026-10-29T20-33-12-703Z.log` |
+| Arrêt des serveurs E2E sans sortie (Sprints 3 et 4, 2 occurrences) | Non reproduit à la relance (20/20) ; cause non identifiée | `test-logs/e2e-2026-10-30T00-46-22-458Z.log`         |
+| Latence Neon `us-east-2` (~300 ms par requête)                     | Accepté en test ; région à choisir pour la production     | `docs/DEPLOIEMENT-RAILWAY.md` §8                     |
 
 Les journaux `test-logs/` ne sont pas versionnés : ils sont disponibles sur le poste de développement.
 
