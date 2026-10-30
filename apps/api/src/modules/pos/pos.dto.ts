@@ -113,6 +113,11 @@ export class SalesQueryDto {
   @IsIn(['OPEN', 'CANCELLED'])
   status?: 'OPEN' | 'CANCELLED';
 
+  @ApiPropertyOptional({ enum: ['RESTAURANT', 'PARK'] })
+  @IsOptional()
+  @IsIn(['RESTAURANT', 'PARK'])
+  activity?: 'RESTAURANT' | 'PARK';
+
   @ApiPropertyOptional({ example: '2026-10-29T00:00:00Z' })
   @IsOptional()
   @IsISO8601()

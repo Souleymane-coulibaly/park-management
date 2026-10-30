@@ -4,7 +4,12 @@ import { computeSaleTotals } from '@ocall/shared';
 import type { CartLineDto } from './pos.dto';
 
 export interface PricedSaleLine {
-  variantId: string;
+  /** Article de restaurant. */
+  variantId?: string;
+  /** Billetterie : catégorie, billets par unité et prénoms des visiteurs. */
+  ticketCategoryId?: string;
+  peoplePerUnit?: number;
+  visitorNames?: string[];
   productName: string;
   variantName: string;
   unitPrice: number;

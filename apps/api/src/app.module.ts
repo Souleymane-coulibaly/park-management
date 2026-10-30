@@ -25,6 +25,7 @@ import { PlatformModule } from './modules/platform/platform.module';
 import { PosModule } from './modules/pos/pos.module';
 import { RolesModule } from './modules/roles/roles.module';
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
+import { TicketingModule } from './modules/ticketing/ticketing.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { SubscriptionsModule } from './modules/subscriptions/subscriptions.modul
     CatalogModule,
     PosModule,
     HardwareModule,
+    TicketingModule,
   ],
   controllers: [HealthController],
   providers: [

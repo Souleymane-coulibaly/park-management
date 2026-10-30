@@ -173,9 +173,8 @@ describe('Sprint 3 — impression et tiroir-caisse (intégration)', () => {
         .patch(`/api/v1/pos-terminals/${terminalA}`)
         .send({ drawerEnabled: false })
         .expect(403);
-      const park = await parkB.agent.get('/api/v1/pos-terminals');
-      expect(park.status).toBe(403);
-      expect(park.body.code).toBe('MODULE_NOT_IN_PLAN');
+      // Sprint 4 : un parc imprime ses billets avec le même matériel, sans voir les postes des autres.
+      expect((await parkB.agent.get('/api/v1/pos-terminals').expect(200)).body).toEqual([]);
     });
 
     it('isolation : une autre organisation ne voit ni ne modifie le poste', async () => {

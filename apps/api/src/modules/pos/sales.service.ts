@@ -5,11 +5,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@ocall/database';
-import { computeChange } from '@ocall/shared';
+import { type Activity, computeChange } from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
 import type { TenantContext } from '../../common/auth-context';
 import { PaymentMethodsService } from '../payments/payment-methods.service';
+import { TicketIssuanceService } from '../ticket-issuance/ticket-issuance.service';
 import type { CancelSaleDto, CreateSaleDto, PaySaleDto, QuoteDto, SalesQueryDto } from './pos.dto';
 import {
   findSellingEstablishment,
@@ -17,7 +18,7 @@ import {
   requireOpenCashSession,
   visibleSalesWhere,
 } from './pos-scope';
-import { SalePricingService } from './sale-pricing.service';
+import { type PricedSale, SalePricingService } from './sale-pricing.service';
 
 const SALE_SELECT = {
   id: true,
@@ -26,6 +27,7 @@ const SALE_SELECT = {
   paymentStatus: true,
   preparationStatus: true,
   total: true,
+  activity: true,
   createdAt: true,
   cancelledAt: true,
   cashSessionId: true,
@@ -34,6 +36,9 @@ const SALE_SELECT = {
   lines: {
     select: {
       variantId: true,
+      ticketCategoryId: true,
+      peoplePerUnit: true,
+      visitorNames: true,
       productName: true,
       variantName: true,
       unitPrice: true,
@@ -69,6 +74,10 @@ function toSale({ cashier, ...sale }: SaleRow) {
 const isUniqueViolation = (error: unknown) =>
   error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
 
+const isAlreadyPaid = (error: unknown) =>
+  error instanceof ConflictException &&
+  (error.getResponse() as { code?: string }).code === 'SALE_ALREADY_PAID';
+
 /**
  * Ventes de la caisse. Règles :
  * - les montants sont calculés par le serveur (SalePricingService) ;
@@ -83,11 +92,12 @@ export class SalesService {
     private readonly audit: AuditService,
     private readonly pricing: SalePricingService,
     private readonly paymentMethods: PaymentMethodsService,
+    private readonly ticketIssuance: TicketIssuanceService,
   ) {}
 
   /** Aperçu des montants d'un panier, sans rien enregistrer. */
   async quote(auth: TenantContext, dto: QuoteDto) {
-    await findSellingEstablishment(this.prisma, auth, dto.establishmentId);
+    await findSellingEstablishment(this.prisma, auth, dto.establishmentId, 'RESTAURANT');
     return this.pricing.price(
       this.prisma,
       auth.membership.organizationId,
@@ -96,17 +106,46 @@ export class SalesService {
     );
   }
 
+  /** Vente de restaurant : panier d'articles valorisé aux tarifs de l'établissement. */
   async create(auth: TenantContext, dto: CreateSaleDto) {
+    return this.createSale(auth, {
+      establishmentId: dto.establishmentId,
+      activity: 'RESTAURANT',
+      clientRequestId: dto.clientRequestId,
+      price: (tx, organizationId) =>
+        this.pricing.price(tx, organizationId, dto.establishmentId, dto.lines),
+    });
+  }
+
+  /**
+   * Création d'une vente, commune au restaurant et à la billetterie : session de caisse ouverte
+   * obligatoire, montants calculés par le serveur (fonction `price`), numéro séquentiel par
+   * établissement, idempotence par clé de requête, audit.
+   */
+  async createSale(
+    auth: TenantContext,
+    params: {
+      establishmentId: string;
+      activity: Activity;
+      clientRequestId?: string;
+      price: (tx: Prisma.TransactionClient, organizationId: string) => Promise<PricedSale>;
+    },
+  ) {
     const organizationId = auth.membership.organizationId;
-    if (dto.clientRequestId) {
-      const replay = await this.findReplayedSale(auth, dto.clientRequestId);
+    if (params.clientRequestId) {
+      const replay = await this.findReplayedSale(auth, params.clientRequestId);
       if (replay) return replay;
     }
-    const establishment = await findSellingEstablishment(this.prisma, auth, dto.establishmentId);
+    const establishment = await findSellingEstablishment(
+      this.prisma,
+      auth,
+      params.establishmentId,
+      params.activity,
+    );
     try {
       const id = await this.prisma.$transaction(async (tx) => {
         const session = await requireOpenCashSession(tx, auth, establishment.id);
-        const priced = await this.pricing.price(tx, organizationId, establishment.id, dto.lines);
+        const priced = await params.price(tx, organizationId);
         const { saleSeq } = await tx.establishment.update({
           where: { id: establishment.id },
           data: { saleSeq: { increment: 1 } },
@@ -119,8 +158,9 @@ export class SalesService {
             cashSessionId: session.id,
             cashierId: auth.membership.id,
             number: saleSeq,
+            activity: params.activity,
             total: priced.total,
-            clientRequestId: dto.clientRequestId,
+            clientRequestId: params.clientRequestId,
             lines: { create: priced.lines.map((l) => ({ ...l, organizationId })) },
           },
         });
@@ -131,7 +171,12 @@ export class SalesService {
             action: 'sale.created',
             targetType: 'Sale',
             targetId: sale.id,
-            metadata: { number: saleSeq, total: priced.total, lines: priced.lines.length },
+            metadata: {
+              number: saleSeq,
+              total: priced.total,
+              lines: priced.lines.length,
+              activity: params.activity,
+            },
           },
           tx,
         );
@@ -140,8 +185,8 @@ export class SalesService {
       return this.get(auth, id);
     } catch (error) {
       // Deux envois simultanés de la même vente : le second renvoie la vente déjà créée.
-      if (dto.clientRequestId && isUniqueViolation(error)) {
-        const replay = await this.findReplayedSale(auth, dto.clientRequestId);
+      if (params.clientRequestId && isUniqueViolation(error)) {
+        const replay = await this.findReplayedSale(auth, params.clientRequestId);
         if (replay) return replay;
       }
       throw error;
@@ -163,6 +208,7 @@ export class SalesService {
         cashSessionId: query.cashSessionId,
         paymentStatus: query.paymentStatus,
         status: query.status,
+        activity: query.activity,
         createdAt,
       },
       orderBy: { createdAt: 'desc' },
@@ -215,6 +261,7 @@ export class SalesService {
             total: true,
             establishmentId: true,
             number: true,
+            activity: true,
           },
         });
         if (sale.status === 'CANCELLED') {
@@ -253,6 +300,9 @@ export class SalesService {
         });
         // Paiement seulement : le statut de préparation n'est volontairement PAS modifié.
         await tx.sale.update({ where: { id }, data: { paymentStatus: 'PAID' } });
+        // Billetterie : les billets (et leurs QR codes) ne sont émis qu'ici, dans la transaction du
+        // paiement confirmé. Un paiement rejoué ne repasse jamais par ce point (vente déjà payée).
+        if (sale.activity === 'PARK') await this.ticketIssuance.issueForPaidSale(tx, auth, id);
         await this.audit.record(
           {
             organizationId,
@@ -274,7 +324,9 @@ export class SalesService {
       });
       return this.paymentResult(auth, id, paymentId);
     } catch (error) {
-      if (dto.clientRequestId && isUniqueViolation(error)) {
+      // Même paiement envoyé deux fois en même temps : le second attend le verrou de la vente puis la
+      // trouve payée (ou bute sur la clé unique) ; il renvoie alors le paiement déjà enregistré.
+      if (dto.clientRequestId && (isUniqueViolation(error) || isAlreadyPaid(error))) {
         const replay = await this.findReplayedPayment(auth, id, dto.clientRequestId);
         if (replay) return replay;
       }

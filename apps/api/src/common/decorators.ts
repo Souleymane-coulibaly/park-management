@@ -20,10 +20,11 @@ export const RequirePermission = (permission: Permission) =>
   SetMetadata(REQUIRED_PERMISSION, permission);
 
 /**
- * Route réservée aux organisations dont le métier couvre l'activité (ex. RESTAURANT pour la caisse
- * et le catalogue). Vérifiée côté serveur à chaque requête, indépendamment de l'interface.
+ * Route réservée aux organisations dont le métier couvre au moins une des activités (ex. RESTAURANT
+ * pour le catalogue, RESTAURANT ou PARK pour les sessions de caisse et les paiements). Vérifiée côté serveur à chaque requête, indépendamment de l'interface.
  */
-export const RequireActivity = (activity: Activity) => SetMetadata(REQUIRED_ACTIVITY, activity);
+export const RequireActivity = (...activities: Activity[]) =>
+  SetMetadata(REQUIRED_ACTIVITY, activities);
 
 /** Route réservée au SUPER_ADMIN de la plateforme. */
 export const SuperAdminOnly = () => SetMetadata(SUPER_ADMIN_ONLY, true);

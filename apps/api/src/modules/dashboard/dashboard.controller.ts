@@ -70,18 +70,23 @@ export class DashboardController {
         })
       : null;
 
-    const restaurantRevenue =
-      coversActivity(businessType, 'RESTAURANT') && hasPermission(role, 'sale.read_all')
-        ? await this.restaurantRevenue(
+    const revenueFor = (activity: 'RESTAURANT' | 'PARK') =>
+      coversActivity(businessType, activity) && hasPermission(role, 'sale.read_all')
+        ? this.revenue(
+            activity,
             tenant.membership.organizationId,
             tenant.membership.timezone,
             hasOrganizationWideScope(role) ? null : tenant.membership.id,
           )
-        : null;
+        : Promise.resolve(null);
+    const [restaurantRevenue, parkRevenue] = await Promise.all([
+      revenueFor('RESTAURANT'),
+      revenueFor('PARK'),
+    ]);
 
     return {
-      // Revenus séparés par activité : Restaurant (caisse POS) disponible, Parc avec la billetterie.
-      revenue: { RESTAURANT: restaurantRevenue, PARK: null },
+      // Revenus séparés par activité : caisse restaurant et billetterie parc ne se mélangent jamais.
+      revenue: { RESTAURANT: restaurantRevenue, PARK: parkRevenue },
       activities: activitiesOf(businessType),
       establishments: { total: establishmentsTotal, active: establishmentsActive },
       employees,
@@ -91,11 +96,12 @@ export class DashboardController {
   }
 
   /**
-   * Chiffre d'affaires restaurant encaissé (ventes payées, non annulées), aujourd'hui et sur
+   * Chiffre d'affaires encaissé d'une activité (ventes payées, non annulées), aujourd'hui et sur
    * 30 jours glissants. « Aujourd'hui » suit le fuseau horaire de l'organisation.
    * Pour un superviseur, limité aux établissements qui lui sont affectés.
    */
-  private async restaurantRevenue(
+  private async revenue(
+    activity: 'RESTAURANT' | 'PARK',
     organizationId: string,
     timezone: string,
     assignedMembershipId: string | null,
@@ -109,6 +115,7 @@ export class DashboardController {
         COUNT(*) AS count30
       FROM "Sale" s
       WHERE s."organizationId" = ${organizationId}::uuid
+        AND s."activity" = ${activity}::"SaleActivity"
         AND s."status" = 'OPEN' AND s."paymentStatus" = 'PAID'
         AND s."createdAt" >= now() - interval '30 days'
         AND (${assignedMembershipId}::uuid IS NULL OR s."establishmentId" IN (

@@ -13,6 +13,8 @@ import {
   hasOrganizationWideScope,
   hasPermission,
   layoutReceipt,
+  layoutTickets,
+  ticketQrPayload,
   layoutTestPage,
   previewLines,
   toBase64,
@@ -35,6 +37,7 @@ const JOB_SELECT = {
   createdAt: true,
   completedAt: true,
   saleId: true,
+  ticketId: true,
   terminalId: true,
   requestedById: true,
   terminal: { select: { name: true } },
@@ -101,6 +104,21 @@ export class PrintJobsService {
         });
       }
     }
+    if (dto.ticketId && (dto.kind !== 'REPRINT' || !dto.saleId)) {
+      throw new BadRequestException({
+        code: 'TICKET_REPRINT_ONLY',
+        message: 'Un billet seul ne peut être que réimprimé, avec sa vente.',
+      });
+    }
+    if (
+      dto.ticketId &&
+      !(await this.prisma.ticket.count({ where: { id: dto.ticketId, saleId: dto.saleId } }))
+    ) {
+      throw new NotFoundException({
+        code: 'TICKET_NOT_FOUND',
+        message: 'Billet introuvable pour cette vente.',
+      });
+    }
     if (dto.kind !== 'TEST' && !dto.saleId) {
       throw new BadRequestException({
         code: 'SALE_REQUIRED',
@@ -117,6 +135,7 @@ export class PrintJobsService {
             establishmentId: terminal.establishment.id,
             terminalId: terminal.id,
             saleId: dto.saleId ?? null,
+            ticketId: dto.ticketId ?? null,
             kind: dto.kind,
             paperWidth: terminal.paperWidth,
             reason: dto.reason ?? null,
@@ -305,7 +324,7 @@ export class PrintJobsService {
     const job = await this.get(auth, jobId);
     const paperWidth = (job.paperWidth === 58 ? 58 : 80) as PaperWidth;
     const lines = job.saleId
-      ? await this.saleReceipt(job.saleId, paperWidth, job.kind === 'REPRINT')
+      ? await this.saleReceipt(job.saleId, paperWidth, job.kind === 'REPRINT', job.ticketId)
       : layoutTestPage(terminal.name, terminal.establishment.name, paperWidth, job.createdAt);
     const pending = job.status === 'PENDING';
     return {
@@ -322,10 +341,12 @@ export class PrintJobsService {
     saleId: string,
     paperWidth: PaperWidth,
     duplicate: boolean,
+    ticketId: string | null,
   ): Promise<ReceiptLine[]> {
     const sale = await this.prisma.sale.findUniqueOrThrow({
       where: { id: saleId },
       select: {
+        activity: true,
         number: true,
         total: true,
         createdAt: true,
@@ -349,6 +370,40 @@ export class PrintJobsService {
         },
       },
     });
+    if (sale.activity === 'PARK') {
+      const tickets = await this.prisma.ticket.findMany({
+        where: { saleId, ...(ticketId ? { id: ticketId } : {}), status: { not: 'CANCELLED' } },
+        orderBy: [{ saleLine: { id: 'asc' } }, { position: 'asc' }],
+        select: {
+          id: true,
+          visitorName: true,
+          pricePaid: true,
+          validFrom: true,
+          validUntil: true,
+          token: true,
+          ticketCategory: { select: { name: true } },
+        },
+      });
+      return layoutTickets(
+        {
+          organizationName: sale.organization.name,
+          establishmentName: sale.establishment.name,
+          timezone: sale.establishment.timezone,
+          saleNumber: sale.number,
+          duplicate,
+          tickets: tickets.map((t) => ({
+            id: t.id,
+            visitorName: t.visitorName,
+            categoryName: t.ticketCategory.name,
+            pricePaid: t.pricePaid,
+            validFrom: t.validFrom.toISOString(),
+            validUntil: t.validUntil.toISOString(),
+            qr: ticketQrPayload(t.token),
+          })),
+        },
+        paperWidth,
+      );
+    }
     return layoutReceipt(
       {
         organizationName: sale.organization.name,

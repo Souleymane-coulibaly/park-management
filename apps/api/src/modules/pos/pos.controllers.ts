@@ -49,7 +49,7 @@ export class PosController {
   @Get('catalog')
   async catalog(@CurrentAuth() auth: AuthContext, @Query() query: EstablishmentQueryDto) {
     const tenant = requireTenant(auth);
-    await findSellingEstablishment(this.prisma, tenant, query.establishmentId);
+    await findSellingEstablishment(this.prisma, tenant, query.establishmentId, 'RESTAURANT');
     const categories = await this.prisma.productCategory.findMany({
       where: { organizationId: tenant.membership.organizationId, isActive: true },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
@@ -110,7 +110,7 @@ export class PosController {
 }
 
 @ApiTags('Caisse POS')
-@RequireActivity('RESTAURANT')
+@RequireActivity('RESTAURANT', 'PARK')
 @Controller('cash-sessions')
 export class CashSessionsController {
   constructor(private readonly sessions: CashSessionsService) {}
@@ -152,12 +152,14 @@ export class CashSessionsController {
 }
 
 @ApiTags('Caisse POS')
-@RequireActivity('RESTAURANT')
+@RequireActivity('RESTAURANT', 'PARK')
 @Controller('sales')
 export class SalesController {
   constructor(private readonly sales: SalesService) {}
 
+  /** Vente de restaurant (la billetterie passe par POST /ticketing/orders). */
   @RequirePermission('pos.sell')
+  @RequireActivity('RESTAURANT')
   @Post()
   create(@CurrentAuth() auth: AuthContext, @Body() dto: CreateSaleDto) {
     return this.sales.create(requireTenant(auth), dto);

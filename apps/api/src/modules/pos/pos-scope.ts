@@ -1,6 +1,11 @@
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@ocall/database';
-import { coversActivity, hasOrganizationWideScope, hasPermission } from '@ocall/shared';
+import {
+  type Activity,
+  coversActivity,
+  hasOrganizationWideScope,
+  hasPermission,
+} from '@ocall/shared';
 import type { TenantContext } from '../../common/auth-context';
 import { establishmentScope } from '../../common/tenant-scope';
 
@@ -8,16 +13,18 @@ type Db = Pick<Prisma.TransactionClient, 'establishment' | 'cashSession'>;
 
 /**
  * Établissement dans lequel le membre peut encaisser : de son organisation, dans son périmètre
- * d'affectation, actif et exerçant une activité restaurant.
+ * d'affectation, actif, et exerçant l'activité demandée (restaurant pour la caisse, parc pour la billetterie).
  */
 export async function findSellingEstablishment(
   db: Db,
   auth: TenantContext,
   establishmentId: string,
+  /** Activité exigée (restaurant pour la caisse, parc pour la billetterie) ; absente = l'une ou l'autre. */
+  activity?: Activity,
 ) {
   const establishment = await db.establishment.findFirst({
     where: { ...establishmentScope(auth), id: establishmentId },
-    select: { id: true, name: true, businessType: true, isActive: true },
+    select: { id: true, name: true, businessType: true, isActive: true, timezone: true },
   });
   if (!establishment) {
     throw new NotFoundException({
@@ -31,10 +38,16 @@ export async function findSellingEstablishment(
       message: 'Cet établissement est désactivé.',
     });
   }
-  if (!coversActivity(establishment.businessType, 'RESTAURANT')) {
+  if (activity === 'RESTAURANT' && !coversActivity(establishment.businessType, 'RESTAURANT')) {
     throw new BadRequestException({
       code: 'ESTABLISHMENT_NOT_RESTAURANT',
       message: "La caisse n'est disponible que dans un établissement avec une activité restaurant.",
+    });
+  }
+  if (activity === 'PARK' && !coversActivity(establishment.businessType, 'PARK')) {
+    throw new BadRequestException({
+      code: 'ESTABLISHMENT_NOT_PARK',
+      message: "La billetterie n'est disponible que dans un établissement avec une activité parc.",
     });
   }
   return establishment;

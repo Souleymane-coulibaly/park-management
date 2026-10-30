@@ -143,14 +143,20 @@ describe('Sprint 2 — caisse POS (intégration)', () => {
       expect(res.body.code).toBe('CATEGORY_NOT_FOUND');
     });
 
-    it('une organisation PARK n’a accès ni au catalogue ni à la caisse (vérifié côté serveur)', async () => {
+    it('une organisation PARK n’a pas accès au catalogue restaurant ni à la caisse d’une autre organisation', async () => {
       const catalog = await parkB.agent.get('/api/v1/catalog/categories');
       expect(catalog.status).toBe(403);
       expect(catalog.body.code).toBe('MODULE_NOT_IN_PLAN');
-      await parkB.agent
+      const restaurantSale = await parkB.agent
+        .post('/api/v1/sales')
+        .send({ establishmentId: estA, lines: [{ variantId: petit, quantity: 1 }] });
+      expect(restaurantSale.status).toBe(403);
+      // Sprint 4 : la billetterie utilise les sessions de caisse ; l'établissement d'une autre organisation reste introuvable.
+      const session = await parkB.agent
         .post('/api/v1/cash-sessions')
-        .send({ establishmentId: estA, openingFloat: 0 })
-        .expect(403);
+        .send({ establishmentId: estA, openingFloat: 0 });
+      expect(session.status).toBe(404);
+      expect(session.body.code).toBe('ESTABLISHMENT_NOT_FOUND');
     });
   });
 

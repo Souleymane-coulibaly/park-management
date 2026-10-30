@@ -38,11 +38,15 @@ export class PermissionsGuard implements CanActivate {
       if (!auth.membership || !hasPermission(auth.membership.role, permission)) throw this.denied();
     }
 
-    const activity = this.reflector.getAllAndOverride<Activity | undefined>(
+    const activities = this.reflector.getAllAndOverride<Activity[] | undefined>(
       REQUIRED_ACTIVITY,
       targets,
     );
-    if (activity && (!auth.membership || !coversActivity(auth.membership.businessType, activity))) {
+    const membership = auth.membership;
+    if (
+      activities &&
+      (!membership || !activities.some((a) => coversActivity(membership.businessType, a)))
+    ) {
       throw new ForbiddenException({
         code: 'MODULE_NOT_IN_PLAN',
         message: "Ce module n'est pas inclus dans le métier de votre organisation.",

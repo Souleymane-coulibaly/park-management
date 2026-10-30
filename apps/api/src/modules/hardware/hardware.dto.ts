@@ -121,6 +121,11 @@ export class CreatePrintJobDto {
   @IsUUID('4')
   saleId?: string;
 
+  @ApiPropertyOptional({ description: 'Billetterie : réimprimer un seul billet de la vente.' })
+  @IsOptional()
+  @IsUUID('4')
+  ticketId?: string;
+
   @ApiPropertyOptional({ description: 'Motif, obligatoire pour une réimpression.' })
   @IsOptional()
   @Transform(trim)

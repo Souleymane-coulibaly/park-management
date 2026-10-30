@@ -28,7 +28,7 @@ import { PrintJobsService } from './print-jobs.service';
 import { TerminalsService } from './terminals.service';
 
 @ApiTags('Matériel de caisse')
-@RequireActivity('RESTAURANT')
+@RequireActivity('RESTAURANT', 'PARK')
 @Controller('pos-terminals')
 class TerminalsController {
   constructor(private readonly terminals: TerminalsService) {}
@@ -57,7 +57,7 @@ class TerminalsController {
 }
 
 @ApiTags('Matériel de caisse')
-@RequireActivity('RESTAURANT')
+@RequireActivity('RESTAURANT', 'PARK')
 @Controller('print-jobs')
 class PrintJobsController {
   constructor(private readonly printJobs: PrintJobsService) {}
@@ -88,7 +88,7 @@ class PrintJobsController {
 }
 
 @ApiTags('Matériel de caisse')
-@RequireActivity('RESTAURANT')
+@RequireActivity('RESTAURANT', 'PARK')
 @Controller('drawer-events')
 class DrawerEventsController {
   constructor(private readonly drawer: DrawerService) {}
