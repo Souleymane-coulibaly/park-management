@@ -130,3 +130,67 @@ export function previewLines(lines: readonly ReceiptLine[], paperWidth: PaperWid
     return text;
   });
 }
+
+export interface TicketPrintData {
+  organizationName: string;
+  establishmentName: string;
+  timezone: string;
+  saleNumber: number;
+  tickets: {
+    id: string;
+    visitorName: string;
+    categoryName: string;
+    pricePaid: number;
+    validFrom: string;
+    validUntil: string;
+    /** Contenu du QR code (préfixe + jeton), jamais de donnée personnelle. */
+    qr: string;
+  }[];
+  duplicate: boolean;
+}
+
+function formatDay(iso: string, timezone: string): string {
+  return new Intl.DateTimeFormat('fr-FR', {
+    timeZone: timezone,
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(new Date(iso));
+}
+
+/**
+ * Billets d'entrée : un billet par visiteur, chacun avec son QR code, séparés par une coupe.
+ * La date affichée est le dernier jour de validité (fin de journée, fuseau de l'établissement).
+ */
+export function layoutTickets(data: TicketPrintData, paperWidth: PaperWidth): ReceiptLine[] {
+  const w = charsPerLine(paperWidth);
+  const out: ReceiptLine[] = [];
+  data.tickets.forEach((t, index) => {
+    if (data.duplicate) out.push({ text: '*** DUPLICATA ***', align: 'center', bold: true });
+    for (const line of wrap(data.organizationName, Math.floor(w / 2)))
+      out.push({ text: line, align: 'center', bold: true, large: true });
+    for (const line of wrap(data.establishmentName, w)) out.push({ text: line, align: 'center' });
+    out.push(separator(w));
+    out.push({ text: 'BILLET D’ENTRÉE', align: 'center', bold: true });
+    for (const line of wrap(t.visitorName, Math.floor(w / 2)))
+      out.push({ text: line, align: 'center', large: true });
+    out.push({ text: columns(t.categoryName, formatXof(t.pricePaid), w) });
+    const from = formatDay(t.validFrom, data.timezone);
+    const until = formatDay(t.validUntil, data.timezone);
+    out.push({
+      text: from === until ? `Valable le ${until}` : `Valable du ${from} au ${until}`,
+      align: 'center',
+    });
+    out.push({ text: `[QR ${t.id.slice(0, 8).toUpperCase()}]`, qr: t.qr });
+    out.push({
+      text: `Réf. ${t.id.slice(0, 8).toUpperCase()} · Vente n° ${formatSaleNumber(data.saleNumber)}`,
+      align: 'center',
+    });
+    out.push({
+      text: `Billet ${index + 1}/${data.tickets.length} — une seule entrée`,
+      align: 'center',
+      cut: true,
+    });
+  });
+  return out;
+}

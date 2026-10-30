@@ -51,6 +51,9 @@ export const Permission = {
   HARDWARE_MANAGE: 'hardware.manage',
   RECEIPT_REPRINT: 'receipt.reprint',
   DRAWER_OPEN_MANUAL: 'drawer.open_manual',
+  TICKETING_MANAGE: 'ticketing.manage',
+  ACCESS_SCAN: 'access.scan',
+  TICKET_CANCEL: 'ticket.cancel',
 } as const;
 export type Permission = (typeof Permission)[keyof typeof Permission];
 export const PERMISSIONS: readonly Permission[] = Object.values(Permission);
@@ -77,6 +80,9 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'hardware.manage': 'Configurer les postes, imprimantes et tiroirs-caisses',
   'receipt.reprint': 'Réimprimer un ticket (duplicata)',
   'drawer.open_manual': 'Ouvrir manuellement le tiroir-caisse',
+  'ticketing.manage': 'Gérer les tarifs et les horaires du parc',
+  'access.scan': 'Contrôler les entrées (scanner les billets)',
+  'ticket.cancel': 'Annuler un billet',
 };
 
 const P = Permission;
@@ -98,11 +104,14 @@ export const ROLE_PERMISSIONS: Record<MemberRole, readonly Permission[]> = {
     P.CASH_SUPERVISE,
     P.RECEIPT_REPRINT,
     P.DRAWER_OPEN_MANUAL,
+    P.ACCESS_SCAN,
+    P.TICKET_CANCEL,
   ],
   // Un caissier encaisse et ne voit que ses propres ventes et sessions.
   CASHIER: [...OPERATOR_BASE, P.CATALOG_READ, P.POS_SELL],
   KITCHEN: [...OPERATOR_BASE, P.CATALOG_READ],
-  GATE_AGENT: OPERATOR_BASE,
+  // L'agent d'entrée scanne les billets ; il ne vend pas et ne voit pas le chiffre d'affaires.
+  GATE_AGENT: [...OPERATOR_BASE, P.ACCESS_SCAN],
 };
 
 export function hasPermission(role: MemberRole, permission: Permission): boolean {

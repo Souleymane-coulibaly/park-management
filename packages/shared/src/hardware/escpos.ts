@@ -108,6 +108,10 @@ export interface ReceiptLine {
   bold?: boolean;
   /** Double hauteur et largeur (total, titre). */
   large?: boolean;
+  /** QR code à imprimer (commande ESC/POS GS ( k, modèle 2), centré ; `text` sert alors d'aperçu. */
+  qr?: string;
+  /** Coupe du papier après cette ligne (plusieurs billets dans un même flux). */
+  cut?: boolean;
 }
 
 /** Texte à gauche et montant à droite sur une même ligne. */
@@ -140,17 +144,82 @@ export function wrap(text: string, width: number): string[] {
   return lines.length > 0 ? lines : [''];
 }
 
+/** Taille maximale du contenu d'un QR code imprimé (le billet n'en utilise que 27 caractères). */
+export const MAX_QR_LENGTH = 256;
+
+/**
+ * QR code ESC/POS (GS ( k) : modèle 2, module de 6 points, correction d'erreur M.
+ * Le contenu est limité à l'ASCII imprimable : un billet ne contient qu'un préfixe et un jeton.
+ */
+export function qrCode(data: string): number[] {
+  if (data.length === 0 || data.length > MAX_QR_LENGTH || !/^[ -~]+$/.test(data)) {
+    throw new RangeError('Contenu de QR code invalide.');
+  }
+  const store = data.length + 3;
+  return [
+    GS,
+    0x28,
+    0x6b,
+    0x04,
+    0x00,
+    0x31,
+    0x41,
+    0x32,
+    0x00, // modèle 2
+    GS,
+    0x28,
+    0x6b,
+    0x03,
+    0x00,
+    0x31,
+    0x43,
+    0x06, // taille du module
+    GS,
+    0x28,
+    0x6b,
+    0x03,
+    0x00,
+    0x31,
+    0x45,
+    0x31, // correction d'erreur M
+    GS,
+    0x28,
+    0x6b,
+    store & 0xff,
+    store >> 8,
+    0x31,
+    0x50,
+    0x30,
+    ...[...data].map((c) => c.charCodeAt(0)),
+    GS,
+    0x28,
+    0x6b,
+    0x03,
+    0x00,
+    0x31,
+    0x51,
+    0x30, // impression
+  ];
+}
+
 /** Convertit des lignes de ticket en octets ESC/POS, avec avance papier et coupe partielle. */
 export function encodeReceiptLines(lines: readonly ReceiptLine[]): Uint8Array {
   const out: number[] = [ESC, 0x40, ESC, 0x74, CODE_PAGE_PC858];
   for (const line of lines) {
-    out.push(ESC, 0x61, line.align === 'center' ? 1 : line.align === 'right' ? 2 : 0);
-    out.push(ESC, 0x45, line.bold ? 1 : 0);
-    out.push(GS, 0x21, line.large ? 0x11 : 0x00);
-    out.push(...encodePc858(line.text), 0x0a);
+    out.push(ESC, 0x61, line.qr || line.align === 'center' ? 1 : line.align === 'right' ? 2 : 0);
+    if (line.qr) {
+      out.push(...qrCode(line.qr), 0x0a);
+    } else {
+      out.push(ESC, 0x45, line.bold ? 1 : 0);
+      out.push(GS, 0x21, line.large ? 0x11 : 0x00);
+      out.push(...encodePc858(line.text), 0x0a);
+    }
+    if (line.cut) out.push(ESC, 0x45, 0, GS, 0x21, 0, ESC, 0x64, 4, GS, 0x56, 0x42, 0x00);
   }
-  // Remise à zéro de la mise en forme, avance de 4 lignes puis coupe partielle.
-  out.push(ESC, 0x45, 0, GS, 0x21, 0, ESC, 0x61, 0, ESC, 0x64, 4, GS, 0x56, 0x42, 0x00);
+  // Remise à zéro de la mise en forme, avance de 4 lignes puis coupe partielle (sauf si déjà coupé).
+  if (!lines[lines.length - 1]?.cut) {
+    out.push(ESC, 0x45, 0, GS, 0x21, 0, ESC, 0x61, 0, ESC, 0x64, 4, GS, 0x56, 0x42, 0x00);
+  }
   return Uint8Array.from(out);
 }
 
