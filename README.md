@@ -3,8 +3,10 @@
 Logiciel SaaS B2B de gestion pour les établissements africains : **parcs aquatiques et espaces de
 loisirs**, **restaurants**, ou **les deux**. Lancement au Mali, en français, prix en FCFA (XOF).
 
-> Statut : **Sprint 3** — socle SaaS (Sprint 1), caisse POS restaurant (Sprint 2), POS Android avec
-> impression thermique ESC/POS et tiroir-caisse (Sprint 3, validation sur matériel réel à faire).
+> Statut : **Sprint 4** — socle SaaS (Sprint 1), caisse POS restaurant (Sprint 2), POS Android avec
+> impression thermique ESC/POS et tiroir-caisse (Sprint 3, validation sur matériel réel à faire),
+> billetterie du parc avec QR codes et contrôle d'accès (Sprint 4,
+> [docs/BILLETTERIE-PARC.md](docs/BILLETTERIE-PARC.md)).
 > Billetterie, cuisine KDS, stocks, CRM et planning sont annoncés « à venir ». Suivi détaillé :
 > [SPRINT_STATUS.md](SPRINT_STATUS.md).
 
@@ -19,7 +21,7 @@ packages/
   shared/     Contrats partagés : métiers, rôles, matrice RBAC, modules, navigation
   database/   Schéma Prisma, migrations, scripts (db:check, super admin)
 e2e/          Tests Playwright
-docs/         Documentation (déploiement Railway, caisse POS, matériel, checkpoints)
+docs/         Documentation (déploiement Railway, caisse POS, matériel, billetterie, checkpoints)
 scripts/      Outils de dépôt (journaux complets des tests dans test-logs/)
 ```
 

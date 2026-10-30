@@ -1,19 +1,85 @@
 # Ocall Park — suivi des sprints
 
-| Sprint | Périmètre                                         | Branche           | Statut                                                               |
-| ------ | ------------------------------------------------- | ----------------- | -------------------------------------------------------------------- |
-| 1      | Socle SaaS multi-tenant, frontend, établissements | `claude/sprint-1` | ✅ Validé                                                            |
-| 2      | Caisse POS restaurant                             | `claude/sprint-2` | ✅ Validé                                                            |
-| 3      | POS Android, impression thermique, tiroir-caisse  | `claude/sprint-3` | 🟡 Terminé, en attente de validation (validation matérielle à faire) |
-| 4      | —                                                 | —                 | ⛔ Non démarré (accord requis)                                       |
+| Sprint | Périmètre                                         | Branche           | Statut                                            |
+| ------ | ------------------------------------------------- | ----------------- | ------------------------------------------------- |
+| 1      | Socle SaaS multi-tenant, frontend, établissements | `claude/sprint-1` | ✅ Validé                                         |
+| 2      | Caisse POS restaurant                             | `claude/sprint-2` | ✅ Validé                                         |
+| 3      | POS Android, impression thermique, tiroir-caisse  | `claude/sprint-3` | ✅ Validé (validation matérielle à faire)         |
+| 4      | Billetterie Parc, QR codes, contrôle d’accès      | `claude/sprint-4` | 🟡 Terminé — en attente de validation et de CP-03 |
 
 Environnements : base Neon de **développement** (préservée), branche Neon **`test`** réservée aux
 tests automatisés, base de **production non configurée**. Aucune fusion dans `main`, aucun déploiement.
-Checkpoint Codex suivant : **CP-02** (Sprints 1 à 3), voir `docs/checkpoints/CP-02-preparation.md`.
+Checkpoint Codex : CP-02 non réalisé (démarrage du Sprint 4 accepté sans ce rapport) ; le prochain audit, **CP-03**, couvrira les Sprints 1 à 4.
 
 ---
 
-## Sprint 3 — POS Android, impression thermique, tiroir-caisse
+## Sprint 4 — Billetterie Parc, QR codes sécurisés, contrôle d'accès (en attente de validation)
+
+### Fonctionnalités réalisées
+
+1. **Tarifs** (`/app/billetterie/configuration`) : catégories Adulte, Enfant, Famille, Groupe,
+   Personnalisée ; prix, personnes incluses, conditions, période de vente, validité ; désactivation
+   plutôt que suppression ; nouveau prix sans effet sur les billets déjà émis.
+2. **Vente tactile** (`/app/billetterie`) : grandes tuiles, prénom obligatoire par visiteur, total
+   calculé par le serveur, **moteur de vente et de paiement communs** avec la caisse (session de caisse,
+   idempotence, espèces ; Wave toujours non activé, aucun paiement simulé).
+3. **QR codes** : un billet par visiteur, émis **uniquement dans la transaction du paiement
+   confirmé**, émission idempotente ; QR = `OCP1-` + jeton aléatoire de 128 bits, sans donnée
+   personnelle ni secret ; statuts `VALID`, `USED`, `EXPIRED`, `CANCELLED` ; annulation motivée et auditée.
+4. **Contrôle d'accès** (`/app/controle-acces`) : caméra (détecteur natif ou `jsqr`) ou saisie
+   manuelle, résultat en très grand, historique ; **validation atomique en PostgreSQL** (5 scans
+   simultanés → 1 entrée) ; motifs : déjà utilisé, expiré, annulé, inconnu, autre établissement, parc
+   fermé, pas encore valable ; **refus hors connexion**.
+5. **Impression** (réutilise le Sprint 3) : billets 58 / 80 mm avec QR ESC/POS, plusieurs billets
+   séparés par une coupe, réimpression contrôlée (tous ou un seul billet, DUPLICATA), historique,
+   échec sans effet sur la vente ; billets annulés non réimprimés.
+6. **Horaires** : semaine type, dates particulières (fermeture, horaires spéciaux, évènement) ; vente
+   et entrée refusées parc fermé ; **parc + restaurant : le restaurant reste ouvert** (testé).
+7. **Tableau de bord Parc** (`/app/billetterie/tableau`) : billets vendus, entrées, non utilisés,
+   chiffre d'affaires, par catégorie, par heure, comparaison avec la veille ; tableau de bord principal
+   avec chiffre d'affaires **séparé par activité**.
+
+API : `/ticketing/*`, `/tickets`, `/access/*` (Swagger). Migration additive
+`20261029234320_billetterie_parc` (5 tables, colonnes avec valeur par défaut), appliquée sur `test`
+puis sur la base de développement (comptages inchangés). Documentation :
+[docs/BILLETTERIE-PARC.md](docs/BILLETTERIE-PARC.md), [CP-03](docs/checkpoints/CP-03-preparation.md).
+
+### Tests (branche Neon `test` uniquement)
+
+| Suite                                                    | Résultat        |
+| -------------------------------------------------------- | --------------- |
+| Unitaires (shared 67, database 13, api 8)                | 88/88           |
+| Intégration API — Sprint 4 (19 cas demandés + isolation) | 26/26           |
+| Intégration API — Sprints 1 à 4 (régression complète)    | 102/102         |
+| E2E Playwright — Sprints 1 à 4 (régression)              | voir ci-dessous |
+| Lint, Prettier, TypeScript strict, build                 | OK              |
+| Contrôle des migrations destructrices                    | OK              |
+
+### Corrections et changements transverses
+
+- **Paiement rejoué en simultané** (même clé d'idempotence) : renvoyait `409 SALE_ALREADY_PAID` au
+  lieu du paiement existant ; corrigé.
+- **Délai des transactions Prisma** porté de 5 s (défaut) à 15 s : un encaissement de billets
+  dépassait 5 s avec la latence Neon `us-east-2`.
+- **Chiffre d'affaires du tableau de bord** filtré par activité (sinon les ventes parc auraient été
+  comptées comme restaurant).
+- Sessions de caisse, ventes et matériel ouverts aux organisations `PARK` (`POST /sales` et `/pos/*`
+  restent restaurant) : deux assertions des Sprints 2 et 3 adaptées, l'isolation reste vérifiée.
+
+### Nécessite encore une validation sur matériel réel
+
+- Scan **caméra** sur la tablette des agents (HTTPS, lumière, billet froissé, QR sur téléphone).
+- Lisibilité des **QR imprimés** sur imprimantes 58 et 80 mm réelles, coupe entre billets.
+- Validation matérielle du Sprint 3 toujours à faire (connecteur Android non compilé).
+
+### Problèmes restants
+
+- Remboursement d'un billet annulé : hors périmètre.
+- Latence Neon `us-east-2` : encaissement de billets ≈ 5 s en test (≈ 12 allers-retours).
+
+---
+
+## Sprint 3 — POS Android, impression thermique, tiroir-caisse (validé)
 
 ### Fonctionnalités réalisées (logiciel)
 
