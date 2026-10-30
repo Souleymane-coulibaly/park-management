@@ -11,6 +11,7 @@ import { PermissionsGuard } from './common/guards/permissions.guard';
 import { HttpExceptionFilter } from './common/http-exception.filter';
 import { throttlerOptions } from './common/throttling';
 import { AiModule } from './modules/ai/ai.module';
+import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
@@ -69,6 +70,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     LoyaltyModule,
     PlanningModule,
     AiModule,
+    AnalyticsModule,
   ],
   controllers: [HealthController],
   providers: [

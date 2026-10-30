@@ -11,7 +11,8 @@ loisirs**, **restaurants**, ou **les deux**. Lancement au Mali, en français, pr
 > [docs/RESTAURANT.md](docs/RESTAURANT.md)), bornes de commande, CRM, fidélité et planning du personnel
 > (Sprint 6, [docs/BORNES-CRM-FIDELITE-PLANNING.md](docs/BORNES-CRM-FIDELITE-PLANNING.md)), intelligence
 > artificielle : import de carte, copilote analytique, commande vocale (Sprint 8,
-> [docs/INTELLIGENCE-ARTIFICIELLE.md](docs/INTELLIGENCE-ARTIFICIELLE.md)).
+> [docs/INTELLIGENCE-ARTIFICIELLE.md](docs/INTELLIGENCE-ARTIFICIELLE.md)), analyses, marges et exports CSV
+> (Sprint 9A, [docs/ANALYSES.md](docs/ANALYSES.md)).
 > Suivi détaillé : [SPRINT_STATUS.md](SPRINT_STATUS.md).
 
 ## Architecture

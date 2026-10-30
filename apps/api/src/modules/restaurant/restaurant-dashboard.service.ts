@@ -77,7 +77,12 @@ export class RestaurantDashboardService {
       this.prisma.saleLine.groupBy({
         by: ['productName'],
         where: {
-          sale: { ...restaurantSales, status: 'OPEN', paymentStatus: 'PAID', createdAt: day },
+          // Daté à l'encaissement, comme le CA encaissé ci-dessus.
+          sale: {
+            ...restaurantSales,
+            status: 'OPEN',
+            payments: { some: { status: 'SUCCEEDED', createdAt: day } },
+          },
         },
         _sum: { quantity: true, lineTotal: true },
         orderBy: { _sum: { quantity: 'desc' } },

@@ -5,6 +5,7 @@ import {
   extractNumbers,
   hasPermission,
   isPotentialDuplicate,
+  matchProductName,
   microUsdToXof,
   navigationFor,
   normalizeLabel,
@@ -133,5 +134,25 @@ describe('IA — droits', () => {
     expect(hasPermission('SUPERVISOR', 'ai.manage')).toBe(false);
     expect(hasPermission('ADMIN', 'ai.manage')).toBe(true);
     expect(navigationFor('RESTAURANT', 'CASHIER').map((m) => m.key)).not.toContain('copilot');
+  });
+});
+
+describe('Copilote — produit cité dans une question', () => {
+  const items = [
+    { id: 'p1', name: 'Poulet braisé' },
+    { id: 'p2', name: 'Poulet yassa' },
+    { id: 'p3', name: 'Jus de bissap' },
+  ];
+  it('identique au singulier et sans accents', () => {
+    expect(matchProductName('poulets braises', items)).toEqual({
+      status: 'MATCHED',
+      item: items[0],
+    });
+    expect(matchProductName('jus bissap', items)).toEqual({ status: 'MATCHED', item: items[2] });
+  });
+  it('ambigu ou introuvable : jamais deviné', () => {
+    expect(matchProductName('poulet', items)).toMatchObject({ status: 'AMBIGUOUS' });
+    expect(matchProductName('pizza', items)).toEqual({ status: 'NOT_FOUND' });
+    expect(matchProductName('  ', items)).toEqual({ status: 'NOT_FOUND' });
   });
 });

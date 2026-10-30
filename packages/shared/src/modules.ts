@@ -140,6 +140,16 @@ export const MODULES: readonly ModuleDefinition[] = [
     href: '/app/personnel/planning',
   },
   {
+    key: 'analytics',
+    label: 'Analyses',
+    description:
+      'Chiffre d’affaires, ventes par produit et par heure, fréquentation, marges estimées et exports.',
+    status: 'available',
+    activities: [],
+    permission: 'analytics.read',
+    href: '/app/analytics',
+  },
+  {
     key: 'copilot',
     label: 'Copilote IA',
     description:

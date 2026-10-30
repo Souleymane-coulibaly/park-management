@@ -21,6 +21,11 @@ const SUGGESTIONS = [
   'Combien de visiteurs sont entrés dans mon parc hier ?',
   'Quel est mon panier moyen ce mois-ci ?',
   'Quel jour ai-je réalisé le plus de ventes ces 30 derniers jours ?',
+  'Combien de poulets braisés ont été vendus entre 12 h et 14 h cette semaine ?',
+  'Quel produit a généré le plus de revenus cette semaine ?',
+  'Quelles heures génèrent le plus de commandes ce mois-ci ?',
+  'Quel est le jour le plus fréquenté du parc ces 30 derniers jours ?',
+  'Quelle catégorie est la plus rentable ce mois-ci ?',
   'Combien de commandes ont été préparées aujourd’hui ?',
 ];
 
@@ -245,6 +250,110 @@ function ResultCard({ result }: { result: CopilotResult }) {
         <div className="grid grid-cols-2 gap-3">
           <Figure label="Billets" value={String(num(d.tickets))} />
           <Figure label="Montant" value={formatXof(num(d.amountXof))} />
+        </div>
+      )}
+      {result.tool === 'product_hourly_sales' && (
+        <div className="space-y-2">
+          <div className="grid grid-cols-2 gap-3">
+            <Figure
+              label={d.product ? String(d.product) : 'Tous produits'}
+              value={`${num(d.quantity)} vendu(s)`}
+            />
+            <Figure label="Montant" value={formatXof(num(d.amountXof))} />
+          </div>
+          <ul className="space-y-1 text-sm">
+            {((d.byHour as Array<{ hour: number; quantity: number; amountXof: number }>) ?? [])
+              .filter((h) => h.quantity > 0)
+              .map((h) => (
+                <li key={h.hour} className="flex justify-between gap-2">
+                  <span>
+                    {h.hour} h – {h.hour + 1} h
+                  </span>
+                  <span className="font-semibold">
+                    {h.quantity} · {formatXof(h.amountXof)}
+                  </span>
+                </li>
+              ))}
+          </ul>
+          {!d.product && ((d.products as unknown[]) ?? []).length > 0 && (
+            <ol className="space-y-1 text-sm">
+              {(d.products as Array<{ name: string; quantity: number; amountXof: number }>).map(
+                (p, i) => (
+                  <li key={p.name} className="flex justify-between gap-2">
+                    <span>
+                      {i + 1}. {p.name}
+                    </span>
+                    <span className="font-semibold">{formatXof(p.amountXof)}</span>
+                  </li>
+                ),
+              )}
+            </ol>
+          )}
+        </div>
+      )}
+      {result.tool === 'top_products_revenue' && (
+        <ol className="space-y-1 text-sm">
+          {(
+            d.products as Array<{ rank: number; name: string; quantity: number; amountXof: number }>
+          ).map((p) => (
+            <li key={p.rank} className="flex justify-between gap-2">
+              <span>
+                {p.rank}. {p.name}
+              </span>
+              <span className="font-semibold">
+                {formatXof(p.amountXof)} · {p.quantity}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+      {result.tool === 'busiest_hours' && (
+        <ol className="space-y-1 text-sm">
+          {(d.hours as Array<{ hour: number; orders: number; amountXof: number }>).map((h) => (
+            <li key={h.hour} className="flex justify-between gap-2">
+              <span>
+                {h.hour} h – {h.hour + 1} h
+              </span>
+              <span className="font-semibold">
+                {h.orders} commande(s) · {formatXof(h.amountXof)}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+      {result.tool === 'busiest_park_day' && d.day !== null && (
+        <div className="grid grid-cols-2 gap-3">
+          <Figure label="Jour" value={String(d.day)} />
+          <Figure label="Entrées" value={String(num(d.entries))} />
+          <Figure label="Jour de la semaine" value={String(d.busiestWeekday ?? '—')} />
+          <Figure label="Entrées sur la période" value={String(num(d.totalEntries))} />
+        </div>
+      )}
+      {result.tool === 'category_margins' && (
+        <div className="space-y-2 text-sm">
+          <p className="text-muted">{String(d.note)}</p>
+          <ul className="space-y-1">
+            {(
+              d.categories as Array<{
+                category: string;
+                estimatedMarginXof: number;
+                marginRatePct: number | null;
+                complete: boolean;
+              }>
+            ).map((c) => (
+              <li key={c.category} className="flex justify-between gap-2">
+                <span>
+                  {c.category}
+                  {c.category === d.mostProfitable && ' (la plus rentable)'}
+                </span>
+                <span className="font-semibold">
+                  {c.complete
+                    ? `≈ ${formatXof(c.estimatedMarginXof)}${c.marginRatePct !== null ? ` · ${c.marginRatePct} %` : ''}`
+                    : 'incomplète'}
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
       {result.missing.map((m) => (

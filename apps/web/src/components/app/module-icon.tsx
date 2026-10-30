@@ -1,4 +1,5 @@
 import {
+  BarChart3,
   BookOpen,
   Boxes,
   Building2,
@@ -34,12 +35,15 @@ const ICONS: Record<string, LucideIcon> = {
   kiosks: MonitorSmartphone,
   crm: HeartHandshake,
   'hr-planning': CalendarDays,
+  analytics: BarChart3,
   copilot: Sparkles,
   employees: Users,
   settings: Settings,
   'platform-overview': LayoutDashboard,
   'platform-organizations': Building2,
   'platform-subscriptions': CreditCard,
+  'platform-payments': Receipt,
+  'platform-stats': BarChart3,
 };
 
 export function ModuleIcon({

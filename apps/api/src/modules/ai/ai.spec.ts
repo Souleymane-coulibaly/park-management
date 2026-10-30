@@ -161,9 +161,131 @@ describe('Copilote : arguments stricts, aucun établissement fourni par le modè
       'best_day',
       'prepared_orders',
       'ticket_sales',
+      'product_hourly_sales',
+      'top_products_revenue',
+      'busiest_hours',
+      'busiest_park_day',
+      'category_margins',
     ]);
     for (const t of ANALYTICS_TOOLS)
       expect(t.parameters).toMatchObject({ additionalProperties: false });
+  });
+});
+
+describe('Copilote enrichi (Sprint 9B) : analyses du Sprint 9, lecture seule', () => {
+  const tool = (name: string) => ANALYTICS_TOOLS.find((t) => t.name === name)!;
+  const ctx = (
+    analytics: Record<string, jest.Mock>,
+    products: { id: string; name: string }[] = [],
+  ) =>
+    ({
+      prisma: { product: { findMany: jest.fn().mockResolvedValue(products) } },
+      organizationId: 'org-1',
+      establishment: { id: 'est-1', name: 'Maquis', timezone: 'Africa/Bamako' },
+      now: new Date('2026-10-30T15:00:00Z'),
+      analytics,
+    }) as never;
+
+  it('arguments stricts : plage horaire bornée et ordonnée, produit borné, aucune clé en plus', () => {
+    const t = tool('product_hourly_sales');
+    expect(
+      t.parse({ period: 'this_week', product: 'poulets braisés', hour_from: 12, hour_to: 14 }),
+    ).toEqual({ period: 'this_week', product: 'poulets braisés', hourFrom: 12, hourTo: 14 });
+    expect(t.parse({ period: 'today', product: '', hour_from: 14, hour_to: 12 })).toBeNull();
+    expect(t.parse({ period: 'today', product: '', hour_from: 0, hour_to: 25 })).toBeNull();
+    expect(
+      t.parse({ period: 'today', product: 'x'.repeat(81), hour_from: 1, hour_to: 2 }),
+    ).toBeNull();
+    expect(
+      t.parse({ period: 'today', product: '', hour_from: 1, hour_to: 2, establishmentId: 'x' }),
+    ).toBeNull();
+    expect(tool('top_products_revenue').parse({ period: 'today', limit: 11 })).toBeNull();
+    expect(tool('category_margins').permission).toBe('analytics.margins');
+  });
+
+  it('produit retrouvé par le serveur (pluriel, accents) puis analyse du Sprint 9 avec son identifiant', async () => {
+    const restaurantHourly = jest.fn().mockResolvedValue({
+      rows: [
+        {
+          productId: 'p1',
+          product: 'Poulet braisé',
+          category: 'Plats',
+          hour: 12,
+          quantity: 5,
+          revenue: 20000,
+        },
+      ],
+      hours: [
+        { hour: 12, orders: 2, quantity: 5, revenue: 20000 },
+        { hour: 13, orders: 0, quantity: 0, revenue: 0 },
+      ],
+    });
+    const result = await tool('product_hourly_sales').run(
+      ctx({ restaurantHourly }, [
+        { id: 'p1', name: 'Poulet braisé' },
+        { id: 'p2', name: 'Jus de bissap' },
+      ]),
+      { period: 'this_week', product: 'poulets braises', hourFrom: 12, hourTo: 14 },
+    );
+    const [scope, filters] = restaurantHourly.mock.calls[0];
+    expect(scope).toMatchObject({
+      organizationId: 'org-1',
+      establishmentIds: ['est-1'],
+      activities: ['RESTAURANT'],
+    });
+    expect(filters).toEqual({ hourFrom: 12, hourTo: 14, weekday: null, productId: 'p1' });
+    expect(result.data).toMatchObject({ product: 'Poulet braisé', quantity: 5, amountXof: 20000 });
+  });
+
+  it('produit introuvable ou ambigu : signalé, aucune analyse lancée, rien d’inventé', async () => {
+    const restaurantHourly = jest.fn();
+    const ambiguous = await tool('product_hourly_sales').run(
+      ctx({ restaurantHourly }, [
+        { id: 'p1', name: 'Poulet braisé' },
+        { id: 'p2', name: 'Poulet yassa' },
+      ]),
+      { period: 'today', product: 'poulet', hourFrom: 12, hourTo: 13 },
+    );
+    expect(ambiguous.missing[0]).toContain('précisez');
+    expect(ambiguous.data).toMatchObject({
+      product: null,
+      candidates: ['Poulet braisé', 'Poulet yassa'],
+    });
+    const unknown = await tool('product_hourly_sales').run(ctx({ restaurantHourly }, []), {
+      period: 'today',
+      product: 'pizza',
+      hourFrom: 12,
+      hourTo: 13,
+    });
+    expect(unknown.missing[0]).toContain('Aucun produit');
+    expect(restaurantHourly).not.toHaveBeenCalled();
+  });
+
+  it('marges : estimation signalée, catégorie la plus rentable parmi les coûts complets seulement', async () => {
+    const margins = jest.fn().mockResolvedValue({
+      categories: [
+        {
+          category: 'Desserts',
+          revenue: 9000,
+          materialCost: 0,
+          margin: 0,
+          marginRate: null,
+          complete: false,
+        },
+        {
+          category: 'Plats',
+          revenue: 8000,
+          materialCost: 3100,
+          margin: 4900,
+          marginRate: 61.3,
+          complete: true,
+        },
+      ],
+    });
+    const r = await tool('category_margins').run(ctx({ margins }), { period: 'this_month' });
+    expect(r.data).toMatchObject({ mostProfitable: 'Plats' });
+    expect(String(r.data.note)).toContain('estimée');
+    expect(r.missing.join(' ')).toContain('Desserts');
   });
 });
 
@@ -197,5 +319,56 @@ describe('Fournisseur simulé (tests déterministes)', () => {
     await expect(
       provider.transcribe({ audio: Buffer.from('OCALL-SIM-DOWN') }),
     ).rejects.toMatchObject({ code: 'AI_UNAVAILABLE' });
+  });
+});
+
+describe('Fournisseur simulé — questions du Sprint 9B', () => {
+  const provider = new SimulatedAiProvider();
+  const callFor = async (question: string) => {
+    const calls: unknown[] = [];
+    await provider.runWithTools({
+      question,
+      tools: [],
+      execute: async (c) => {
+        calls.push(c);
+        return {};
+      },
+    });
+    return calls[0];
+  };
+
+  it.each([
+    [
+      'Combien de poulets braisés ont été vendus entre 12 h et 14 h cette semaine ?',
+      {
+        name: 'product_hourly_sales',
+        arguments: { period: 'this_week', product: 'poulets braises', hour_from: 12, hour_to: 14 },
+      },
+    ],
+    [
+      'Quel produit rapporte le plus à 19 h aujourd’hui ?',
+      {
+        name: 'product_hourly_sales',
+        arguments: { period: 'today', product: '', hour_from: 19, hour_to: 20 },
+      },
+    ],
+    [
+      'Quel produit a généré le plus de revenus cette semaine ?',
+      { name: 'top_products_revenue', arguments: { period: 'this_week', limit: 5 } },
+    ],
+    [
+      'Quelles heures génèrent le plus de commandes ce mois-ci ?',
+      { name: 'busiest_hours', arguments: { period: 'this_month' } },
+    ],
+    [
+      'Quel est le jour le plus fréquenté du parc ces 30 derniers jours ?',
+      { name: 'busiest_park_day', arguments: { period: 'last_30_days' } },
+    ],
+    [
+      'Quelle catégorie est la plus rentable ce mois-ci ?',
+      { name: 'category_margins', arguments: { period: 'this_month' } },
+    ],
+  ])('%s', async (question, expected) => {
+    expect(await callFor(question)).toEqual(expected);
   });
 });

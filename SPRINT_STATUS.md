@@ -10,6 +10,8 @@
 | 6      | Bornes de commande, CRM, fidélité, planning du personnel      | `claude/sprint-6` | 🟡 En cours — tests base bloqués (Neon `test`)    |
 | 7      | Paiement des abonnements (CinetPay)                           | —                 | ⏸️ Reporté par le commanditaire (plan présenté)   |
 | 8      | IA : import de carte, copilote, commande vocale               | `claude/sprint-8` | 🟡 En cours — tests base bloqués (Neon `test`)    |
+| 9A     | Analyses : CA, produits × heures, parc, marges, exports CSV   | `claude/sprint-9` | 🟡 En cours — tests base bloqués (Neon `test`)    |
+| 9B     | Copilote enrichi, statistiques SaaS, règlements d’abonnement  | `claude/sprint-9` | 🟡 En cours — tests base bloqués (Neon `test`)    |
 
 Environnements : base Neon de **développement** (préservée), branche Neon **`test`** réservée aux
 tests automatisés, base de **production non configurée**. Aucune fusion dans `main`, aucun déploiement.
@@ -27,6 +29,90 @@ Checkpoints Codex :
 - Le Sprint 7 (CinetPay) a été **reporté** par le commanditaire le 30/10/2026, après présentation du
   plan ; le Sprint 8 a été démarré à sa demande, sans CP-05 ni CP-06 (aucun rapport CP-06 n'existe).
   Préparation : [CP-07-preparation.md](docs/checkpoints/CP-07-preparation.md).
+- Le Sprint 9 est démarré **sans audit CP-07** (seule sa préparation existe), sur décision explicite
+  du commanditaire le 30/10/2026. Il est découpé en **9A** (analyses, marges, exports) puis **9B**
+  (copilote, Super Admin), démarré à la demande du commanditaire le 30/10/2026 ; exports en **CSV uniquement** (Excel et PDF
+  reportés, aucune nouvelle dépendance). CP-08 couvrira les Sprints 1 à 9 :
+  [CP-08-preparation.md](docs/checkpoints/CP-08-preparation.md).
+
+---
+
+## Sprint 9B — Copilote enrichi, statistiques SaaS et règlements d’abonnement (en cours, non commité)
+
+Documentation : [docs/ANALYSES.md](docs/ANALYSES.md) §8 et §9. Même branche `claude/sprint-9`.
+
+### Fonctionnalités réalisées
+
+- Copilote : 5 nouvelles fonctions en lecture seule, adossées au service d’analyses du 9A — ventes
+  par produit et par heure (produit retrouvé par le serveur, jamais deviné), produits qui rapportent
+  le plus, heures de pointe, jour le plus fréquenté du parc, marges estimées par catégorie
+  (`analytics.margins`). Affichage dédié dans `/app/copilot`, exemples de questions.
+- Super Admin : `/admin/statistiques` (organisations, abonnements par statut, offres, encaissements
+  SaaS validés par mois, règlements à vérifier, renouvellements à 30 jours et échus, historique,
+  revenu théorique distinct) et `/admin/reglements` (saisie, validation, rejet motivé).
+- Règlements payés à Ocall hors plateforme, validés manuellement ; prolongation de l’abonnement
+  uniquement sur case explicite (décochée par défaut, choix du commanditaire), jamais raccourcie ;
+  aucun paiement en ligne ni renouvellement automatique ; séparés des recettes des établissements.
+- Migration additive `20261030210000_reglements_saas` (table `SubscriptionPayment`, 2 CHECK).
+  **Non appliquée.**
+
+### Tests
+
+- Unitaires : shared 116/116, API 54/54 (10 nouveaux : copilote, produit cité, fournisseur simulé),
+  database 13/13. Typecheck, lint, Prettier, build, `migrate:check` : OK.
+- Vérification hors ligne du registre SaaS avec le vrai client Prisma (PostgreSQL embarqué jetable,
+  hors dépôt, aucune base Neon) : 24/24 conforme.
+- `apps/api/test/sprint9b-copilot-saas.integration.spec.ts` (tests 24 et 25) : **écrit, non
+  exécuté** (A11).
+
+### Limites connues
+
+- A27 — validation sans double contrôle ; A28 — abonnements échus signalés, jamais basculés
+  automatiquement ; A29 — pas d’E2E Super Admin. Voir CP-08.
+
+---
+
+## Sprint 9A — Analyses, statistiques, rentabilité et exports CSV (en cours, non commité)
+
+Documentation : [docs/ANALYSES.md](docs/ANALYSES.md). Branche `claude/sprint-9`, créée depuis
+`claude/sprint-8` (`10f6453`).
+
+### Fonctionnalités réalisées
+
+- Module `analytics` (API, lecture seule) : vue globale, restaurant, ventes par produit et par heure,
+  parc, carte thermique, coûts et marges estimés, comparaison des établissements, export CSV.
+- Règles de calcul uniques (`packages/shared/src/analytics.ts`) : CA daté à l'encaissement, impayées
+  et annulées exclues, visiteurs = scans acceptés, billet vendu / payé / émis / scanné distincts,
+  heures locales de chaque établissement, période précédente de même durée.
+- Écrans `/app/analytics` (5 onglets), graphiques HTML/SVG sans dépendance, filtres communs
+  (période, dates, établissement, activité), tableaux filtrables, comparaison entre deux journées.
+- Permissions `analytics.read` (OWNER, ADMIN, SUPERVISOR), `analytics.margins` et
+  `analytics.export` (OWNER, ADMIN) ; exports journalisés ; injection de formules neutralisée.
+- Protection de la base : transaction en lecture seule, `statement_timeout` 10 s, période ≤ 366 jours,
+  export ≤ 50 000 lignes, limites de débit dédiées.
+- Migration additive `20261030190000_analyses` : index `Payment(organizationId, createdAt)`.
+  **Non appliquée** (ni `test`, ni développement).
+- Règle commune appliquée au tableau de bord (CA daté au paiement au lieu de la création de la vente),
+  aux meilleures ventes du tableau de bord restaurant et à `top_products` du copilote.
+
+### Tests
+
+- Unitaires : shared 114/114 (11 nouveaux), API 44/44 (18 nouveaux : CSV et formules, exports,
+  périmètre serveur, période), database 13/13. Typecheck, lint, Prettier, build, `migrate:check` : OK.
+- **Vérification SQL hors ligne** (PostgreSQL embarqué PGlite, toutes les migrations appliquées,
+  script jetable hors dépôt, aucune base Neon) : 43/43 contrôles conformes — tests 1 à 18, 20, lecture
+  seule ; performance indicative sur 20 000 ventes.
+- `apps/api/test/sprint9-analytics.integration.spec.ts` (tests 1 à 20, 23, 26) et
+  `e2e/sprint9-analytics.spec.ts` : **écrits, non exécutés** — branche Neon `test` inaccessible (A11).
+- Tests 21 (Excel) et 22 (PDF) : sans objet (CSV seul, décision du commanditaire). Tests 24
+  (copilote) et 25 (SaaS) : Sprint 9B. Test 27 (régression 1 à 8) : bloqué par A11.
+
+### Limites connues
+
+- A23 — marges au coût d'achat actuel (coût à la date de vente non enregistré).
+- A24 — performance sur Neon non mesurée (test 26 non exécuté).
+- A25 — écrans d'analyse non vérifiés dans un navigateur (E2E non exécuté, base de développement
+  sans les migrations des Sprints 6, 8 et 9).
 
 ---
 

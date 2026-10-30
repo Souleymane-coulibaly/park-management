@@ -96,8 +96,9 @@ export class DashboardController {
   }
 
   /**
-   * Chiffre d'affaires encaissé d'une activité (ventes payées, non annulées), aujourd'hui et sur
-   * 30 jours glissants. « Aujourd'hui » suit le fuseau horaire de l'organisation.
+   * Chiffre d'affaires encaissé d'une activité (paiements réussis de ventes non annulées, datés à
+   * l'encaissement, comme les analyses du Sprint 9), aujourd'hui et sur 30 jours glissants.
+   * « Aujourd'hui » suit le fuseau horaire de l'organisation.
    * Pour un superviseur, limité aux établissements qui lui sont affectés.
    */
   private async revenue(
@@ -110,14 +111,16 @@ export class DashboardController {
       { today: bigint | null; last30: bigint | null; count30: bigint }[]
     >`
       SELECT
-        SUM(s."total") FILTER (WHERE s."createdAt" >= (date_trunc('day', now() AT TIME ZONE ${timezone}) AT TIME ZONE ${timezone})) AS today,
-        SUM(s."total") AS last30,
+        SUM(p."amount") FILTER (WHERE p."createdAt" >= (date_trunc('day', now() AT TIME ZONE ${timezone}) AT TIME ZONE ${timezone})) AS today,
+        SUM(p."amount") AS last30,
         COUNT(*) AS count30
-      FROM "Sale" s
-      WHERE s."organizationId" = ${organizationId}::uuid
+      FROM "Payment" p
+      JOIN "Sale" s ON s."id" = p."saleId"
+      WHERE p."organizationId" = ${organizationId}::uuid
+        AND p."status" = 'SUCCEEDED'
         AND s."activity" = ${activity}::"SaleActivity"
-        AND s."status" = 'OPEN' AND s."paymentStatus" = 'PAID'
-        AND s."createdAt" >= now() - interval '30 days'
+        AND s."status" = 'OPEN'
+        AND p."createdAt" >= now() - interval '30 days'
         AND (${assignedMembershipId}::uuid IS NULL OR s."establishmentId" IN (
           SELECT a."establishmentId" FROM "EstablishmentAssignment" a WHERE a."membershipId" = ${assignedMembershipId}::uuid))`;
     return {

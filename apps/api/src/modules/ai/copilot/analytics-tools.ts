@@ -5,10 +5,15 @@ import {
   type CopilotPeriod,
   type Permission,
   type ResolvedPeriod,
+  addDays,
+  matchProductName,
+  resolveAnalyticsPeriod,
   resolveCopilotPeriod,
   zonedMidnight,
 } from '@ocall/shared';
 import type { PrismaService } from '../../../prisma/prisma.service';
+import type { AnalyticsScope } from '../../analytics/analytics-scope';
+import type { AnalyticsService } from '../../analytics/analytics.service';
 import type { JsonSchema } from '../providers/ai-provider';
 
 /**
@@ -17,7 +22,9 @@ import type { JsonSchema } from '../providers/ai-provider';
  * nombre de lignes) ; il ne fournit jamais l'établissement, ni SQL, ni commande. Les périodes sont
  * calculées dans le fuseau de l'établissement.
  *
- * Point d'extension du Sprint 9 : de nouvelles analyses s'ajoutent ici, avec la même structure.
+ * Sprint 9B : les analyses avancées (produit × heure, CA par produit, heures de pointe, jour le plus
+ * fréquenté, marges par catégorie) réutilisent le service d'analyses du Sprint 9 — mêmes règles de
+ * calcul que les écrans, transaction en lecture seule.
  */
 
 export interface AnalyticsContext {
@@ -25,6 +32,8 @@ export interface AnalyticsContext {
   organizationId: string;
   establishment: { id: string; name: string; timezone: string };
   now: Date;
+  /** Analyses du Sprint 9 (lecture seule). */
+  analytics: AnalyticsService;
 }
 
 export interface AnalyticsResult {
@@ -92,6 +101,42 @@ function window(ctx: AnalyticsContext, period: CopilotPeriod) {
 }
 
 const periodOf = (r: ResolvedPeriod) => ({ label: r.label, from: r.from, to: r.to });
+
+/**
+ * Périmètre d'analyse du copilote : l'établissement de la session uniquement, une activité, la
+ * période choisie (résolue dans le fuseau de l'établissement).
+ */
+function analyticsScope(
+  ctx: AnalyticsContext,
+  period: CopilotPeriod,
+  activity: Activity,
+): { scope: AnalyticsScope; resolved: ResolvedPeriod } {
+  const tz = ctx.establishment.timezone;
+  const resolved = resolveCopilotPeriod(period, ctx.now, tz);
+  const p = resolveAnalyticsPeriod(
+    { period: 'custom', from: resolved.from, to: addDays(resolved.to, -1) },
+    ctx.now,
+    tz,
+  );
+  if ('error' in p) throw new Error(`Période invalide : ${p.error}`);
+  return {
+    resolved,
+    scope: {
+      organizationId: ctx.organizationId,
+      establishments: [{ ...ctx.establishment, activities: [activity] }],
+      establishmentIds: [ctx.establishment.id],
+      activity,
+      activities: [activity],
+      period: p,
+      timezone: tz,
+    },
+  };
+}
+
+const isInt = (v: unknown, min: number, max: number): v is number =>
+  typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max;
+const hourLabel = (h: number) => `${h} h`;
+const WEEKDAYS = ['lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi', 'dimanche'];
 
 /** Ventes comptées : de l'établissement, non annulées (comme les tableaux de bord). */
 const saleScope = (ctx: AnalyticsContext, activity?: Activity): Prisma.SaleWhereInput => ({
@@ -175,7 +220,11 @@ export const ANALYTICS_TOOLS: readonly AnalyticsTool[] = [
         by: ['productName', 'variantName'],
         where: {
           variantId: { not: null },
-          sale: { ...saleScope(ctx, 'RESTAURANT'), paymentStatus: 'PAID', createdAt: range },
+          // Daté à l'encaissement (règle commune aux analyses du Sprint 9).
+          sale: {
+            ...saleScope(ctx, 'RESTAURANT'),
+            payments: { some: { status: 'SUCCEEDED', createdAt: range } },
+          },
         },
         _sum: { quantity: true, lineTotal: true },
         orderBy: { _sum: { quantity: 'desc' } },
@@ -371,6 +420,252 @@ export const ANALYTICS_TOOLS: readonly AnalyticsTool[] = [
           byCategory,
         },
         missing: rows.length ? [] : ['Aucun billet vendu sur cette période.'],
+      };
+    },
+  },
+  {
+    name: 'product_hourly_sales',
+    description:
+      'Ventes encaissées par produit et par heure locale (quantités et montant) sur une plage horaire. ' +
+      'Ex. « combien de poulets braisés entre 12 h et 14 h ? » (product « poulet braisé », hour_from 12, ' +
+      'hour_to 14) ou « quel produit rapporte le plus à 19 h ? » (product vide, hour_from 19, hour_to 20). Restaurant.',
+    parameters: strictObject({
+      period: periodSchema,
+      product: {
+        type: 'string',
+        description:
+          'Nom du produit tel que dit par l’utilisateur ; chaîne vide pour tous les produits.',
+      },
+      hour_from: {
+        type: 'integer',
+        minimum: 0,
+        maximum: 23,
+        description: 'Heure de début (incluse).',
+      },
+      hour_to: { type: 'integer', minimum: 1, maximum: 24, description: 'Heure de fin (exclue).' },
+    }),
+    permission: 'sale.read_all',
+    activity: 'RESTAURANT',
+    parse(args) {
+      const a = exactKeys(args, ['period', 'product', 'hour_from', 'hour_to']);
+      if (!a || !isPeriod(a.period) || typeof a.product !== 'string' || a.product.length > 80) {
+        return null;
+      }
+      if (!isInt(a.hour_from, 0, 23) || !isInt(a.hour_to, 1, 24) || a.hour_to <= a.hour_from) {
+        return null;
+      }
+      return {
+        period: a.period,
+        product: a.product.trim(),
+        hourFrom: a.hour_from,
+        hourTo: a.hour_to,
+      };
+    },
+    async run(ctx, args) {
+      const { scope, resolved } = analyticsScope(ctx, args.period as CopilotPeriod, 'RESTAURANT');
+      const hourFrom = args.hourFrom as number;
+      const hourTo = args.hourTo as number;
+      const base = {
+        tool: 'product_hourly_sales',
+        title: `Ventes par produit, ${hourLabel(hourFrom)} – ${hourLabel(hourTo)}`,
+        period: periodOf(resolved),
+      };
+      let productId: string | null = null;
+      let productName: string | null = null;
+      if (args.product) {
+        // Produit cherché par le serveur dans le catalogue de l'établissement, jamais deviné.
+        const catalog = await ctx.prisma.product.findMany({
+          where: {
+            organizationId: ctx.organizationId,
+            variants: { some: { prices: { some: { establishmentId: ctx.establishment.id } } } },
+          },
+          select: { id: true, name: true },
+        });
+        const match = matchProductName(args.product as string, catalog);
+        if (match.status !== 'MATCHED') {
+          return {
+            ...base,
+            data: {
+              product: null,
+              candidates: match.status === 'AMBIGUOUS' ? match.candidates.map((c) => c.name) : [],
+            },
+            missing: [
+              match.status === 'AMBIGUOUS'
+                ? `Plusieurs produits correspondent à « ${args.product} » : précisez lequel.`
+                : `Aucun produit du catalogue ne correspond à « ${args.product} ».`,
+            ],
+          };
+        }
+        productId = match.item.id;
+        productName = match.item.name;
+      }
+      const r = await ctx.analytics.restaurantHourly(scope, {
+        hourFrom,
+        hourTo,
+        weekday: null,
+        productId,
+      });
+      const byProduct = new Map<string, { quantity: number; amountXof: number }>();
+      for (const row of r.rows) {
+        const p = byProduct.get(row.product) ?? { quantity: 0, amountXof: 0 };
+        p.quantity += row.quantity;
+        p.amountXof += row.revenue;
+        byProduct.set(row.product, p);
+      }
+      const products = [...byProduct.entries()]
+        .map(([name, p]) => ({ name, ...p }))
+        .sort((a, b) => b.amountXof - a.amountXof)
+        .slice(0, 10);
+      return {
+        ...base,
+        data: {
+          product: productName,
+          hourFrom,
+          hourTo,
+          quantity: r.hours.reduce((s, h) => s + h.quantity, 0),
+          amountXof: r.hours.reduce((s, h) => s + h.revenue, 0),
+          byHour: r.hours.map((h) => ({
+            hour: h.hour,
+            quantity: h.quantity,
+            amountXof: h.revenue,
+          })),
+          products,
+        },
+        missing: r.rows.length ? [] : ['Aucune vente encaissée sur cette plage horaire.'],
+      };
+    },
+  },
+  {
+    name: 'top_products_revenue',
+    description:
+      'Produits qui ont généré le plus de chiffre d’affaires (lignes encaissées) sur une période. Restaurant.',
+    parameters: strictObject({
+      period: periodSchema,
+      limit: { type: 'integer', minimum: 1, maximum: 10, description: 'Nombre de produits.' },
+    }),
+    permission: 'sale.read_all',
+    activity: 'RESTAURANT',
+    parse(args) {
+      const a = exactKeys(args, ['period', 'limit']);
+      return a && isPeriod(a.period) && isInt(a.limit, 1, 10)
+        ? { period: a.period, limit: a.limit }
+        : null;
+    },
+    async run(ctx, args) {
+      const { scope, resolved } = analyticsScope(ctx, args.period as CopilotPeriod, 'RESTAURANT');
+      const r = await ctx.analytics.restaurant(scope);
+      const products = [...r.products]
+        .sort((a, b) => b.revenue - a.revenue)
+        .slice(0, args.limit as number)
+        .map((p, i) => ({
+          rank: i + 1,
+          name: p.product,
+          amountXof: p.revenue,
+          quantity: p.quantity,
+        }));
+      return {
+        tool: 'top_products_revenue',
+        title: 'Produits qui rapportent le plus',
+        period: periodOf(resolved),
+        data: { products },
+        missing: products.length ? [] : ['Aucune vente payée sur cette période.'],
+      };
+    },
+  },
+  {
+    name: 'busiest_hours',
+    description:
+      'Heures locales qui génèrent le plus de commandes, avec leur montant encaissé, sur une période. Restaurant.',
+    parameters: strictObject({ period: periodSchema }),
+    permission: 'sale.read_all',
+    activity: 'RESTAURANT',
+    parse: parsePeriodOnly,
+    async run(ctx, args) {
+      const { scope, resolved } = analyticsScope(ctx, args.period as CopilotPeriod, 'RESTAURANT');
+      const r = await ctx.analytics.restaurant(scope);
+      const hours = r.hourly
+        .filter((h) => h.orders > 0)
+        .sort((a, b) => b.orders - a.orders || b.revenue - a.revenue)
+        .slice(0, 3)
+        .map((h) => ({ hour: h.hour, orders: h.orders, amountXof: h.revenue }));
+      return {
+        tool: 'busiest_hours',
+        title: 'Heures de pointe',
+        period: periodOf(resolved),
+        data: { hours },
+        missing: hours.length ? [] : ['Aucune commande sur cette période.'],
+      };
+    },
+  },
+  {
+    name: 'busiest_park_day',
+    description:
+      'Jour le plus fréquenté du parc (entrées réelles = scans acceptés) et jour de la semaine le plus fréquenté, sur une période. Parc.',
+    parameters: strictObject({ period: periodSchema }),
+    permission: 'sale.read_all',
+    activity: 'PARK',
+    parse: parsePeriodOnly,
+    async run(ctx, args) {
+      const { scope, resolved } = analyticsScope(ctx, args.period as CopilotPeriod, 'PARK');
+      const r = await ctx.analytics.park(scope);
+      const total = r.totals.scanned.current;
+      const best = [...r.daily].sort((a, b) => b.entries - a.entries)[0];
+      const weekday = [...r.weekdays].sort((a, b) => b.entries - a.entries)[0];
+      return {
+        tool: 'busiest_park_day',
+        title: 'Jour le plus fréquenté',
+        period: periodOf(resolved),
+        data: {
+          day: total > 0 && best ? best.date : null,
+          entries: total > 0 && best ? best.entries : 0,
+          busiestWeekday: total > 0 && weekday ? WEEKDAYS[weekday.weekday - 1] : null,
+          totalEntries: total,
+          refusedScans: r.totals.refusedScans.total,
+        },
+        missing: total > 0 ? [] : ['Aucune entrée enregistrée sur cette période.'],
+      };
+    },
+  },
+  {
+    name: 'category_margins',
+    description:
+      'Marge brute ESTIMÉE par catégorie de produits (CA − coût matière au coût d’achat actuel des recettes) et catégorie la plus rentable parmi celles dont les coûts sont complets. Ce n’est pas un bénéfice net. Restaurant.',
+    parameters: strictObject({ period: periodSchema }),
+    permission: 'analytics.margins',
+    activity: 'RESTAURANT',
+    parse: parsePeriodOnly,
+    async run(ctx, args) {
+      const { scope, resolved } = analyticsScope(ctx, args.period as CopilotPeriod, 'RESTAURANT');
+      const r = await ctx.analytics.margins(scope);
+      const categories = r.categories.map((c) => ({
+        category: c.category,
+        revenueXof: c.revenue,
+        materialCostXof: c.materialCost,
+        estimatedMarginXof: c.margin,
+        marginRatePct: c.marginRate,
+        complete: c.complete,
+      }));
+      const complete = categories.filter((c) => c.complete);
+      const best = [...complete].sort((a, b) => b.estimatedMarginXof - a.estimatedMarginXof)[0];
+      const incomplete = categories.filter((c) => !c.complete).map((c) => c.category);
+      return {
+        tool: 'category_margins',
+        title: 'Marges estimées par catégorie',
+        period: periodOf(resolved),
+        data: {
+          categories,
+          mostProfitable: best?.category ?? null,
+          note: 'Marge brute estimée au coût d’achat actuel des ingrédients ; personnel, loyer, énergie et taxes non intégrés.',
+        },
+        missing: [
+          ...(categories.length ? [] : ['Aucune vente payée sur cette période.']),
+          ...(incomplete.length
+            ? [`Marge incomplète (recette ou coût manquant) : ${incomplete.join(', ')}.`]
+            : []),
+          ...(categories.length && !complete.length
+            ? ['Aucune catégorie n’a de coûts complets : la plus rentable ne peut être déterminée.']
+            : []),
+        ],
       };
     },
   },

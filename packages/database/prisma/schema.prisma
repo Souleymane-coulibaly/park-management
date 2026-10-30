@@ -64,46 +64,47 @@ model Organization {
   createdAt    DateTime           @default(now())
   updatedAt    DateTime           @updatedAt
 
-  establishments      Establishment[]
-  memberships         OrganizationMembership[]
-  assignments         EstablishmentAssignment[]
-  subscription        Subscription?
-  auditLogs           AuditLog[]
-  categories          ProductCategory[]
-  products            Product[]
-  variants            ProductVariant[]
-  variantPrices       VariantPrice[]
-  cashSessions        CashSession[]
-  sales               Sale[]
-  saleLines           SaleLine[]
-  payments            Payment[]
-  posTerminals        PosTerminal[]
-  printJobs           PrintJob[]
-  drawerEvents        DrawerEvent[]
-  ticketCategories    TicketCategory[]
-  tickets             Ticket[]
-  ticketScans         TicketScan[]
-  parkSchedules       ParkOpeningSchedule[]
-  parkExceptions      ParkCalendarException[]
-  orderEvents         OrderEvent[]
-  diningZones         DiningZone[]
-  diningTables        DiningTable[]
-  qrOrderRequests     QrOrderRequest[]
-  stockItems          StockItem[]
-  stockMovements      StockMovement[]
-  recipeComponents    RecipeComponent[]
-  reservations        Reservation[]
-  kioskDevices        KioskDevice[]
-  customers           Customer[]
-  loyaltyRules        LoyaltyRule[]
-  loyaltyWallets      LoyaltyWallet[]
-  loyaltyTransactions LoyaltyTransaction[]
-  staffPositions      StaffPosition[]
-  staffAssignments    StaffAssignment[]
-  aiSettings          AiSettings?
-  aiUsages            AiUsage[]
-  aiImports           AiImport[]
-  voiceOrderDrafts    VoiceOrderDraft[]
+  establishments       Establishment[]
+  memberships          OrganizationMembership[]
+  assignments          EstablishmentAssignment[]
+  subscription         Subscription?
+  subscriptionPayments SubscriptionPayment[]
+  auditLogs            AuditLog[]
+  categories           ProductCategory[]
+  products             Product[]
+  variants             ProductVariant[]
+  variantPrices        VariantPrice[]
+  cashSessions         CashSession[]
+  sales                Sale[]
+  saleLines            SaleLine[]
+  payments             Payment[]
+  posTerminals         PosTerminal[]
+  printJobs            PrintJob[]
+  drawerEvents         DrawerEvent[]
+  ticketCategories     TicketCategory[]
+  tickets              Ticket[]
+  ticketScans          TicketScan[]
+  parkSchedules        ParkOpeningSchedule[]
+  parkExceptions       ParkCalendarException[]
+  orderEvents          OrderEvent[]
+  diningZones          DiningZone[]
+  diningTables         DiningTable[]
+  qrOrderRequests      QrOrderRequest[]
+  stockItems           StockItem[]
+  stockMovements       StockMovement[]
+  recipeComponents     RecipeComponent[]
+  reservations         Reservation[]
+  kioskDevices         KioskDevice[]
+  customers            Customer[]
+  loyaltyRules         LoyaltyRule[]
+  loyaltyWallets       LoyaltyWallet[]
+  loyaltyTransactions  LoyaltyTransaction[]
+  staffPositions       StaffPosition[]
+  staffAssignments     StaffAssignment[]
+  aiSettings           AiSettings?
+  aiUsages             AiUsage[]
+  aiImports            AiImport[]
+  voiceOrderDrafts     VoiceOrderDraft[]
 
   @@index([status])
   @@index([businessType])
@@ -176,9 +177,12 @@ model User {
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
-  memberships         OrganizationMembership[]
-  sessions            Session[]
-  passwordResetTokens PasswordResetToken[]
+  memberships                   OrganizationMembership[]
+  sessions                      Session[]
+  passwordResetTokens           PasswordResetToken[]
+  /// Règlements SaaS saisis / validés par ce Super Admin (Sprint 9B).
+  subscriptionPaymentsRecorded  SubscriptionPayment[]    @relation("SubscriptionPaymentRecordedBy")
+  subscriptionPaymentsValidated SubscriptionPayment[]    @relation("SubscriptionPaymentValidatedBy")
 }
 
 model OrganizationMembership {
@@ -287,6 +291,7 @@ model SubscriptionPlan {
   updatedAt    DateTime     @updatedAt
 
   subscriptions Subscription[]
+  payments      SubscriptionPayment[]
 }
 
 model Subscription {
@@ -299,9 +304,10 @@ model Subscription {
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
 
-  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  plan         SubscriptionPlan    @relation(fields: [planId], references: [id])
+  organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plan         SubscriptionPlan      @relation(fields: [planId], references: [id])
   events       SubscriptionEvent[]
+  payments     SubscriptionPayment[]
 
   @@index([status])
 }
@@ -322,6 +328,64 @@ model SubscriptionEvent {
   subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
 
   @@index([subscriptionId, createdAt])
+}
+
+/// Moyen de règlement d'un abonnement SaaS, reçu par Ocall HORS plateforme.
+enum SubscriptionPaymentMethod {
+  CASH
+  BANK_TRANSFER
+  MOBILE_MONEY
+  CHECK
+  OTHER
+}
+
+enum SubscriptionPaymentStatus {
+  PENDING
+  VALIDATED
+  REJECTED
+}
+
+/// Règlement d'abonnement SaaS (Sprint 9B) : payé directement à Ocall, hors plateforme, saisi puis
+/// vérifié et validé MANUELLEMENT par le Super Admin. Aucun paiement ni renouvellement automatique.
+/// Jamais mélangé aux recettes des établissements (Sale / Payment).
+model SubscriptionPayment {
+  id                   String                    @id @default(uuid()) @db.Uuid
+  organizationId       String                    @db.Uuid
+  subscriptionId       String                    @db.Uuid
+  /// Offre au moment du règlement.
+  planId               String                    @db.Uuid
+  /// Montant en FCFA (entier, strictement positif).
+  amount               Int
+  currency             String                    @default("XOF") @db.Char(3)
+  method               SubscriptionPaymentMethod
+  /// Référence du virement, du reçu ou de la transaction mobile, telle que fournie par le client.
+  reference            String?
+  /// Date du règlement déclarée par le client.
+  paidAt               DateTime
+  /// Période couverte (dates incluses).
+  periodStart          DateTime                  @db.Date
+  periodEnd            DateTime                  @db.Date
+  status               SubscriptionPaymentStatus @default(PENDING)
+  note                 String?
+  recordedById         String                    @db.Uuid
+  validatedById        String?                   @db.Uuid
+  /// Date de validation ou de rejet.
+  validatedAt          DateTime?
+  rejectionReason      String?
+  /// Vrai si le Super Admin a explicitement activé / prolongé l'abonnement à la validation.
+  subscriptionExtended Boolean                   @default(false)
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subscription Subscription     @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  plan         SubscriptionPlan @relation(fields: [planId], references: [id])
+  recordedBy   User             @relation("SubscriptionPaymentRecordedBy", fields: [recordedById], references: [id], onDelete: NoAction)
+  validatedBy  User?            @relation("SubscriptionPaymentValidatedBy", fields: [validatedById], references: [id], onDelete: NoAction)
+
+  @@index([status, paidAt])
+  @@index([organizationId, paidAt])
+  @@index([subscriptionId])
 }
 
 /// Journal d'audit en ajout seul. organizationId null = action plateforme.
@@ -631,6 +695,8 @@ model Payment {
   @@unique([organizationId, clientRequestId])
   @@index([saleId])
   @@index([cashSessionId, method, status])
+  /// Analyses : encaissements d'une organisation sur une période (Sprint 9).
+  @@index([organizationId, createdAt])
 }
 
 // ─── Sprint 3 : postes de caisse, impression thermique et tiroir-caisse ───

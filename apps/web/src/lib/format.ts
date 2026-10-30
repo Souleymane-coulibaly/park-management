@@ -90,6 +90,10 @@ const ACTION_LABELS: Record<string, string> = {
   'planning.assignment_created': 'Créneau planifié',
   'planning.assignment_updated': 'Créneau modifié',
   'planning.assignment_deleted': 'Créneau supprimé',
+  'analytics.exported': 'Analyse exportée (CSV)',
+  'platform.subscription_payment_recorded': 'Règlement d’abonnement saisi',
+  'platform.subscription_payment_validated': 'Règlement d’abonnement validé',
+  'platform.subscription_payment_rejected': 'Règlement d’abonnement rejeté',
 };
 
 export const actionLabel = (action: string) => ACTION_LABELS[action] ?? action;

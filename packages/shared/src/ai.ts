@@ -255,6 +255,47 @@ export function isPotentialDuplicate(a: string, b: string): boolean {
   return short.length >= 4 && ` ${long} `.includes(` ${short} `);
 }
 
+// ─── Copilote : produit cité dans une question ───
+
+/** Mots significatifs au singulier (« poulets braisés » → « poulet braise »). */
+function productWords(label: string): string[] {
+  const STOP = new Set(['de', 'du', 'des', 'la', 'le', 'les', 'au', 'aux', 'a', 'l', 'd', 'et']);
+  return normalizeLabel(label)
+    .split(' ')
+    .filter((w) => w && !STOP.has(w))
+    .map((w) => (w.length > 3 && /[sx]$/.test(w) ? w.slice(0, -1) : w));
+}
+
+export type ProductMatch<T> =
+  | { status: 'MATCHED'; item: T }
+  | { status: 'AMBIGUOUS'; candidates: T[] }
+  | { status: 'NOT_FOUND' };
+
+/**
+ * Retrouve le produit du catalogue désigné par les mots de l'utilisateur, sans jamais deviner :
+ * nom identique (au singulier, sans accents) ; sinon un seul produit dont le nom contient tous les
+ * mots cités ; plusieurs candidats → ambigu (on demande de préciser) ; aucun → introuvable.
+ */
+export function matchProductName<T extends { name: string }>(
+  query: string,
+  items: T[],
+): ProductMatch<T> {
+  const q = productWords(query);
+  if (q.length === 0) return { status: 'NOT_FOUND' };
+  const key = q.join(' ');
+  const exact = items.filter((i) => productWords(i.name).join(' ') === key);
+  if (exact.length === 1) return { status: 'MATCHED', item: exact[0]! };
+  const containing = items.filter((i) => {
+    const words = productWords(i.name);
+    return q.every((w) => words.includes(w));
+  });
+  if (containing.length === 1) return { status: 'MATCHED', item: containing[0]! };
+  if (containing.length > 1 || exact.length > 1) {
+    return { status: 'AMBIGUOUS', candidates: exact.length > 1 ? exact : containing };
+  }
+  return { status: 'NOT_FOUND' };
+}
+
 // ─── Copilote : chiffres cités ───
 
 /** Nombres présents dans un texte (« 12 500 », « 12.500 », « 3,5 » → 12500, 12500, 3.5). */

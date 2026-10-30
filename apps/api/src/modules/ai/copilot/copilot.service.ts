@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { coversActivity, hasPermission, numbersAreGrounded } from '@ocall/shared';
 import { PrismaService } from '../../../prisma/prisma.service';
 import type { TenantContext } from '../../../common/auth-context';
+import { AnalyticsService } from '../../analytics/analytics.service';
 import { findSellingEstablishment } from '../../pos/pos-scope';
 import { AiUsageService } from '../ai-usage.service';
 import type { AiToolCall } from '../providers/ai-provider';
@@ -38,6 +39,7 @@ export class CopilotService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly ai: AiUsageService,
+    private readonly analytics: AnalyticsService,
   ) {}
 
   /** Fonctions proposées : seulement celles permises au rôle et à l'activité de l'établissement. */
@@ -80,6 +82,7 @@ export class CopilotService {
           organizationId: auth.membership.organizationId,
           establishment,
           now: new Date(),
+          analytics: this.analytics,
         },
         args,
       );

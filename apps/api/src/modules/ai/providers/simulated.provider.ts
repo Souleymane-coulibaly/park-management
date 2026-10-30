@@ -109,7 +109,36 @@ export class SimulatedAiProvider implements AiProvider {
     }
     const period = PERIODS.find(([re]) => re.test(q))?.[1] ?? 'today';
     const limit = Number(q.match(/\b(\d{1,2})\b/)?.[1] ?? 5);
-    const call: AiToolCall | null = /plus vendu|top/.test(q)
+    // Sprint 9B : analyses avancées (produit × heure, CA par produit, heures de pointe, jour le plus
+    // fréquenté, marges). Le produit est transmis tel que dit ; le serveur le cherche au catalogue.
+    const range = q.match(/entre (\d{1,2}) ?h\w* et (\d{1,2}) ?h/);
+    const atHour = q.match(/\ba (\d{1,2}) ?h\b/);
+    const product = q.match(/combien de (.+?) (?:ont ete |a ete )?vendu/)?.[1] ?? '';
+    const call: AiToolCall | null = /rentable|marge/.test(q)
+      ? { name: 'category_margins', arguments: { period } }
+      : range
+        ? {
+            name: 'product_hourly_sales',
+            arguments: { period, product, hour_from: Number(range[1]), hour_to: Number(range[2]) },
+          }
+        : atHour && /rapporte|revenu/.test(q)
+          ? {
+              name: 'product_hourly_sales',
+              arguments: {
+                period,
+                product: '',
+                hour_from: Number(atHour[1]),
+                hour_to: Number(atHour[1]) + 1,
+              },
+            }
+          : /plus de revenus|rapporte le plus|plus de chiffre/.test(q)
+            ? { name: 'top_products_revenue', arguments: { period, limit: Math.min(limit, 10) } }
+            : /heure de pointe|quelles heures|heures .*commandes/.test(q)
+              ? { name: 'busiest_hours', arguments: { period } }
+              : /plus frequente|jour .*frequent/.test(q)
+                ? { name: 'busiest_park_day', arguments: { period } }
+                : null;
+    const fallback: AiToolCall | null = /plus vendu|top/.test(q)
       ? { name: 'top_products', arguments: { period, limit } }
       : /rupture|stock/.test(q)
         ? { name: 'low_stock', arguments: {} }
@@ -124,7 +153,8 @@ export class SimulatedAiProvider implements AiProvider {
                 : /chiffre d affaires|panier moyen|ventes/.test(q)
                   ? { name: 'revenue_summary', arguments: { period } }
                   : null;
-    if (!call) {
+    const selected = call ?? fallback;
+    if (!selected) {
       return {
         value: {
           answer:
@@ -134,7 +164,7 @@ export class SimulatedAiProvider implements AiProvider {
         usage: USAGE,
       };
     }
-    await request.execute(call);
+    await request.execute(selected);
     return { value: { answer: 'Voici les résultats calculés sur vos données.' }, usage: USAGE };
   }
 

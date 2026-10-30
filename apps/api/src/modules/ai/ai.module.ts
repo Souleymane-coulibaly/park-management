@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
+import { AnalyticsModule } from '../analytics/analytics.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { RestaurantModule } from '../restaurant/restaurant.module';
 import { TicketingModule } from '../ticketing/ticketing.module';
@@ -21,7 +22,7 @@ import { VoiceOrderService } from './voice/voice-order.service';
  * les fonctionnalités IA répondent « non activée » et le reste de l'application est inchangé.
  */
 @Module({
-  imports: [CatalogModule, TicketingModule, RestaurantModule],
+  imports: [AnalyticsModule, CatalogModule, TicketingModule, RestaurantModule],
   controllers: [AiSettingsController, AiImportController, CopilotController, VoiceOrderController],
   providers: [
     {

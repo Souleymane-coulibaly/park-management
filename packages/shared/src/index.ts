@@ -9,3 +9,5 @@ export * from './park';
 export * from './restaurant';
 export * from './crm';
 export * from './ai';
+export * from './analytics';
+export * from './saas';

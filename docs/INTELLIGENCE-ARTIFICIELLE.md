@@ -80,9 +80,11 @@ fichier → analyser → revoir et corriger chaque ligne → publier.
 
 ## 5. Copilote analytique (`/app/copilot`)
 
-- **Lecture seule par construction** : le modèle ne peut appeler que 7 fonctions de lecture
+- **Lecture seule par construction** : le modèle ne peut appeler que 12 fonctions de lecture
   (chiffre d'affaires et panier moyen, produits les plus vendus, stocks bas, entrées au parc, meilleur
-  jour, commandes préparées, billets vendus). Aucune fonction d'écriture, aucun SQL libre, aucune commande.
+  jour, commandes préparées, billets vendus ; depuis le Sprint 9B : ventes par produit et par heure,
+  produits qui rapportent le plus, heures de pointe, jour le plus fréquenté, marges estimées par
+  catégorie — voir [ANALYSES.md](ANALYSES.md) §8). Aucune fonction d'écriture, aucun SQL libre, aucune commande.
 - **Établissement imposé par le serveur** : choisi par l'utilisateur dans son périmètre, revérifié ;
   le modèle ne fournit jamais d'établissement (un argument en trop est refusé, `INVALID_ARGUMENTS`).
 - **Périodes** : liste fermée (`today`, `yesterday`, `this_week`, `last_7_days`, `this_month`,
@@ -91,8 +93,8 @@ fichier → analyser → revoir et corriger chaque ligne → publier.
   nombre absent des résultats, elle est écartée (`grounded: false`).
 - Données manquantes signalées ; question ambiguë → demande de précision.
 - **Droits** : `ai.copilot` (propriétaire, administrateur, superviseur) ; chaque fonction exige en plus
-  sa permission (`sale.read_all`, `stock.read`) et l'activité de l'établissement.
-- Point d'extension du Sprint 9 : `copilot/analytics-tools.ts`.
+  sa permission (`sale.read_all`, `stock.read`, `analytics.margins`) et l'activité de l'établissement.
+- Les fonctions du Sprint 9B réutilisent le service d'analyses (`modules/analytics`).
 
 ## 6. Commande vocale (Commandes → « Commande vocale »)
 
