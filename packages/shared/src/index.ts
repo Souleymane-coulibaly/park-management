@@ -6,3 +6,4 @@ export * from './validation';
 export * from './pos';
 export * from './hardware';
 export * from './park';
+export * from './restaurant';

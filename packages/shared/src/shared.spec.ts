@@ -32,6 +32,8 @@ describe('navigation par métier', () => {
       'Catalogue',
       'Commandes',
       'Cuisine KDS',
+      'Réservations',
+      'Salles et tables',
       'Stocks',
       'CRM',
       'Planning RH',
@@ -45,7 +47,7 @@ describe('navigation par métier', () => {
     expect(nav).toEqual(
       expect.arrayContaining(['Billetterie', 'Contrôle des entrées', 'Caisse POS', 'Cuisine KDS']),
     );
-    expect(nav).toHaveLength(12);
+    expect(nav).toHaveLength(14);
   });
 
   it('masque Employés à un caissier', () => {

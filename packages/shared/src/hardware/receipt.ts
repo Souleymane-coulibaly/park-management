@@ -194,3 +194,59 @@ export function layoutTickets(data: TicketPrintData, paperWidth: PaperWidth): Re
   });
   return out;
 }
+
+export interface KitchenTicketData {
+  establishmentName: string;
+  timezone: string;
+  saleNumber: number;
+  /** Libellé du canal (Sur place, À emporter…). */
+  channelLabel: string;
+  /** Table ou zone, si la commande en a une. */
+  location: string | null;
+  /** Date ISO de l'envoi en cuisine. */
+  sentAt: string;
+  notes: string | null;
+  lines: { productName: string; variantName: string; quantity: number; notes: string | null }[];
+  duplicate: boolean;
+}
+
+/**
+ * Ticket cuisine : articles, quantités, variantes et instructions, en gros caractères.
+ * Il ne contient AUCUN prix ni information de paiement.
+ */
+export function layoutKitchenTicket(
+  data: KitchenTicketData,
+  paperWidth: PaperWidth,
+): ReceiptLine[] {
+  const w = charsPerLine(paperWidth);
+  const half = Math.floor(w / 2);
+  const out: ReceiptLine[] = [];
+  if (data.duplicate) out.push({ text: '*** RÉIMPRESSION ***', align: 'center', bold: true });
+  out.push({ text: 'CUISINE', align: 'center', bold: true, large: true });
+  out.push({
+    text: `N° ${formatSaleNumber(data.saleNumber)}`,
+    align: 'center',
+    bold: true,
+    large: true,
+  });
+  for (const t of wrap(data.establishmentName, w)) out.push({ text: t, align: 'center' });
+  out.push(separator(w));
+  out.push({ text: columns(data.channelLabel, formatDate(data.sentAt, data.timezone), w) });
+  if (data.location) {
+    for (const t of wrap(data.location, half)) out.push({ text: t, bold: true, large: true });
+  }
+  out.push(separator(w));
+  for (const l of data.lines) {
+    for (const t of wrap(`${l.quantity} x ${l.productName}`, half))
+      out.push({ text: t, bold: true, large: true });
+    if (l.variantName) for (const t of wrap(`  ${l.variantName}`, w)) out.push({ text: t });
+    if (l.notes) for (const t of wrap(`  >> ${l.notes}`, w)) out.push({ text: t, bold: true });
+  }
+  if (data.notes) {
+    out.push(separator(w));
+    out.push({ text: 'Instructions :', bold: true });
+    for (const t of wrap(data.notes, w)) out.push({ text: t });
+  }
+  out.push(separator(w));
+  return out;
+}

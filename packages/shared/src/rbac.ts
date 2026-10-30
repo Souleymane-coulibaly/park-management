@@ -54,6 +54,14 @@ export const Permission = {
   TICKETING_MANAGE: 'ticketing.manage',
   ACCESS_SCAN: 'access.scan',
   TICKET_CANCEL: 'ticket.cancel',
+  ORDER_SEND_KITCHEN: 'order.send_kitchen',
+  KITCHEN_VIEW: 'kitchen.view',
+  KITCHEN_UPDATE: 'kitchen.update',
+  TABLES_MANAGE: 'tables.manage',
+  STOCK_READ: 'stock.read',
+  STOCK_MOVE: 'stock.move',
+  STOCK_MANAGE: 'stock.manage',
+  RESERVATION_MANAGE: 'reservation.manage',
 } as const;
 export type Permission = (typeof Permission)[keyof typeof Permission];
 export const PERMISSIONS: readonly Permission[] = Object.values(Permission);
@@ -83,6 +91,14 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'ticketing.manage': 'Gérer les tarifs et les horaires du parc',
   'access.scan': 'Contrôler les entrées (scanner les billets)',
   'ticket.cancel': 'Annuler un billet',
+  'order.send_kitchen': 'Envoyer les commandes en cuisine et les marquer servies',
+  'kitchen.view': 'Consulter l’écran cuisine',
+  'kitchen.update': 'Faire avancer la préparation (en préparation, prête)',
+  'tables.manage': 'Configurer les salles, zones, tables et QR codes',
+  'stock.read': 'Consulter les stocks',
+  'stock.move': 'Saisir les entrées et sorties de stock',
+  'stock.manage': 'Gérer les articles, recettes et inventaires',
+  'reservation.manage': 'Gérer les réservations',
 };
 
 const P = Permission;
@@ -106,10 +122,23 @@ export const ROLE_PERMISSIONS: Record<MemberRole, readonly Permission[]> = {
     P.DRAWER_OPEN_MANUAL,
     P.ACCESS_SCAN,
     P.TICKET_CANCEL,
+    P.ORDER_SEND_KITCHEN,
+    P.KITCHEN_VIEW,
+    P.KITCHEN_UPDATE,
+    P.STOCK_READ,
+    P.STOCK_MOVE,
+    P.RESERVATION_MANAGE,
   ],
-  // Un caissier encaisse et ne voit que ses propres ventes et sessions.
-  CASHIER: [...OPERATOR_BASE, P.CATALOG_READ, P.POS_SELL],
-  KITCHEN: [...OPERATOR_BASE, P.CATALOG_READ],
+  // Un caissier encaisse, envoie ses commandes en cuisine et ne voit que ses propres ventes et sessions.
+  CASHIER: [
+    ...OPERATOR_BASE,
+    P.CATALOG_READ,
+    P.POS_SELL,
+    P.ORDER_SEND_KITCHEN,
+    P.RESERVATION_MANAGE,
+  ],
+  // La cuisine voit les commandes envoyées et fait avancer la préparation ; elle n'encaisse pas.
+  KITCHEN: [...OPERATOR_BASE, P.CATALOG_READ, P.KITCHEN_VIEW, P.KITCHEN_UPDATE, P.STOCK_READ],
   // L'agent d'entrée scanne les billets ; il ne vend pas et ne voit pas le chiffre d'affaires.
   GATE_AGENT: [...OPERATOR_BASE, P.ACCESS_SCAN],
 };

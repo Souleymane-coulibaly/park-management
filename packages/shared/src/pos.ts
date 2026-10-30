@@ -19,7 +19,8 @@ export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
 
 export const PREPARATION_STATUS_LABELS = {
   NOT_SENT: 'Non envoyée en cuisine',
-  SENT: 'En cuisine',
+  SENT: 'Envoyée en cuisine',
+  IN_PREPARATION: 'En préparation',
   READY: 'Prête',
   SERVED: 'Servie',
 } as const;
