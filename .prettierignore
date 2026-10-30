@@ -9,3 +9,4 @@ test-results
 
 # Rapports d'audit externes : conservés tels quels
 docs/checkpoints/audit-*.md
+docs/checkpoints/CHECKPOINT_*.md
