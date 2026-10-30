@@ -377,13 +377,11 @@ describe('Sprint 1 — socle SaaS (intégration)', () => {
 
     it("l'accès aux modules est vérifié côté serveur selon le métier", async () => {
       await restoB.agent.get('/api/v1/modules/ticketing').expect(403);
-      // Sprint 2 : la caisse est disponible ; Sprint 5 : la cuisine (KDS) aussi ; le CRM reste annoncé « à venir ».
-      const pos = await restoB.agent.get('/api/v1/modules/pos').expect(200);
-      expect(pos.body.status).toBe('available');
-      const kitchen = await restoB.agent.get('/api/v1/modules/kitchen').expect(200);
-      expect(kitchen.body.status).toBe('available');
-      const crm = await restoB.agent.get('/api/v1/modules/crm').expect(200);
-      expect(crm.body.status).toBe('upcoming');
+      // Sprint 2 : caisse ; Sprint 5 : cuisine ; Sprint 6 : CRM — tous disponibles pour un restaurant.
+      for (const key of ['pos', 'kitchen', 'crm']) {
+        const res = await restoB.agent.get(`/api/v1/modules/${key}`).expect(200);
+        expect(res.body.status).toBe('available');
+      }
       await restoB.agent.get('/api/v1/modules/inconnu').expect(404);
     });
   });
