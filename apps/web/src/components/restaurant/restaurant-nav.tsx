@@ -13,6 +13,7 @@ export function RestaurantNav() {
   const managesTables = useCan('tables.manage');
   const seesStock = useCan('stock.read');
   const seesStats = useCan('sale.read_all');
+  const managesKiosks = useCan('kiosk.manage');
   const links = [
     canSell && { href: '/app/commandes', label: 'Commandes' },
     canSell && { href: '/app/caisse', label: 'Caisse' },
@@ -20,6 +21,7 @@ export function RestaurantNav() {
     books && { href: '/app/reservations', label: 'Réservations' },
     managesTables && { href: '/app/restaurant/tables', label: 'Salles et tables' },
     seesStock && { href: '/app/stocks', label: 'Stocks' },
+    managesKiosks && { href: '/app/bornes', label: 'Bornes' },
     seesStats && { href: '/app/restaurant/tableau', label: 'Tableau de bord' },
   ].filter((l): l is { href: string; label: string } => !!l);
   return (

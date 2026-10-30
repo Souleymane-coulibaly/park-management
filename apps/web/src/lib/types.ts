@@ -193,6 +193,7 @@ export interface CatalogProduct {
   isActive: boolean;
   category: { id: string; name: string };
   variants: CatalogVariant[];
+  imageUrl: string | null;
 }
 
 export interface PosEstablishment {
@@ -249,6 +250,15 @@ export interface Sale {
   preparationStartedAt: string | null;
   readyAt: string | null;
   servedAt: string | null;
+  /** Remise fidélité déjà déduite du total, et points utilisés. */
+  loyaltyDiscount: number;
+  loyaltyPointsRedeemed: number;
+  customer: {
+    id: string;
+    firstName: string | null;
+    lastName: string | null;
+    phone: string | null;
+  } | null;
   establishment: { id: string; name: string };
   table: { id: string; name: string } | null;
   zone: { id: string; name: string } | null;
@@ -580,6 +590,9 @@ export interface QrRequest {
   createdAt: string;
   saleId: string | null;
   location: string;
+  /** Origine : QR code de table/zone ou borne libre-service (numéro affiché au client). */
+  source: 'QR' | 'KIOSK';
+  displayNumber: number | null;
 }
 
 export interface PublicMenu {
@@ -678,4 +691,112 @@ export interface RestaurantDashboard {
     quantity: number;
     alertThreshold: number;
   }[];
+}
+
+// ─── Sprint 6 : bornes, CRM, fidélité, planning ───
+
+export type LoyaltyActivityType = 'PARK' | 'RESTAURANT';
+
+export interface CustomerWallet {
+  activity: LoyaltyActivityType;
+  balance: number;
+}
+
+export interface CustomerSummary {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  phone: string | null;
+  marketingConsent: boolean;
+  lastVisitAt: string | null;
+  anonymizedAt: string | null;
+  wallets: CustomerWallet[];
+  /** Présents uniquement avec l'accès complet (responsables). */
+  visits?: number;
+  totalSpent?: number;
+}
+
+export interface CustomerDetail extends CustomerSummary {
+  notes?: string | null;
+  consentAt?: string | null;
+  marketingConsentAt?: string | null;
+  createdAt?: string;
+  purchases?: {
+    id: string;
+    number: number;
+    activity: LoyaltyActivityType;
+    total: number;
+    loyaltyDiscount: number;
+    createdAt: string;
+    establishment: { name: string };
+  }[];
+  loyaltyMovements?: {
+    id: string;
+    kind: 'EARN' | 'REDEEM' | 'ADJUST' | 'REVERSAL';
+    points: number;
+    balanceAfter: number;
+    reason: string | null;
+    createdAt: string;
+    activity: LoyaltyActivityType;
+  }[];
+}
+
+export interface LoyaltyRule {
+  activity: LoyaltyActivityType;
+  isActive: boolean;
+  earnAmountStep: number;
+  redeemValue: number;
+  minRedeemPoints: number;
+}
+
+export interface KioskDevice {
+  id: string;
+  name: string;
+  isActive: boolean;
+  status: 'PAIRED' | 'AWAITING_PAIRING' | 'UNPAIRED' | 'REVOKED';
+  pairedAt: string | null;
+  revokedAt: string | null;
+  lastSeenAt: string | null;
+  tokenExpiresAt: string | null;
+  pairingCodeExpiresAt: string | null;
+  createdAt: string;
+  establishment: { id: string; name: string };
+}
+
+export interface KioskMenu {
+  establishmentName: string;
+  categories: {
+    id: string;
+    name: string;
+    products: {
+      id: string;
+      name: string;
+      description: string | null;
+      imageUrl: string | null;
+      variants: { id: string; name: string; price: number }[];
+    }[];
+  }[];
+}
+
+export interface StaffPosition {
+  id: string;
+  name: string;
+  kind: 'CASHIER' | 'KITCHEN' | 'ENTRANCE' | 'SURVEILLANCE' | 'CLEANING' | 'OTHER';
+  isActive: boolean;
+}
+
+export interface StaffMember {
+  membershipId: string;
+  role: MemberRole;
+  name: string;
+}
+
+export interface StaffAssignment {
+  id: string;
+  startsAt: string;
+  endsAt: string;
+  notes: string | null;
+  establishment: { id: string; name: string };
+  position: { id: string; name: string; kind: StaffPosition['kind'] };
+  employee: { membershipId: string; role: MemberRole; name: string };
 }

@@ -308,6 +308,7 @@ function ProductDialog({
 }) {
   const [name, setName] = useState(product?.name ?? '');
   const [categoryId, setCategoryId] = useState(product?.category.id ?? categories[0]?.id ?? '');
+  const [imageUrl, setImageUrl] = useState(product?.imageUrl ?? '');
   const [variants, setVariants] = useState<VariantForm[]>(
     product
       ? product.variants
@@ -336,6 +337,8 @@ function ProductDialog({
     const body = {
       name,
       categoryId,
+      // Photo affichée sur la borne et le menu QR ; vide = aucune photo.
+      imageUrl: imageUrl.trim() || null,
       variants: variants.map((v) => ({
         ...(v.id ? { id: v.id } : {}),
         name: v.name,
@@ -368,6 +371,14 @@ function ProductDialog({
           value={name}
           onChange={(e) => setName(e.target.value)}
           required
+        />
+        <InputField
+          label="Photo (adresse https, facultatif)"
+          type="url"
+          value={imageUrl}
+          onChange={(e) => setImageUrl(e.target.value)}
+          placeholder="https://…"
+          hint="Affichée sur la borne de commande et le menu QR."
         />
         <SelectField
           label="Catégorie"

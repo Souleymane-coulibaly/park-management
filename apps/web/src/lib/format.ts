@@ -73,6 +73,23 @@ const ACTION_LABELS: Record<string, string> = {
   'reservation.created': 'Réservation créée',
   'reservation.updated': 'Réservation modifiée',
   'reservation.status_changed': 'Statut de réservation modifié',
+  'kiosk.created': 'Borne créée',
+  'kiosk.paired': 'Borne appairée',
+  'kiosk.pairing_code_issued': 'Code d’appairage de borne émis',
+  'kiosk.revoked': 'Borne révoquée',
+  'customer.created': 'Client créé',
+  'customer.updated': 'Client modifié',
+  'customer.anonymized': 'Client anonymisé',
+  'customer.retention_applied': 'Règle de conservation appliquée',
+  'sale.customer_set': 'Client rattaché à une vente',
+  'loyalty.rule_updated': 'Programme de fidélité modifié',
+  'loyalty.adjusted': 'Points de fidélité corrigés',
+  'loyalty.redeemed': 'Points de fidélité utilisés',
+  'planning.position_created': 'Poste créé',
+  'planning.position_updated': 'Poste modifié',
+  'planning.assignment_created': 'Créneau planifié',
+  'planning.assignment_updated': 'Créneau modifié',
+  'planning.assignment_deleted': 'Créneau supprimé',
 };
 
 export const actionLabel = (action: string) => ACTION_LABELS[action] ?? action;

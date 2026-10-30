@@ -11,6 +11,8 @@ import { newRequestId } from '@/lib/request-id';
 import type { PaymentMethodInfo, PaymentResult, Sale } from '@/lib/types';
 import { useApi } from '@/lib/use-api';
 import type { PosTerminal } from '@/lib/types';
+import { useCan } from '@/components/app/session-context';
+import { LoyaltyPanel } from '@/components/crm/loyalty-panel';
 import { AfterPaymentHardware } from './after-payment-hardware';
 
 /** Montants rapides : le total exact, puis les arrondis aux coupures FCFA courantes. */
@@ -33,6 +35,9 @@ export function PaymentDialog({
   onClose: () => void;
   onPaid: (result: PaymentResult) => void;
 }) {
+  // La vente peut changer avant l'encaissement (client rattaché, remise fidélité calculée par le serveur).
+  const [current, setCurrent] = useState(sale);
+  const showLoyalty = useCan('customer.read');
   const methods = useApi<PaymentMethodInfo[]>('/payments/methods');
   const [tendered, setTendered] = useState('');
   // Une clé par tentative d'encaissement : un double appui ou une reprise réseau ne paie pas deux fois.
@@ -40,7 +45,7 @@ export function PaymentDialog({
   const [error, setError] = useState<ApiError | null>(null);
   const [loading, setLoading] = useState(false);
   const amount = tendered === '' ? null : Number(tendered);
-  const validAmount = amount !== null && Number.isInteger(amount) && amount >= sale.total;
+  const validAmount = amount !== null && Number.isInteger(amount) && amount >= current.total;
   const wave =
     methods.state === 'success' ? methods.data.find((m) => m.method === 'WAVE') : undefined;
 
@@ -50,7 +55,7 @@ export function PaymentDialog({
     setLoading(true);
     setError(null);
     try {
-      const result = await api<PaymentResult>(`/sales/${sale.id}/payments`, {
+      const result = await api<PaymentResult>(`/sales/${current.id}/payments`, {
         method: 'POST',
         body: { method: 'CASH', amountTendered: amount, clientRequestId: requestId },
       });
@@ -80,9 +85,16 @@ export function PaymentDialog({
         <div className="rounded-2xl bg-forest px-5 py-4 text-ivory">
           <p className="text-sm text-ivory/75">Total à payer</p>
           <p className="font-display text-4xl font-bold" data-testid="payment-total">
-            {formatXof(sale.total)}
+            {formatXof(current.total)}
           </p>
+          {current.loyaltyDiscount > 0 && (
+            <p className="text-sm text-ivory/80">
+              Remise fidélité déduite : {formatXof(current.loyaltyDiscount)}
+            </p>
+          )}
         </div>
+
+        {showLoyalty && <LoyaltyPanel sale={current} onChange={setCurrent} />}
 
         <div className="grid grid-cols-2 gap-2">
           <div className="flex min-h-14 items-center justify-center gap-2 rounded-xl border-2 border-forest bg-forest-light/60 font-semibold text-forest-dark">
@@ -115,14 +127,14 @@ export function PaymentDialog({
             placeholder="0"
           />
           <div className="mt-2 flex flex-wrap gap-2">
-            {quickAmounts(sale.total).map((a) => (
+            {quickAmounts(current.total).map((a) => (
               <button
                 key={a}
                 type="button"
                 onClick={() => setTendered(String(a))}
                 className="min-h-11 rounded-xl border border-line bg-surface px-3 text-sm font-semibold hover:border-forest"
               >
-                {a === sale.total ? 'Montant exact' : formatXof(a)}
+                {a === current.total ? 'Montant exact' : formatXof(a)}
               </button>
             ))}
           </div>
@@ -131,7 +143,7 @@ export function PaymentDialog({
         <div className="flex items-center justify-between rounded-xl bg-savanna-light/60 px-4 py-3">
           <span className="font-medium">Monnaie à rendre</span>
           <span className="font-display text-2xl font-bold">
-            {validAmount ? formatXof(amount! - sale.total) : '—'}
+            {validAmount ? formatXof(amount! - current.total) : '—'}
           </span>
         </div>
         {amount !== null && !validAmount && (

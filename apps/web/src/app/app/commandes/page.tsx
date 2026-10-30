@@ -2,7 +2,7 @@
 
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { ChefHat, Plus, QrCode, Receipt } from 'lucide-react';
-import { formatSaleNumber, formatXof } from '@ocall/shared';
+import { formatKioskNumber, formatSaleNumber, formatXof } from '@ocall/shared';
 import { AccessDenied } from '@/components/app/access-denied';
 import { useCan } from '@/components/app/session-context';
 import { CashSessionGate, OfflineBanner, SessionBar } from '@/components/pos/cash-session';
@@ -161,8 +161,8 @@ function OrdersBoard({ establishmentId }: { establishmentId: string }) {
       {pendingRequests.length > 0 && (
         <Card>
           <CardHeader
-            title={`Demandes QR à valider (${pendingRequests.length})`}
-            description="Envoyées par les clients depuis un QR code. Elles ne sont ni payées ni envoyées en cuisine."
+            title={`Demandes clients à valider (${pendingRequests.length})`}
+            description="QR codes des tables et bornes de commande. Elles ne sont ni payées ni envoyées en cuisine : validez, encaissez, puis envoyez en cuisine."
           />
           <ul className="divide-y divide-line/70">
             {pendingRequests.map((r) => (
@@ -174,6 +174,11 @@ function OrdersBoard({ establishmentId }: { establishmentId: string }) {
                 <div className="min-w-0 space-y-1">
                   <p className="flex items-center gap-2 font-semibold">
                     <QrCode className="h-4 w-4 text-forest" aria-hidden />
+                    {r.source === 'KIOSK' && r.displayNumber !== null && (
+                      <span className="rounded-lg bg-forest px-2 py-0.5 text-white">
+                        {formatKioskNumber(r.displayNumber)}
+                      </span>
+                    )}
                     {r.location || 'Sans table'}
                     <span className="text-sm font-normal text-muted">
                       · il y a {formatElapsed(r.createdAt, now)}
