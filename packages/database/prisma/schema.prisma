@@ -64,55 +64,64 @@ model Organization {
   createdAt    DateTime           @default(now())
   updatedAt    DateTime           @updatedAt
 
-  establishments   Establishment[]
-  memberships      OrganizationMembership[]
-  assignments      EstablishmentAssignment[]
-  subscription     Subscription?
-  auditLogs        AuditLog[]
-  categories       ProductCategory[]
-  products         Product[]
-  variants         ProductVariant[]
-  variantPrices    VariantPrice[]
-  cashSessions     CashSession[]
-  sales            Sale[]
-  saleLines        SaleLine[]
-  payments         Payment[]
-  posTerminals     PosTerminal[]
-  printJobs        PrintJob[]
-  drawerEvents     DrawerEvent[]
-  ticketCategories TicketCategory[]
-  tickets          Ticket[]
-  ticketScans      TicketScan[]
-  parkSchedules    ParkOpeningSchedule[]
-  parkExceptions   ParkCalendarException[]
-  orderEvents      OrderEvent[]
-  diningZones      DiningZone[]
-  diningTables     DiningTable[]
-  qrOrderRequests  QrOrderRequest[]
-  stockItems       StockItem[]
-  stockMovements   StockMovement[]
-  recipeComponents RecipeComponent[]
-  reservations     Reservation[]
+  establishments      Establishment[]
+  memberships         OrganizationMembership[]
+  assignments         EstablishmentAssignment[]
+  subscription        Subscription?
+  auditLogs           AuditLog[]
+  categories          ProductCategory[]
+  products            Product[]
+  variants            ProductVariant[]
+  variantPrices       VariantPrice[]
+  cashSessions        CashSession[]
+  sales               Sale[]
+  saleLines           SaleLine[]
+  payments            Payment[]
+  posTerminals        PosTerminal[]
+  printJobs           PrintJob[]
+  drawerEvents        DrawerEvent[]
+  ticketCategories    TicketCategory[]
+  tickets             Ticket[]
+  ticketScans         TicketScan[]
+  parkSchedules       ParkOpeningSchedule[]
+  parkExceptions      ParkCalendarException[]
+  orderEvents         OrderEvent[]
+  diningZones         DiningZone[]
+  diningTables        DiningTable[]
+  qrOrderRequests     QrOrderRequest[]
+  stockItems          StockItem[]
+  stockMovements      StockMovement[]
+  recipeComponents    RecipeComponent[]
+  reservations        Reservation[]
+  kioskDevices        KioskDevice[]
+  customers           Customer[]
+  loyaltyRules        LoyaltyRule[]
+  loyaltyWallets      LoyaltyWallet[]
+  loyaltyTransactions LoyaltyTransaction[]
+  staffPositions      StaffPosition[]
+  staffAssignments    StaffAssignment[]
 
   @@index([status])
   @@index([businessType])
 }
 
 model Establishment {
-  id             String       @id @default(uuid()) @db.Uuid
-  organizationId String       @db.Uuid
-  name           String
+  id              String       @id @default(uuid()) @db.Uuid
+  organizationId  String       @db.Uuid
+  name            String
   /// Activité(s) exercée(s), toujours compatible(s) avec le métier de l'organisation.
-  businessType   BusinessType
-  city           String?
-  address        String?
-  phone          String?
-  timezone       String       @default("Africa/Bamako")
-  isActive       Boolean      @default(true)
+  businessType    BusinessType
+  city            String?
+  address         String?
+  phone           String?
+  timezone        String       @default("Africa/Bamako")
+  isActive        Boolean      @default(true)
   /// Compteur des numéros de vente de l'établissement, incrémenté de façon atomique.
-  saleSeq        Int          @default(0)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  saleSeq         Int          @default(0)
+  /// Compteur des numéros affichés des commandes de borne, incrémenté de façon atomique.
+  orderRequestSeq Int          @default(0)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   organization     Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   assignments      EstablishmentAssignment[]
@@ -134,6 +143,8 @@ model Establishment {
   stockItems       StockItem[]
   stockMovements   StockMovement[]
   reservations     Reservation[]
+  kioskDevices     KioskDevice[]
+  staffAssignments StaffAssignment[]
 
   @@unique([organizationId, name])
   @@index([organizationId, isActive])
@@ -177,19 +188,24 @@ model OrganizationMembership {
   assignments  EstablishmentAssignment[]
   sessions     Session[]
 
-  cashSessionsOpened CashSession[]    @relation("CashSessionOpenedBy")
-  cashSessionsClosed CashSession[]    @relation("CashSessionClosedBy")
-  sales              Sale[]           @relation("SaleCashier")
-  salesCancelled     Sale[]           @relation("SaleCancelledBy")
-  paymentsReceived   Payment[]        @relation("PaymentReceivedBy")
-  printJobs          PrintJob[]       @relation("PrintJobRequestedBy")
-  drawerEvents       DrawerEvent[]    @relation("DrawerEventRequestedBy")
-  ticketScans        TicketScan[]     @relation("TicketScanAgent")
-  ticketsCancelled   Ticket[]         @relation("TicketCancelledBy")
-  orderEvents        OrderEvent[]     @relation("OrderEventActor")
-  qrOrdersDecided    QrOrderRequest[] @relation("QrOrderDecidedBy")
-  stockMovements     StockMovement[]  @relation("StockMovementActor")
-  reservationsMade   Reservation[]    @relation("ReservationCreatedBy")
+  cashSessionsOpened      CashSession[]        @relation("CashSessionOpenedBy")
+  cashSessionsClosed      CashSession[]        @relation("CashSessionClosedBy")
+  sales                   Sale[]               @relation("SaleCashier")
+  salesCancelled          Sale[]               @relation("SaleCancelledBy")
+  paymentsReceived        Payment[]            @relation("PaymentReceivedBy")
+  printJobs               PrintJob[]           @relation("PrintJobRequestedBy")
+  drawerEvents            DrawerEvent[]        @relation("DrawerEventRequestedBy")
+  ticketScans             TicketScan[]         @relation("TicketScanAgent")
+  ticketsCancelled        Ticket[]             @relation("TicketCancelledBy")
+  orderEvents             OrderEvent[]         @relation("OrderEventActor")
+  qrOrdersDecided         QrOrderRequest[]     @relation("QrOrderDecidedBy")
+  stockMovements          StockMovement[]      @relation("StockMovementActor")
+  reservationsMade        Reservation[]        @relation("ReservationCreatedBy")
+  kioskDevicesCreated     KioskDevice[]        @relation("KioskDeviceCreatedBy")
+  customersCreated        Customer[]           @relation("CustomerCreatedBy")
+  loyaltyTransactions     LoyaltyTransaction[] @relation("LoyaltyActor")
+  staffAssignments        StaffAssignment[]    @relation("StaffAssignee")
+  staffAssignmentsCreated StaffAssignment[]    @relation("StaffAssignmentCreatedBy")
 
   @@unique([organizationId, userId])
   @@index([userId])
@@ -354,6 +370,7 @@ enum OrderChannel {
   TAKEAWAY
   COUNTER
   QR
+  KIOSK
 }
 
 enum PaymentMethod {
@@ -389,6 +406,8 @@ model Product {
   categoryId     String   @db.Uuid
   name           String
   description    String?
+  /// Photo du produit (URL https), affichée sur la borne et le menu public.
+  imageUrl       String?
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -474,54 +493,61 @@ model CashSession {
 }
 
 model Sale {
-  id                   String            @id @default(uuid()) @db.Uuid
-  organizationId       String            @db.Uuid
-  establishmentId      String            @db.Uuid
-  cashSessionId        String            @db.Uuid
-  cashierId            String            @db.Uuid
+  id                    String            @id @default(uuid()) @db.Uuid
+  organizationId        String            @db.Uuid
+  establishmentId       String            @db.Uuid
+  cashSessionId         String            @db.Uuid
+  cashierId             String            @db.Uuid
   /// Numéro séquentiel par établissement.
-  number               Int
+  number                Int
   /// Restaurant (caisse) ou parc (billetterie) : même moteur de vente et de paiement.
-  activity             SaleActivity      @default(RESTAURANT)
-  status               SaleStatus        @default(OPEN)
-  paymentStatus        SalePaymentStatus @default(UNPAID)
-  preparationStatus    PreparationStatus @default(NOT_SENT)
+  activity              SaleActivity      @default(RESTAURANT)
+  status                SaleStatus        @default(OPEN)
+  paymentStatus         SalePaymentStatus @default(UNPAID)
+  preparationStatus     PreparationStatus @default(NOT_SENT)
   /// Total TTC en FCFA, calculé par le serveur à partir des tarifs de l'établissement.
-  total                Int
+  total                 Int
   /// Clé d'idempotence fournie par la caisse : une nouvelle tentative ne crée pas de doublon.
-  clientRequestId      String?
-  cancelledAt          DateTime?
-  cancelledById        String?           @db.Uuid
+  clientRequestId       String?
+  cancelledAt           DateTime?
+  cancelledById         String?           @db.Uuid
   /// Restaurant : canal de commande (null pour la billetterie et les ventes antérieures au Sprint 5).
-  channel              OrderChannel?
-  tableId              String?           @db.Uuid
-  zoneId               String?           @db.Uuid
+  channel               OrderChannel?
+  tableId               String?           @db.Uuid
+  zoneId                String?           @db.Uuid
   /// Instructions de préparation pour toute la commande.
-  notes                String?
+  notes                 String?
   /// Horodatage du cycle de préparation (temps d'attente et de préparation).
-  sentToKitchenAt      DateTime?
-  preparationStartedAt DateTime?
-  readyAt              DateTime?
-  servedAt             DateTime?
+  sentToKitchenAt       DateTime?
+  preparationStartedAt  DateTime?
+  readyAt               DateTime?
+  servedAt              DateTime?
   /// Déduction des ingrédients réalisée (une seule fois par vente : envoi en cuisine ou paiement).
-  stockDeductedAt      DateTime?
-  createdAt            DateTime          @default(now())
-  updatedAt            DateTime          @updatedAt
+  stockDeductedAt       DateTime?
+  /// Client rattaché (CRM, fidélité) ; facultatif.
+  customerId            String?           @db.Uuid
+  /// Remise fidélité calculée par le serveur (déjà déduite de `total`) et points utilisés.
+  loyaltyDiscount       Int               @default(0)
+  loyaltyPointsRedeemed Int               @default(0)
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
 
-  organization   Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  establishment  Establishment           @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
-  cashSession    CashSession             @relation(fields: [cashSessionId], references: [id], onDelete: Cascade)
-  cashier        OrganizationMembership  @relation("SaleCashier", fields: [cashierId], references: [id], onDelete: NoAction)
-  cancelledBy    OrganizationMembership? @relation("SaleCancelledBy", fields: [cancelledById], references: [id], onDelete: NoAction)
-  table          DiningTable?            @relation(fields: [tableId], references: [id], onDelete: NoAction)
-  zone           DiningZone?             @relation(fields: [zoneId], references: [id], onDelete: NoAction)
-  lines          SaleLine[]
-  payments       Payment[]
-  printJobs      PrintJob[]
-  tickets        Ticket[]
-  events         OrderEvent[]
-  qrRequest      QrOrderRequest?
-  stockMovements StockMovement[]
+  organization        Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment       Establishment           @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  cashSession         CashSession             @relation(fields: [cashSessionId], references: [id], onDelete: Cascade)
+  cashier             OrganizationMembership  @relation("SaleCashier", fields: [cashierId], references: [id], onDelete: NoAction)
+  cancelledBy         OrganizationMembership? @relation("SaleCancelledBy", fields: [cancelledById], references: [id], onDelete: NoAction)
+  table               DiningTable?            @relation(fields: [tableId], references: [id], onDelete: NoAction)
+  zone                DiningZone?             @relation(fields: [zoneId], references: [id], onDelete: NoAction)
+  customer            Customer?               @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  loyaltyTransactions LoyaltyTransaction[]
+  lines               SaleLine[]
+  payments            Payment[]
+  printJobs           PrintJob[]
+  tickets             Ticket[]
+  events              OrderEvent[]
+  qrRequest           QrOrderRequest?
+  stockMovements      StockMovement[]
 
   @@unique([establishmentId, number])
   @@unique([organizationId, clientRequestId])
@@ -530,6 +556,7 @@ model Sale {
   @@index([cashierId, createdAt])
   @@index([establishmentId, preparationStatus])
   @@index([tableId])
+  @@index([customerId])
 }
 
 /// Ligne de vente : libellés et prix figés au moment de la vente.
@@ -976,6 +1003,12 @@ enum QrOrderStatus {
   REJECTED
 }
 
+/// Origine d'une demande client.
+enum QrOrderSource {
+  QR
+  KIOSK
+}
+
 /// Demande de commande envoyée par un client depuis un QR code. Elle n'est ni payée ni envoyée en
 /// cuisine : un employé la valide (elle devient alors une vente non payée, non envoyée) ou la refuse.
 model QrOrderRequest {
@@ -987,6 +1020,11 @@ model QrOrderRequest {
   /// Jeton aléatoire remis au client pour suivre sa demande (aucun compte requis).
   publicToken     String        @unique
   status          QrOrderStatus @default(PENDING_VALIDATION)
+  source          QrOrderSource @default(QR)
+  /// Borne : appareil, session client (une commande par session) et numéro affiché au client.
+  kioskDeviceId   String?       @db.Uuid
+  kioskSessionId  String?       @unique @db.Uuid
+  displayNumber   Int?
   customerName    String?
   notes           String?
   /// Lignes demandées (variante, quantité, instruction) avec libellés et prix indicatifs du moment.
@@ -1008,8 +1046,11 @@ model QrOrderRequest {
   zone          DiningZone?             @relation(fields: [zoneId], references: [id], onDelete: NoAction)
   decidedBy     OrganizationMembership? @relation("QrOrderDecidedBy", fields: [decidedById], references: [id], onDelete: NoAction)
   sale          Sale?                   @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  kioskDevice   KioskDevice?            @relation(fields: [kioskDeviceId], references: [id], onDelete: SetNull)
+  kioskSession  KioskSession?           @relation(fields: [kioskSessionId], references: [id], onDelete: SetNull)
 
   @@unique([establishmentId, clientRequestId])
+  @@index([kioskDeviceId, createdAt])
   @@index([establishmentId, status, createdAt])
   @@index([tableId, status])
   @@index([zoneId, status])
@@ -1138,4 +1179,205 @@ model Reservation {
 
   @@index([establishmentId, startsAt])
   @@index([tableId, startsAt])
+}
+
+// ─── Sprint 6 : bornes de commande, CRM, fidélité, planning du personnel ───
+
+/// Borne de commande libre-service d'un établissement restaurant. Elle s'authentifie par un jeton
+/// d'appareil (cookie httpOnly) obtenu avec un code d'appairage à usage unique ; seuls les hash sont
+/// stockés. Révocable à tout moment ; le jeton ne donne accès qu'aux routes /kiosk.
+model KioskDevice {
+  id                   String    @id @default(uuid()) @db.Uuid
+  organizationId       String    @db.Uuid
+  establishmentId      String    @db.Uuid
+  name                 String
+  isActive             Boolean   @default(true)
+  /// SHA-256 du jeton d'appareil (null tant que la borne n'est pas appairée).
+  tokenHash            String?   @unique
+  tokenExpiresAt       DateTime?
+  /// SHA-256 du code d'appairage à usage unique, valable 15 minutes.
+  pairingCodeHash      String?   @unique
+  pairingCodeExpiresAt DateTime?
+  pairedAt             DateTime?
+  revokedAt            DateTime?
+  lastSeenAt           DateTime?
+  createdById          String    @db.Uuid
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  organization  Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment          @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  createdBy     OrganizationMembership @relation("KioskDeviceCreatedBy", fields: [createdById], references: [id], onDelete: NoAction)
+  sessions      KioskSession[]
+  orderRequests QrOrderRequest[]
+
+  @@unique([establishmentId, name])
+  @@index([organizationId])
+}
+
+/// Passage d'un client sur la borne : une session = une commande au plus. Fermée à l'envoi, à
+/// l'abandon ou par expiration ; rien de personnel n'y est conservé.
+model KioskSession {
+  id        String    @id @default(uuid()) @db.Uuid
+  deviceId  String    @db.Uuid
+  startedAt DateTime  @default(now())
+  expiresAt DateTime
+  endedAt   DateTime?
+
+  device       KioskDevice     @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+  orderRequest QrOrderRequest?
+
+  @@index([deviceId, startedAt])
+}
+
+/// Fiche client (CRM), au niveau de l'organisation. Toutes les informations personnelles sont
+/// facultatives ; le consentement est enregistré. Une demande de suppression anonymise la fiche :
+/// les ventes restent (obligations comptables) mais ne sont plus rattachées à une personne identifiable.
+model Customer {
+  id                 String    @id @default(uuid()) @db.Uuid
+  organizationId     String    @db.Uuid
+  firstName          String?
+  lastName           String?
+  /// Téléphone normalisé (chiffres, préfixe « + » facultatif) ; unique dans l'organisation.
+  phone              String?
+  notes              String?
+  /// Consentement à la conservation de la fiche (date de recueil).
+  consentAt          DateTime?
+  /// Consentement aux communications commerciales (aucune campagne n'est envoyée à ce stade).
+  marketingConsent   Boolean   @default(false)
+  marketingConsentAt DateTime?
+  anonymizedAt       DateTime?
+  lastVisitAt        DateTime?
+  createdById        String?   @db.Uuid
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  organization Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  createdBy    OrganizationMembership? @relation("CustomerCreatedBy", fields: [createdById], references: [id], onDelete: NoAction)
+  sales        Sale[]
+  wallets      LoyaltyWallet[]
+
+  @@unique([organizationId, phone])
+  @@index([organizationId, lastVisitAt])
+}
+
+/// Règles de fidélité d'une activité (Parc ou Restaurant) : une par organisation et par activité.
+model LoyaltyRule {
+  id              String       @id @default(uuid()) @db.Uuid
+  organizationId  String       @db.Uuid
+  activity        SaleActivity
+  isActive        Boolean      @default(false)
+  /// Montant payé (FCFA) donnant droit à 1 point.
+  earnAmountStep  Int          @default(1000)
+  /// Valeur d'un point utilisé (FCFA de remise).
+  redeemValue     Int          @default(10)
+  /// Points minimum pour une utilisation.
+  minRedeemPoints Int          @default(100)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, activity])
+}
+
+/// Portefeuille de points d'un client pour UNE activité : Parc et Restaurant restent distincts.
+model LoyaltyWallet {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  customerId     String       @db.Uuid
+  activity       SaleActivity
+  /// Toujours ≥ 0 : contrôlé par une mise à jour conditionnelle et une contrainte CHECK.
+  balance        Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customer     Customer             @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  transactions LoyaltyTransaction[]
+
+  @@unique([customerId, activity])
+  @@index([organizationId])
+}
+
+enum LoyaltyTransactionKind {
+  EARN
+  REDEEM
+  ADJUST
+  REVERSAL
+}
+
+/// Mouvement de points en ajout seul. La clé d'idempotence empêche tout double crédit ou débit.
+model LoyaltyTransaction {
+  id                String                 @id @default(uuid()) @db.Uuid
+  organizationId    String                 @db.Uuid
+  walletId          String                 @db.Uuid
+  kind              LoyaltyTransactionKind
+  /// Variation signée.
+  points            Int
+  balanceAfter      Int
+  saleId            String?                @db.Uuid
+  reason            String?
+  actorMembershipId String?                @db.Uuid
+  /// « earn:<vente> », « redeem:<vente> », « reversal:<vente> », « adjust:<clé client> ».
+  idempotencyKey    String
+  createdAt         DateTime               @default(now())
+
+  organization Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  wallet       LoyaltyWallet           @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  sale         Sale?                   @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  actor        OrganizationMembership? @relation("LoyaltyActor", fields: [actorMembershipId], references: [id], onDelete: NoAction)
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([walletId, createdAt])
+}
+
+enum StaffPositionKind {
+  CASHIER
+  KITCHEN
+  ENTRANCE
+  SURVEILLANCE
+  CLEANING
+  OTHER
+}
+
+/// Poste de travail configurable (caisse, cuisine, entrée, surveillance, entretien, autres).
+model StaffPosition {
+  id             String            @id @default(uuid()) @db.Uuid
+  organizationId String            @db.Uuid
+  name           String
+  kind           StaffPositionKind
+  isActive       Boolean           @default(true)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  assignments  StaffAssignment[]
+
+  @@unique([organizationId, name])
+}
+
+/// Créneau de travail d'un employé : établissement, poste, début et fin. Un planning (jour, semaine,
+/// mois) est l'ensemble des créneaux d'une période : pas de table « planning » séparée.
+model StaffAssignment {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  establishmentId String   @db.Uuid
+  membershipId    String   @db.Uuid
+  positionId      String   @db.Uuid
+  startsAt        DateTime
+  endsAt          DateTime
+  notes           String?
+  createdById     String   @db.Uuid
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization  Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment          @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  membership    OrganizationMembership @relation("StaffAssignee", fields: [membershipId], references: [id], onDelete: Cascade)
+  position      StaffPosition          @relation(fields: [positionId], references: [id], onDelete: NoAction)
+  createdBy     OrganizationMembership @relation("StaffAssignmentCreatedBy", fields: [createdById], references: [id], onDelete: NoAction)
+
+  @@index([organizationId, establishmentId, startsAt])
+  @@index([membershipId, startsAt])
 }
