@@ -10,9 +10,11 @@ test.describe('Sprint 1 — parcours propriétaire', () => {
     await expect(page.getByText('Établissements actifs')).toBeVisible();
     await expect(page.getByText('Revenus Parc')).toBeVisible();
 
-    // Navigation PARK : modules parc annoncés « à venir », aucun module restaurant.
+    // Navigation PARK : billetterie et contrôle d'accès disponibles (Sprint 4), aucun module restaurant.
     const nav = sidebar(page).first();
-    await expect(nav.getByRole('link', { name: /Billetterie/ })).toContainText('À venir');
+    await expect(nav.getByRole('link', { name: /Billetterie/ })).toBeVisible();
+    await expect(nav.getByRole('link', { name: /Billetterie/ })).not.toContainText('À venir');
+    await expect(nav.getByRole('link', { name: /Contrôle des entrées/ })).toBeVisible();
     await expect(nav.getByRole('link', { name: /Caisse POS/ })).toHaveCount(0);
 
     await page.getByRole('button', { name: 'Déconnexion' }).click();
