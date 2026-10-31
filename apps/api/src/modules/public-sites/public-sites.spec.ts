@@ -2,7 +2,7 @@ import { mkdtemp, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SimulatedDomainVerifier, createDomainVerifier } from './domain-verifier';
-import { LocalMediaStorage } from './media-storage';
+import { LocalStorageProvider } from '../../common/storage/storage-provider';
 import { loadSitesConfig } from './sites.config';
 import { siteAvailability } from './sites.service';
 
@@ -62,7 +62,7 @@ describe('Sites — configuration (aucun domaine ni stockage supposé acquis)', 
 describe('Sites — stockage local des médias', () => {
   it('clés générées uniquement (aucun chemin), écriture sans écrasement', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'ocall-media-'));
-    const storage = new LocalMediaStorage(dir);
+    const storage = new LocalStorageProvider(dir);
     const key = '0b2f6c1e-1d2a-4b4e-9a7c-2f1d3c4b5a69.png';
     await storage.put(key, Buffer.from('img'));
     expect((await storage.get(key))?.toString()).toBe('img');

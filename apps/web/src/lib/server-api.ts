@@ -26,7 +26,7 @@ export async function requireMemberSession(): Promise<Me> {
   const me = await getSession();
   if (!me) redirect('/connexion');
   if (me.user.mustChangePassword) redirect('/changer-mot-de-passe');
-  if (me.user.platformRole === 'SUPER_ADMIN') redirect('/admin');
+  if (me.user.platformRole) redirect('/admin');
   if (!me.organization) redirect('/connexion');
   return me;
 }
@@ -35,6 +35,8 @@ export async function requireSuperAdminSession(): Promise<Me> {
   const me = await getSession();
   if (!me) redirect('/connexion');
   if (me.user.mustChangePassword) redirect('/changer-mot-de-passe');
-  if (me.user.platformRole !== 'SUPER_ADMIN') redirect('/app');
+  if (!me.user.platformRole) redirect('/app');
+  // Second facteur obligatoire (propriétaire, administrateur délégué, facturation).
+  if (me.mfa.required && !me.mfa.verified) redirect('/double-authentification');
   return me;
 }

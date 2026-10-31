@@ -12,3 +12,5 @@ export * from './ai';
 export * from './analytics';
 export * from './saas';
 export * from './sites';
+export * from './platform';
+export * from './support';

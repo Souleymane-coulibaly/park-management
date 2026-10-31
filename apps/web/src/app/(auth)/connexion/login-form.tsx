@@ -13,7 +13,10 @@ import type { Me } from '@/lib/types';
 /** Destination après connexion : changement de mot de passe imposé, espace Super Admin ou espace client. */
 export function destinationFor(me: Me, requested: string | null): string {
   if (me.user.mustChangePassword) return '/changer-mot-de-passe';
-  if (me.user.platformRole === 'SUPER_ADMIN') return '/admin';
+  if (me.user.platformRole) {
+    // Comptes internes Ocall : second facteur avant l'administration.
+    return me.mfa.required && !me.mfa.verified ? '/double-authentification' : '/admin';
+  }
   return requested?.startsWith('/app') ? requested : '/app';
 }
 

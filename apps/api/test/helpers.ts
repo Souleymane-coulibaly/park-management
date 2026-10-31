@@ -3,7 +3,9 @@ import { Test } from '@nestjs/testing';
 import { randomBytes } from 'node:crypto';
 import request from 'supertest';
 import { resolveTestDatabase } from '@ocall/database';
-import type { BusinessType } from '@ocall/shared';
+import { type BusinessType, type StoredPlatformRole, platformRoleRequiresMfa } from '@ocall/shared';
+import { hash } from 'argon2';
+import { currentStep, totpCode } from '../src/common/security/totp';
 import { AppModule } from '../src/app.module';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { setupApp } from '../src/setup-app';
@@ -80,6 +82,58 @@ export async function login(
   const a = agent(app);
   const res = await a.post('/api/v1/auth/login').send({ identifier, password });
   return { agent: a, status: res.status, body: res.body };
+}
+
+export interface InternalAccount {
+  agent: Agent;
+  id: string;
+  email: string;
+  /** Secret TOTP en clair (rôles soumis à la MFA), pour calculer des codes dans les tests. */
+  secret: string | null;
+  recoveryCodes: string[];
+}
+
+/**
+ * Compte interne Ocall connecté. Pour les rôles soumis à la double authentification, l'enrôlement
+ * est fait par l'API (setup puis enable avec un code TOTP réel) : la session est alors validée.
+ */
+export async function internalAccount(
+  app: INestApplication,
+  prisma: PrismaService,
+  label: string,
+  role: StoredPlatformRole,
+): Promise<InternalAccount> {
+  const address = email(label);
+  const user = await prisma.user.create({
+    data: {
+      email: address,
+      loginId: address,
+      firstName: 'Interne',
+      lastName: label,
+      platformRole: role,
+      mustChangePassword: false,
+      passwordHash: await hash(PASSWORD, { type: 2 }),
+    },
+    select: { id: true },
+  });
+  const { agent: a, status } = await login(app, address, PASSWORD);
+  if (status !== 200) throw new Error(`Connexion du compte interne ${label} : HTTP ${status}`);
+  if (!platformRoleRequiresMfa(role)) {
+    return { agent: a, id: user.id, email: address, secret: null, recoveryCodes: [] };
+  }
+  const setup = await a.post('/api/v1/auth/mfa/setup').expect(200);
+  const secret: string = setup.body.secret;
+  const enabled = await a
+    .post('/api/v1/auth/mfa/enable')
+    .send({ code: totpCode(secret, currentStep()) })
+    .expect(200);
+  return {
+    agent: a,
+    id: user.id,
+    email: address,
+    secret,
+    recoveryCodes: enabled.body.recoveryCodes,
+  };
 }
 
 /** Organisations de test : « Test <libellé> <RUN> », RUN étant 8 caractères hexadécimaux. */

@@ -4,6 +4,8 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_CONFIG, type AppConfig } from './config/app-config';
 import { ConfigModule } from './config/config.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { StorageModule } from './common/storage/storage.module';
+import { SupportModule } from './modules/support/support.module';
 import { CommonModule } from './common/common.module';
 import { AuthGuard } from './common/guards/auth.guard';
 import { OriginGuard } from './common/guards/origin.guard';
@@ -47,6 +49,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     }),
     PrismaModule,
     CommonModule,
+    StorageModule,
     RealtimeModule,
     AuthModule,
     OrganizationsModule,
@@ -73,6 +76,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     AiModule,
     AnalyticsModule,
     PublicSitesModule,
+    SupportModule,
   ],
   controllers: [HealthController],
   providers: [

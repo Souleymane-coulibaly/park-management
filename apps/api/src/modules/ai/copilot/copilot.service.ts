@@ -6,6 +6,7 @@ import { AnalyticsService } from '../../analytics/analytics.service';
 import { findSellingEstablishment } from '../../pos/pos-scope';
 import { AiUsageService } from '../ai-usage.service';
 import type { AiToolCall } from '../providers/ai-provider';
+import { stripSimulationDirectives } from '../providers/simulated.provider';
 import { ANALYTICS_TOOLS, type AnalyticsResult, type AnalyticsTool } from './analytics-tools';
 
 /** Au plus 4 fonctions par question : borne le coût et la durée d'une réponse. */
@@ -111,7 +112,9 @@ export class CopilotService {
       }),
     );
 
-    const groundTruth = `${question} ${establishment.name} ${JSON.stringify(results)}`;
+    // Données autorisées : la question (sans consigne de simulation), l'établissement et les
+    // résultats calculés par le serveur.
+    const groundTruth = `${stripSimulationDirectives(question)} ${establishment.name} ${JSON.stringify(results)}`;
     const grounded = numbersAreGrounded(answer, groundTruth);
     const text = answer.trim().slice(0, 2000);
     return {

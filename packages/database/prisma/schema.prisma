@@ -27,7 +27,13 @@ enum MemberRole {
 }
 
 enum PlatformRole {
+  /// Historique : équivalent au propriétaire de la plateforme.
   SUPER_ADMIN
+  PLATFORM_OWNER
+  PLATFORM_ADMIN
+  BILLING_MANAGER
+  SUPPORT_AGENT
+  READ_ONLY_AUDITOR
 }
 
 enum OrganizationStatus {
@@ -50,24 +56,28 @@ enum SubscriptionEventType {
 }
 
 model Organization {
-  id           String             @id @default(uuid()) @db.Uuid
-  name         String
+  id                     String             @id @default(uuid()) @db.Uuid
+  name                   String
   /// Code court unique, préfixe des identifiants employés (ex. AQUA → AQUA-0001).
-  code         String             @unique
-  businessType BusinessType
-  countryCode  String             @default("ML") @db.Char(2)
-  currency     String             @default("XOF") @db.Char(3)
-  timezone     String             @default("Africa/Bamako")
-  status       OrganizationStatus @default(ACTIVE)
+  code                   String             @unique
+  businessType           BusinessType
+  countryCode            String             @default("ML") @db.Char(2)
+  currency               String             @default("XOF") @db.Char(3)
+  timezone               String             @default("Africa/Bamako")
+  status                 OrganizationStatus @default(ACTIVE)
+  /// Dérogations du Super Admin aux quotas de l'offre (Sprint 11B) ; null = quota de l'offre.
+  aiMonthlyQuotaOverride Int?
+  storageQuotaMbOverride Int?
   /// Compteur des identifiants employés, incrémenté de façon atomique.
-  employeeSeq  Int                @default(0)
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
+  employeeSeq            Int                @default(0)
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
 
   establishments       Establishment[]
   memberships          OrganizationMembership[]
   assignments          EstablishmentAssignment[]
-  subscription         Subscription?
+  subscriptions        Subscription[]
+  invoices             Invoice[]
   subscriptionPayments SubscriptionPayment[]
   publicSites          PublicSite[]
   publicSiteMedia      PublicSiteMedia[]
@@ -108,6 +118,8 @@ model Organization {
   aiUsages             AiUsage[]
   aiImports            AiImport[]
   voiceOrderDrafts     VoiceOrderDraft[]
+  storedFiles          StoredFile[]
+  supportTickets       SupportTicket[]
 
   @@index([status])
   @@index([businessType])
@@ -155,6 +167,8 @@ model Establishment {
   staffAssignments StaffAssignment[]
   aiUsages         AiUsage[]
   aiImports        AiImport[]
+  storedFiles      StoredFile[]
+  supportTickets   SupportTicket[]
   voiceOrderDrafts VoiceOrderDraft[]
   publicSite       PublicSite?
 
@@ -178,6 +192,15 @@ model User {
   lockedUntil        DateTime?
   lastLoginAt        DateTime?
   passwordChangedAt  DateTime?
+  /// Authentification à deux facteurs (comptes internes Ocall) : secret TOTP chiffré (AES-256-GCM).
+  mfaSecret          String?
+  /// Secret en cours d'enrôlement, chiffré, validé par un premier code.
+  mfaPendingSecret   String?
+  mfaEnabledAt       DateTime?
+  /// Codes de secours, hachés (SHA-256), à usage unique.
+  mfaRecoveryCodes   String[]      @default([])
+  /// Dernier pas TOTP accepté : un code ne peut pas être rejoué.
+  mfaLastStep        Int?
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
@@ -187,6 +210,12 @@ model User {
   /// Règlements SaaS saisis / validés par ce Super Admin (Sprint 9B).
   subscriptionPaymentsRecorded  SubscriptionPayment[]    @relation("SubscriptionPaymentRecordedBy")
   subscriptionPaymentsValidated SubscriptionPayment[]    @relation("SubscriptionPaymentValidatedBy")
+  invoicesCreated               Invoice[]                @relation("InvoiceCreatedBy")
+  /// Support (Sprint 11B) et fichiers privés déposés.
+  supportTicketsCreated         SupportTicket[]          @relation("SupportTicketCreatedBy")
+  supportTicketsAssigned        SupportTicket[]          @relation("SupportTicketAssignedTo")
+  supportMessages               SupportMessage[]
+  storedFiles                   StoredFile[]
 }
 
 model OrganizationMembership {
@@ -250,17 +279,19 @@ model EstablishmentAssignment {
 
 /// Session opaque : seul le hash SHA-256 du jeton est stocké.
 model Session {
-  id           String    @id @default(uuid()) @db.Uuid
-  tokenHash    String    @unique
-  userId       String    @db.Uuid
+  id            String    @id @default(uuid()) @db.Uuid
+  tokenHash     String    @unique
+  userId        String    @db.Uuid
   /// Organisation active de la session ; null pour un SUPER_ADMIN.
-  membershipId String?   @db.Uuid
-  expiresAt    DateTime
-  lastSeenAt   DateTime  @default(now())
-  revokedAt    DateTime?
-  ipAddress    String?
-  userAgent    String?
-  createdAt    DateTime  @default(now())
+  membershipId  String?   @db.Uuid
+  expiresAt     DateTime
+  lastSeenAt    DateTime  @default(now())
+  revokedAt     DateTime?
+  /// Second facteur validé pour cette session (comptes internes soumis à la MFA).
+  mfaVerifiedAt DateTime?
+  ipAddress     String?
+  userAgent     String?
+  createdAt     DateTime  @default(now())
 
   user       User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
   membership OrganizationMembership? @relation(fields: [membershipId], references: [id], onDelete: Cascade)
@@ -285,36 +316,55 @@ model PasswordResetToken {
 
 /// Offres commerciales. Les prix ne vivent qu'ici et sont modifiables par le Super Admin.
 model SubscriptionPlan {
-  id           String       @id @default(uuid()) @db.Uuid
-  businessType BusinessType @unique
-  name         String
-  monthlyPrice Int
+  id                 String        @id @default(uuid()) @db.Uuid
+  /// Métier de l'application Ocall Park couvert par l'offre ; null pour un autre produit (ex. Ocall School).
+  businessType       BusinessType?
+  /// Produit SaaS de l'offre (catalogue Ocall Suite).
+  productId          String?       @db.Uuid
+  name               String
+  monthlyPrice       Int
   /// Frais de mise en service unique (FCFA), réglés hors plateforme (Sprint 10).
-  setupFee     Int          @default(0)
-  currency     String       @default("XOF") @db.Char(3)
-  isActive     Boolean      @default(true)
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
+  setupFee           Int           @default(0)
+  currency           String        @default("XOF") @db.Char(3)
+  /// Quotas de l'offre (Sprint 11B) : appels IA par mois et stockage de fichiers (Mo).
+  aiMonthlyCallQuota Int           @default(500)
+  storageQuotaMb     Int           @default(1024)
+  isActive           Boolean       @default(true)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
   subscriptions Subscription[]
   payments      SubscriptionPayment[]
+  product       SaasProduct?          @relation(fields: [productId], references: [id])
+
+  @@unique([productId, name])
+  @@index([businessType])
 }
 
 model Subscription {
-  id             String             @id @default(uuid()) @db.Uuid
-  organizationId String             @unique @db.Uuid
-  planId         String             @db.Uuid
-  status         SubscriptionStatus @default(NOT_ACTIVATED)
-  startedAt      DateTime?
-  expiresAt      DateTime?
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
+  id                 String             @id @default(uuid()) @db.Uuid
+  organizationId     String             @db.Uuid
+  /// Produit SaaS souscrit : une organisation peut souscrire plusieurs produits (un abonnement chacun).
+  productId          String             @db.Uuid
+  planId             String             @db.Uuid
+  status             SubscriptionStatus @default(NOT_ACTIVATED)
+  startedAt          DateTime?
+  expiresAt          DateTime?
+  /// Tarif accepté par le client, figé (jamais recalculé lors d'un changement de prix des offres).
+  agreedSetupFee     Int?
+  agreedMonthlyPrice Int?
+  agreedAt           DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
 
   organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   plan         SubscriptionPlan      @relation(fields: [planId], references: [id])
+  product      SaasProduct           @relation(fields: [productId], references: [id])
   events       SubscriptionEvent[]
+  invoices     Invoice[]
   payments     SubscriptionPayment[]
 
+  @@unique([organizationId, productId])
   @@index([status])
 }
 
@@ -380,6 +430,8 @@ model SubscriptionPayment {
   rejectionReason      String?
   /// Vrai si le Super Admin a explicitement activé / prolongé l'abonnement à la validation.
   subscriptionExtended Boolean                   @default(false)
+  /// Facture réglée (Sprint 11A) ; null pour les règlements saisis avant la facturation.
+  invoiceId            String?                   @db.Uuid
   createdAt            DateTime                  @default(now())
   updatedAt            DateTime                  @updatedAt
 
@@ -388,6 +440,7 @@ model SubscriptionPayment {
   plan         SubscriptionPlan @relation(fields: [planId], references: [id])
   recordedBy   User             @relation("SubscriptionPaymentRecordedBy", fields: [recordedById], references: [id], onDelete: NoAction)
   validatedBy  User?            @relation("SubscriptionPaymentValidatedBy", fields: [validatedById], references: [id], onDelete: NoAction)
+  invoice      Invoice?         @relation(fields: [invoiceId], references: [id], onDelete: NoAction)
 
   @@index([status, paidAt])
   @@index([organizationId, paidAt])
@@ -1723,4 +1776,210 @@ model PublicSiteDomain {
 
   @@index([siteId])
   @@index([status])
+}
+
+// ─── Ocall Suite : catalogue, facturation (Sprint 11A) ───
+
+enum SaasProductStatus {
+  AVAILABLE
+  UPCOMING
+  RETIRED
+}
+
+/// Produit SaaS du catalogue Ocall Suite (Ocall Park, Restaurant, Parc + Restaurant, School…).
+/// Un produit UPCOMING n'est pas commercialisable : aucun abonnement ne peut y être créé.
+model SaasProduct {
+  id          String            @id @default(uuid()) @db.Uuid
+  code        String            @unique
+  name        String
+  description String            @default("")
+  status      SaasProductStatus @default(UPCOMING)
+  /// Fonctionnalités autorisées (clés de modules), affichage et contrôle d'accès futurs.
+  features    String[]          @default([])
+  /// Paramètres de facturation (devise, périodicité…), sans tarif figé pour un produit à venir.
+  billing     Json              @default("{}")
+  sortOrder   Int               @default(0)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  plans          SubscriptionPlan[]
+  subscriptions  Subscription[]
+  supportTickets SupportTicket[]
+  invoices       Invoice[]
+}
+
+enum InvoiceStatus {
+  ISSUED
+  PAID
+  CANCELLED
+}
+
+enum InvoiceLineKind {
+  SETUP
+  MONTHLY
+  ADJUSTMENT
+}
+
+/// Facture SaaS émise par Ocall : montants figés à l'émission (tarif accepté), jamais recalculés.
+/// Payée uniquement par validation manuelle d'un règlement hors plateforme.
+model Invoice {
+  id             String        @id @default(uuid()) @db.Uuid
+  number         String        @unique
+  organizationId String        @db.Uuid
+  subscriptionId String        @db.Uuid
+  productId      String        @db.Uuid
+  status         InvoiceStatus @default(ISSUED)
+  currency       String        @default("XOF") @db.Char(3)
+  total          Int
+  issuedAt       DateTime      @default(now())
+  dueAt          DateTime?
+  paidAt         DateTime?
+  cancelledAt    DateTime?
+  cancelReason   String?
+  notes          String?
+  createdById    String        @db.Uuid
+  /// Clé d'idempotence : une nouvelle tentative ne crée pas de seconde facture.
+  idempotencyKey String        @unique
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subscription Subscription          @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  product      SaasProduct           @relation(fields: [productId], references: [id])
+  createdBy    User                  @relation("InvoiceCreatedBy", fields: [createdById], references: [id], onDelete: NoAction)
+  lines        InvoiceLine[]
+  payments     SubscriptionPayment[]
+
+  @@index([organizationId, issuedAt])
+  @@index([status, dueAt])
+  @@index([productId, issuedAt])
+}
+
+model InvoiceLine {
+  id         String          @id @default(uuid()) @db.Uuid
+  invoiceId  String          @db.Uuid
+  kind       InvoiceLineKind
+  label      String
+  quantity   Int
+  unitAmount Int
+  amount     Int
+  reason     String?
+  position   Int
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+}
+
+/// Compteurs de la plateforme (numérotation des factures par année), incrémentés de façon atomique.
+model PlatformCounter {
+  key   String @id
+  value Int    @default(0)
+}
+
+// ─── Sprint 11B : fichiers privés, support ───
+
+enum StoredFileKind {
+  SUPPORT_ATTACHMENT
+}
+
+/// Fichier PRIVÉ d'une organisation : jamais public, servi uniquement par lien temporaire signé
+/// (après contrôle d'accès) ; compté dans le quota de stockage ; conservation bornée.
+model StoredFile {
+  id               String         @id @default(uuid()) @db.Uuid
+  organizationId   String         @db.Uuid
+  establishmentId  String?        @db.Uuid
+  kind             StoredFileKind
+  /// Clé générée par le serveur : org/<organisation>/<établissement|_>/<uuid>.<ext>.
+  storageKey       String         @unique
+  mimeType         String
+  bytes            Int
+  sha256           String         @db.Char(64)
+  /// Nom affiché, nettoyé ; jamais utilisé pour le stockage.
+  displayName      String
+  createdById      String         @db.Uuid
+  supportMessageId String?        @db.Uuid
+  createdAt        DateTime       @default(now())
+  /// Fin de conservation : le fichier est purgé ensuite.
+  retentionUntil   DateTime?
+  deletedAt        DateTime?
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment  Establishment?  @relation(fields: [establishmentId], references: [id], onDelete: SetNull)
+  createdBy      User            @relation(fields: [createdById], references: [id], onDelete: NoAction)
+  supportMessage SupportMessage? @relation(fields: [supportMessageId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, deletedAt])
+  @@index([retentionUntil])
+}
+
+enum SupportTicketStatus {
+  OPEN
+  IN_PROGRESS
+  WAITING_CUSTOMER
+  RESOLVED
+  CLOSED
+}
+
+enum SupportTicketCategory {
+  BILLING
+  TECHNICAL
+  ACCOUNT
+  HARDWARE
+  OTHER
+}
+
+enum SupportTicketPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+/// Demande de support d'un client à Ocall (Sprint 11B). Aucun envoi d'e-mail : suivi dans l'application.
+model SupportTicket {
+  id              String                @id @default(uuid()) @db.Uuid
+  /// Référence lisible : SUP-2026-00042.
+  number          String                @unique
+  organizationId  String                @db.Uuid
+  establishmentId String?               @db.Uuid
+  productId       String?               @db.Uuid
+  subject         String
+  category        SupportTicketCategory
+  priority        SupportTicketPriority @default(NORMAL)
+  status          SupportTicketStatus   @default(OPEN)
+  createdById     String                @db.Uuid
+  assignedToId    String?               @db.Uuid
+  lastMessageAt   DateTime              @default(now())
+  resolvedAt      DateTime?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  organization  Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment?   @relation(fields: [establishmentId], references: [id], onDelete: SetNull)
+  product       SaasProduct?     @relation(fields: [productId], references: [id])
+  createdBy     User             @relation("SupportTicketCreatedBy", fields: [createdById], references: [id], onDelete: NoAction)
+  assignedTo    User?            @relation("SupportTicketAssignedTo", fields: [assignedToId], references: [id], onDelete: SetNull)
+  messages      SupportMessage[]
+
+  @@index([organizationId, createdAt])
+  @@index([status, lastMessageAt])
+}
+
+model SupportMessage {
+  id        String   @id @default(uuid()) @db.Uuid
+  ticketId  String   @db.Uuid
+  authorId  String   @db.Uuid
+  /// Réponse de l'équipe Ocall (sinon : message du client).
+  fromOcall Boolean
+  /// Note interne Ocall : jamais visible par le client.
+  internal  Boolean  @default(false)
+  body      String
+  createdAt DateTime @default(now())
+
+  ticket      SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author      User          @relation(fields: [authorId], references: [id], onDelete: NoAction)
+  attachments StoredFile[]
+
+  @@index([ticketId, createdAt])
 }

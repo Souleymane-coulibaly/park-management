@@ -9,13 +9,12 @@ export const metadata: Metadata = { title: 'Changer votre mot de passe' };
 export default async function ChangerMotDePassePage() {
   const me = await getSession();
   if (!me) redirect('/connexion');
-  if (!me.user.mustChangePassword)
-    redirect(me.user.platformRole === 'SUPER_ADMIN' ? '/admin' : '/app');
+  if (!me.user.mustChangePassword) redirect(me.user.platformRole ? '/admin' : '/app');
   return (
     <ForcedPasswordChange
       firstName={me.user.firstName}
       loginId={me.user.loginId}
-      destination={me.user.platformRole === 'SUPER_ADMIN' ? '/admin' : '/app'}
+      destination={me.user.platformRole ? '/admin' : '/app'}
     />
   );
 }

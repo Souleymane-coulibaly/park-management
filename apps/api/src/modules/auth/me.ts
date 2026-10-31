@@ -1,4 +1,10 @@
-import { ROLE_PERMISSIONS, navigationFor, type Permission } from '@ocall/shared';
+import {
+  ROLE_PERMISSIONS,
+  navigationFor,
+  type Permission,
+  type PlatformPermission,
+  platformPermissionsOf,
+} from '@ocall/shared';
 import type { AuthContext } from '../../common/auth-context';
 
 /** Profil de la session courante, avec permissions et navigation calculées côté serveur. */
@@ -7,6 +13,9 @@ export interface MeResponse {
   organization: { id: string; name: string; businessType: string; timezone: string } | null;
   role: string | null;
   permissions: Permission[];
+  /** Permissions des comptes internes Ocall (vide pour un membre d'organisation). */
+  platformPermissions: PlatformPermission[];
+  mfa: AuthContext['mfa'];
   navigation: { key: string; label: string; status: string; href: string | null }[];
 }
 
@@ -24,6 +33,8 @@ export function toMe(auth: AuthContext): MeResponse {
       : null,
     role: m?.role ?? auth.user.platformRole,
     permissions: m ? [...ROLE_PERMISSIONS[m.role]] : [],
+    platformPermissions: m ? [] : platformPermissionsOf(auth.user.platformRole),
+    mfa: auth.mfa,
     navigation: m
       ? navigationFor(m.businessType, m.role).map((mod) => ({
           key: mod.key,

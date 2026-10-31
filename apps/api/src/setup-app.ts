@@ -3,12 +3,20 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
+import { JsonLogger, requestLogger } from './common/logging/json-logger';
 import { APP_CONFIG, type AppConfig, SESSION_COOKIE } from './config/app-config';
 
 /** Configuration HTTP commune au serveur et aux tests d'intégration. */
 export function setupApp(app: INestApplication): AppConfig {
   const config = app.get<AppConfig>(APP_CONFIG);
   const express = app as NestExpressApplication;
+  // Production : journaux JSON structurés, secrets masqués, journal d'accès HTTP.
+  if (config.logFormat === 'json') {
+    app.useLogger(new JsonLogger());
+    app.use(requestLogger());
+  } else {
+    app.flushLogs();
+  }
 
   // Derrière le proxy Next.js et Railway : req.ip doit refléter le client réel (limites par IP).
   express.set('trust proxy', config.trustProxyHops);

@@ -416,7 +416,7 @@ describe('Sprint 8 — IA (intégration, fournisseur simulé)', () => {
       await resto.agent
         .post(api(`/sales/${sale.id}/payments`))
         .send({ method: 'CASH', amountTendered: 9000 })
-        .expect(201);
+        .expect(200);
     });
 
     it('10. question autorisée : chiffres calculés par le serveur, période affichée', async () => {

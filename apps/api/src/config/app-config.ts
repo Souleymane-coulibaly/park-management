@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { type AiConfig, loadAiConfig } from '../modules/ai/ai.config';
 import { type SitesConfig, loadSitesConfig } from '../modules/public-sites/sites.config';
 
@@ -27,6 +28,50 @@ export interface AppConfig {
   ai: AiConfig;
   /** Sites vitrines : adresses publiques, domaines, stockage des médias (Sprint 10). */
   sites: SitesConfig;
+  /**
+   * Clé de chiffrement des secrets de double authentification (AES-256-GCM, 32 octets en base64).
+   * Obligatoire en production ; absente en développement, l'enrôlement MFA est indisponible.
+   */
+  mfaEncryptionKey: Buffer | null;
+  /**
+   * Clé de signature des liens temporaires de téléchargement (HMAC-SHA256, 32 octets au moins en
+   * base64). Obligatoire en production ; aléatoire par démarrage ailleurs (liens invalidés au
+   * redémarrage).
+   */
+  storageSigningKey: Buffer;
+  /** Format des journaux : json (production, par défaut) ou texte lisible (développement). */
+  logFormat: 'json' | 'text';
+}
+
+function storageSigningKey(env: NodeJS.ProcessEnv, nodeEnv: string): Buffer {
+  const raw = env.STORAGE_SIGNING_SECRET?.trim();
+  if (!raw) {
+    if (nodeEnv === 'production') {
+      throw new Error(
+        'STORAGE_SIGNING_SECRET est obligatoire en production (32 octets en base64).',
+      );
+    }
+    return randomBytes(32);
+  }
+  const key = Buffer.from(raw, 'base64');
+  if (key.length < 32) {
+    throw new Error('STORAGE_SIGNING_SECRET invalide : 32 octets au moins, en base64.');
+  }
+  return key;
+}
+
+function mfaKey(env: NodeJS.ProcessEnv, nodeEnv: string): Buffer | null {
+  const raw = env.MFA_ENCRYPTION_KEY?.trim();
+  if (!raw) {
+    if (nodeEnv === 'production') {
+      throw new Error('MFA_ENCRYPTION_KEY est obligatoire en production (32 octets en base64).');
+    }
+    return null;
+  }
+  const key = Buffer.from(raw, 'base64');
+  if (key.length !== 32)
+    throw new Error('MFA_ENCRYPTION_KEY invalide : 32 octets en base64 attendus.');
+  return key;
 }
 
 export const APP_CONFIG = Symbol('APP_CONFIG');
@@ -72,5 +117,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     realtimeHeartbeatMs: int(env, 'REALTIME_HEARTBEAT_MS', 25_000),
     ai: loadAiConfig(env, nodeEnv),
     sites: loadSitesConfig(env, nodeEnv),
+    mfaEncryptionKey: mfaKey(env, nodeEnv),
+    storageSigningKey: storageSigningKey(env, nodeEnv),
+    logFormat:
+      env.LOG_FORMAT === 'text' || env.LOG_FORMAT === 'json'
+        ? env.LOG_FORMAT
+        : nodeEnv === 'production'
+          ? 'json'
+          : 'text',
   };
 }

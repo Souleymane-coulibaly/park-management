@@ -22,7 +22,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
 import type { TenantContext } from '../../common/auth-context';
 import type { UploadedFileInMemory } from '../ai/uploaded-file';
-import { MEDIA_STORAGE, type MediaStorage } from './media-storage';
+import { STORAGE_PROVIDER, type StorageProvider } from '../../common/storage/storage-provider';
+import { StorageService } from '../../common/storage/storage.service';
 import { SitesService } from './sites.service';
 
 /** Plafond de médias par site (galerie, logos et couvertures successifs). */
@@ -40,7 +41,8 @@ export class SiteMediaService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly sites: SitesService,
-    @Inject(MEDIA_STORAGE) private readonly storage: MediaStorage,
+    @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
+    private readonly files: StorageService,
   ) {}
 
   async list(tenant: TenantContext, siteId: string) {
@@ -110,44 +112,51 @@ export class SiteMediaService {
     }
     const key = `${randomUUID()}.${EXTENSION[image.mime]}`;
     await this.storage.put(key, file.buffer, image.mime);
-    const media = await this.prisma.$transaction(async (tx) => {
-      const m = await tx.publicSiteMedia.create({
-        data: {
-          organizationId: tenant.membership.organizationId,
-          siteId,
-          kind,
-          storageKey: key,
-          mimeType: image.mime,
-          bytes: file.size,
-          width: image.width,
-          height: image.height,
-          alt: alt.trim().slice(0, SITE_LIMITS.altText),
-        },
-        select: {
-          id: true,
-          kind: true,
-          mimeType: true,
-          bytes: true,
-          width: true,
-          height: true,
-          alt: true,
-          isPublished: true,
-          createdAt: true,
-        },
+    // Quota de stockage de l'organisation (Sprint 11B), vérifié sous verrou ; objet supprimé si refus.
+    const media = await this.prisma
+      .$transaction(async (tx) => {
+        await this.files.assertQuota(tx, tenant.membership.organizationId, file.size);
+        const m = await tx.publicSiteMedia.create({
+          data: {
+            organizationId: tenant.membership.organizationId,
+            siteId,
+            kind,
+            storageKey: key,
+            mimeType: image.mime,
+            bytes: file.size,
+            width: image.width,
+            height: image.height,
+            alt: alt.trim().slice(0, SITE_LIMITS.altText),
+          },
+          select: {
+            id: true,
+            kind: true,
+            mimeType: true,
+            bytes: true,
+            width: true,
+            height: true,
+            alt: true,
+            isPublished: true,
+            createdAt: true,
+          },
+        });
+        await this.audit.record(
+          {
+            organizationId: tenant.membership.organizationId,
+            actorUserId: tenant.user.id,
+            action: 'site.media_uploaded',
+            targetType: 'PublicSiteMedia',
+            targetId: m.id,
+            metadata: { siteId, kind, bytes: file.size, mime: image.mime },
+          },
+          tx,
+        );
+        return m;
+      })
+      .catch(async (e: unknown) => {
+        await this.storage.delete(key).catch(() => undefined);
+        throw e;
       });
-      await this.audit.record(
-        {
-          organizationId: tenant.membership.organizationId,
-          actorUserId: tenant.user.id,
-          action: 'site.media_uploaded',
-          targetType: 'PublicSiteMedia',
-          targetId: m.id,
-          metadata: { siteId, kind, bytes: file.size, mime: image.mime },
-        },
-        tx,
-      );
-      return m;
-    });
     return {
       ...media,
       createdAt: media.createdAt.toISOString(),

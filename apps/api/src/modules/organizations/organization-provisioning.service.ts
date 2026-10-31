@@ -1,6 +1,11 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@ocall/database';
-import { type BusinessType, DEFAULT_TIMEZONE, SUPPORTED_COUNTRIES } from '@ocall/shared';
+import {
+  type BusinessType,
+  DEFAULT_TIMEZONE,
+  SUPPORTED_COUNTRIES,
+  PARK_APP_PRODUCTS,
+} from '@ocall/shared';
 import { randomInt } from 'node:crypto';
 
 export interface ProvisionOrganizationInput {
@@ -44,8 +49,10 @@ export class OrganizationProvisioningService {
       });
     const timezone = input.timezone ?? country.timezone ?? DEFAULT_TIMEZONE;
 
-    const plan = await tx.subscriptionPlan.findUnique({
-      where: { businessType: input.businessType },
+    // Offre active du produit Ocall Park correspondant au métier (la plus ancienne en cas de plusieurs).
+    const plan = await tx.subscriptionPlan.findFirst({
+      where: { product: { code: PARK_APP_PRODUCTS[input.businessType] }, isActive: true },
+      orderBy: { createdAt: 'asc' },
     });
     if (!plan)
       throw new NotFoundException({
@@ -89,8 +96,18 @@ export class OrganizationProvisioningService {
       data: { organizationId: organization.id, userId: user.id, role: 'OWNER' },
     });
 
+    // Abonnement au produit Ocall Park correspondant au métier (catalogue Ocall Suite).
+    const product = await tx.saasProduct.findUniqueOrThrow({
+      where: { code: PARK_APP_PRODUCTS[input.businessType] },
+      select: { id: true },
+    });
     const subscription = await tx.subscription.create({
-      data: { organizationId: organization.id, planId: plan.id, status: 'NOT_ACTIVATED' },
+      data: {
+        organizationId: organization.id,
+        productId: product.id,
+        planId: plan.id,
+        status: 'NOT_ACTIVATED',
+      },
     });
     await tx.subscriptionEvent.create({
       data: {

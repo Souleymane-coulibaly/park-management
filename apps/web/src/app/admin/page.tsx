@@ -8,6 +8,7 @@ import {
   type SubscriptionStatus,
   formatXof,
 } from '@ocall/shared';
+import { CommercialDashboard } from '@/components/admin/commercial-dashboard';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { KpiCard } from '@/components/ui/kpi-card';
 import { PageHeader } from '@/components/ui/page-header';
@@ -20,10 +21,12 @@ export default function AdminOverviewPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Super Admin"
-        title="Activité SaaS"
-        description="Synthèse de la plateforme, calculée sur les données réelles."
+        eyebrow="Ocall Suite"
+        title="Tableau de bord commercial"
+        description="Encaissements validés, facturation et abonnements, calculés sur les données réelles."
       />
+      <CommercialDashboard />
+      <h2 className="mb-4 mt-10 text-lg font-semibold">Activité de la plateforme</h2>
       {overview.state === 'loading' && <LoadingState />}
       {overview.state === 'error' && (
         <ErrorState error={overview.error} onRetry={overview.reload} />

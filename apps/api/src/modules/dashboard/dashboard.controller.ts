@@ -7,6 +7,7 @@ import {
   hasPermission,
 } from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
+import { parkSubscriptionWhere } from '../../common/park-subscription';
 import { type AuthContext, requireTenant } from '../../common/auth-context';
 import { CurrentAuth, RequirePermission } from '../../common/decorators';
 import { establishmentScope, membershipScope } from '../../common/tenant-scope';
@@ -51,8 +52,8 @@ export class DashboardController {
       : null;
 
     const subscription = hasPermission(role, 'subscription.read')
-      ? await this.prisma.subscription.findUnique({
-          where: { organizationId },
+      ? await this.prisma.subscription.findFirst({
+          where: parkSubscriptionWhere(organizationId),
           select: {
             status: true,
             expiresAt: true,

@@ -47,9 +47,11 @@ function SettingsForm() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
+  // Référence stable (état de useApi) : la saisie n'est pas réinitialisée à chaque rendu.
+  const loaded = settings.state === 'success' ? settings.data : null;
   useEffect(() => {
-    if (settings.state === 'success') setForm(settings.data);
-  }, [settings]);
+    if (loaded) setForm(loaded);
+  }, [loaded]);
 
   if (settings.state === 'loading' || !form) return <LoadingState />;
   if (settings.state === 'error')
@@ -62,7 +64,8 @@ function SettingsForm() {
     setSaved(false);
     setError(null);
     try {
-      setForm(await api<AiSettings>('/ai/settings', { method: 'PUT', body: form }));
+      const { platformLimit: _platformLimit, ...body } = form;
+      setForm(await api<AiSettings>('/ai/settings', { method: 'PUT', body }));
       setSaved(true);
       status.reload();
     } catch (e) {
@@ -100,7 +103,12 @@ function SettingsForm() {
             label="Plafond mensuel d’appels"
             type="number"
             min={0}
-            max={1_000_000}
+            max={form.platformLimit ?? 1_000_000}
+            hint={
+              form.platformLimit !== undefined
+                ? `Votre offre Ocall autorise ${form.platformLimit} appels par mois au plus.`
+                : undefined
+            }
             value={form.monthlyCallLimit}
             onChange={(e) => setForm({ ...form, monthlyCallLimit: Number(e.target.value) })}
           />

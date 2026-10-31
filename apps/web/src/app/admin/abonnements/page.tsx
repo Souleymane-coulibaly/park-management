@@ -93,13 +93,23 @@ export default function AdminAbonnementsPage() {
 function PlanEditor({ plan, onSaved }: { plan: Plan; onSaved: () => void }) {
   const [price, setPrice] = useState(String(plan.monthlyPrice));
   const [setup, setSetup] = useState(String(plan.setupFee));
+  const [aiQuota, setAiQuota] = useState(String(plan.aiMonthlyCallQuota ?? ''));
+  const [storageQuota, setStorageQuota] = useState(String(plan.storageQuotaMb ?? ''));
   const [error, setError] = useState<ApiError | null>(null);
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(false);
   const value = Number(price);
   const setupValue = Number(setup);
-  const valid =
-    Number.isInteger(value) && value >= 0 && Number.isInteger(setupValue) && setupValue >= 0;
+  const aiValue = Number(aiQuota);
+  const storageValue = Number(storageQuota);
+  const valid = [value, setupValue, aiValue, storageValue].every(
+    (n) => Number.isInteger(n) && n >= 0,
+  );
+  const changed =
+    value !== plan.monthlyPrice ||
+    setupValue !== plan.setupFee ||
+    aiValue !== plan.aiMonthlyCallQuota ||
+    storageValue !== plan.storageQuotaMb;
 
   async function save() {
     setLoading(true);
@@ -108,7 +118,12 @@ function PlanEditor({ plan, onSaved }: { plan: Plan; onSaved: () => void }) {
     try {
       await api(`/platform/plans/${plan.id}`, {
         method: 'PATCH',
-        body: { monthlyPrice: value, setupFee: setupValue },
+        body: {
+          monthlyPrice: value,
+          setupFee: setupValue,
+          aiMonthlyCallQuota: aiValue,
+          storageQuotaMb: storageValue,
+        },
       });
       setSaved(true);
       onSaved();
@@ -142,14 +157,30 @@ function PlanEditor({ plan, onSaved }: { plan: Plan; onSaved: () => void }) {
         value={setup}
         onChange={(e) => setSetup(e.target.value)}
       />
+      <div className="grid grid-cols-2 gap-3">
+        <InputField
+          label="Appels IA / mois"
+          type="number"
+          min={0}
+          value={aiQuota}
+          onChange={(e) => setAiQuota(e.target.value)}
+        />
+        <InputField
+          label="Stockage (Mo)"
+          type="number"
+          min={0}
+          value={storageQuota}
+          onChange={(e) => setStorageQuota(e.target.value)}
+        />
+      </div>
       <ApiErrorAlert error={error} />
-      {saved && <Alert tone="success">Prix enregistré.</Alert>}
+      {saved && <Alert tone="success">Offre enregistrée.</Alert>}
       <Button
         size="sm"
         variant="secondary"
         onClick={save}
         loading={loading}
-        disabled={!valid || (value === plan.monthlyPrice && setupValue === plan.setupFee)}
+        disabled={!valid || !changed}
         icon={<Save className="h-4 w-4" />}
       >
         Enregistrer

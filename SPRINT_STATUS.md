@@ -13,6 +13,8 @@
 | 9A     | Analyses : CA, produits × heures, parc, marges, exports CSV   | `claude/sprint-9`  | 🟡 En cours — tests base bloqués (Neon `test`)    |
 | 9B     | Copilote enrichi, statistiques SaaS, règlements d’abonnement  | `claude/sprint-9`  | 🟡 En cours — tests base bloqués (Neon `test`)    |
 | 10     | Sites vitrines publics, domaines, tarifs SaaS                 | `claude/sprint-10` | 🟡 En cours — tests base bloqués (Neon `test`)    |
+| 11A    | Ocall Suite : produits, abonnements, factures, rôles, MFA     | `claude/sprint-11` | 🟡 Terminé — local, non commité, à valider        |
+| 11B    | Stockage privé, quotas IA, support, production, pilote        | `claude/sprint-11` | 🟡 Terminé — local, non commité ; CP-10 préparé   |
 
 Environnements : base Neon de **développement** (préservée), branche Neon **`test`** réservée aux
 tests automatisés, base de **production non configurée**. Aucune fusion dans `main`, aucun déploiement.
@@ -41,7 +43,89 @@ Checkpoints Codex :
 
 ---
 
-## Intervention — Thème Ocall Aqua Premium des sites vitrines (non commité)
+## Sprint 11B — Exploitation Ocall Suite (terminé localement, non commité)
+
+Même branche `claude/sprint-11`. Documents : [PRODUCTION.md](docs/PRODUCTION.md),
+[PILOTE.md](docs/PILOTE.md), [GUIDE-PAIEMENT-MANUEL.md](docs/GUIDE-PAIEMENT-MANUEL.md),
+[GUIDE-SUPPORT.md](docs/GUIDE-SUPPORT.md), [ANOMALIES-HISTORIQUES.md](docs/ANOMALIES-HISTORIQUES.md),
+[RAPPORT-PERFORMANCE.md](docs/RAPPORT-PERFORMANCE.md),
+[CP-10-preparation.md](docs/checkpoints/CP-10-preparation.md).
+
+- **Stockage** : fournisseur commun (`common/storage`, repris du Sprint 10) pour médias publics et
+  fichiers **privés** (clés `org/<organisation>/<établissement>/…`), liens temporaires signés HMAC
+  (5 min, `STORAGE_SIGNING_SECRET`), téléchargements journalisés, en-têtes `no-store` / `nosniff` /
+  pièce jointe, conservation (365 jours pour le support) puis purge. Bucket privé.
+- **Quotas par offre** (IA : appels par mois ; stockage : Mo) et **dérogations** par organisation,
+  journalisées. Quota de stockage vérifié sous verrou (médias des sites, pièces jointes) ; plafond IA
+  Ocall appliqué à la réservation, l'organisation ne pouvant que le restreindre.
+- **Support** : demandes des clients (catégorie, urgence, établissement, pièces jointes images / PDF
+  vérifiées par signature), fil de discussion, notes internes invisibles du client, statuts,
+  affectation, isolation entre organisations ; permission `support.use` (propriétaire,
+  administrateur, superviseur). Aucun e-mail.
+- **Administration** : Consommation IA, Stockage, Support, Paramètres généraux (lecture seule, sans
+  secret) ; quotas dans l'éditeur des offres.
+- **Production** : sonde `/api/v1/health/ready` (base et stockage, bornée à 3 s), journaux JSON avec
+  masquage des secrets et journal d'accès (`X-Request-Id`), borne serveur
+  `idle_in_transaction_session_timeout = 60s` (migration), procédures de sauvegarde, restauration,
+  déploiement et retour arrière.
+- **Correctifs trouvés en exécutant les régressions** : commande vocale (requête hors transaction,
+  blocage avec un pool réduit), spec Sprint 8 (code HTTP attendu erroné), formulaire des réglages IA
+  du client (saisie réinitialisée à chaque rendu), rapports plateforme passés à un nombre de
+  requêtes constant.
+- Migration `20261031020000_ocall_suite_support_quotas`, additive, **non appliquée**.
+- Tests :
+  - unitaires : shared 145/145, API 81/81 ; lint, type-check, Prettier, build : OK ;
+  - intégration sur PostgreSQL **local jetable** (PGlite) : 11B 8/8, 11A 6/6, Sprint 10 12/12,
+    Sprint 9B 7/7, Sprint 8 15/15, Sprint 1 33/33 ;
+  - non exécutés : Neon `test` (A11), régression des Sprints 2 à 6 et 9A, E2E, matériel, test de
+    restauration.
+- Proposition CP-10 : **GO SOUS RÉSERVES pour préparer le pilote, NO-GO pour le démarrer** (voir le
+  dossier CP-10).
+
+---
+
+## Sprint 11A — Ocall Suite : administration centrale (terminé localement, non commité)
+
+Branche `claude/sprint-11`, depuis `6bcee39`. Guide : [docs/OCALL-SUITE.md](docs/OCALL-SUITE.md).
+Découpage décidé par le commanditaire : **11A** puis **11B** (stockage, quotas IA, support,
+préparation production, CP-10) après validation.
+
+- **Produits** : catalogue `SaasProduct` (Ocall Park, Ocall Restaurant, Ocall Park + Restaurant,
+  Ocall School **à venir**, sans prix, non souscriptible). Un produit n'est commercialisable qu'avec
+  une offre active.
+- **Abonnements multi-produits** : un abonnement par produit et par organisation ; un seul produit
+  de la famille Ocall Park. Tarif accepté (mise en service + mensualité) **figé** à l'activation.
+- **Factures** : numérotation `OCP-AAAA-NNNNN`, montants calculés par le serveur au tarif accepté,
+  clé d'idempotence, annulation motivée (impossible après règlement).
+- **Règlements** : rattachables à une facture ; montant égal au reste à payer ; la validation marque
+  la facture payée. Aucun prestataire de paiement, aucun renouvellement automatique.
+- **Rôles internes** : propriétaire, administrateur délégué, facturation, assistance, audit ;
+  matrice unique (`packages/shared/src/platform.ts`) appliquée par l'API, navigation filtrée.
+- **Double authentification TOTP** obligatoire pour propriétaire, administrateur délégué et
+  facturation (exigée aussi dès qu'un autre compte interne l'a activée) ; secret chiffré
+  (AES-256-GCM, `MFA_ENCRYPTION_KEY`), 10 codes de secours hachés à usage unique, anti-rejeu,
+  réinitialisation par le propriétaire ou `pnpm db:reset-mfa` pour le propriétaire lui-même.
+- **Administration** : tableau de bord commercial (encaissé validé, facturé, MRR théorique,
+  impayés, échéances, par produit), produits, fiche organisation, factures, comptes internes,
+  journal d'audit, sécurité du compte, page `/double-authentification`.
+- Migration `20261031010000_ocall_suite_plateforme` (reprise des abonnements existants vers leur
+  produit), **non appliquée**.
+- Tests :
+  - unitaires : shared 138/138, API 72/72 ; lint, type-check, build : OK ;
+  - intégration `sprint11a-suite` 6/6, Sprints 1 et 10 OK, exécutés sur une base PostgreSQL
+    **locale jetable** (PGlite), pas sur Neon `test` (toujours inaccessible, A11) ;
+  - les specs existantes utilisent un compte interne enrôlé (`internalAccount`) : la MFA les
+    concerne désormais.
+- Corrigé ensuite, à la demande du commanditaire :
+  - test 9B « statistique inventée écartée » : la consigne simulée (« 999 ») comptait parmi les
+    données autorisées du copilote ; elle en est retirée (contrôle plus strict), test unitaire
+    ajouté, spec 9B 7/7 ;
+  - création d'une offre pour un produit hors famille Ocall Park (`POST
+/platform/products/:id/plans`, permission `platform.plans.manage`), bouton « Ajouter une offre ».
+
+---
+
+## Intervention — Thème Ocall Aqua Premium des sites vitrines (commité et poussé : `6bcee39`)
 
 Branche `claude/site-aqua-premium`, créée depuis `claude/sprint-10` (`bee25ec`). Le travail en cours
 du Sprint 11A est mis de côté localement (`git stash`, sur `claude/sprint-11`).

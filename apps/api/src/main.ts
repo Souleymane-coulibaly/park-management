@@ -6,7 +6,8 @@ import { AppModule } from './app.module';
 import { setupApp } from './setup-app';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule);
+  // Journaux mis en tampon jusqu'au choix du format (JSON en production) par setupApp.
+  const app = await NestFactory.create(AppModule, { bufferLogs: true });
   const config = setupApp(app);
   await app.listen(config.port);
   Logger.log(`API Ocall Park prête sur http://localhost:${config.port}/api/v1`, 'Bootstrap');

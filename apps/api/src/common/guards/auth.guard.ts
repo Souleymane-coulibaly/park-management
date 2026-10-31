@@ -8,7 +8,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { SESSION_COOKIE } from '../../config/app-config';
-import { ALLOW_PENDING_PASSWORD, IS_PUBLIC } from '../decorators';
+import { ALLOW_MFA_PENDING, ALLOW_PENDING_PASSWORD, IS_PUBLIC } from '../decorators';
 import { SessionService } from '../security/session.service';
 
 /**
@@ -46,6 +46,24 @@ export class AuthGuard implements CanActivate {
         code: 'PASSWORD_CHANGE_REQUIRED',
         message: 'Vous devez changer votre mot de passe initial.',
       });
+    }
+    // Comptes internes soumis à la MFA : aucune route métier avant validation du second facteur.
+    if (
+      auth.mfa.required &&
+      !auth.mfa.verified &&
+      !this.reflector.getAllAndOverride<boolean>(ALLOW_MFA_PENDING, targets)
+    ) {
+      throw new ForbiddenException(
+        auth.mfa.enrolled
+          ? {
+              code: 'MFA_REQUIRED',
+              message: 'Saisissez le code de votre application d’authentification.',
+            }
+          : {
+              code: 'MFA_ENROLLMENT_REQUIRED',
+              message: 'Activez la double authentification pour continuer.',
+            },
+      );
     }
     return true;
   }

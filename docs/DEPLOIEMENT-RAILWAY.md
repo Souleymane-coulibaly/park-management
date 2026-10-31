@@ -124,6 +124,9 @@ Frontend : `apps/web/.env.local` avec `API_URL=http://localhost:4000`.
 | `ACCOUNT_LOCK_MINUTES`       | non         | `15`                                                             |
 | `PASSWORD_RESET_TTL_MINUTES` | non         | `30`                                                             |
 | `SWAGGER_ENABLED`            | non         | absent (Swagger désactivé en production)                         |
+| `MFA_ENCRYPTION_KEY`         | oui         | 32 octets base64 (Sprint 11A) — voir PRODUCTION.md               |
+| `STORAGE_SIGNING_SECRET`     | oui         | 32 octets base64 (Sprint 11B) — voir PRODUCTION.md               |
+| `MEDIA_STORAGE` + `S3_*`     | oui         | `s3`, bucket R2 **privé** (Sprint 10)                            |
 
 Jamais de `TEST_DATABASE_URL` sur Railway. Saisir les URL de base comme variables **scellées**.
 

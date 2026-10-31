@@ -21,7 +21,7 @@ import { Alert, ApiErrorAlert, EmptyState, ErrorState, LoadingState } from '@/co
 import { Table, Td } from '@/components/ui/table';
 import { type ApiError, api } from '@/lib/api';
 import { formatDate } from '@/lib/format';
-import type { PlatformOrganization } from '@/lib/types';
+import type { PlatformOrganization, SuiteInvoice } from '@/lib/types';
 import { useApi } from '@/lib/use-api';
 
 const STATUS_TONE: Record<SubscriptionPaymentStatus, 'savanna' | 'forest' | 'terracotta'> = {
@@ -301,6 +301,7 @@ function RecordDialog({
   const today = new Date().toISOString().slice(0, 10);
   const [form, setForm] = useState({
     organizationId: '',
+    invoiceId: '',
     amount: '',
     method: 'BANK_TRANSFER' as SubscriptionPaymentMethod,
     reference: '',
@@ -311,6 +312,14 @@ function RecordDialog({
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
+  // Factures émises non réglées de l'organisation : le règlement doit couvrir le reste à payer.
+  const invoices = useApi<SuiteInvoice[]>(
+    open && form.organizationId
+      ? `/platform/invoices?status=ISSUED&organizationId=${form.organizationId}`
+      : null,
+  );
+  const outstanding = (i: SuiteInvoice) =>
+    i.total - i.payments.reduce((sum, p) => sum + p.amount, 0);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -321,6 +330,7 @@ function RecordDialog({
         method: 'POST',
         body: {
           organizationId: form.organizationId,
+          ...(form.invoiceId ? { invoiceId: form.invoiceId } : {}),
           amount: Number(form.amount),
           method: form.method,
           ...(form.reference.trim() ? { reference: form.reference.trim() } : {}),
@@ -351,7 +361,7 @@ function RecordDialog({
             label="Organisation"
             required
             value={form.organizationId}
-            onChange={(e) => setForm({ ...form, organizationId: e.target.value })}
+            onChange={(e) => setForm({ ...form, organizationId: e.target.value, invoiceId: '' })}
             options={[
               { value: '', label: 'Choisir…' },
               ...orgs.data.map((o) => ({ value: o.id, label: o.name })),
@@ -361,6 +371,28 @@ function RecordDialog({
           <ErrorState error={orgs.error} onRetry={orgs.reload} />
         ) : (
           <LoadingState />
+        )}
+        {invoices.state === 'success' && invoices.data.length > 0 && (
+          <SelectField
+            label="Facture réglée"
+            hint="Le montant doit correspondre au reste à payer ; la validation marque la facture payée."
+            value={form.invoiceId}
+            onChange={(e) => {
+              const inv = invoices.data.find((i) => i.id === e.target.value);
+              setForm({
+                ...form,
+                invoiceId: e.target.value,
+                ...(inv ? { amount: String(outstanding(inv)) } : {}),
+              });
+            }}
+            options={[
+              { value: '', label: 'Sans facture (registre)' },
+              ...invoices.data.map((i) => ({
+                value: i.id,
+                label: `${i.number} · ${i.product.name} · reste ${formatXof(outstanding(i))}`,
+              })),
+            ]}
+          />
         )}
         <div className="grid gap-3 sm:grid-cols-2">
           <InputField

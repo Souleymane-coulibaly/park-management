@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { BUSINESS_TYPE_LABELS, canChangeBusinessType } from '@ocall/shared';
+import { BUSINESS_TYPE_LABELS, canChangeBusinessType, PARK_APP_PRODUCTS } from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
+import { parkSubscriptionWhere } from '../../common/park-subscription';
 import { AuditService } from '../../common/audit/audit.service';
 import type { TenantContext } from '../../common/auth-context';
 import type { ChangeBusinessTypeDto, UpdateOrganizationDto } from './organizations.dto';
@@ -64,7 +65,7 @@ export class OrganizationsService {
     await this.prisma.$transaction(async (tx) => {
       const org = await tx.organization.findUniqueOrThrow({
         where: { id: organizationId },
-        include: { subscription: true },
+        select: { businessType: true },
       });
       if (!canChangeBusinessType(org.businessType, dto.businessType)) {
         throw new BadRequestException({
@@ -72,27 +73,47 @@ export class OrganizationsService {
           message: `Évolution impossible de « ${BUSINESS_TYPE_LABELS[org.businessType]} » vers « ${BUSINESS_TYPE_LABELS[dto.businessType]} ».`,
         });
       }
-      const plan = await tx.subscriptionPlan.findUniqueOrThrow({
-        where: { businessType: dto.businessType },
+      const plan = await tx.subscriptionPlan.findFirstOrThrow({
+        where: { product: { code: PARK_APP_PRODUCTS[dto.businessType] }, isActive: true },
+        orderBy: { createdAt: 'asc' },
       });
       await tx.organization.update({
         where: { id: organizationId },
         data: { businessType: dto.businessType },
       });
 
-      if (org.subscription) {
+      // L'abonnement Ocall Park change de produit et d'offre ; le tarif précédemment accepté est
+      // conservé dans l'historique et sera refigé à la prochaine facture ou activation.
+      const current = await tx.subscription.findFirst({
+        where: parkSubscriptionWhere(organizationId),
+      });
+      if (current) {
+        const product = await tx.saasProduct.findUniqueOrThrow({
+          where: { code: PARK_APP_PRODUCTS[dto.businessType] },
+          select: { id: true },
+        });
         await tx.subscription.update({
-          where: { id: org.subscription.id },
-          data: { planId: plan.id },
+          where: { id: current.id },
+          data: {
+            planId: plan.id,
+            productId: product.id,
+            agreedSetupFee: null,
+            agreedMonthlyPrice: null,
+            agreedAt: null,
+          },
         });
         await tx.subscriptionEvent.create({
           data: {
-            subscriptionId: org.subscription.id,
+            subscriptionId: current.id,
             type: 'PLAN_CHANGED',
-            fromPlanId: org.subscription.planId,
+            fromPlanId: current.planId,
             toPlanId: plan.id,
             actorUserId: auth.user.id,
-            reason: `Évolution du métier ${org.businessType} → ${dto.businessType}`,
+            reason:
+              `Évolution du métier ${org.businessType} → ${dto.businessType}` +
+              (current.agreedMonthlyPrice !== null
+                ? ` (tarif accepté précédent : ${current.agreedSetupFee ?? 0} + ${current.agreedMonthlyPrice}/mois)`
+                : ''),
           },
         });
       }

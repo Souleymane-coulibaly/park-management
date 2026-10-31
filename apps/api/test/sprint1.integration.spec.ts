@@ -1,5 +1,4 @@
 import type { INestApplication } from '@nestjs/common';
-import { hash } from 'argon2';
 import type { PrismaService } from '../src/prisma/prisma.service';
 import {
   PASSWORD,
@@ -7,7 +6,9 @@ import {
   type SignedUpOwner,
   agent,
   cleanup,
+  type InternalAccount,
   createTestApp,
+  internalAccount,
   email,
   login,
   signup,
@@ -387,23 +388,10 @@ describe('Sprint 1 — socle SaaS (intégration)', () => {
   });
 
   describe('Super Admin', () => {
-    let superAdmin: Awaited<ReturnType<typeof login>>;
+    let superAdmin: InternalAccount;
 
     beforeAll(async () => {
-      const adminEmail = email('superadmin');
-      await prisma.user.create({
-        data: {
-          email: adminEmail,
-          loginId: adminEmail,
-          firstName: 'Super',
-          lastName: 'Admin',
-          platformRole: 'SUPER_ADMIN',
-          mustChangePassword: false,
-          passwordHash: await hash(PASSWORD, { type: 2 }),
-        },
-      });
-      superAdmin = await login(app, adminEmail, PASSWORD);
-      expect(superAdmin.status).toBe(200);
+      superAdmin = await internalAccount(app, prisma, 'superadmin', 'SUPER_ADMIN');
     });
 
     it('accède à la vue synthétique et aux organisations, sans les données nominatives', async () => {

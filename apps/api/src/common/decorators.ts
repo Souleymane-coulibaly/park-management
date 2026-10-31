@@ -1,6 +1,6 @@
 import { createParamDecorator, type ExecutionContext, SetMetadata } from '@nestjs/common';
 import type { Request } from 'express';
-import type { Activity, Permission } from '@ocall/shared';
+import type { Activity, Permission, PlatformPermission } from '@ocall/shared';
 import type { AuthContext } from './auth-context';
 
 export const IS_PUBLIC = 'isPublic';
@@ -8,6 +8,8 @@ export const ALLOW_PENDING_PASSWORD = 'allowPendingPassword';
 export const REQUIRED_PERMISSION = 'requiredPermission';
 export const REQUIRED_ACTIVITY = 'requiredActivity';
 export const SUPER_ADMIN_ONLY = 'superAdminOnly';
+export const PLATFORM_PERMISSION = 'platformPermission';
+export const ALLOW_MFA_PENDING = 'allowMfaPending';
 
 /** Route accessible sans session. */
 export const Public = () => SetMetadata(IS_PUBLIC, true);
@@ -26,8 +28,18 @@ export const RequirePermission = (permission: Permission) =>
 export const RequireActivity = (...activities: Activity[]) =>
   SetMetadata(REQUIRED_ACTIVITY, activities);
 
-/** Route réservée au SUPER_ADMIN de la plateforme. */
+/** Route réservée aux comptes internes Ocall (tout rôle plateforme). */
 export const SuperAdminOnly = () => SetMetadata(SUPER_ADMIN_ONLY, true);
+
+/** Route réservée aux comptes internes portant la permission plateforme (Sprint 11A). */
+export const RequirePlatformPermission = (permission: PlatformPermission) =>
+  SetMetadata(PLATFORM_PERMISSION, permission);
+
+/**
+ * Route accessible avant validation du second facteur (connexion, profil, déconnexion, changement
+ * de mot de passe, enrôlement et vérification MFA). Toutes les autres l'exigent.
+ */
+export const AllowMfaPending = () => SetMetadata(ALLOW_MFA_PENDING, true);
 
 /** Injecte le contexte d'authentification résolu par l'AuthGuard. */
 export const CurrentAuth = createParamDecorator((_data: unknown, ctx: ExecutionContext) => {

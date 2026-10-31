@@ -25,6 +25,15 @@ import {
 export const SIM_MARKER = 'OCALL-SIM:';
 export const SIM_DOWN = 'OCALL-SIM-DOWN';
 
+/**
+ * Retire les consignes de simulation (`OCALL-SIM:…:FIN`) d'un texte. Le copilote s'en sert pour que
+ * la réponse imposée par une consigne ne compte pas parmi les données autorisées : retirer ce texte
+ * ne peut que rendre le contrôle des chiffres plus strict.
+ */
+export function stripSimulationDirectives(text: string): string {
+  return text.replace(/OCALL-SIM:[\s\S]*?(?::FIN|$)/g, ' ');
+}
+
 const USAGE: AiUsageReport = { inputTokens: 1000, cachedInputTokens: 0, outputTokens: 200 };
 
 function marker(content: string): unknown {

@@ -103,7 +103,7 @@ export class AuthService {
 
     let membershipId: string | null = null;
     let organizationId: string | null = null;
-    if (user.platformRole !== 'SUPER_ADMIN') {
+    if (!user.platformRole) {
       const membership = await this.prisma.organizationMembership.findFirst({
         where: { userId: user.id, isActive: true },
         include: { organization: { select: { status: true } } },

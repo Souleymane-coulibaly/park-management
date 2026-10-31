@@ -4,11 +4,18 @@ import { SensitiveRoute } from '../../common/throttling';
 import type { Request, Response } from 'express';
 import { APP_CONFIG, type AppConfig, SESSION_COOKIE } from '../../config/app-config';
 import type { AuthContext } from '../../common/auth-context';
-import { AllowPendingPassword, CurrentAuth, Public } from '../../common/decorators';
+import {
+  AllowMfaPending,
+  AllowPendingPassword,
+  CurrentAuth,
+  Public,
+} from '../../common/decorators';
 import { requestMeta } from '../../common/request-meta';
 import { SessionService } from '../../common/security/session.service';
 import {
   ChangePasswordDto,
+  MfaCodeDto,
+  MfaVerifyDto,
   LoginDto,
   PasswordResetConfirmDto,
   PasswordResetRequestDto,
@@ -16,6 +23,7 @@ import {
   UpdateProfileDto,
 } from './auth.dto';
 import { AuthService } from './auth.service';
+import { MfaService } from './mfa.service';
 import { type MeResponse, toMe } from './me';
 
 @ApiTags('Authentification')
@@ -24,6 +32,7 @@ export class AuthController {
   constructor(
     private readonly auth: AuthService,
     private readonly sessions: SessionService,
+    private readonly mfa: MfaService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -53,6 +62,7 @@ export class AuthController {
   }
 
   @AllowPendingPassword()
+  @AllowMfaPending()
   @HttpCode(204)
   @Post('logout')
   async logout(
@@ -64,6 +74,7 @@ export class AuthController {
   }
 
   @AllowPendingPassword()
+  @AllowMfaPending()
   @Get('me')
   me(@CurrentAuth() auth: AuthContext): MeResponse {
     return toMe(auth);
@@ -79,6 +90,7 @@ export class AuthController {
   }
 
   @AllowPendingPassword()
+  @AllowMfaPending()
   @SensitiveRoute()
   @HttpCode(204)
   @Post('change-password')
@@ -107,6 +119,32 @@ export class AuthController {
   @Post('password-reset/confirm')
   async confirmReset(@Body() dto: PasswordResetConfirmDto, @Req() req: Request): Promise<void> {
     await this.auth.confirmPasswordReset(dto, requestMeta(req));
+  }
+
+  // ─── Double authentification (comptes internes Ocall) ───
+
+  @AllowMfaPending()
+  @SensitiveRoute()
+  @HttpCode(200)
+  @Post('mfa/setup')
+  mfaSetup(@CurrentAuth() auth: AuthContext) {
+    return this.mfa.setup(auth);
+  }
+
+  @AllowMfaPending()
+  @SensitiveRoute()
+  @HttpCode(200)
+  @Post('mfa/enable')
+  mfaEnable(@CurrentAuth() auth: AuthContext, @Body() dto: MfaCodeDto, @Req() req: Request) {
+    return this.mfa.enable(auth, dto.code, requestMeta(req));
+  }
+
+  @AllowMfaPending()
+  @SensitiveRoute()
+  @HttpCode(200)
+  @Post('mfa/verify')
+  mfaVerify(@CurrentAuth() auth: AuthContext, @Body() dto: MfaVerifyDto, @Req() req: Request) {
+    return this.mfa.verify(auth, dto, requestMeta(req));
   }
 
   private async openSession(token: string, res: Response): Promise<MeResponse> {

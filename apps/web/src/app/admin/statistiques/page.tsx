@@ -135,7 +135,7 @@ function Stats({ data: d }: { data: SaasStats }) {
             {d.plans.map((p) => (
               <tr key={p.planId}>
                 <Td className="font-medium">{p.name}</Td>
-                <Td>{BUSINESS_TYPE_LABELS[p.businessType]}</Td>
+                <Td>{p.businessType ? BUSINESS_TYPE_LABELS[p.businessType] : 'Autre produit'}</Td>
                 <Td className="tabular-nums">{formatXof(p.monthlyPrice)}</Td>
                 <Td className="tabular-nums">{formatInt(p.subscriptions)}</Td>
                 <Td className="tabular-nums">{formatInt(p.active)}</Td>

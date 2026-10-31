@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { config } from 'dotenv';
@@ -25,3 +26,5 @@ process.env.SITES_BASE_DOMAIN = 'ocall-test.example.com';
 process.env.SITES_SUBDOMAINS_ENABLED = 'true';
 process.env.SITES_PUBLIC_ORIGIN = 'https://app.ocall-test.example.com';
 delete process.env.SITES_REVALIDATE_URL;
+// Double authentification des comptes internes : clé de chiffrement éphémère, propre à l'exécution.
+process.env.MFA_ENCRYPTION_KEY = randomBytes(32).toString('base64');

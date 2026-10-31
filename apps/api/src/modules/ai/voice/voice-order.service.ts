@@ -218,6 +218,8 @@ export class VoiceOrderService {
       }),
     );
     const proposal = this.validate(raw, refs, tableRefs);
+    // Lu avant la transaction : aucune requête hors transaction pendant qu'elle tient une connexion.
+    const expiresAt = await this.ai.expiryFor(organizationId);
 
     return this.prisma.$transaction(async (tx) => {
       const draft = await tx.voiceOrderDraft.create({
@@ -227,7 +229,7 @@ export class VoiceOrderService {
           createdById: auth.membership.id,
           transcript,
           proposal: proposal as unknown as Prisma.InputJsonValue,
-          expiresAt: await this.ai.expiryFor(organizationId),
+          expiresAt,
         },
         select: DRAFT_SELECT,
       });

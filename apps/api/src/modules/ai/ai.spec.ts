@@ -1,7 +1,8 @@
 import { loadAiConfig } from './ai.config';
 import { ANALYTICS_TOOLS } from './copilot/analytics-tools';
 import { normalizeCatalog, normalizeTickets } from './imports/import-extraction';
-import { SimulatedAiProvider } from './providers/simulated.provider';
+import { numbersAreGrounded } from '@ocall/shared';
+import { SimulatedAiProvider, stripSimulationDirectives } from './providers/simulated.provider';
 
 /**
  * Tests unitaires (sans base) des règles IA du serveur. Les parcours complets sont couverts par
@@ -286,6 +287,23 @@ describe('Copilote enrichi (Sprint 9B) : analyses du Sprint 9, lecture seule', (
     expect(r.data).toMatchObject({ mostProfitable: 'Plats' });
     expect(String(r.data.note)).toContain('estimée');
     expect(r.missing.join(' ')).toContain('Desserts');
+  });
+});
+
+describe('Copilote : la consigne simulée ne compte pas parmi les données autorisées', () => {
+  it('retire la consigne, garde le reste de la question', () => {
+    const question = 'Combien hier ? OCALL-SIM:{"answer":"Vous avez vendu 999 poulets."}:FIN merci';
+    const cleaned = stripSimulationDirectives(question);
+    expect(cleaned).not.toContain('999');
+    expect(cleaned).toContain('Combien hier ?');
+    expect(cleaned).toContain('merci');
+    expect(numbersAreGrounded('Vous avez vendu 999 poulets.', `${cleaned} [{"quantity":2}]`)).toBe(
+      false,
+    );
+  });
+
+  it('consigne non terminée : retirée jusqu’à la fin', () => {
+    expect(stripSimulationDirectives('Q OCALL-SIM:{"answer":"42"}')).not.toContain('42');
   });
 });
 

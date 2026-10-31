@@ -1,4 +1,3 @@
-import { hash } from 'argon2';
 import type { INestApplication } from '@nestjs/common';
 import type { PrismaService } from '../src/prisma/prisma.service';
 import {
@@ -7,7 +6,7 @@ import {
   type SignedUpOwner,
   cleanup,
   createTestApp,
-  email,
+  internalAccount,
   login,
   signup,
 } from './helpers';
@@ -89,19 +88,8 @@ describe('Sprint 9B — copilote enrichi et statistiques SaaS (intégration)', (
     await prisma.payment.updateMany({ where: { saleId: sale.id }, data: { createdAt: noon } });
     await prisma.sale.update({ where: { id: sale.id }, data: { createdAt: noon } });
 
-    const adminEmail = email('s9badmin');
-    await prisma.user.create({
-      data: {
-        email: adminEmail,
-        loginId: adminEmail,
-        firstName: 'Super',
-        lastName: 'Admin',
-        platformRole: 'SUPER_ADMIN',
-        mustChangePassword: false,
-        passwordHash: await hash(PASSWORD, { type: 2 }),
-      },
-    });
-    superAdmin = (await login(app, adminEmail, PASSWORD)).agent;
+    // Compte interne historique SUPER_ADMIN : double authentification enrôlée (Sprint 11A).
+    superAdmin = (await internalAccount(app, prisma, 's9badmin', 'SUPER_ADMIN')).agent;
   }, 300_000);
 
   afterAll(async () => {
@@ -228,7 +216,7 @@ describe('Sprint 9B — copilote enrichi et statistiques SaaS (intégration)', (
       expect(mid.payments.pending.count).toBe(before.payments.pending.count + 1);
 
       // Validation sans prolongation : abonnement inchangé.
-      const subBefore = await prisma.subscription.findUniqueOrThrow({
+      const subBefore = await prisma.subscription.findFirstOrThrow({
         where: { organizationId: resto.organizationId },
       });
       const v1 = (
@@ -238,7 +226,7 @@ describe('Sprint 9B — copilote enrichi et statistiques SaaS (intégration)', (
           .expect(201)
       ).body;
       expect(v1.subscription).toBeNull();
-      const subMid = await prisma.subscription.findUniqueOrThrow({
+      const subMid = await prisma.subscription.findFirstOrThrow({
         where: { organizationId: resto.organizationId },
       });
       expect(subMid.status).toBe(subBefore.status);
@@ -256,7 +244,7 @@ describe('Sprint 9B — copilote enrichi et statistiques SaaS (intégration)', (
           .expect(201)
       ).body;
       expect(v2.subscription).toMatchObject({ status: 'ACTIVE', changed: true });
-      const subAfter = await prisma.subscription.findUniqueOrThrow({
+      const subAfter = await prisma.subscription.findFirstOrThrow({
         where: { organizationId: resto.organizationId },
         include: { events: { orderBy: { createdAt: 'desc' }, take: 1 } },
       });

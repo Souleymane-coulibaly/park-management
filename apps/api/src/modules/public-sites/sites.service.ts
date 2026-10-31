@@ -32,6 +32,7 @@ import { AuditService } from '../../common/audit/audit.service';
 import type { TenantContext } from '../../common/auth-context';
 import { establishmentScope } from '../../common/tenant-scope';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
+import { PARK_SUBSCRIPTION_STATUS } from '../../common/park-subscription';
 
 type Db = Prisma.TransactionClient | PrismaService;
 
@@ -64,7 +65,7 @@ const SITE_SELECT = {
   draftUpdatedAt: true,
   publishedAt: true,
   establishment: { select: { id: true, name: true, businessType: true } },
-  organization: { select: { status: true, subscription: { select: { status: true } } } },
+  organization: { select: { status: true, subscriptions: PARK_SUBSCRIPTION_STATUS } },
   domains: {
     select: {
       id: true,
@@ -129,7 +130,7 @@ export class SitesService {
       /** Faux si l'abonnement ou l'organisation empêche l'affichage public (contenu conservé). */
       availableByPlan: siteAvailability(
         site.organization.status,
-        site.organization.subscription?.status,
+        site.organization.subscriptions[0]?.status,
       ),
       domains: site.domains.map((d) => ({
         id: d.id,
@@ -656,13 +657,13 @@ export class SitesService {
         slug: true,
         isOnline: true,
         published: true,
-        organization: { select: { status: true, subscription: { select: { status: true } } } },
+        organization: { select: { status: true, subscriptions: PARK_SUBSCRIPTION_STATUS } },
         domains: { where: { status: 'ACTIVE' }, select: { hostname: true, status: true } },
       },
     });
     if (!site || !site.isOnline || !site.published) return null;
     const published = site.published as unknown as PublishedSite;
-    if (!siteAvailability(site.organization.status, site.organization.subscription?.status)) {
+    if (!siteAvailability(site.organization.status, site.organization.subscriptions[0]?.status)) {
       return { state: 'UNAVAILABLE', publicName: published.content.publicName, siteId: site.id };
     }
     return {
@@ -703,13 +704,15 @@ export class SitesService {
         slug: true,
         publishedAt: true,
         domains: { where: { status: 'ACTIVE' }, select: { hostname: true, status: true } },
-        organization: { select: { status: true, subscription: { select: { status: true } } } },
+        organization: { select: { status: true, subscriptions: PARK_SUBSCRIPTION_STATUS } },
       },
       take: 50_000,
     });
     const h = host.toLowerCase().split(':')[0]!;
     return sites
-      .filter((s) => siteAvailability(s.organization.status, s.organization.subscription?.status))
+      .filter((s) =>
+        siteAvailability(s.organization.status, s.organization.subscriptions[0]?.status),
+      )
       .map((s) => ({ url: this.canonicalUrl(s), lastModified: s.publishedAt!.toISOString() }))
       .filter((e) => new URL(e.url).hostname === h);
   }

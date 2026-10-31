@@ -16,11 +16,24 @@ export const MEMBER_ROLES: readonly MemberRole[] = Object.values(MemberRole);
  * Rôle plateforme, distinct des rôles d'organisation : un SUPER_ADMIN gère le SaaS
  * mais n'est membre d'aucune organisation et n'accède pas à leurs données métier.
  */
-export const PlatformRole = { SUPER_ADMIN: 'SUPER_ADMIN' } as const;
+export const PlatformRole = {
+  /** Historique : équivalent au propriétaire de la plateforme (voir platform.ts). */
+  SUPER_ADMIN: 'SUPER_ADMIN',
+  PLATFORM_OWNER: 'PLATFORM_OWNER',
+  PLATFORM_ADMIN: 'PLATFORM_ADMIN',
+  BILLING_MANAGER: 'BILLING_MANAGER',
+  SUPPORT_AGENT: 'SUPPORT_AGENT',
+  READ_ONLY_AUDITOR: 'READ_ONLY_AUDITOR',
+} as const;
 export type PlatformRole = (typeof PlatformRole)[keyof typeof PlatformRole];
 
 export const ROLE_LABELS: Record<MemberRole | PlatformRole, string> = {
   SUPER_ADMIN: 'Super administrateur',
+  PLATFORM_OWNER: 'Propriétaire de la plateforme',
+  PLATFORM_ADMIN: 'Administrateur délégué',
+  BILLING_MANAGER: 'Gestion des abonnements et paiements',
+  SUPPORT_AGENT: 'Assistance',
+  READ_ONLY_AUDITOR: 'Consultation et audit',
   OWNER: 'Propriétaire',
   ADMIN: 'Administrateur',
   SUPERVISOR: 'Superviseur',
@@ -78,6 +91,7 @@ export const Permission = {
   SITE_MANAGE: 'site.manage',
   SITE_PUBLISH: 'site.publish',
   SITE_DOMAIN: 'site.domain',
+  SUPPORT_USE: 'support.use',
 } as const;
 export type Permission = (typeof Permission)[keyof typeof Permission];
 export const PERMISSIONS: readonly Permission[] = Object.values(Permission);
@@ -131,6 +145,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'site.manage': 'Modifier le site vitrine (brouillon, médias, menu public)',
   'site.publish': 'Publier ou dépublier le site vitrine',
   'site.domain': 'Gérer le nom de domaine du site vitrine',
+  'support.use': 'Contacter le support Ocall',
 };
 
 const P = Permission;
@@ -169,6 +184,7 @@ export const ROLE_PERMISSIONS: Record<MemberRole, readonly Permission[]> = {
     P.PLANNING_MANAGE,
     P.AI_COPILOT,
     P.ANALYTICS_READ,
+    P.SUPPORT_USE,
   ],
   // Un caissier encaisse, envoie ses commandes en cuisine et ne voit que ses propres ventes et sessions.
   CASHIER: [

@@ -1,3 +1,4 @@
+import { PARK_APP_PRODUCT_CODES } from '@ocall/shared';
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
@@ -66,19 +67,27 @@ export class PlatformService {
         countryCode: true,
         status: true,
         createdAt: true,
-        subscription: {
+        subscriptions: {
           select: {
+            id: true,
             status: true,
             expiresAt: true,
+            agreedMonthlyPrice: true,
+            product: { select: { code: true, name: true } },
             plan: { select: { name: true, monthlyPrice: true } },
           },
+          orderBy: { createdAt: 'asc' },
         },
         _count: { select: { establishments: true, memberships: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
-    return rows.map(({ _count, ...org }) => ({
+    return rows.map(({ _count, subscriptions, ...org }) => ({
       ...org,
+      subscriptions,
+      /** Abonnement Ocall Park (compatibilité de l'écran historique). */
+      subscription:
+        subscriptions.find((s) => PARK_APP_PRODUCT_CODES.includes(s.product.code)) ?? null,
       establishmentsCount: _count.establishments,
       accountsCount: _count.memberships,
     }));
@@ -199,6 +208,8 @@ export class PlatformService {
               monthlyPrice: plan.monthlyPrice,
               setupFee: plan.setupFee,
               isActive: plan.isActive,
+              aiMonthlyCallQuota: plan.aiMonthlyCallQuota,
+              storageQuotaMb: plan.storageQuotaMb,
             },
             after: { ...dto },
           },

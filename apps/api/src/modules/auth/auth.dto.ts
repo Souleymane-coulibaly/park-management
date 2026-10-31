@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import { IsEmail, IsIn, IsOptional, IsString, Length, MaxLength } from 'class-validator';
+import { IsEmail, IsIn, IsOptional, IsString, Length, Matches, MaxLength } from 'class-validator';
 import {
   BUSINESS_TYPES,
   type BusinessType,
@@ -116,4 +116,22 @@ export class UpdateProfileDto {
   @IsString()
   @Length(1, 80)
   lastName?: string;
+}
+
+export class MfaCodeDto {
+  @ApiProperty({ description: 'Code à 6 chiffres de l’application d’authentification.' })
+  @Matches(/^\d{6}$/)
+  code: string;
+}
+
+export class MfaVerifyDto {
+  @ApiPropertyOptional({ description: 'Code à 6 chiffres.' })
+  @IsOptional()
+  @Matches(/^\d{6}$/)
+  code?: string;
+
+  @ApiPropertyOptional({ description: 'Code de secours (usage unique), ex. 7K2Q-M9XD.' })
+  @IsOptional()
+  @Matches(/^[A-Za-z2-7]{4}-?[A-Za-z2-7]{4}$/)
+  recoveryCode?: string;
 }

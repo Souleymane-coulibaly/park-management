@@ -4,6 +4,7 @@ import { APP_CONFIG, type AppConfig } from '../../config/app-config';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { AuthContext } from '../auth-context';
 import type { RequestMeta } from '../request-meta';
+import { platformRoleRequiresMfa } from '@ocall/shared';
 import { generateToken, hashToken } from './tokens';
 
 /** Intervalle minimal entre deux mises à jour de lastSeenAt, pour limiter les écritures. */
@@ -59,7 +60,7 @@ export class SessionService {
 
     if (membership) {
       if (!membership.isActive || membership.organization.status !== 'ACTIVE') return null;
-    } else if (user.platformRole !== 'SUPER_ADMIN') {
+    } else if (!user.platformRole) {
       return null;
     }
 
@@ -81,6 +82,16 @@ export class SessionService {
         mustChangePassword: user.mustChangePassword,
         platformRole: user.platformRole,
       },
+      mfa: {
+        // Obligatoire pour les rôles sensibles ; pour les autres comptes internes, exigée dès
+        // qu'elle a été activée volontairement.
+        required:
+          !membership &&
+          !!user.platformRole &&
+          (platformRoleRequiresMfa(user.platformRole) || user.mfaEnabledAt !== null),
+        enrolled: user.mfaEnabledAt !== null,
+        verified: session.mfaVerifiedAt !== null,
+      },
       membership: membership
         ? {
             id: membership.id,
@@ -92,6 +103,11 @@ export class SessionService {
           }
         : null,
     };
+  }
+
+  /** Second facteur validé pour cette session. */
+  async markMfaVerified(sessionId: string, db: Db = this.prisma): Promise<void> {
+    await db.session.update({ where: { id: sessionId }, data: { mfaVerifiedAt: new Date() } });
   }
 
   async revoke(sessionId: string): Promise<void> {

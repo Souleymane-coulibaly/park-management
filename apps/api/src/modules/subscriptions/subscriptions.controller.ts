@@ -1,6 +1,7 @@
 import { Controller, Get, NotFoundException } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { PrismaService } from '../../prisma/prisma.service';
+import { parkSubscriptionWhere } from '../../common/park-subscription';
 import { type AuthContext, requireTenant } from '../../common/auth-context';
 import { CurrentAuth, Public, RequirePermission } from '../../common/decorators';
 
@@ -14,7 +15,8 @@ export class SubscriptionsController {
   @Get('plans')
   plans() {
     return this.prisma.subscriptionPlan.findMany({
-      where: { isActive: true },
+      // Page Tarifs : offres actives des produits Ocall Park commercialisés.
+      where: { isActive: true, businessType: { not: null }, product: { status: 'AVAILABLE' } },
       select: {
         id: true,
         businessType: true,
@@ -32,8 +34,8 @@ export class SubscriptionsController {
   @Get('subscription')
   async current(@CurrentAuth() auth: AuthContext) {
     const { membership } = requireTenant(auth);
-    const subscription = await this.prisma.subscription.findUnique({
-      where: { organizationId: membership.organizationId },
+    const subscription = await this.prisma.subscription.findFirst({
+      where: parkSubscriptionWhere(membership.organizationId),
       select: {
         status: true,
         startedAt: true,

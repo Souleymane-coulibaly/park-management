@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { AuthContext } from '../../common/auth-context';
-import { CurrentAuth, SuperAdminOnly } from '../../common/decorators';
+import { CurrentAuth, RequirePlatformPermission, SuperAdminOnly } from '../../common/decorators';
 import {
   CreateOrganizationByAdminDto,
   RecordSubscriptionPaymentDto,
@@ -23,21 +23,25 @@ export class PlatformController {
     private readonly saas: SaasService,
   ) {}
 
+  @RequirePlatformPermission('platform.dashboard')
   @Get('overview')
   overview() {
     return this.platform.overview();
   }
 
+  @RequirePlatformPermission('platform.orgs.read')
   @Get('organizations')
   organizations() {
     return this.platform.organizations();
   }
 
+  @RequirePlatformPermission('platform.orgs.manage')
   @Post('organizations')
   createOrganization(@CurrentAuth() auth: AuthContext, @Body() dto: CreateOrganizationByAdminDto) {
     return this.platform.createOrganization(auth, dto);
   }
 
+  @RequirePlatformPermission('platform.orgs.manage')
   @Patch('organizations/:id/status')
   setStatus(
     @CurrentAuth() auth: AuthContext,
@@ -47,16 +51,19 @@ export class PlatformController {
     return this.platform.setStatus(auth, id, dto);
   }
 
+  @RequirePlatformPermission('platform.billing.read')
   @Get('subscriptions')
   subscriptions() {
     return this.platform.subscriptions();
   }
 
+  @RequirePlatformPermission('platform.orgs.read')
   @Get('plans')
   plans() {
     return this.platform.plans();
   }
 
+  @RequirePlatformPermission('platform.plans.manage')
   @Patch('plans/:id')
   updatePlan(
     @CurrentAuth() auth: AuthContext,
@@ -68,16 +75,19 @@ export class PlatformController {
 
   // ─── Sprint 9B : statistiques SaaS et règlements d'abonnement (hors plateforme) ───
 
+  @RequirePlatformPermission('platform.dashboard')
   @Get('saas-stats')
   saasStats() {
     return this.saas.stats();
   }
 
+  @RequirePlatformPermission('platform.billing.read')
   @Get('subscription-payments')
   subscriptionPayments(@Query() query: SubscriptionPaymentsQueryDto) {
     return this.saas.listPayments(query);
   }
 
+  @RequirePlatformPermission('platform.billing.manage')
   @Post('subscription-payments')
   recordSubscriptionPayment(
     @CurrentAuth() auth: AuthContext,
@@ -86,6 +96,7 @@ export class PlatformController {
     return this.saas.recordPayment(auth, dto);
   }
 
+  @RequirePlatformPermission('platform.billing.validate')
   @Post('subscription-payments/:id/validate')
   validateSubscriptionPayment(
     @CurrentAuth() auth: AuthContext,
@@ -95,6 +106,7 @@ export class PlatformController {
     return this.saas.validatePayment(auth, id, dto);
   }
 
+  @RequirePlatformPermission('platform.billing.validate')
   @Post('subscription-payments/:id/reject')
   rejectSubscriptionPayment(
     @CurrentAuth() auth: AuthContext,

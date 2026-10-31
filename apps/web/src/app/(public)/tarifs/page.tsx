@@ -38,6 +38,8 @@ export default async function TarifsPage() {
       ) : (
         <div className="grid gap-5 md:grid-cols-3">
           {plans.map((plan) => {
+            // L'API ne renvoie ici que les offres Ocall Park (métier renseigné).
+            if (!plan.businessType) return null;
             const p = BUSINESS_PRESENTATION[plan.businessType];
             const featured = plan.businessType === 'PARK_RESTAURANT';
             return (

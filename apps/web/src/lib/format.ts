@@ -103,6 +103,23 @@ const ACTION_LABELS: Record<string, string> = {
   'platform.subscription_payment_recorded': 'Règlement d’abonnement saisi',
   'platform.subscription_payment_validated': 'Règlement d’abonnement validé',
   'platform.subscription_payment_rejected': 'Règlement d’abonnement rejeté',
+  'auth.mfa_enabled': 'Double authentification activée',
+  'auth.mfa_verified': 'Double authentification validée',
+  'auth.mfa_failed': 'Code de double authentification refusé',
+  'auth.mfa_recovery_code_used': 'Code de secours utilisé',
+  'platform.product_created': 'Produit créé',
+  'platform.plan_created': 'Offre créée',
+  'platform.plan_updated': 'Offre modifiée',
+  'platform.product_updated': 'Produit modifié',
+  'platform.subscription_created': 'Abonnement à un produit créé',
+  'platform.invoice_issued': 'Facture émise',
+  'platform.invoice_cancelled': 'Facture annulée',
+  'platform.user_created': 'Compte interne créé',
+  'platform.user_role_changed': 'Rôle d’un compte interne modifié',
+  'platform.user_deactivated': 'Compte interne désactivé',
+  'platform.user_reactivated': 'Compte interne réactivé',
+  'platform.user_mfa_reset': 'Double authentification réinitialisée',
+  'platform.user_mfa_reset_server': 'Double authentification réinitialisée (procédure serveur)',
 };
 
 export const actionLabel = (action: string) => ACTION_LABELS[action] ?? action;

@@ -27,7 +27,8 @@
     "db:migrate:deploy": "pnpm --filter @ocall/database run migrate:deploy",
     "db:migrate:deploy:test": "pnpm --filter @ocall/database run migrate:deploy:test",
     "db:migrate:status": "pnpm --filter @ocall/database run migrate:status",
-    "db:bootstrap-super-admin": "pnpm --filter @ocall/database run bootstrap-super-admin"
+    "db:bootstrap-super-admin": "pnpm --filter @ocall/database run bootstrap-super-admin",
+    "db:reset-mfa": "pnpm --filter @ocall/database run reset-mfa"
   },
   "devDependencies": {
     "@eslint/js": "^9.18.0",

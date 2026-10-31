@@ -1,7 +1,7 @@
 'use client';
 
 import { type ReactNode, createContext, useContext } from 'react';
-import type { Permission } from '@ocall/shared';
+import type { Permission, PlatformPermission } from '@ocall/shared';
 import type { Me } from '@/lib/types';
 
 const SessionContext = createContext<Me | null>(null);
@@ -22,4 +22,9 @@ export function useSession(): Me {
  */
 export function useCan(permission: Permission): boolean {
   return useSession().permissions.includes(permission);
+}
+
+/** Même principe pour les comptes internes Ocall (permissions plateforme). */
+export function useCanPlatform(permission: PlatformPermission): boolean {
+  return useSession().platformPermissions.includes(permission);
 }

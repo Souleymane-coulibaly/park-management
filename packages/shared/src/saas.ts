@@ -98,7 +98,8 @@ export interface SaasStats {
   plans: {
     planId: string;
     name: string;
-    businessType: BusinessType;
+    /** Métier Ocall Park couvert ; null pour un autre produit. */
+    businessType: BusinessType | null;
     monthlyPrice: number;
     subscriptions: number;
     active: number;

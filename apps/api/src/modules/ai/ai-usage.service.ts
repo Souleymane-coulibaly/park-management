@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   ForbiddenException,
   HttpException,
   HttpStatus,
@@ -19,6 +20,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
 import type { TenantContext } from '../../common/auth-context';
+import { organizationQuotas } from '../../common/quotas';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
 import {
   AI_PROVIDER,
@@ -113,8 +115,39 @@ export class AiUsageService {
     );
   }
 
+  /**
+   * Réglages avec le plafond fixé par Ocall (Sprint 11B : quota de l'offre ou dérogation du Super
+   * Admin). Le plafond de l'organisation ne peut que le restreindre.
+   */
+  async settingsView(organizationId: string) {
+    const [settings, quotas] = await Promise.all([
+      this.settings(organizationId),
+      organizationQuotas(this.prisma, organizationId),
+    ]);
+    return { ...settings, platformLimit: quotas.aiMonthlyCalls };
+  }
+
+  /** Plafond réellement appliqué : le plus bas entre celui de l'organisation et celui d'Ocall. */
+  private async effectiveLimit(
+    db: PrismaService | Prisma.TransactionClient,
+    organizationId: string,
+    organizationLimit: number,
+  ): Promise<number> {
+    const quotas = await organizationQuotas(db, organizationId);
+    return Math.min(organizationLimit, quotas.aiMonthlyCalls);
+  }
+
   async updateSettings(auth: TenantContext, dto: Partial<AiSettingsRow>) {
     const organizationId = auth.membership.organizationId;
+    if (dto.monthlyCallLimit !== undefined) {
+      const quotas = await organizationQuotas(this.prisma, organizationId);
+      if (dto.monthlyCallLimit > quotas.aiMonthlyCalls) {
+        throw new ConflictException({
+          code: 'AI_LIMIT_ABOVE_PLAN',
+          message: `Votre offre autorise ${quotas.aiMonthlyCalls} appels IA par mois au plus. Contactez Ocall pour l'augmenter.`,
+        });
+      }
+    }
     return this.prisma.$transaction(async (tx) => {
       const row = await tx.aiSettings.upsert({
         where: { organizationId },
@@ -150,7 +183,7 @@ export class AiUsageService {
     const used = await this.prisma.aiUsage.count({
       where: { organizationId, createdAt: { gte: this.monthStart(auth.membership.timezone) } },
     });
-    const limit = settings.monthlyCallLimit;
+    const limit = await this.effectiveLimit(this.prisma, organizationId, settings.monthlyCallLimit);
     return {
       configured: this.provider !== null,
       simulated: this.provider?.name === 'simulated',
@@ -289,7 +322,8 @@ export class AiUsageService {
       const used = await tx.aiUsage.count({
         where: { organizationId, createdAt: { gte: this.monthStart(auth.membership.timezone) } },
       });
-      if (used >= settings.monthlyCallLimit) {
+      const limit = await this.effectiveLimit(tx, organizationId, settings.monthlyCallLimit);
+      if (used >= limit) {
         throw new HttpException(
           {
             code: 'AI_QUOTA_EXCEEDED',
@@ -312,7 +346,7 @@ export class AiUsageService {
         select: { id: true },
       });
       // Alerte de dépassement : journalisée une fois, au franchissement du seuil.
-      const threshold = Math.ceil((settings.monthlyCallLimit * settings.alertPercent) / 100);
+      const threshold = Math.ceil((limit * settings.alertPercent) / 100);
       if (used + 1 === threshold) {
         await this.audit.record(
           {
@@ -321,7 +355,7 @@ export class AiUsageService {
             action: 'ai.quota_alert',
             targetType: 'AiSettings',
             targetId: organizationId,
-            metadata: { used: used + 1, limit: settings.monthlyCallLimit },
+            metadata: { used: used + 1, limit },
           },
           tx,
         );

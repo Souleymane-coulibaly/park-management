@@ -13,7 +13,12 @@ export interface AuthContext {
     mustChangePassword: boolean;
     platformRole: PlatformRole | null;
   };
-  /** Absent pour un SUPER_ADMIN, qui n'est membre d'aucune organisation. */
+  /**
+   * Second facteur (comptes internes Ocall) : requis selon le rôle, enrôlé ou non, validé ou non
+   * pour cette session.
+   */
+  mfa: { required: boolean; enrolled: boolean; verified: boolean };
+  /** Absent pour un compte interne Ocall, qui n'est membre d'aucune organisation. */
   membership: {
     id: string;
     role: MemberRole;

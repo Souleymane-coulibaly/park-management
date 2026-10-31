@@ -1,6 +1,7 @@
 'use client';
 
 import { type FormEvent, useState } from 'react';
+import Link from 'next/link';
 import { Building2, Plus, Power } from 'lucide-react';
 import {
   BUSINESS_TYPES,
@@ -88,7 +89,12 @@ export default function AdminOrganisationsPage() {
             {orgs.data.map((o) => (
               <tr key={o.id}>
                 <Td>
-                  <p className="font-semibold">{o.name}</p>
+                  <Link
+                    href={`/admin/organisations/${o.id}`}
+                    className="font-semibold text-forest hover:underline"
+                  >
+                    {o.name}
+                  </Link>
                   <p className="text-xs text-muted">
                     <span className="font-mono">{o.code}</span> · créée le {formatDate(o.createdAt)}
                   </p>

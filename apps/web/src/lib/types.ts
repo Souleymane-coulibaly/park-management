@@ -1,4 +1,15 @@
 import type {
+  SupportTicketCategory,
+  SupportTicketPriority,
+  SupportTicketStatus,
+  InvoiceLineKind,
+  InvoiceStatus,
+  PlatformPermission,
+  PlatformRole,
+  PlatformRoleName,
+  SaasProductStatus,
+  SubscriptionPaymentMethod,
+  SubscriptionPaymentStatus,
   SiteContent,
   SiteDomainStatus,
   SiteMediaKind,
@@ -34,11 +45,15 @@ export interface Me {
     email: string | null;
     loginId: string;
     mustChangePassword: boolean;
-    platformRole: 'SUPER_ADMIN' | null;
+    platformRole: PlatformRole | null;
   };
   organization: { id: string; name: string; businessType: BusinessType; timezone: string } | null;
-  role: MemberRole | 'SUPER_ADMIN' | null;
+  role: MemberRole | PlatformRole | null;
   permissions: Permission[];
+  /** Permissions des comptes internes Ocall (vide pour un membre d'organisation). */
+  platformPermissions: PlatformPermission[];
+  /** Second facteur : requis (rôle interne sensible), enrôlé, validé pour la session. */
+  mfa: { required: boolean; enrolled: boolean; verified: boolean };
   navigation: {
     key: string;
     label: string;
@@ -94,13 +109,17 @@ export interface RoleMatrix {
 
 export interface Plan {
   id: string;
-  businessType: BusinessType;
+  /** Métier Ocall Park couvert ; null pour l'offre d'un autre produit Ocall Suite. */
+  businessType: BusinessType | null;
   name: string;
   monthlyPrice: number;
   /** Frais de mise en service unique (FCFA), réglés hors plateforme. */
   setupFee: number;
   currency: string;
   isActive?: boolean;
+  /** Quotas de l'offre (Sprint 11B), renvoyés à l'administration. */
+  aiMonthlyCallQuota?: number;
+  storageQuotaMb?: number;
 }
 
 export interface Subscription {
@@ -830,6 +849,8 @@ export interface AiSettings {
   monthlyCallLimit: number;
   alertPercent: number;
   retentionDays: number;
+  /** Plafond fixé par Ocall (offre ou dérogation) : lecture seule. */
+  platformLimit?: number;
 }
 
 export interface AiUsageReport {
@@ -995,4 +1016,217 @@ export interface SiteMediaView {
 export interface SiteCatalogOptions {
   products: { id: string; name: string; category: string; price: number }[];
   tickets: { id: string; name: string; price: number; peopleIncluded: number }[];
+}
+
+// ─── Sprint 11A : Ocall Suite (administration centrale) ───
+
+export interface SuiteProduct {
+  id: string;
+  code: string;
+  name: string;
+  description: string;
+  status: SaasProductStatus;
+  features: string[];
+  sortOrder: number;
+  plans: {
+    id: string;
+    name: string;
+    monthlyPrice: number;
+    setupFee: number;
+    isActive: boolean;
+    businessType: BusinessType | null;
+  }[];
+  subscriptions: number;
+}
+
+export interface SuiteOrganization {
+  id: string;
+  name: string;
+  code: string;
+  businessType: BusinessType;
+  countryCode: string;
+  status: 'ACTIVE' | 'SUSPENDED';
+  createdAt: string;
+  establishments: {
+    id: string;
+    name: string;
+    businessType: BusinessType;
+    city: string | null;
+    isActive: boolean;
+    publicSite: { slug: string; isOnline: boolean } | null;
+  }[];
+  subscriptions: {
+    id: string;
+    status: SubscriptionStatus;
+    startedAt: string | null;
+    expiresAt: string | null;
+    agreedSetupFee: number | null;
+    agreedMonthlyPrice: number | null;
+    agreedAt: string | null;
+    product: { id: string; code: string; name: string; status: SaasProductStatus };
+    plan: { id: string; name: string; setupFee: number; monthlyPrice: number };
+  }[];
+  invoices: {
+    id: string;
+    number: string;
+    status: InvoiceStatus;
+    total: number;
+    issuedAt: string;
+    dueAt: string | null;
+    paidAt: string | null;
+    product: { code: string };
+  }[];
+  subscriptionPayments: {
+    id: string;
+    amount: number;
+    method: SubscriptionPaymentMethod;
+    status: SubscriptionPaymentStatus;
+    paidAt: string;
+    invoiceId: string | null;
+  }[];
+  _count: { memberships: number };
+}
+
+export interface SuiteInvoice {
+  id: string;
+  number: string;
+  status: InvoiceStatus;
+  total: number;
+  currency: string;
+  issuedAt: string;
+  dueAt: string | null;
+  paidAt: string | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  organization: { id: string; name: string };
+  product: { code: string; name: string };
+  lines: {
+    kind: InvoiceLineKind;
+    label: string;
+    quantity: number;
+    unitAmount: number;
+    amount: number;
+    reason: string | null;
+  }[];
+  payments: { id: string; amount: number; status: SubscriptionPaymentStatus }[];
+}
+
+export interface InternalUser {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string | null;
+  loginId: string;
+  role: PlatformRoleName | null;
+  isActive: boolean;
+  mfaEnabled: boolean;
+  lastLoginAt: string | null;
+  createdAt: string;
+}
+
+export interface PlatformAuditEntry {
+  id: string;
+  action: string;
+  targetType: string | null;
+  targetId: string | null;
+  metadata: unknown;
+  ipAddress: string | null;
+  createdAt: string;
+  actor: string | null;
+}
+
+// ─── Sprint 11B : exploitation Ocall Suite ───
+
+export type QuotaSource = 'override' | 'plan' | 'default';
+
+export interface PlatformAiUsage {
+  period: { from: string; to: string };
+  provider: 'none' | 'simulated' | 'openai';
+  usdXofRate: number;
+  totals: { calls: number; estimatedCostUsd: number };
+  rows: {
+    organization: { id: string; name: string };
+    product: { code: string; name: string } | null;
+    plan: string | null;
+    calls: number;
+    failed: number;
+    estimatedCostUsd: number;
+    features: Partial<Record<AiFeature, number>>;
+    establishments: { id: string | null; name: string; calls: number }[];
+    monthUsed: number;
+    monthQuota: number;
+    quotaSource: QuotaSource;
+  }[];
+}
+
+export interface PlatformStorage {
+  driver: 'local' | 's3';
+  healthy: boolean;
+  totalMb: number;
+  expiredFiles: number;
+  rows: {
+    organization: { id: string; name: string };
+    product: { code: string; name: string } | null;
+    plan: string | null;
+    usedBytes: number;
+    usedMb: number;
+    quotaMb: number;
+    siteMediaBytes: number;
+    privateBytes: number;
+    files: number;
+    quotaSource: QuotaSource;
+    percent: number;
+  }[];
+}
+
+export interface PlatformSettings {
+  environment: string;
+  ai: { provider: string; models: Record<string, string> };
+  storage: { driver: string; healthy: boolean; bucket: string | null };
+  security: {
+    mfaConfigured: boolean;
+    cookieSecure: boolean;
+    sessionTtlHours: number;
+    accountLockThreshold: number;
+  };
+  sites: { publicOrigin: string; baseDomain: string | null; subdomainsEnabled: boolean };
+  logFormat: string;
+  payments: string;
+}
+
+export interface SupportAttachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  bytes: number;
+  url: string;
+  expiresAt: string;
+}
+
+export interface SupportMessageView {
+  id: string;
+  fromOcall: boolean;
+  internal: boolean;
+  body: string;
+  createdAt: string;
+  author: string;
+  attachments: SupportAttachment[];
+}
+
+export interface SupportTicketView {
+  id: string;
+  number: string;
+  subject: string;
+  category: SupportTicketCategory;
+  priority: SupportTicketPriority;
+  status: SupportTicketStatus;
+  lastMessageAt: string;
+  resolvedAt: string | null;
+  createdAt: string;
+  establishment: { id: string; name: string } | null;
+  product: { code: string; name: string } | null;
+  createdBy: { id: string; firstName: string; lastName: string };
+  assignedTo: { id: string; firstName: string; lastName: string } | null;
+  organization?: { id: string; name: string };
+  messages?: SupportMessageView[];
 }

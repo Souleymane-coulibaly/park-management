@@ -1,4 +1,3 @@
-import { hash } from 'argon2';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import type { PrismaService } from '../src/prisma/prisma.service';
@@ -12,7 +11,7 @@ import {
   type SignedUpOwner,
   cleanup,
   createTestApp,
-  email,
+  internalAccount,
   login,
   signup,
 } from './helpers';
@@ -95,19 +94,7 @@ describe('Sprint 10 — sites vitrines (intégration)', () => {
         .expect(201)
     ).body.id;
 
-    const adminEmail = email('s10admin');
-    await prisma.user.create({
-      data: {
-        email: adminEmail,
-        loginId: adminEmail,
-        firstName: 'Super',
-        lastName: 'Admin',
-        platformRole: 'SUPER_ADMIN',
-        mustChangePassword: false,
-        passwordHash: await hash(PASSWORD, { type: 2 }),
-      },
-    });
-    superAdmin = (await login(app, adminEmail, PASSWORD)).agent;
+    superAdmin = (await internalAccount(app, prisma, 's10admin', 'SUPER_ADMIN')).agent;
   }, 300_000);
 
   afterAll(async () => {

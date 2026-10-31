@@ -19,7 +19,13 @@ import { ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { SITE_MEDIA_MAX_BYTES } from '@ocall/shared';
 import { type AuthContext, requireTenant } from '../../common/auth-context';
-import { CurrentAuth, Public, RequirePermission, SuperAdminOnly } from '../../common/decorators';
+import {
+  CurrentAuth,
+  Public,
+  RequirePermission,
+  RequirePlatformPermission,
+  SuperAdminOnly,
+} from '../../common/decorators';
 import { PublicSiteRoute } from '../../common/throttling';
 import type { UploadedFileInMemory } from '../ai/uploaded-file';
 import {
@@ -246,6 +252,7 @@ export class PublicSitesController {
 /** Super Admin : domaines personnalisés à activer (procédure administrative). */
 @ApiTags('Plateforme (Super Admin)')
 @SuperAdminOnly()
+@RequirePlatformPermission('platform.domains.manage')
 @Controller('platform/site-domains')
 export class PlatformSiteDomainsController {
   constructor(private readonly domains: SiteDomainsService) {}

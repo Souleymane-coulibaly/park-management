@@ -66,7 +66,7 @@ export class AiSettingsController {
   @RequirePermission('ai.manage')
   @Get('settings')
   settings(@CurrentAuth() auth: AuthContext) {
-    return this.ai.settings(requireTenant(auth).membership.organizationId);
+    return this.ai.settingsView(requireTenant(auth).membership.organizationId);
   }
 
   @RequirePermission('ai.manage')

@@ -17,7 +17,8 @@
     "migrate:deploy": "tsx scripts/check-migrations.ts && dotenv -e ../../apps/api/.env -- prisma migrate deploy",
     "migrate:deploy:test": "tsx scripts/check-migrations.ts && dotenv -e ../../apps/api/.env -- tsx scripts/migrate-test.ts",
     "migrate:status": "dotenv -e ../../apps/api/.env -- prisma migrate status",
-    "bootstrap-super-admin": "dotenv -e ../../apps/api/.env -- tsx scripts/bootstrap-super-admin.ts"
+    "bootstrap-super-admin": "dotenv -e ../../apps/api/.env -- tsx scripts/bootstrap-super-admin.ts",
+    "reset-mfa": "dotenv -e ../../apps/api/.env -- tsx scripts/reset-mfa.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.2.1",

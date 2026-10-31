@@ -17,6 +17,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
 import type { AuthContext } from '../../common/auth-context';
+import { parkSubscriptionWhere } from '../../common/park-subscription';
 import type {
   RecordSubscriptionPaymentDto,
   RejectSubscriptionPaymentDto,
@@ -145,7 +146,7 @@ export class SaasService {
     const created = await this.prisma.$transaction(async (tx) => {
       const org = await tx.organization.findUnique({
         where: { id: dto.organizationId },
-        select: { id: true, subscription: { select: { id: true, planId: true } } },
+        select: { id: true },
       });
       if (!org) {
         throw new NotFoundException({
@@ -153,11 +154,58 @@ export class SaasService {
           message: 'Organisation introuvable.',
         });
       }
-      if (!org.subscription) {
-        throw new ConflictException({
-          code: 'SUBSCRIPTION_MISSING',
-          message: "Cette organisation n'a pas d'abonnement.",
+      // Règlement d'une facture (Sprint 11A) : il couvre exactement le reste à payer ; la facture
+      // est verrouillée pour que deux saisies simultanées ne la règlent pas deux fois.
+      let target: { subscriptionId: string; planId: string; invoiceId: string | null };
+      if (dto.invoiceId) {
+        await tx.$queryRaw`SELECT "id" FROM "Invoice" WHERE "id" = ${dto.invoiceId}::uuid FOR UPDATE`;
+        const invoice = await tx.invoice.findFirst({
+          where: { id: dto.invoiceId, organizationId: org.id },
+          select: {
+            id: true,
+            status: true,
+            total: true,
+            subscriptionId: true,
+            subscription: { select: { planId: true } },
+            payments: { where: { status: { not: 'REJECTED' } }, select: { amount: true } },
+          },
         });
+        if (!invoice) {
+          throw new NotFoundException({
+            code: 'INVOICE_NOT_FOUND',
+            message: 'Facture introuvable pour ce client.',
+          });
+        }
+        if (invoice.status !== 'ISSUED') {
+          throw new ConflictException({
+            code: 'INVOICE_NOT_PAYABLE',
+            message: 'Cette facture est déjà payée ou annulée.',
+          });
+        }
+        const outstanding = invoice.total - invoice.payments.reduce((t, x) => t + x.amount, 0);
+        if (dto.amount !== outstanding) {
+          throw new BadRequestException({
+            code: 'PAYMENT_AMOUNT_MISMATCH',
+            message: `Le règlement doit couvrir exactement le reste à payer (${outstanding} FCFA).`,
+          });
+        }
+        target = {
+          subscriptionId: invoice.subscriptionId,
+          planId: invoice.subscription.planId,
+          invoiceId: invoice.id,
+        };
+      } else {
+        const sub = await tx.subscription.findFirst({
+          where: parkSubscriptionWhere(org.id),
+          select: { id: true, planId: true },
+        });
+        if (!sub) {
+          throw new ConflictException({
+            code: 'SUBSCRIPTION_MISSING',
+            message: "Cette organisation n'a pas d'abonnement.",
+          });
+        }
+        target = { subscriptionId: sub.id, planId: sub.planId, invoiceId: null };
       }
       // Même référence déjà saisie pour ce client (hors rejetés) : doublon probable.
       if (dto.reference) {
@@ -179,8 +227,9 @@ export class SaasService {
       const payment = await tx.subscriptionPayment.create({
         data: {
           organizationId: org.id,
-          subscriptionId: org.subscription.id,
-          planId: org.subscription.planId,
+          subscriptionId: target.subscriptionId,
+          planId: target.planId,
+          invoiceId: target.invoiceId,
           amount: dto.amount,
           method: dto.method,
           reference: dto.reference ?? null,
@@ -235,17 +284,39 @@ export class SaasService {
         where: { id },
         select: {
           ...PAYMENT_SELECT,
+          invoiceId: true,
           subscription: {
             select: {
               id: true,
               status: true,
               startedAt: true,
               expiresAt: true,
+              agreedMonthlyPrice: true,
+              plan: { select: { setupFee: true, monthlyPrice: true } },
               organization: { select: { timezone: true } },
             },
           },
         },
       });
+
+      // Facture soldée par les règlements validés → payée (une seule fois).
+      let invoicePaid = false;
+      if (payment.invoiceId) {
+        const invoice = await tx.invoice.findUniqueOrThrow({
+          where: { id: payment.invoiceId },
+          select: {
+            total: true,
+            payments: { where: { status: 'VALIDATED' }, select: { amount: true } },
+          },
+        });
+        if (invoice.payments.reduce((t, x) => t + x.amount, 0) >= invoice.total) {
+          const paid = await tx.invoice.updateMany({
+            where: { id: payment.invoiceId, status: 'ISSUED' },
+            data: { status: 'PAID', paidAt: payment.paidAt },
+          });
+          invoicePaid = paid.count === 1;
+        }
+      }
 
       let subscription: { status: string; expiresAt: string | null; changed: boolean } | null =
         null;
@@ -263,6 +334,14 @@ export class SaasService {
               status: 'ACTIVE',
               startedAt: s.startedAt ?? zonedMidnight(dateOnly(payment.periodStart), tz),
               expiresAt,
+              // Première activation : le tarif en vigueur devient le tarif accepté, figé.
+              ...(s.agreedMonthlyPrice === null
+                ? {
+                    agreedSetupFee: s.plan.setupFee,
+                    agreedMonthlyPrice: s.plan.monthlyPrice,
+                    agreedAt: new Date(),
+                  }
+                : {}),
             },
           });
           await tx.subscriptionEvent.create({
@@ -291,11 +370,13 @@ export class SaasService {
             amount: payment.amount,
             extendSubscription: dto.extendSubscription,
             subscription,
+            invoiceId: payment.invoiceId,
+            invoicePaid,
           },
         },
         tx,
       );
-      return { payment: toView(payment), subscription };
+      return { payment: toView(payment), subscription, invoicePaid };
     });
   }
 

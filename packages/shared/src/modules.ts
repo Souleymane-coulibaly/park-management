@@ -179,6 +179,15 @@ export const MODULES: readonly ModuleDefinition[] = [
     href: '/app/employes',
   },
   {
+    key: 'support',
+    label: 'Support Ocall',
+    description: 'Demandes d’assistance à l’équipe Ocall : suivi, réponses, pièces jointes.',
+    status: 'available',
+    activities: [],
+    permission: 'support.use',
+    href: '/app/support',
+  },
+  {
     key: 'settings',
     label: 'Paramètres',
     description: 'Organisation, établissements, rôles, abonnement et compte.',
