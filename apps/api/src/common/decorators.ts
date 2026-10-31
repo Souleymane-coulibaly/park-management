@@ -8,6 +8,7 @@ export const ALLOW_PENDING_PASSWORD = 'allowPendingPassword';
 export const REQUIRED_PERMISSION = 'requiredPermission';
 export const REQUIRED_ACTIVITY = 'requiredActivity';
 export const SUPER_ADMIN_ONLY = 'superAdminOnly';
+export const PARTNER_ONLY = 'partnerOnly';
 export const PLATFORM_PERMISSION = 'platformPermission';
 export const ALLOW_MFA_PENDING = 'allowMfaPending';
 
@@ -30,6 +31,12 @@ export const RequireActivity = (...activities: Activity[]) =>
 
 /** Route réservée aux comptes internes Ocall (tout rôle plateforme). */
 export const SuperAdminOnly = () => SetMetadata(SUPER_ADMIN_ONLY, true);
+
+/**
+ * Route du portail partenaires (Sprint 12B) : réservée aux comptes partenaires, jamais à un membre
+ * d'organisation ni à un compte interne. Le service filtre toujours sur le partenaire de la session.
+ */
+export const PartnerOnly = () => SetMetadata(PARTNER_ONLY, true);
 
 /** Route réservée aux comptes internes portant la permission plateforme (Sprint 11A). */
 export const RequirePlatformPermission = (permission: PlatformPermission) =>

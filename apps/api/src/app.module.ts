@@ -8,6 +8,7 @@ import { StorageModule } from './common/storage/storage.module';
 import { SupportModule } from './modules/support/support.module';
 import { OnlinePaymentsModule } from './modules/online-payments/online-payments.module';
 import { CommercialModule } from './modules/commercial/commercial.module';
+import { PartnersModule } from './modules/partners/partners.module';
 import { CommonModule } from './common/common.module';
 import { AuthGuard } from './common/guards/auth.guard';
 import { OriginGuard } from './common/guards/origin.guard';
@@ -81,6 +82,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     SupportModule,
     OnlinePaymentsModule,
     CommercialModule,
+    PartnersModule,
   ],
   controllers: [HealthController],
   providers: [

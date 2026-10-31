@@ -54,6 +54,14 @@ export interface Me {
   platformPermissions: PlatformPermission[];
   /** Second facteur : requis (rôle interne sensible), enrôlé, validé pour la session. */
   mfa: { required: boolean; enrolled: boolean; verified: boolean };
+  /** Sprint 12B : membre d'une organisation, compte interne Ocall ou partenaire commercial. */
+  accountKind: 'member' | 'internal' | 'partner';
+  partner: {
+    id: string;
+    code: string;
+    companyName: string;
+    status: 'PENDING_VERIFICATION' | 'ACTIVE';
+  } | null;
   navigation: {
     key: string;
     label: string;

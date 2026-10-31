@@ -13,9 +13,9 @@ export const revalidate = 300;
 export default async function DemoPage({
   searchParams,
 }: {
-  searchParams: Promise<{ produit?: string }>;
+  searchParams: Promise<{ produit?: string; ref?: string }>;
 }) {
-  const [{ produit }, catalog] = await Promise.all([searchParams, loadCatalog()]);
+  const [{ produit, ref }, catalog] = await Promise.all([searchParams, loadCatalog()]);
   return (
     <div className="mx-auto max-w-3xl px-4 py-14 sm:px-6">
       <PageHeader
@@ -27,6 +27,7 @@ export default async function DemoPage({
         <DemoForm
           products={(catalog ?? []).map((p) => ({ slug: p.slug, name: p.name }))}
           initialProduct={typeof produit === 'string' ? produit.slice(0, 60) : ''}
+          referral={typeof ref === 'string' && /^[A-Z0-9]{4,16}$/.test(ref) ? ref : null}
         />
       </div>
     </div>

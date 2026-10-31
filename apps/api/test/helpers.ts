@@ -136,6 +136,62 @@ export async function internalAccount(
   };
 }
 
+export interface PartnerAccount {
+  agent: Agent;
+  partnerId: string;
+  userId: string;
+  code: string;
+  email: string;
+}
+
+/**
+ * Partenaire commercial (Sprint 12B) créé par le Super Admin via l'API : connexion avec le mot de
+ * passe temporaire, changement obligatoire, puis enrôlement de la double authentification
+ * (obligatoire pour les partenaires). Le profil reste « à vérifier » tant que `verify` est faux.
+ */
+export async function partnerAccount(
+  app: INestApplication,
+  admin: Agent,
+  label: string,
+  options: { verify?: boolean } = {},
+): Promise<PartnerAccount> {
+  const address = email(label);
+  const created = await admin
+    .post('/api/v1/platform/partners')
+    .send({
+      companyName: `Partenaire ${label} ${RUN}`,
+      firstName: 'Moussa',
+      lastName: label,
+      email: address,
+      phone: '+223 76 00 00 00',
+      country: 'Mali',
+      territories: ['Bamako'],
+    })
+    .expect(201);
+  const { partner, temporaryPassword } = created.body;
+  const { agent: a, status } = await login(app, address, temporaryPassword);
+  if (status !== 200) throw new Error(`Connexion du partenaire ${label} : HTTP ${status}`);
+  await a
+    .post('/api/v1/auth/change-password')
+    .send({ currentPassword: temporaryPassword, newPassword: PASSWORD })
+    .expect(204);
+  const setup = await a.post('/api/v1/auth/mfa/setup').expect(200);
+  await a
+    .post('/api/v1/auth/mfa/enable')
+    .send({ code: totpCode(setup.body.secret, currentStep()) })
+    .expect(200);
+  if (options.verify !== false) {
+    await admin.post(`/api/v1/platform/partners/${partner.id}/verify`).expect(200);
+  }
+  return {
+    agent: a,
+    partnerId: partner.id,
+    userId: partner.user.id,
+    code: partner.code,
+    email: address,
+  };
+}
+
 /** Organisations de test : « Test <libellé> <RUN> », RUN étant 8 caractères hexadécimaux. */
 const TEST_ORG_NAME = /^Test .+ [0-9a-f]{8}$/;
 /** Au-delà de ce délai, une organisation de test est un reste d'exécution interrompue. */
@@ -183,6 +239,7 @@ export async function cleanup(prisma: PrismaService): Promise<void> {
   await prisma.cashRemittance.deleteMany({
     where: { OR: [{ collectorId: { in: userIds } }, { recordedById: { in: userIds } }] },
   });
+  await prisma.commissionRule.deleteMany({ where: { name: { endsWith: RUN } } });
   await prisma.demoRequest.deleteMany({
     where: { email: { endsWith: `${RUN}@test.ocallpark.local` } },
   });

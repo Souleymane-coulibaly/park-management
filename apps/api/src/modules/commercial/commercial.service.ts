@@ -123,6 +123,14 @@ export class CommercialService {
       : null;
     const productId =
       product && product.listed && isPublicProductStatus(product.status) ? product.id : null;
+    // Parrainage (Sprint 12B) : rattachée au partenaire actif du code ; l'attribution d'un futur
+    // client reste confirmée par Ocall.
+    const partner = dto.ref
+      ? await this.prisma.partner.findFirst({
+          where: { code: dto.ref, status: 'ACTIVE' },
+          select: { id: true },
+        })
+      : null;
     const retentionUntil = new Date();
     retentionUntil.setUTCMonth(retentionUntil.getUTCMonth() + DEMO_REQUEST_RETENTION_MONTHS);
     await this.prisma.$transaction(async (tx) => {
@@ -137,6 +145,7 @@ export class CommercialService {
           email: dto.email,
           productId,
           message: dto.message,
+          partnerId: partner?.id ?? null,
           retentionUntil,
         },
         select: { id: true, number: true },
@@ -149,7 +158,7 @@ export class CommercialService {
           action: 'platform.demo_request_received',
           targetType: 'DemoRequest',
           targetId: created.id,
-          metadata: { number: created.number, product: dto.product ?? null },
+          metadata: { number: created.number, product: dto.product ?? null, referral: !!partner },
         },
         tx,
       );
@@ -183,6 +192,7 @@ export class CommercialService {
         retentionUntil: true,
         product: { select: { code: true, name: true } },
         assignedTo: { select: { id: true, firstName: true, lastName: true } },
+        partner: { select: { id: true, code: true, companyName: true } },
       },
     });
   }

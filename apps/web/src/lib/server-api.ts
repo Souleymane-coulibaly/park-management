@@ -22,12 +22,31 @@ export async function getSession(): Promise<Me | null> {
 }
 
 /** Exige une session de membre d'organisation ; le changement de mot de passe initial est imposé. */
+/** Espace d'accueil selon le type de compte (Sprint 12B). */
+export function homeFor(me: Pick<Me, 'accountKind'>): '/app' | '/admin' | '/partenaire' {
+  return me.accountKind === 'partner'
+    ? '/partenaire'
+    : me.accountKind === 'internal'
+      ? '/admin'
+      : '/app';
+}
+
 export async function requireMemberSession(): Promise<Me> {
   const me = await getSession();
   if (!me) redirect('/connexion');
   if (me.user.mustChangePassword) redirect('/changer-mot-de-passe');
-  if (me.user.platformRole) redirect('/admin');
+  if (me.accountKind !== 'member') redirect(homeFor(me));
   if (!me.organization) redirect('/connexion');
+  return me;
+}
+
+/** Portail partenaire : compte partenaire, mot de passe changé, second facteur validé. */
+export async function requirePartnerSession(): Promise<Me> {
+  const me = await getSession();
+  if (!me) redirect('/connexion');
+  if (me.user.mustChangePassword) redirect('/changer-mot-de-passe');
+  if (me.accountKind !== 'partner') redirect(homeFor(me));
+  if (me.mfa.required && !me.mfa.verified) redirect('/double-authentification');
   return me;
 }
 
@@ -35,7 +54,7 @@ export async function requireSuperAdminSession(): Promise<Me> {
   const me = await getSession();
   if (!me) redirect('/connexion');
   if (me.user.mustChangePassword) redirect('/changer-mot-de-passe');
-  if (!me.user.platformRole) redirect('/app');
+  if (me.accountKind !== 'internal') redirect(homeFor(me));
   // Second facteur obligatoire (propriétaire, administrateur délégué, facturation).
   if (me.mfa.required && !me.mfa.verified) redirect('/double-authentification');
   return me;

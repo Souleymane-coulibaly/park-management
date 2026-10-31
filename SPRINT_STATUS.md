@@ -1,21 +1,22 @@
 # Ocall Park — suivi des sprints
 
-| Sprint | Périmètre                                                               | Branche            | Statut                                                |
-| ------ | ----------------------------------------------------------------------- | ------------------ | ----------------------------------------------------- |
-| 1      | Socle SaaS multi-tenant, frontend, établissements                       | `claude/sprint-1`  | ✅ Validé                                             |
-| 2      | Caisse POS restaurant                                                   | `claude/sprint-2`  | ✅ Validé                                             |
-| 3      | POS Android, impression thermique, tiroir-caisse                        | `claude/sprint-3`  | ✅ Validé (validation matérielle à faire)             |
-| 4      | Billetterie Parc, QR codes, contrôle d’accès                            | `claude/sprint-4`  | ✅ CP-03 : GO SOUS RÉSERVES (A1, A2, A5 ouvertes)     |
-| 5      | Restaurant : commandes, KDS, QR, tables, stocks, réservations           | `claude/sprint-5`  | 🟡 Terminé — local, push à autoriser                  |
-| 6      | Bornes de commande, CRM, fidélité, planning du personnel                | `claude/sprint-6`  | 🟡 En cours — tests base bloqués (Neon `test`)        |
-| 7      | Paiement des abonnements (CinetPay)                                     | —                  | ⏸️ Reporté par le commanditaire (plan présenté)       |
-| 8      | IA : import de carte, copilote, commande vocale                         | `claude/sprint-8`  | 🟡 En cours — tests base bloqués (Neon `test`)        |
-| 9A     | Analyses : CA, produits × heures, parc, marges, exports CSV             | `claude/sprint-9`  | 🟡 En cours — tests base bloqués (Neon `test`)        |
-| 9B     | Copilote enrichi, statistiques SaaS, règlements d’abonnement            | `claude/sprint-9`  | 🟡 En cours — tests base bloqués (Neon `test`)        |
-| 10     | Sites vitrines publics, domaines, tarifs SaaS                           | `claude/sprint-10` | 🟡 En cours — tests base bloqués (Neon `test`)        |
-| 11A    | Ocall Suite : produits, abonnements, factures, rôles, MFA               | `claude/sprint-11` | 🟡 Poussé `e1efd33` — CP-10 à auditer                 |
-| 11B    | Stockage privé, quotas IA, support, production, pilote                  | `claude/sprint-11` | 🟡 Poussé `e1efd33` — CP-10 à auditer                 |
-| 12A    | Site Ocall Suite, catalogue, Super Admin, règlements, paiement en ligne | `claude/sprint-12` | 🟡 Terminé localement — non commité ; CP-10 à auditer |
+| Sprint | Périmètre                                                               | Branche            | Statut                                            |
+| ------ | ----------------------------------------------------------------------- | ------------------ | ------------------------------------------------- |
+| 1      | Socle SaaS multi-tenant, frontend, établissements                       | `claude/sprint-1`  | ✅ Validé                                         |
+| 2      | Caisse POS restaurant                                                   | `claude/sprint-2`  | ✅ Validé                                         |
+| 3      | POS Android, impression thermique, tiroir-caisse                        | `claude/sprint-3`  | ✅ Validé (validation matérielle à faire)         |
+| 4      | Billetterie Parc, QR codes, contrôle d’accès                            | `claude/sprint-4`  | ✅ CP-03 : GO SOUS RÉSERVES (A1, A2, A5 ouvertes) |
+| 5      | Restaurant : commandes, KDS, QR, tables, stocks, réservations           | `claude/sprint-5`  | 🟡 Terminé — local, push à autoriser              |
+| 6      | Bornes de commande, CRM, fidélité, planning du personnel                | `claude/sprint-6`  | 🟡 En cours — tests base bloqués (Neon `test`)    |
+| 7      | Paiement des abonnements (CinetPay)                                     | —                  | ⏸️ Reporté par le commanditaire (plan présenté)   |
+| 8      | IA : import de carte, copilote, commande vocale                         | `claude/sprint-8`  | 🟡 En cours — tests base bloqués (Neon `test`)    |
+| 9A     | Analyses : CA, produits × heures, parc, marges, exports CSV             | `claude/sprint-9`  | 🟡 En cours — tests base bloqués (Neon `test`)    |
+| 9B     | Copilote enrichi, statistiques SaaS, règlements d’abonnement            | `claude/sprint-9`  | 🟡 En cours — tests base bloqués (Neon `test`)    |
+| 10     | Sites vitrines publics, domaines, tarifs SaaS                           | `claude/sprint-10` | 🟡 En cours — tests base bloqués (Neon `test`)    |
+| 11A    | Ocall Suite : produits, abonnements, factures, rôles, MFA               | `claude/sprint-11` | 🟡 Poussé `e1efd33` — CP-10 à auditer             |
+| 11B    | Stockage privé, quotas IA, support, production, pilote                  | `claude/sprint-11` | 🟡 Poussé `e1efd33` — CP-10 à auditer             |
+| 12A    | Site Ocall Suite, catalogue, Super Admin, règlements, paiement en ligne | `claude/sprint-12` | 🟡 Poussé `6c2254a` ; base de dév. migrée         |
+| 12B    | Portail partenaires, prospects, attributions, commissions               | `claude/sprint-12` | 🟡 Terminé localement — non commité               |
 
 Environnements : base Neon de **développement** (préservée), branche Neon **`test`** réservée aux
 tests automatisés, base de **production non configurée**. Aucune fusion dans `main`, aucun déploiement.
@@ -43,6 +44,27 @@ Checkpoints Codex :
   `claude/sprint-10`. Préparation : [CP-09-preparation.md](docs/checkpoints/CP-09-preparation.md).
 
 ---
+
+## Sprint 12B — Portail partenaires commerciaux (terminé localement, non commité)
+
+Démarré le 2026-11-01 après validation du modèle par le commanditaire (protection des prospects
+90 jours prolongeable, fenêtre de 12 mois depuis la première activation, attribution toujours
+confirmée par Ocall, MFA obligatoire des partenaires, taux configurables et règle inactive jusqu'à
+validation). Documentation : [PARTENAIRES.md](docs/PARTENAIRES.md).
+
+- **Compte partenaire** exclusif (session, connexion, `/me`, MFA, garde `@PartnerOnly`, redirections
+  web), portail `/partenaire` : tableau de bord, prospects, clients apportés (nom et montants),
+  commissions et versements, espèces, produits et ressources, lien de parrainage.
+- **Super Admin** : partenaires (invitation, vérification, suspension, territoires, règle, espèces),
+  prospects et attributions (confirmation, conflits, prolongation), règles de commission (validation
+  par le propriétaire), commissions (validation, litiges), versements à quatre yeux, rapports.
+- **Moteur de commissions** (`common/commissions.ts`) branché sur la confirmation et le
+  remboursement des règlements : uniquement sur encaissement confirmé, prorata des lignes, fenêtre
+  des mensualités, aucun doublon, annulation ou régularisation négative.
+- **Espèces des partenaires** : déclaration plafonnée pour un client attribué, confirmée par Ocall ;
+  rapprochement de caisse par partenaire. **Parrainage** : `/demo?ref=CODE`.
+- Migration additive `20261102000000_partenaires_commerciaux` (6 tables, 5 types, contraintes),
+  **non appliquée** ; vérifiée sur base vierge (schéma identique).
 
 ## Sprint 12A — Ocall Suite : site public, catalogue, règlements, paiement en ligne (terminé localement, non commité)
 

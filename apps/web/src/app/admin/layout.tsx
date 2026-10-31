@@ -66,6 +66,24 @@ const NAV: (NavItem & { permission: PlatformPermission | null })[] = [
     permission: 'platform.demo.manage',
   },
   {
+    key: 'platform-partners',
+    label: 'Partenaires',
+    href: '/admin/partenaires',
+    permission: 'platform.partners.manage',
+  },
+  {
+    key: 'platform-attributions',
+    label: 'Prospects et attributions',
+    href: '/admin/partenaires/attributions',
+    permission: 'platform.partners.manage',
+  },
+  {
+    key: 'platform-commissions',
+    label: 'Commissions partenaires',
+    href: '/admin/partenaires/commissions',
+    permission: 'platform.commissions.validate',
+  },
+  {
     key: 'platform-domains',
     label: 'Domaines',
     href: '/admin/domaines',

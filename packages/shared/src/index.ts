@@ -15,3 +15,4 @@ export * from './sites';
 export * from './platform';
 export * from './support';
 export * from './commercial';
+export * from './partners';

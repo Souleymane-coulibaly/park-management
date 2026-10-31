@@ -18,6 +18,7 @@ import {
   PLATFORM_PERMISSION,
   REQUIRED_ACTIVITY,
   REQUIRED_PERMISSION,
+  PARTNER_ONLY,
   SUPER_ADMIN_ONLY,
 } from '../decorators';
 
@@ -37,6 +38,11 @@ export class PermissionsGuard implements CanActivate {
     const targets = [context.getHandler(), context.getClass()];
     const auth = context.switchToHttp().getRequest<Request>().auth;
     if (!auth) return true; // route publique : l'AuthGuard a déjà tranché
+
+    if (this.reflector.getAllAndOverride<boolean>(PARTNER_ONLY, targets)) {
+      if (!auth.partner || auth.membership || auth.user.platformRole) throw this.denied();
+      return true;
+    }
 
     const platformPermission = this.reflector.getAllAndOverride<PlatformPermission | undefined>(
       PLATFORM_PERMISSION,

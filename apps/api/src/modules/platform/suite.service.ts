@@ -16,6 +16,7 @@ import {
   computeInvoiceLines,
   effectivePlatformRole,
   type SaasProductStatus,
+  allocatePayment,
   canSubscribeToProduct,
   formatInvoiceNumber,
   isProductBillable,
@@ -861,17 +862,10 @@ export class SuiteService {
         collected.unallocated += p.amount;
         continue;
       }
-      let allocated = 0;
-      p.invoice.lines.forEach((l, i, all) => {
-        const share =
-          i === all.length - 1
-            ? p.amount - allocated
-            : Math.round((p.amount * l.amount) / p.invoice!.total);
-        allocated += share;
-        if (l.kind === 'SETUP') collected.setup += share;
-        else if (l.kind === 'MONTHLY') collected.monthly += share;
-        else collected.adjustments += share;
-      });
+      const share = allocatePayment(p.invoice.lines, p.invoice.total, p.amount);
+      collected.setup += share.setup;
+      collected.monthly += share.monthly;
+      collected.adjustments += share.adjustments;
     }
     const count = (status: string) => subs.find((s) => s.status === status)?._count._all ?? 0;
     const outstanding = unpaidInvoices.map((i) => ({

@@ -16,6 +16,9 @@ export interface MeResponse {
   /** Permissions des comptes internes Ocall (vide pour un membre d'organisation). */
   platformPermissions: PlatformPermission[];
   mfa: AuthContext['mfa'];
+  /** Type de compte : membre d'une organisation, compte interne Ocall ou partenaire (Sprint 12B). */
+  accountKind: 'member' | 'internal' | 'partner';
+  partner: AuthContext['partner'];
   navigation: { key: string; label: string; status: string; href: string | null }[];
 }
 
@@ -33,8 +36,10 @@ export function toMe(auth: AuthContext): MeResponse {
       : null,
     role: m?.role ?? auth.user.platformRole,
     permissions: m ? [...ROLE_PERMISSIONS[m.role]] : [],
-    platformPermissions: m ? [] : platformPermissionsOf(auth.user.platformRole),
+    platformPermissions: m || auth.partner ? [] : platformPermissionsOf(auth.user.platformRole),
     mfa: auth.mfa,
+    accountKind: m ? 'member' : auth.partner ? 'partner' : 'internal',
+    partner: auth.partner,
     navigation: m
       ? navigationFor(m.businessType, m.role).map((mod) => ({
           key: mod.key,

@@ -85,6 +85,11 @@ export class CreateDemoRequestDto {
   @MaxLength(200)
   website?: string;
 
+  @ApiPropertyOptional({ description: 'Code de parrainage d’un partenaire (lien /demo?ref=CODE).' })
+  @IsOptional()
+  @Matches(/^[A-Z0-9]{4,16}$/)
+  ref?: string;
+
   @ApiProperty({ description: 'Horodatage (ms) de l’affichage du formulaire.' })
   @IsInt()
   startedAt: number;

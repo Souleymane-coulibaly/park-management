@@ -14,7 +14,15 @@ import { ApiError, api } from '@/lib/api';
  * confirmation par un premier code, codes de secours affichés une seule fois) ou vérification
  * (code à 6 chiffres ou code de secours).
  */
-export function MfaForm({ enrolled, account }: { enrolled: boolean; account: string }) {
+export function MfaForm({
+  enrolled,
+  account,
+  home = '/admin',
+}: {
+  enrolled: boolean;
+  account: string;
+  home?: string;
+}) {
   const router = useRouter();
   const [setup, setSetup] = useState<{ secret: string; otpauthUri: string } | null>(null);
   const [qr, setQr] = useState<string | null>(null);
@@ -66,7 +74,7 @@ export function MfaForm({ enrolled, account }: { enrolled: boolean; account: str
           method: 'POST',
           body: useRecovery ? { recoveryCode: code.trim() } : { code },
         });
-        router.replace('/admin');
+        router.replace(home);
         router.refresh();
       }
     } catch (e) {
@@ -94,7 +102,7 @@ export function MfaForm({ enrolled, account }: { enrolled: boolean; account: str
         <Button
           className="w-full"
           onClick={() => {
-            router.replace('/admin');
+            router.replace(home);
             router.refresh();
           }}
         >

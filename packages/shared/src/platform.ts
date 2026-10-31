@@ -59,6 +59,10 @@ export const PlatformPermission = {
   CASH_DECLARE: 'platform.billing.cash.declare',
   ACTIVATIONS_APPROVE: 'platform.activations.approve',
   DEMO_REQUESTS_MANAGE: 'platform.demo.manage',
+  /** Sprint 12B : partenaires commerciaux, commissions, versements. */
+  PARTNERS_MANAGE: 'platform.partners.manage',
+  COMMISSIONS_VALIDATE: 'platform.commissions.validate',
+  PAYOUTS_MANAGE: 'platform.payouts.manage',
 } as const;
 export type PlatformPermission = (typeof PlatformPermission)[keyof typeof PlatformPermission];
 export const PLATFORM_PERMISSIONS: readonly PlatformPermission[] =
@@ -80,6 +84,8 @@ export const PLATFORM_ROLE_PERMISSIONS: Record<PlatformRoleName, readonly Platfo
     PP.CASH_DECLARE,
     PP.ACTIVATIONS_APPROVE,
     PP.DEMO_REQUESTS_MANAGE,
+    PP.COMMISSIONS_VALIDATE,
+    PP.PAYOUTS_MANAGE,
   ],
   SUPPORT_AGENT: [
     PP.DASHBOARD,

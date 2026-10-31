@@ -50,10 +50,12 @@ export class MfaService {
   }
 
   private assertInternal(auth: AuthContext) {
-    if (!auth.user.platformRole || auth.membership) {
+    // Comptes internes Ocall et partenaires commerciaux (Sprint 12B) ; jamais les membres clients.
+    if (auth.membership || (!auth.user.platformRole && !auth.partner)) {
       throw new ForbiddenException({
         code: 'FORBIDDEN',
-        message: 'La double authentification concerne les comptes internes Ocall.',
+        message:
+          'La double authentification concerne les comptes internes Ocall et les partenaires.',
       });
     }
   }

@@ -1,4 +1,4 @@
-# Checkpoint CP-11 — préparation (Sprint 12A ; 12B à venir)
+# Checkpoint CP-11 — préparation (Sprint 12 : 12A et 12B)
 
 Ce document prépare l'audit indépendant Codex CP-11. Il ne constitue pas l'audit lui-même. CP-11
 couvrira le Sprint 12 entier (12A puis 12B, portail partenaires) ; cette version décrit le 12A.
@@ -42,6 +42,21 @@ couvrira le Sprint 12 entier (12A puis 12B, portail partenaires) ; cette version
    commercialisé, demande de démonstration (anti-spam, conservation, aucune création
    d'abonnement), pages légales sans donnée inventée, sites vitrines clients inchangés.
 7. **Autorisations** : nouvelles permissions, routes plateforme refusées aux clients.
+
+## Points à vérifier — Sprint 12B (partenaires)
+
+8. **Type de compte partenaire** (`session.service.ts`, `auth-context.ts`, `permissions.guard.ts`,
+   `auth.service.ts`, `me.ts`) : exclusivité, partenaire suspendu sans session, MFA obligatoire,
+   aucune route client ni plateforme accessible, portail filtré sur le partenaire de la session.
+9. **Prospects** : doublons (téléphone, e-mail, nom normalisés), réservation 90 jours, aucune fuite
+   de l'identité d'un autre partenaire, verrou contre les enregistrements simultanés.
+10. **Attributions** : confirmation par Ocall seulement, une confirmée par organisation, conflits.
+11. **Commissions** (`common/commissions.ts`) : encaissement confirmé seulement, prorata, fenêtre de
+    12 mois, unicité, remboursement (annulation ou régularisation), partenaire suspendu, règle
+    inactive sans effet, validation par le propriétaire.
+12. **Versements** : validation, quatre yeux, aucun versement automatique.
+13. **Espèces des partenaires** : habilitation, client attribué, plafond, jamais confirmées par le
+    partenaire.
 
 ## Résultats à la date de préparation
 

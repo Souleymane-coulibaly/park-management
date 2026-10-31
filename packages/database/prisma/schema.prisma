@@ -140,6 +140,9 @@ model Organization {
   storedFiles          StoredFile[]
   supportTickets       SupportTicket[]
   onlinePayments       OnlinePayment[]
+  attributions         Attribution[]
+  commissions          Commission[]
+  prospects            Prospect[]
 
   @@index([status])
   @@index([businessType])
@@ -246,6 +249,8 @@ model User {
   cashRemittancesConfirmed       CashRemittance[]         @relation("CashRemittanceConfirmedBy")
   onlinePaymentsInitiated        OnlinePayment[]          @relation("OnlinePaymentInitiatedBy")
   demoRequestsAssigned           DemoRequest[]            @relation("DemoRequestAssignedTo")
+  /// Sprint 12B : compte partenaire commercial (exclusif d'un compte client ou interne).
+  partner                        Partner?                 @relation("PartnerUser")
 }
 
 model OrganizationMembership {
@@ -544,6 +549,8 @@ model SubscriptionPayment {
   remittanceId             String?                   @db.Uuid
   cancelledAt              DateTime?
   cancelledById            String?                   @db.Uuid
+  /// Sprint 12B : collecte d'espèces déclarée par un partenaire habilité (jamais confirmée par lui).
+  collectedByPartnerId     String?                   @db.Uuid
   /// Décision d'activation (règlement en ligne, mode ADMIN_APPROVAL) : le paiement reste compté
   /// quel que soit l'état de l'abonnement.
   activationStatus         PaymentActivationStatus   @default(NOT_REQUIRED)
@@ -568,12 +575,15 @@ model SubscriptionPayment {
   collectedBy         User?            @relation("SubscriptionPaymentCollectedBy", fields: [collectedById], references: [id], onDelete: NoAction)
   cancelledBy         User?            @relation("SubscriptionPaymentCancelledBy", fields: [cancelledById], references: [id], onDelete: NoAction)
   remittance          CashRemittance?  @relation(fields: [remittanceId], references: [id], onDelete: NoAction)
+  collectedByPartner  Partner?         @relation(fields: [collectedByPartnerId], references: [id], onDelete: NoAction)
+  commissions         Commission[]
   onlinePayment       OnlinePayment?
 
   @@unique([organizationId, receiptReference])
   @@index([status, paidAt])
   @@index([activationStatus])
   @@index([collectedById, paidAt])
+  @@index([collectedByPartnerId, status])
   @@index([remittanceId])
   @@index([organizationId, paidAt])
   @@index([subscriptionId])
@@ -1953,6 +1963,8 @@ model SaasProduct {
   supportTickets SupportTicket[]
   invoices       Invoice[]
   demoRequests   DemoRequest[]
+  prospects      Prospect[]
+  commissions    Commission[]
 }
 
 enum InvoiceStatus {
@@ -2123,6 +2135,9 @@ model DemoRequest {
   status         DemoRequestStatus @default(NEW)
   assignedToId   String?           @db.Uuid
   notes          String?
+  /// Sprint 12B : partenaire à l'origine de la demande (portail ou lien de parrainage).
+  partnerId      String?           @db.Uuid
+  prospectId     String?           @db.Uuid
   retentionUntil DateTime
   anonymizedAt   DateTime?
   createdAt      DateTime          @default(now())
@@ -2130,9 +2145,12 @@ model DemoRequest {
 
   product    SaasProduct? @relation(fields: [productId], references: [id], onDelete: SetNull)
   assignedTo User?        @relation("DemoRequestAssignedTo", fields: [assignedToId], references: [id], onDelete: SetNull)
+  partner    Partner?     @relation(fields: [partnerId], references: [id], onDelete: SetNull)
+  prospect   Prospect?    @relation(fields: [prospectId], references: [id], onDelete: SetNull)
 
   @@index([status, createdAt])
   @@index([retentionUntil])
+  @@index([partnerId, createdAt])
 }
 
 /// Compteurs de la plateforme (numérotation des factures par année), incrémentés de façon atomique.
@@ -2246,4 +2264,242 @@ model SupportMessage {
   attachments StoredFile[]
 
   @@index([ticketId, createdAt])
+}
+
+// ─── Sprint 12B : partenaires commerciaux ───
+
+enum PartnerStatus {
+  /// Créé et invité par Ocall, profil à vérifier avant toute activité.
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+}
+
+/// Partenaire commercial (apporteur d'affaires). Aucun privilège d'administration SaaS : il ne voit
+/// que ses prospects, ses clients apportés (nom et montants encaissés) et ses commissions.
+model Partner {
+  id                    String        @id @default(uuid()) @db.Uuid
+  userId                String        @unique @db.Uuid
+  /// Code de parrainage (liens /demo?ref=CODE), unique.
+  code                  String        @unique
+  companyName           String
+  contactName           String
+  phone                 String
+  country               String
+  territories           String[]      @default([])
+  status                PartnerStatus @default(PENDING_VERIFICATION)
+  /// Encaissement d'espèces : désactivé par défaut ; plafond des collectes non remises (FCFA).
+  cashCollectionEnabled Boolean       @default(false)
+  cashCollectionLimit   Int           @default(0)
+  /// Règle de commission propre au partenaire ; sinon la règle générale active.
+  commissionRuleId      String?       @db.Uuid
+  notes                 String?
+  verifiedAt            DateTime?
+  verifiedById          String?       @db.Uuid
+  suspendedAt           DateTime?
+  suspensionReason      String?
+  createdById           String        @db.Uuid
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+
+  user              User                  @relation("PartnerUser", fields: [userId], references: [id], onDelete: Cascade)
+  commissionRule    CommissionRule?       @relation(fields: [commissionRuleId], references: [id], onDelete: SetNull)
+  prospects         Prospect[]
+  attributions      Attribution[]
+  commissions       Commission[]
+  payouts           CommissionPayout[]
+  demoRequests      DemoRequest[]
+  collectedPayments SubscriptionPayment[]
+
+  @@index([status])
+}
+
+/// Règle de commission (taux en points de base : 1500 = 15 %). Créée inactive ; ne s'applique
+/// qu'après validation explicite par Ocall. Jamais de taux dans le code.
+model CommissionRule {
+  id                  String    @id @default(uuid()) @db.Uuid
+  name                String
+  setupRateBps        Int
+  monthlyRateBps      Int
+  /// Mensualités commissionnées pendant N mois à compter de la première activation du client.
+  monthlyWindowMonths Int
+  /// Produit concerné ; null = tous les produits.
+  productId           String?   @db.Uuid
+  isActive            Boolean   @default(false)
+  validatedById       String?   @db.Uuid
+  validatedAt         DateTime?
+  createdById         String    @db.Uuid
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  partners     Partner[]
+  attributions Attribution[]
+
+  @@index([isActive, productId])
+}
+
+enum ProspectStatus {
+  NEW
+  CONTACTED
+  DEMO_REQUESTED
+  QUALIFIED
+  WON
+  LOST
+}
+
+/// Prospect enregistré par un partenaire. Les doublons sont détectés côté serveur sur les valeurs
+/// normalisées ; un prospect reste réservé à son partenaire jusqu'à `protectedUntil`.
+model Prospect {
+  id              String         @id @default(uuid()) @db.Uuid
+  partnerId       String         @db.Uuid
+  companyName     String
+  normalizedName  String
+  contactName     String
+  phone           String
+  phoneNormalized String
+  email           String?
+  emailNormalized String?
+  country         String
+  city            String?
+  productId       String?        @db.Uuid
+  status          ProspectStatus @default(NEW)
+  notes           String?
+  protectedUntil  DateTime
+  /// Organisation cliente une fois convertie (renseignée par Ocall).
+  organizationId  String?        @db.Uuid
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  partner      Partner       @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  product      SaasProduct?  @relation(fields: [productId], references: [id], onDelete: SetNull)
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  attributions Attribution[]
+  demoRequests DemoRequest[]
+
+  @@index([partnerId, createdAt])
+  @@index([phoneNormalized])
+  @@index([emailNormalized])
+  @@index([normalizedName])
+}
+
+enum AttributionStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+}
+
+enum AttributionSource {
+  PROSPECT
+  REFERRAL
+  ADMIN
+}
+
+/// Attribution d'une organisation cliente à un partenaire : proposée, puis TOUJOURS confirmée par
+/// Ocall. Au plus une attribution confirmée par organisation (contrôle sous verrou).
+model Attribution {
+  id              String            @id @default(uuid()) @db.Uuid
+  organizationId  String            @db.Uuid
+  partnerId       String            @db.Uuid
+  prospectId      String?           @db.Uuid
+  source          AttributionSource
+  status          AttributionStatus @default(PENDING)
+  /// Règle de commission figée à la confirmation.
+  ruleId          String?           @db.Uuid
+  confirmedById   String?           @db.Uuid
+  confirmedAt     DateTime?
+  rejectionReason String?
+  createdById     String?           @db.Uuid
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  partner      Partner         @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  prospect     Prospect?       @relation(fields: [prospectId], references: [id], onDelete: SetNull)
+  rule         CommissionRule? @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+  commissions  Commission[]
+
+  @@index([organizationId, status])
+  @@index([partnerId, status])
+}
+
+enum CommissionKind {
+  SETUP
+  MONTHLY
+  /// Régularisation négative (remboursement d'un règlement dont la commission était versée).
+  ADJUSTMENT
+}
+
+enum CommissionStatus {
+  ACCRUED
+  VALIDATED
+  REVERSED
+  PAID
+}
+
+/// Commission calculée uniquement sur un encaissement CONFIRMÉ et éligible ; une par règlement et
+/// par nature (aucun doublon). Aucun versement automatique.
+model Commission {
+  id                    String           @id @default(uuid()) @db.Uuid
+  partnerId             String           @db.Uuid
+  attributionId         String           @db.Uuid
+  subscriptionPaymentId String?          @db.Uuid
+  organizationId        String           @db.Uuid
+  productId             String           @db.Uuid
+  kind                  CommissionKind
+  /// Part encaissée servant de base (FCFA).
+  baseAmount            Int
+  rateBps               Int
+  /// Montant (négatif pour une régularisation).
+  amount                Int
+  currency              String           @default("XOF") @db.Char(3)
+  status                CommissionStatus @default(ACCRUED)
+  validatedById         String?          @db.Uuid
+  validatedAt           DateTime?
+  reversedAt            DateTime?
+  reversalReason        String?
+  payoutId              String?          @db.Uuid
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  partner             Partner              @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  attribution         Attribution          @relation(fields: [attributionId], references: [id], onDelete: Cascade)
+  subscriptionPayment SubscriptionPayment? @relation(fields: [subscriptionPaymentId], references: [id], onDelete: SetNull)
+  organization        Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  product             SaasProduct          @relation(fields: [productId], references: [id])
+  payout              CommissionPayout?    @relation(fields: [payoutId], references: [id], onDelete: SetNull)
+
+  @@unique([subscriptionPaymentId, kind])
+  @@index([partnerId, status])
+  @@index([payoutId])
+}
+
+enum CommissionPayoutStatus {
+  RECORDED
+  CONFIRMED
+  REJECTED
+}
+
+/// Versement de commissions, saisi manuellement puis confirmé par une autre personne.
+model CommissionPayout {
+  id              String                 @id @default(uuid()) @db.Uuid
+  number          String                 @unique
+  partnerId       String                 @db.Uuid
+  total           Int
+  currency        String                 @default("XOF") @db.Char(3)
+  method          String
+  reference       String?
+  paidAt          DateTime
+  status          CommissionPayoutStatus @default(RECORDED)
+  note            String?
+  recordedById    String                 @db.Uuid
+  confirmedById   String?                @db.Uuid
+  confirmedAt     DateTime?
+  rejectionReason String?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  partner     Partner      @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  commissions Commission[]
+
+  @@index([partnerId, paidAt])
 }

@@ -103,7 +103,20 @@ export class AuthService {
 
     let membershipId: string | null = null;
     let organizationId: string | null = null;
-    if (!user.platformRole) {
+    // Compte partenaire (Sprint 12B) : aucune adhésion ; refusé s'il est suspendu.
+    const partner = user.platformRole
+      ? null
+      : await this.prisma.partner.findUnique({
+          where: { userId: user.id },
+          select: { status: true },
+        });
+    if (partner?.status === 'SUSPENDED') {
+      throw new ForbiddenException({
+        code: 'PARTNER_SUSPENDED',
+        message: 'Ce compte partenaire est suspendu.',
+      });
+    }
+    if (!user.platformRole && !partner) {
       const membership = await this.prisma.organizationMembership.findFirst({
         where: { userId: user.id, isActive: true },
         include: { organization: { select: { status: true } } },

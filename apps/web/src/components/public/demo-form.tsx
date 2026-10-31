@@ -16,9 +16,12 @@ import { type ApiError, api } from '@/lib/api';
 export function DemoForm({
   products,
   initialProduct,
+  referral = null,
 }: {
   products: { slug: string; name: string }[];
   initialProduct: string;
+  /** Code de parrainage d'un partenaire (lien /demo?ref=CODE), Sprint 12B. */
+  referral?: string | null;
 }) {
   const [startedAt, setStartedAt] = useState(0);
   const [form, setForm] = useState({
@@ -55,6 +58,7 @@ export function DemoForm({
           message: form.message,
           consent: form.consent,
           website: form.website,
+          ...(referral ? { ref: referral } : {}),
           startedAt,
         },
       });

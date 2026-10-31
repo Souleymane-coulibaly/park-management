@@ -23,6 +23,7 @@ import { AuditService } from '../../common/audit/audit.service';
 import type { AuthContext } from '../../common/auth-context';
 import { PLATFORM_TIMEZONE, nextPlatformSequence } from '../../common/platform-counter';
 import { extendSubscription, markInvoicePaidIfSettled } from '../../common/subscription-billing';
+import { accrueCommissions, reverseCommissions } from '../../common/commissions';
 import type {
   DeclareRemittanceDto,
   DeclareSubscriptionPaymentDto,
@@ -158,7 +159,16 @@ export class SubscriptionPaymentsService {
 
   // ─── Déclaration ───
 
-  async declare(auth: AuthContext, dto: DeclareSubscriptionPaymentDto) {
+  /**
+   * Avec `partnerId` (Sprint 12B) : collecte d'espèces déclarée par un partenaire habilité, pour un
+   * client qui lui est attribué, dans la limite de son plafond ; statut DECLARED, confirmée
+   * ensuite par Ocall à la remise des espèces (jamais par le partenaire).
+   */
+  async declare(
+    auth: AuthContext,
+    dto: DeclareSubscriptionPaymentDto,
+    options: { partnerId?: string } = {},
+  ) {
     this.assertDates(dto);
     if (dto.method === 'CASH' && !dto.receiptReference) {
       throw new BadRequestException({
@@ -228,11 +238,16 @@ export class SubscriptionPaymentsService {
           }
         }
         const cash = dto.method === 'CASH';
+        if (options.partnerId) {
+          await this.assertPartnerCollection(tx, options.partnerId, dto.organizationId, dto.amount);
+        }
         let collectedById: string | null = null;
         let receiptNumber: string | null = null;
         if (cash) {
-          collectedById = dto.collectedById ?? auth.user.id;
-          if (collectedById !== auth.user.id) await this.assertInternalUser(tx, collectedById);
+          if (!options.partnerId) {
+            collectedById = dto.collectedById ?? auth.user.id;
+            if (collectedById !== auth.user.id) await this.assertInternalUser(tx, collectedById);
+          }
           const { year, sequence } = await nextPlatformSequence(tx, 'receipt');
           receiptNumber = formatReceiptNumber(year, sequence);
         }
@@ -250,9 +265,10 @@ export class SubscriptionPaymentsService {
             periodStart: new Date(`${dto.periodStart}T00:00:00Z`),
             periodEnd: new Date(`${dto.periodEnd}T00:00:00Z`),
             note: dto.note ?? null,
-            status: 'PENDING_VERIFICATION',
+            status: options.partnerId ? 'DECLARED' : 'PENDING_VERIFICATION',
             recordedById: auth.user.id,
             collectedById,
+            collectedByPartnerId: options.partnerId ?? null,
             receiptNumber,
             receiptReference: cash ? dto.receiptReference! : null,
           },
@@ -308,7 +324,14 @@ export class SubscriptionPaymentsService {
         });
       }
       const claimed = await tx.subscriptionPayment.updateMany({
-        where: { id, status: 'PENDING_VERIFICATION' },
+        where: {
+          id,
+          OR: [
+            { status: 'PENDING_VERIFICATION' },
+            // Collecte d'un partenaire : confirmée par Ocall à la remise des espèces.
+            { status: 'DECLARED', collectedByPartnerId: { not: null } },
+          ],
+        },
         data: { status: 'CONFIRMED', validatedById: auth.user.id, validatedAt: new Date() },
       });
       if (claimed.count === 0) this.notInStatus(current.status, 'à vérifier');
@@ -439,6 +462,7 @@ export class SubscriptionPaymentsService {
           invoiceReopened = true;
         }
       }
+      const commissionReversal = await reverseCommissions(tx, id, `Remboursement : ${reason}`);
       const online = await tx.onlinePayment.findUnique({
         where: { subscriptionPaymentId: id },
         select: { id: true, status: true },
@@ -462,7 +486,7 @@ export class SubscriptionPaymentsService {
           action: 'platform.subscription_payment_refunded',
           targetType: 'SubscriptionPayment',
           targetId: id,
-          metadata: { amount: current.amount, reason, invoiceReopened },
+          metadata: { amount: current.amount, reason, invoiceReopened, commissionReversal },
         },
         tx,
       );
@@ -497,7 +521,9 @@ export class SubscriptionPaymentsService {
       invoicePaid && options.activate !== false
         ? await this.applyActivation(tx, paymentId, actorUserId)
         : null;
-    return { invoicePaid, activation };
+    // Commissions partenaires : sur tout encaissement confirmé et éligible (Sprint 12B).
+    const commissions = await accrueCommissions(tx, paymentId);
+    return { invoicePaid, activation, commissions };
   }
 
   private async applyActivation(
@@ -934,6 +960,8 @@ export class SubscriptionPaymentsService {
         status: true,
         collectedById: true,
         collectedBy: PERSON,
+        collectedByPartnerId: true,
+        collectedByPartner: { select: { companyName: true } },
         remittance: { select: { status: true } },
       },
     });
@@ -952,13 +980,18 @@ export class SubscriptionPaymentsService {
       }
     >();
     for (const r of rows) {
-      const key = r.collectedById ?? 'inconnu';
+      // Collecte d'un partenaire (Sprint 12B) : une ligne par partenaire.
+      const key =
+        r.collectedById ??
+        (r.collectedByPartnerId ? `partner:${r.collectedByPartnerId}` : 'inconnu');
       const line =
         byCollector.get(key) ??
         byCollector
           .set(key, {
             collectorId: key,
-            collector: fullName(r.collectedBy),
+            collector: r.collectedByPartner
+              ? `${r.collectedByPartner.companyName} (partenaire)`
+              : fullName(r.collectedBy),
             inProgress: 0,
             confirmed: 0,
             rejectedOrCancelled: 0,
@@ -974,8 +1007,10 @@ export class SubscriptionPaymentsService {
       else if (r.status === 'REFUNDED') line.refunded += r.amount;
       else if (r.status === 'CONFIRMED') {
         line.confirmed += r.amount;
-        if (r.remittance?.status === 'CONFIRMED') line.remittedConfirmed += r.amount;
-        else if (r.remittance?.status === 'DECLARED') line.remittedPending += r.amount;
+        // Une collecte de partenaire est confirmée par Ocall à la remise des espèces.
+        if (r.remittance?.status === 'CONFIRMED' || r.collectedByPartnerId) {
+          line.remittedConfirmed += r.amount;
+        } else if (r.remittance?.status === 'DECLARED') line.remittedPending += r.amount;
         else line.toRemit += r.amount;
       }
     }
@@ -1011,6 +1046,51 @@ export class SubscriptionPaymentsService {
       throw new BadRequestException({
         code: 'PAID_IN_FUTURE',
         message: 'La date du règlement ne peut pas être dans le futur.',
+      });
+    }
+  }
+
+  /**
+   * Collecte d'espèces par un partenaire : habilitation, client attribué (attribution confirmée),
+   * plafond des collectes non encore confirmées (sous verrou du partenaire).
+   */
+  private async assertPartnerCollection(
+    tx: Tx,
+    partnerId: string,
+    organizationId: string,
+    amount: number,
+  ) {
+    await tx.$queryRaw`SELECT "id" FROM "Partner" WHERE "id" = ${partnerId}::uuid FOR UPDATE`;
+    const partner = await tx.partner.findUniqueOrThrow({
+      where: { id: partnerId },
+      select: { status: true, cashCollectionEnabled: true, cashCollectionLimit: true },
+    });
+    if (partner.status !== 'ACTIVE' || !partner.cashCollectionEnabled) {
+      throw new ForbiddenException({
+        code: 'PARTNER_CASH_NOT_ALLOWED',
+        message: 'Vous n’êtes pas habilité à encaisser des espèces.',
+      });
+    }
+    const attributed = await tx.attribution.count({
+      where: { partnerId, organizationId, status: 'CONFIRMED' },
+    });
+    if (attributed === 0) {
+      throw new ForbiddenException({
+        code: 'CLIENT_NOT_ATTRIBUTED',
+        message: 'Ce client ne vous est pas attribué.',
+      });
+    }
+    const open = await tx.subscriptionPayment.aggregate({
+      where: { collectedByPartnerId: partnerId, status: 'DECLARED' },
+      _sum: { amount: true },
+    });
+    const outstanding = open._sum.amount ?? 0;
+    if (outstanding + amount > partner.cashCollectionLimit) {
+      throw new ConflictException({
+        code: 'PARTNER_CASH_LIMIT_EXCEEDED',
+        message: `Plafond de collecte dépassé (${outstanding} déjà déclarés sur ${partner.cashCollectionLimit}).`,
+        outstanding,
+        limit: partner.cashCollectionLimit,
       });
     }
   }

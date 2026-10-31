@@ -52,14 +52,26 @@ export class SessionService {
   async resolve(token: string): Promise<AuthContext | null> {
     const session = await this.prisma.session.findUnique({
       where: { tokenHash: hashToken(token) },
-      include: { user: true, membership: { include: { organization: true } } },
+      include: {
+        user: {
+          include: {
+            partner: { select: { id: true, code: true, companyName: true, status: true } },
+          },
+        },
+        membership: { include: { organization: true } },
+      },
     });
     if (!session || session.revokedAt || session.expiresAt <= new Date()) return null;
     const { user, membership } = session;
     if (!user.isActive) return null;
 
+    const partner = user.partner;
+    // Un compte partenaire est exclusif : jamais membre d'une organisation ni compte interne.
+    if (partner && (membership || user.platformRole)) return null;
     if (membership) {
       if (!membership.isActive || membership.organization.status !== 'ACTIVE') return null;
+    } else if (partner) {
+      if (partner.status === 'SUSPENDED') return null;
     } else if (!user.platformRole) {
       return null;
     }
@@ -85,13 +97,24 @@ export class SessionService {
       mfa: {
         // Obligatoire pour les rôles sensibles ; pour les autres comptes internes, exigée dès
         // qu'elle a été activée volontairement.
+        // Partenaires : obligatoire (ils voient des montants et des clients apportés).
         required:
-          !membership &&
-          !!user.platformRole &&
-          (platformRoleRequiresMfa(user.platformRole) || user.mfaEnabledAt !== null),
+          !!partner ||
+          (!membership &&
+            !!user.platformRole &&
+            (platformRoleRequiresMfa(user.platformRole) || user.mfaEnabledAt !== null)),
         enrolled: user.mfaEnabledAt !== null,
         verified: session.mfaVerifiedAt !== null,
       },
+      partner:
+        partner && partner.status !== 'SUSPENDED'
+          ? {
+              id: partner.id,
+              code: partner.code,
+              companyName: partner.companyName,
+              status: partner.status,
+            }
+          : null,
       membership: membership
         ? {
             id: membership.id,

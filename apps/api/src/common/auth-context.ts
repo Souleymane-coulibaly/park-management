@@ -18,6 +18,16 @@ export interface AuthContext {
    * pour cette session.
    */
   mfa: { required: boolean; enrolled: boolean; verified: boolean };
+  /**
+   * Compte partenaire commercial (Sprint 12B), exclusif d'une adhésion et d'un rôle interne. Un
+   * partenaire suspendu n'a plus de session.
+   */
+  partner: {
+    id: string;
+    code: string;
+    companyName: string;
+    status: 'PENDING_VERIFICATION' | 'ACTIVE';
+  } | null;
   /** Absent pour un compte interne Ocall, qui n'est membre d'aucune organisation. */
   membership: {
     id: string;
@@ -44,6 +54,32 @@ export function requireTenant(auth: AuthContext): TenantContext {
     });
   }
   return auth as TenantContext;
+}
+
+/** Contexte d'un partenaire commercial : seule source fiable du partnerId. */
+export type PartnerContext = AuthContext & { partner: NonNullable<AuthContext['partner']> };
+
+/**
+ * Restreint un contexte à un partenaire. Par défaut, le partenaire doit être vérifié (actif) ; un
+ * partenaire en attente de vérification n'accède qu'à son profil.
+ */
+export function requirePartner(
+  auth: AuthContext,
+  options: { allowPending?: boolean } = {},
+): PartnerContext {
+  if (!auth.partner || auth.membership || auth.user.platformRole) {
+    throw new ForbiddenException({
+      code: 'FORBIDDEN',
+      message: "Vous n'avez pas les droits nécessaires.",
+    });
+  }
+  if (auth.partner.status !== 'ACTIVE' && !options.allowPending) {
+    throw new ForbiddenException({
+      code: 'PARTNER_NOT_VERIFIED',
+      message: 'Votre profil partenaire est en cours de vérification par Ocall.',
+    });
+  }
+  return auth as PartnerContext;
 }
 
 declare global {
