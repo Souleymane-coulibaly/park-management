@@ -15,10 +15,14 @@ import {
   assignablePlatformRoles,
   computeInvoiceLines,
   effectivePlatformRole,
+  type SaasProductStatus,
+  canSubscribeToProduct,
   formatInvoiceNumber,
+  isProductBillable,
   isProductCode,
   zonedMidnight,
 } from '@ocall/shared';
+import { recordPriceChange } from '../../common/subscription-billing';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
 import type { AuthContext } from '../../common/auth-context';
@@ -41,26 +45,61 @@ const INVOICE_DUE_DAYS = 15;
 export interface ProductView {
   id: string;
   code: string;
+  slug: string;
   name: string;
+  tagline: string;
   description: string;
-  status: 'AVAILABLE' | 'UPCOMING' | 'RETIRED';
+  status: SaasProductStatus;
+  listed: boolean;
+  appUrl: string | null;
+  availableAt: string | null;
   features: string[];
   billing: Record<string, unknown>;
   sortOrder: number;
 }
 
-function productView(p: Omit<ProductView, 'billing'> & { billing: unknown }): ProductView {
+function productView(
+  p: Omit<ProductView, 'billing' | 'availableAt'> & { billing: unknown; availableAt: Date | null },
+): ProductView {
   return {
     id: p.id,
     code: p.code,
+    slug: p.slug,
     name: p.name,
+    tagline: p.tagline,
     description: p.description,
     status: p.status,
+    listed: p.listed,
+    appUrl: p.appUrl,
+    availableAt: p.availableAt ? p.availableAt.toISOString().slice(0, 10) : null,
     features: p.features,
     billing: (p.billing ?? {}) as Record<string, unknown>,
     sortOrder: p.sortOrder,
   };
 }
+
+/** Champs publics modifiables d'un produit (Sprint 12A). */
+interface ProductPublicFields {
+  slug?: string;
+  tagline?: string;
+  listed?: boolean;
+  appUrl?: string | null;
+  availableAt?: string | null;
+}
+
+function productPublicData(dto: ProductPublicFields) {
+  return {
+    ...(dto.slug !== undefined ? { slug: dto.slug } : {}),
+    ...(dto.tagline !== undefined ? { tagline: dto.tagline } : {}),
+    ...(dto.listed !== undefined ? { listed: dto.listed } : {}),
+    ...(dto.appUrl !== undefined ? { appUrl: dto.appUrl } : {}),
+    ...(dto.availableAt !== undefined
+      ? { availableAt: dto.availableAt ? new Date(`${dto.availableAt}T00:00:00Z`) : null }
+      : {}),
+  };
+}
+
+const slugFromCode = (code: string) => code.toLowerCase().replace(/_/g, '-');
 
 export interface AuditEntryView {
   id: string;
@@ -114,10 +153,18 @@ export class SuiteService {
       code: string;
       name: string;
       description?: string;
-      status: 'AVAILABLE' | 'UPCOMING' | 'RETIRED';
+      status: SaasProductStatus;
       features?: string[];
-    },
+    } & ProductPublicFields,
   ) {
+    // Un nouveau produit n'a aucune offre : il ne peut pas être créé directement commercialisé.
+    if (isProductBillable(dto.status)) {
+      throw new ConflictException({
+        code: 'PRODUCT_WITHOUT_PLAN',
+        message:
+          'Aucune offre : créez le produit non commercialisé, ajoutez une offre, puis activez-le.',
+      });
+    }
     if (!isProductCode(dto.code)) {
       throw new BadRequestException({
         code: 'PRODUCT_CODE_INVALID',
@@ -133,6 +180,8 @@ export class SuiteService {
             description: dto.description ?? '',
             status: dto.status,
             features: dto.features ?? [],
+            ...productPublicData(dto),
+            slug: dto.slug ?? slugFromCode(dto.code),
           },
         });
         await this.audit.record(
@@ -152,7 +201,7 @@ export class SuiteService {
       if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
         throw new ConflictException({
           code: 'PRODUCT_CODE_TAKEN',
-          message: 'Ce code produit existe déjà.',
+          message: 'Ce code ou cet identifiant public existe déjà.',
         });
       }
       throw e;
@@ -167,7 +216,12 @@ export class SuiteService {
   async createPlan(
     auth: AuthContext,
     productId: string,
-    dto: { name: string; monthlyPrice: number; setupFee?: number },
+    dto: {
+      name: string;
+      monthlyPrice: number;
+      setupFee?: number;
+      activationMode?: 'AUTO' | 'ADMIN_APPROVAL';
+    },
   ) {
     try {
       return await this.prisma.$transaction(async (tx) => {
@@ -194,6 +248,7 @@ export class SuiteService {
             name: dto.name,
             monthlyPrice: dto.monthlyPrice,
             setupFee: dto.setupFee ?? 0,
+            ...(dto.activationMode ? { activationMode: dto.activationMode } : {}),
           },
           select: {
             id: true,
@@ -239,16 +294,16 @@ export class SuiteService {
     dto: {
       name?: string;
       description?: string;
-      status?: 'AVAILABLE' | 'UPCOMING' | 'RETIRED';
+      status?: SaasProductStatus;
       features?: string[];
-    },
+    } & ProductPublicFields,
   ) {
     return this.prisma.$transaction(async (tx) => {
       const before = await tx.saasProduct.findUnique({ where: { id } });
       if (!before)
         throw new NotFoundException({ code: 'PRODUCT_NOT_FOUND', message: 'Produit introuvable.' });
       // Un produit sans offre (ex. Ocall School) ne peut pas être commercialisé : tarifs à valider.
-      if (dto.status === 'AVAILABLE' && before.status !== 'AVAILABLE') {
+      if (dto.status && isProductBillable(dto.status) && !isProductBillable(before.status)) {
         const plans = await tx.subscriptionPlan.count({ where: { productId: id, isActive: true } });
         if (plans === 0) {
           throw new ConflictException({
@@ -257,7 +312,11 @@ export class SuiteService {
           });
         }
       }
-      const product = await tx.saasProduct.update({ where: { id }, data: dto });
+      const { slug, tagline, listed, appUrl, availableAt, ...core } = dto;
+      const product = await tx.saasProduct.update({
+        where: { id },
+        data: { ...core, ...productPublicData({ slug, tagline, listed, appUrl, availableAt }) },
+      });
       await this.audit.record(
         {
           organizationId: null,
@@ -266,8 +325,14 @@ export class SuiteService {
           targetType: 'SaasProduct',
           targetId: id,
           metadata: {
-            before: { name: before.name, status: before.status, features: before.features },
-            after: dto,
+            before: {
+              name: before.name,
+              status: before.status,
+              features: before.features,
+              slug: before.slug,
+              listed: before.listed,
+            },
+            after: { ...dto },
           },
         },
         tx,
@@ -310,6 +375,7 @@ export class SuiteService {
             agreedSetupFee: true,
             agreedMonthlyPrice: true,
             agreedAt: true,
+            activationMode: true,
             product: { select: { id: true, code: true, name: true, status: true } },
             plan: { select: { id: true, name: true, setupFee: true, monthlyPrice: true } },
           },
@@ -371,7 +437,7 @@ export class SuiteService {
         });
       if (!product)
         throw new NotFoundException({ code: 'PRODUCT_NOT_FOUND', message: 'Produit introuvable.' });
-      if (product.status !== 'AVAILABLE') {
+      if (!canSubscribeToProduct(product.status, 'ocall')) {
         throw new ConflictException({
           code: 'PRODUCT_NOT_AVAILABLE',
           message: 'Ce produit n’est pas commercialisé.',
@@ -398,7 +464,14 @@ export class SuiteService {
       }
       try {
         const sub = await tx.subscription.create({
-          data: { organizationId, productId: product.id, planId: plan.id, status: 'NOT_ACTIVATED' },
+          data: {
+            organizationId,
+            productId: product.id,
+            planId: plan.id,
+            status: 'NOT_ACTIVATED',
+            // Mode d'activation figé : un changement ultérieur de l'offre n'est pas rétroactif.
+            activationMode: plan.activationMode,
+          },
         });
         await tx.subscriptionEvent.create({
           data: {
@@ -416,7 +489,12 @@ export class SuiteService {
             action: 'platform.subscription_created',
             targetType: 'Subscription',
             targetId: sub.id,
-            metadata: { organizationId, product: product.code, planId: plan.id },
+            metadata: {
+              organizationId,
+              product: product.code,
+              planId: plan.id,
+              activationMode: plan.activationMode,
+            },
           },
           tx,
         );
@@ -441,9 +519,10 @@ export class SuiteService {
         id: true,
         organizationId: true,
         productId: true,
+        planId: true,
         agreedSetupFee: true,
         agreedMonthlyPrice: true,
-        plan: { select: { setupFee: true, monthlyPrice: true } },
+        plan: { select: { setupFee: true, monthlyPrice: true, currency: true } },
         product: { select: { status: true, code: true } },
       },
     });
@@ -457,6 +536,15 @@ export class SuiteService {
         agreedMonthlyPrice: s.plan.monthlyPrice,
         agreedAt: new Date(),
       },
+    });
+    await recordPriceChange(tx, {
+      subscriptionId: s.id,
+      planId: s.planId,
+      setupFee: s.plan.setupFee,
+      monthlyPrice: s.plan.monthlyPrice,
+      currency: s.plan.currency,
+      actorUserId: null,
+      reason: 'Tarif accepté à la première facture',
     });
     return { sub: s, setupFee: s.plan.setupFee, monthlyPrice: s.plan.monthlyPrice };
   }
@@ -500,7 +588,7 @@ export class SuiteService {
         },
         payments: {
           select: { id: true, amount: true, status: true },
-          where: { status: { not: 'REJECTED' } },
+          where: { status: { notIn: ['REJECTED', 'CANCELLED'] } },
         },
       },
       orderBy: { issuedAt: 'desc' },
@@ -546,7 +634,7 @@ export class SuiteService {
           message: 'Abonnement introuvable.',
         });
       const agreed = await this.agreedPrices(tx, dto.subscriptionId);
-      if (agreed.sub.product.status === 'UPCOMING') {
+      if (!isProductBillable(agreed.sub.product.status)) {
         throw new ConflictException({
           code: 'PRODUCT_NOT_AVAILABLE',
           message: 'Produit non commercialisable : aucune facture possible.',
@@ -609,7 +697,11 @@ export class SuiteService {
         select: {
           status: true,
           number: true,
-          payments: { where: { status: { not: 'REJECTED' } }, select: { id: true } },
+          // Règlements encore engagés (déclarés, à vérifier, confirmés) : annulation impossible.
+          payments: {
+            where: { status: { in: ['DECLARED', 'PENDING_VERIFICATION', 'CONFIRMED'] } },
+            select: { id: true },
+          },
         },
       });
       if (!invoice)
@@ -670,6 +762,10 @@ export class SuiteService {
       active,
       unpaidInvoices,
       renewals,
+      refunded,
+      pendingActivations,
+      demoNew,
+      demoReceived,
     ] = await Promise.all([
       this.prisma.organization.groupBy({ by: ['status'], where: orgWhere, _count: { _all: true } }),
       this.prisma.establishment.count({ where: { organization: orgWhere } }),
@@ -688,9 +784,10 @@ export class SuiteService {
         _count: { _all: true },
       }),
       this.prisma.subscriptionPayment.findMany({
-        where: { status: 'VALIDATED', paidAt: range, subscription: productWhere },
+        where: { status: 'CONFIRMED', paidAt: range, subscription: productWhere },
         select: {
           amount: true,
+          method: true,
           invoice: { select: { total: true, lines: { select: { kind: true, amount: true } } } },
         },
       }),
@@ -707,7 +804,7 @@ export class SuiteService {
         select: {
           total: true,
           dueAt: true,
-          payments: { where: { status: 'VALIDATED' }, select: { amount: true } },
+          payments: { where: { status: 'CONFIRMED' }, select: { amount: true } },
         },
       }),
       this.prisma.subscription.count({
@@ -717,24 +814,64 @@ export class SuiteService {
           ...productWhere,
         },
       }),
+      this.prisma.subscriptionPayment.aggregate({
+        where: { status: 'REFUNDED', refundedAt: range, subscription: productWhere },
+        _sum: { amount: true },
+      }),
+      this.prisma.subscriptionPayment.count({
+        where: { status: 'CONFIRMED', activationStatus: 'PENDING', subscription: productWhere },
+      }),
+      this.prisma.demoRequest.count({
+        where: {
+          status: 'NEW',
+          anonymizedAt: null,
+          ...(filters.productCode ? { product: { code: filters.productCode } } : {}),
+        },
+      }),
+      this.prisma.demoRequest.count({
+        where: {
+          createdAt: range,
+          ...(filters.productCode ? { product: { code: filters.productCode } } : {}),
+        },
+      }),
     ]);
     const suspended = await this.prisma.organization.count({
       where: { ...orgWhere, status: 'SUSPENDED' },
     });
 
-    // Un règlement de facture couvre exactement son reste à payer : ventilation par nature de ligne.
-    const collected = { setup: 0, monthly: 0, adjustments: 0, unallocated: 0, total: 0 };
+    // Ventilation par nature de ligne, au prorata du règlement (paiements partiels, Sprint 12A) ;
+    // l'arrondi est porté par la dernière ligne pour que la somme soit exacte.
+    const collected = {
+      setup: 0,
+      monthly: 0,
+      adjustments: 0,
+      unallocated: 0,
+      total: 0,
+      online: 0,
+      cash: 0,
+      transfer: 0,
+    };
     for (const p of payments) {
       collected.total += p.amount;
-      if (!p.invoice || p.invoice.total !== p.amount) {
+      if (p.method === 'CINETPAY_CARD' || p.method === 'CINETPAY_MOBILE_MONEY')
+        collected.online += p.amount;
+      else if (p.method === 'CASH') collected.cash += p.amount;
+      else collected.transfer += p.amount;
+      if (!p.invoice || p.invoice.total <= 0) {
         collected.unallocated += p.amount;
         continue;
       }
-      for (const l of p.invoice.lines) {
-        if (l.kind === 'SETUP') collected.setup += l.amount;
-        else if (l.kind === 'MONTHLY') collected.monthly += l.amount;
-        else collected.adjustments += l.amount;
-      }
+      let allocated = 0;
+      p.invoice.lines.forEach((l, i, all) => {
+        const share =
+          i === all.length - 1
+            ? p.amount - allocated
+            : Math.round((p.amount * l.amount) / p.invoice!.total);
+        allocated += share;
+        if (l.kind === 'SETUP') collected.setup += share;
+        else if (l.kind === 'MONTHLY') collected.monthly += share;
+        else collected.adjustments += share;
+      });
     }
     const count = (status: string) => subs.find((s) => s.status === status)?._count._all ?? 0;
     const outstanding = unpaidInvoices.map((i) => ({
@@ -766,8 +903,13 @@ export class SuiteService {
         notActivated: count('NOT_ACTIVATED'),
         canceled: count('CANCELED'),
         suspendedOrganizations: suspended,
+        suspended: count('SUSPENDED'),
+        pendingActivation: count('PENDING_ACTIVATION'),
       },
       collected,
+      refunded: refunded._sum.amount ?? 0,
+      pendingActivations,
+      demoRequests: { new: demoNew, received: demoReceived },
       invoiced: invoiced._sum.total ?? 0,
       theoreticalMrr: active.reduce((t, s) => t + (s.agreedMonthlyPrice ?? s.plan.monthlyPrice), 0),
       unpaid: {

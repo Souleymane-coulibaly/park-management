@@ -7,6 +7,8 @@ const PUBLIC_ORDER_ROUTE = 'publicOrderRoute';
 const ANALYTICS_ROUTE = 'analyticsRoute';
 const EXPORT_ROUTE = 'exportRoute';
 const PUBLIC_SITE_ROUTE = 'publicSiteRoute';
+const PUBLIC_LEAD_ROUTE = 'publicLeadRoute';
+const PAYMENT_NOTIFY_ROUTE = 'paymentNotifyRoute';
 
 /** Marque une route sensible (connexion, inscription, mot de passe) : limite stricte par IP. */
 export const SensitiveRoute = () => SetMetadata(SENSITIVE_ROUTE, true);
@@ -25,6 +27,12 @@ export const ExportRoute = () => SetMetadata(EXPORT_ROUTE, true);
  * le cache du frontend : l'API n'est sollicitée qu'à la régénération et pour les images.
  */
 export const PublicSiteRoute = () => SetMetadata(PUBLIC_SITE_ROUTE, true);
+
+/** Marque un formulaire commercial public (demande de démonstration) : limite stricte par IP. */
+export const PublicLeadRoute = () => SetMetadata(PUBLIC_LEAD_ROUTE, true);
+
+/** Marque la réception des notifications d'un prestataire de paiement : limite dédiée. */
+export const PaymentNotifyRoute = () => SetMetadata(PAYMENT_NOTIFY_ROUTE, true);
 
 function hasFlag(context: ExecutionContext, flag: string): boolean {
   return (
@@ -74,6 +82,18 @@ export function throttlerOptions(config: AppConfig): ThrottlerModuleOptions {
         ttl: 60_000,
         limit: 1200,
         skipIf: (context) => !hasFlag(context, PUBLIC_SITE_ROUTE),
+      },
+      {
+        name: 'publicLead',
+        ttl: 10 * 60_000,
+        limit: config.publicLeadThrottleLimit,
+        skipIf: (context) => !hasFlag(context, PUBLIC_LEAD_ROUTE),
+      },
+      {
+        name: 'paymentNotify',
+        ttl: 60_000,
+        limit: 300,
+        skipIf: (context) => !hasFlag(context, PAYMENT_NOTIFY_ROUTE),
       },
     ],
     errorMessage: 'Trop de requêtes. Réessayez dans quelques instants.',

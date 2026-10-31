@@ -55,6 +55,10 @@ export const PlatformPermission = {
   QUOTAS_MANAGE: 'platform.quotas.manage',
   SUPPORT_MANAGE: 'platform.support.manage',
   SETTINGS_READ: 'platform.settings.read',
+  /** Sprint 12A : déclaration d'espèces, approbation des activations, demandes de démonstration. */
+  CASH_DECLARE: 'platform.billing.cash.declare',
+  ACTIVATIONS_APPROVE: 'platform.activations.approve',
+  DEMO_REQUESTS_MANAGE: 'platform.demo.manage',
 } as const;
 export type PlatformPermission = (typeof PlatformPermission)[keyof typeof PlatformPermission];
 export const PLATFORM_PERMISSIONS: readonly PlatformPermission[] =
@@ -73,8 +77,17 @@ export const PLATFORM_ROLE_PERMISSIONS: Record<PlatformRoleName, readonly Platfo
     PP.BILLING_READ,
     PP.BILLING_MANAGE,
     PP.BILLING_VALIDATE,
+    PP.CASH_DECLARE,
+    PP.ACTIVATIONS_APPROVE,
+    PP.DEMO_REQUESTS_MANAGE,
   ],
-  SUPPORT_AGENT: [PP.DASHBOARD, PP.ORGS_READ, PP.DOMAINS_MANAGE, PP.SUPPORT_MANAGE],
+  SUPPORT_AGENT: [
+    PP.DASHBOARD,
+    PP.ORGS_READ,
+    PP.DOMAINS_MANAGE,
+    PP.SUPPORT_MANAGE,
+    PP.DEMO_REQUESTS_MANAGE,
+  ],
   READ_ONLY_AUDITOR: [PP.DASHBOARD, PP.ORGS_READ, PP.BILLING_READ, PP.AUDIT_READ, PP.SETTINGS_READ],
 };
 
@@ -113,14 +126,53 @@ export function assignablePlatformRoles(
 
 // ─── Produits SaaS ───
 
-export const SAAS_PRODUCT_STATUSES = ['AVAILABLE', 'UPCOMING', 'RETIRED'] as const;
+export const SAAS_PRODUCT_STATUSES = [
+  'PLANNED',
+  'COMING_SOON',
+  'PILOT',
+  'ACTIVE',
+  'SUSPENDED',
+  'RETIRED',
+] as const;
 export type SaasProductStatus = (typeof SAAS_PRODUCT_STATUSES)[number];
 
+/** Libellés de l'administration. */
 export const SAAS_PRODUCT_STATUS_LABELS: Record<SaasProductStatus, string> = {
-  AVAILABLE: 'Commercialisé',
-  UPCOMING: 'À venir (non commercialisable)',
+  PLANNED: 'Planifié (non public)',
+  COMING_SOON: 'Bientôt disponible',
+  PILOT: 'Pilote (souscription par Ocall)',
+  ACTIVE: 'Commercialisé',
+  SUSPENDED: 'Suspendu',
   RETIRED: 'Retiré',
 };
+
+/** Statuts présentés sur le site public, avec leur libellé commercial. */
+export const PUBLIC_PRODUCT_STATUS_LABELS: Partial<Record<SaasProductStatus, string>> = {
+  ACTIVE: 'Disponible',
+  PILOT: 'En pilote',
+  COMING_SOON: 'Bientôt disponible',
+};
+export const isPublicProductStatus = (status: SaasProductStatus) =>
+  status in PUBLIC_PRODUCT_STATUS_LABELS;
+
+/**
+ * Règle unique de commercialisation, appliquée par le serveur (souscription, facturation,
+ * activation, tarifs publics). Seul ACTIVE est ouvert à tous ; PILOT seulement par Ocall ;
+ * PLANNED, COMING_SOON, SUSPENDED et RETIRED ne sont jamais souscriptibles ni facturables.
+ */
+export function canSubscribeToProduct(
+  status: SaasProductStatus,
+  by: 'customer' | 'ocall',
+): boolean {
+  return status === 'ACTIVE' || (status === 'PILOT' && by === 'ocall');
+}
+/** Facturation et activation d'un abonnement : produit commercialisé ou en pilote. */
+export const isProductBillable = (status: SaasProductStatus) =>
+  status === 'ACTIVE' || status === 'PILOT';
+
+/** Identifiant public d'une page produit : minuscules, chiffres et tirets. */
+export const isProductSlug = (slug: string) =>
+  /^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug) && slug.length <= 60;
 
 /** Produits de l'application Ocall Park actuelle, liés au métier de l'organisation. */
 export const PARK_APP_PRODUCTS: Record<BusinessType, string> = {
@@ -256,15 +308,28 @@ export interface CommercialDashboard {
     notActivated: number;
     canceled: number;
     suspendedOrganizations: number;
+    /** Sprint 12A. */
+    suspended: number;
+    pendingActivation: number;
   };
-  /** Encaissé = règlements VALIDÉS sur la période (date de règlement). */
+  /** Encaissé = règlements CONFIRMÉS sur la période (date de règlement). */
   collected: {
     setup: number;
     monthly: number;
     adjustments: number;
     unallocated: number;
     total: number;
+    /** Répartition par canal (Sprint 12A). */
+    online: number;
+    cash: number;
+    transfer: number;
   };
+  /** Remboursés sur la période (date de remboursement), jamais déduits de l'encaissé historique. */
+  refunded: number;
+  /** Activations à approuver (notification interne). */
+  pendingActivations: number;
+  /** Demandes de démonstration : nouvelles (à traiter) et reçues sur la période. */
+  demoRequests: { new: number; received: number };
   /** Facturé = factures émises (non annulées) sur la période. */
   invoiced: number;
   /** MRR contractuel THÉORIQUE : tarifs acceptés des abonnements actifs — pas un encaissement. */

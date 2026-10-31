@@ -3,6 +3,7 @@
 import { CreditCard, Info } from 'lucide-react';
 import { BUSINESS_TYPE_LABELS, SUBSCRIPTION_STATUS_LABELS, formatXof } from '@ocall/shared';
 import { AccessDenied } from '@/components/app/access-denied';
+import { ClientInvoices } from '@/components/billing/client-invoices';
 import { useCan } from '@/components/app/session-context';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
@@ -76,10 +77,18 @@ export default function AbonnementPage() {
           </CardBody>
         </Card>
         <div className="space-y-6">
-          {s.status === 'NOT_ACTIVATED' && (
-            <Alert tone="info" title="Abonnement non activé">
-              Le paiement en ligne (Wave) sera disponible prochainement. Votre abonnement ne sera
-              activé qu’après confirmation du paiement par notre serveur.
+          {(s.status === 'NOT_ACTIVATED' || s.status === 'PENDING_ACTIVATION') && (
+            <Alert
+              tone="info"
+              title={
+                s.status === 'PENDING_ACTIVATION'
+                  ? 'Paiement reçu, activation en cours'
+                  : 'Abonnement non activé'
+              }
+            >
+              {s.status === 'PENDING_ACTIVATION'
+                ? 'Votre paiement est enregistré. L’équipe Ocall vérifie votre dossier avant d’activer l’abonnement.'
+                : 'Votre abonnement est activé après confirmation de votre paiement : en ligne (vérifié par notre serveur) ou auprès d’Ocall.'}
             </Alert>
           )}
           <Card>
@@ -103,6 +112,9 @@ export default function AbonnementPage() {
             )}
           </Card>
         </div>
+      </div>
+      <div className="mt-6">
+        <ClientInvoices />
       </div>
     </>
   );

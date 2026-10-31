@@ -2,11 +2,18 @@
 
 import { useState } from 'react';
 import { CreditCard, Save } from 'lucide-react';
-import { BUSINESS_TYPE_LABELS, SUBSCRIPTION_STATUS_LABELS, formatXof } from '@ocall/shared';
+import {
+  ACTIVATION_MODES,
+  ACTIVATION_MODE_LABELS,
+  type ActivationMode,
+  BUSINESS_TYPE_LABELS,
+  SUBSCRIPTION_STATUS_LABELS,
+  formatXof,
+} from '@ocall/shared';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
-import { InputField } from '@/components/ui/field';
+import { InputField, SelectField } from '@/components/ui/field';
 import { PageHeader } from '@/components/ui/page-header';
 import { Alert, ApiErrorAlert, EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
 import { Table, Td } from '@/components/ui/table';
@@ -95,6 +102,7 @@ function PlanEditor({ plan, onSaved }: { plan: Plan; onSaved: () => void }) {
   const [setup, setSetup] = useState(String(plan.setupFee));
   const [aiQuota, setAiQuota] = useState(String(plan.aiMonthlyCallQuota ?? ''));
   const [storageQuota, setStorageQuota] = useState(String(plan.storageQuotaMb ?? ''));
+  const [mode, setMode] = useState<ActivationMode>(plan.activationMode ?? 'ADMIN_APPROVAL');
   const [error, setError] = useState<ApiError | null>(null);
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -109,7 +117,8 @@ function PlanEditor({ plan, onSaved }: { plan: Plan; onSaved: () => void }) {
     value !== plan.monthlyPrice ||
     setupValue !== plan.setupFee ||
     aiValue !== plan.aiMonthlyCallQuota ||
-    storageValue !== plan.storageQuotaMb;
+    storageValue !== plan.storageQuotaMb ||
+    mode !== plan.activationMode;
 
   async function save() {
     setLoading(true);
@@ -123,6 +132,7 @@ function PlanEditor({ plan, onSaved }: { plan: Plan; onSaved: () => void }) {
           setupFee: setupValue,
           aiMonthlyCallQuota: aiValue,
           storageQuotaMb: storageValue,
+          activationMode: mode,
         },
       });
       setSaved(true);
@@ -156,6 +166,13 @@ function PlanEditor({ plan, onSaved }: { plan: Plan; onSaved: () => void }) {
         step={5000}
         value={setup}
         onChange={(e) => setSetup(e.target.value)}
+      />
+      <SelectField
+        label="Activation après paiement vérifié"
+        hint="Figé pour chaque nouvel abonnement : un changement n’est jamais rétroactif."
+        value={mode}
+        onChange={(e) => setMode(e.target.value as ActivationMode)}
+        options={ACTIVATION_MODES.map((m) => ({ value: m, label: ACTIVATION_MODE_LABELS[m] }))}
       />
       <div className="grid grid-cols-2 gap-3">
         <InputField

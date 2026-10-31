@@ -1,14 +1,29 @@
 'use client';
 
 import { useState } from 'react';
-import { AlertTriangle, Banknote, CalendarClock, FileText, TrendingUp } from 'lucide-react';
-import { type CommercialDashboard as Dashboard, formatXof } from '@ocall/shared';
+import Link from 'next/link';
+import {
+  AlertTriangle,
+  BadgeCheck,
+  Banknote,
+  CalendarClock,
+  FileText,
+  Inbox,
+  RotateCcw,
+  TrendingUp,
+} from 'lucide-react';
+import {
+  type CommercialDashboard as Dashboard,
+  SAAS_PRODUCT_STATUS_LABELS,
+  formatXof,
+} from '@ocall/shared';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { InputField, SelectField } from '@/components/ui/field';
 import { KpiCard } from '@/components/ui/kpi-card';
 import { ErrorState, LoadingState } from '@/components/ui/states';
 import { Table, Td } from '@/components/ui/table';
+import { PRODUCT_STATUS_TONE } from '@/lib/format';
 import type { SuiteProduct } from '@/lib/types';
 import { useApi } from '@/lib/use-api';
 
@@ -66,9 +81,9 @@ function DashboardContent({ d }: { d: Dashboard }) {
     <>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" data-testid="commercial-kpis">
         <KpiCard
-          label="Encaissé (validé)"
+          label="Encaissé (confirmé)"
           value={<span className="text-xl sm:text-2xl">{formatXof(d.collected.total)}</span>}
-          hint={`Mise en service ${formatXof(d.collected.setup)} · mensualités ${formatXof(d.collected.monthly)}`}
+          hint={`Mise en service ${formatXof(d.collected.setup)} · mensualités ${formatXof(d.collected.monthly)} · en ligne ${formatXof(d.collected.online)} · espèces ${formatXof(d.collected.cash)} · virements ${formatXof(d.collected.transfer)}`}
           icon={<Banknote className="h-5 w-5" />}
         />
         <KpiCard
@@ -89,6 +104,31 @@ function DashboardContent({ d }: { d: Dashboard }) {
           value={<span className="text-xl sm:text-2xl">{formatXof(d.unpaid.amount)}</span>}
           hint={`${d.unpaid.invoices} facture(s) · dont échu ${formatXof(d.unpaid.overdueAmount)}`}
           icon={<AlertTriangle className="h-5 w-5" />}
+          accent="terracotta"
+        />
+        <KpiCard
+          label="Activations à approuver"
+          value={d.pendingActivations}
+          hint={
+            <Link className="underline" href="/admin/reglements">
+              Voir les règlements
+            </Link>
+          }
+          icon={<BadgeCheck className="h-5 w-5" />}
+          accent={d.pendingActivations > 0 ? 'terracotta' : 'forest'}
+        />
+        <KpiCard
+          label="Demandes de démo"
+          value={d.demoRequests.new}
+          hint={`Nouvelles · ${d.demoRequests.received} reçue(s) sur la période`}
+          icon={<Inbox className="h-5 w-5" />}
+          accent="savanna"
+        />
+        <KpiCard
+          label="Remboursé"
+          value={<span className="text-xl sm:text-2xl">{formatXof(d.refunded)}</span>}
+          hint="Remboursements enregistrés sur la période"
+          icon={<RotateCcw className="h-5 w-5" />}
           accent="terracotta"
         />
       </div>
@@ -130,20 +170,8 @@ function DashboardContent({ d }: { d: Dashboard }) {
               <tr key={p.code}>
                 <Td className="font-medium">{p.name}</Td>
                 <Td>
-                  <Badge
-                    tone={
-                      p.status === 'AVAILABLE'
-                        ? 'forest'
-                        : p.status === 'UPCOMING'
-                          ? 'savanna'
-                          : 'neutral'
-                    }
-                  >
-                    {p.status === 'AVAILABLE'
-                      ? 'Commercialisé'
-                      : p.status === 'UPCOMING'
-                        ? 'À venir'
-                        : 'Retiré'}
+                  <Badge tone={PRODUCT_STATUS_TONE[p.status]}>
+                    {SAAS_PRODUCT_STATUS_LABELS[p.status]}
                   </Badge>
                 </Td>
                 <Td className="tabular-nums">{p.subscriptions}</Td>

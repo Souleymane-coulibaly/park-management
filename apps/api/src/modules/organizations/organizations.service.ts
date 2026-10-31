@@ -4,6 +4,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { parkSubscriptionWhere } from '../../common/park-subscription';
 import { AuditService } from '../../common/audit/audit.service';
 import type { TenantContext } from '../../common/auth-context';
+import { recordPriceChange } from '../../common/subscription-billing';
 import type { ChangeBusinessTypeDto, UpdateOrganizationDto } from './organizations.dto';
 
 @Injectable()
@@ -100,7 +101,17 @@ export class OrganizationsService {
             agreedSetupFee: null,
             agreedMonthlyPrice: null,
             agreedAt: null,
+            activationMode: plan.activationMode,
           },
+        });
+        await recordPriceChange(tx, {
+          subscriptionId: current.id,
+          planId: plan.id,
+          setupFee: null,
+          monthlyPrice: null,
+          currency: plan.currency,
+          actorUserId: auth.user.id,
+          reason: `Changement de métier ${org.businessType} → ${dto.businessType}`,
         });
         await tx.subscriptionEvent.create({
           data: {

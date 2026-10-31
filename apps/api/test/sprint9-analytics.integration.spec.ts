@@ -73,7 +73,7 @@ describe('Sprint 9 — analyses (intégration)', () => {
 
   /** Vente restaurant créée par l'API, éventuellement encaissée, puis datée. */
   async function restaurantSale(
-    owner: SignedUpOwner,
+    owner: { agent: Agent },
     establishmentId: string,
     lines: { variantId: string; quantity: number }[],
     times: { created: string; paid?: string; cancel?: boolean },
@@ -137,9 +137,10 @@ describe('Sprint 9 — analyses (intégration)', () => {
     ).body.id;
     const tô = await product(other, otherCat, 'Tô', 10000, [estO]);
 
+    // Une session de caisse ouverte par employé : Lagos est tenu par son superviseur.
     for (const [owner, est] of [
       [duo, estD],
-      [duo, estL],
+      [{ agent: supervisorL }, estL],
       [other, estO],
     ] as const) {
       await owner.agent
@@ -176,11 +177,16 @@ describe('Sprint 9 — analyses (intégration)', () => {
       created: '2026-10-22T19:00:00Z',
       paid: '2026-10-22T19:05:00Z',
     }); // période précédente
-    await restaurantSale(duo, estL, [{ variantId: poulet.variant, quantity: 3 }], {
-      created: '2026-10-30T11:30:00Z',
-      paid: '2026-10-30T11:35:00Z',
-    }); // 12 h 35 à Lagos
-    await restaurantSale(duo, estL, [{ variantId: jus.variant, quantity: 1 }], {
+    await restaurantSale(
+      { agent: supervisorL },
+      estL,
+      [{ variantId: poulet.variant, quantity: 3 }],
+      {
+        created: '2026-10-30T11:30:00Z',
+        paid: '2026-10-30T11:35:00Z',
+      },
+    ); // 12 h 35 à Lagos
+    await restaurantSale({ agent: supervisorL }, estL, [{ variantId: jus.variant, quantity: 1 }], {
       created: '2026-10-25T23:25:00Z',
       paid: '2026-10-25T23:30:00Z',
     }); // lundi 26 à 0 h 30 à Lagos

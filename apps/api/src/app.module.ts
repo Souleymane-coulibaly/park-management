@@ -6,6 +6,8 @@ import { ConfigModule } from './config/config.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { StorageModule } from './common/storage/storage.module';
 import { SupportModule } from './modules/support/support.module';
+import { OnlinePaymentsModule } from './modules/online-payments/online-payments.module';
+import { CommercialModule } from './modules/commercial/commercial.module';
 import { CommonModule } from './common/common.module';
 import { AuthGuard } from './common/guards/auth.guard';
 import { OriginGuard } from './common/guards/origin.guard';
@@ -77,6 +79,8 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     AnalyticsModule,
     PublicSitesModule,
     SupportModule,
+    OnlinePaymentsModule,
+    CommercialModule,
   ],
   controllers: [HealthController],
   providers: [

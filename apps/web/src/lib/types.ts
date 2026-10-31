@@ -120,6 +120,7 @@ export interface Plan {
   /** Quotas de l'offre (Sprint 11B), renvoyés à l'administration. */
   aiMonthlyCallQuota?: number;
   storageQuotaMb?: number;
+  activationMode?: 'AUTO' | 'ADMIN_APPROVAL';
 }
 
 export interface Subscription {
@@ -1023,6 +1024,12 @@ export interface SiteCatalogOptions {
 export interface SuiteProduct {
   id: string;
   code: string;
+  /** Sprint 12A : page publique du produit. */
+  slug: string;
+  tagline: string;
+  listed: boolean;
+  appUrl: string | null;
+  availableAt: string | null;
   name: string;
   description: string;
   status: SaasProductStatus;
@@ -1063,6 +1070,7 @@ export interface SuiteOrganization {
     agreedSetupFee: number | null;
     agreedMonthlyPrice: number | null;
     agreedAt: string | null;
+    activationMode: 'AUTO' | 'ADMIN_APPROVAL';
     product: { id: string; code: string; name: string; status: SaasProductStatus };
     plan: { id: string; name: string; setupFee: number; monthlyPrice: number };
   }[];

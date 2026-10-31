@@ -19,14 +19,11 @@ import {
   ValidateNested,
 } from 'class-validator';
 import {
+  ACTIVATION_MODES,
+  type ActivationMode,
   BUSINESS_TYPES,
   type BusinessType,
-  SUBSCRIPTION_PAYMENT_MAX_AMOUNT,
-  SUBSCRIPTION_PAYMENT_METHODS,
-  SUBSCRIPTION_PAYMENT_STATUSES,
   SUPPORTED_COUNTRIES,
-  type SubscriptionPaymentMethod,
-  type SubscriptionPaymentStatus,
   INVOICE_LINE_KINDS,
   INVOICE_STATUSES,
   type InvoiceLineKind,
@@ -126,88 +123,17 @@ export class UpdatePlanDto {
   @Min(0)
   @Max(1_000_000)
   storageQuotaMb?: number;
+
+  @ApiPropertyOptional({
+    enum: ACTIVATION_MODES,
+    description: 'Activation après paiement vérifié : AUTO ou ADMIN_APPROVAL (défaut).',
+  })
+  @IsOptional()
+  @IsIn(ACTIVATION_MODES)
+  activationMode?: ActivationMode;
 }
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
-
-/** Saisie d'un règlement d'abonnement reçu HORS plateforme (espèces, virement, mobile money…). */
-export class RecordSubscriptionPaymentDto {
-  @ApiProperty()
-  @IsUUID('4')
-  organizationId: string;
-
-  @ApiPropertyOptional({
-    description: 'Facture réglée (le montant doit couvrir le reste à payer).',
-  })
-  @IsOptional()
-  @IsUUID('4')
-  invoiceId?: string;
-
-  @ApiProperty({ description: 'Montant entier en FCFA.' })
-  @IsInt()
-  @Min(1)
-  @Max(SUBSCRIPTION_PAYMENT_MAX_AMOUNT)
-  amount: number;
-
-  @ApiProperty({ enum: SUBSCRIPTION_PAYMENT_METHODS })
-  @IsIn(SUBSCRIPTION_PAYMENT_METHODS)
-  method: SubscriptionPaymentMethod;
-
-  @ApiPropertyOptional({ description: 'Référence du virement, du reçu ou de la transaction.' })
-  @IsOptional()
-  @Transform(trim)
-  @IsString()
-  @Length(1, 120)
-  reference?: string;
-
-  @ApiProperty({ description: 'Date du règlement (AAAA-MM-JJ).' })
-  @Matches(DATE)
-  paidAt: string;
-
-  @ApiProperty({ description: 'Début de la période couverte (incluse).' })
-  @Matches(DATE)
-  periodStart: string;
-
-  @ApiProperty({ description: 'Fin de la période couverte (incluse).' })
-  @Matches(DATE)
-  periodEnd: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @Transform(trim)
-  @IsString()
-  @MaxLength(500)
-  note?: string;
-}
-
-export class ValidateSubscriptionPaymentDto {
-  @ApiProperty({
-    description:
-      'Activer / prolonger l’abonnement jusqu’à la fin de la période couverte. Choix explicite du Super Admin, faux par défaut.',
-  })
-  @IsBoolean()
-  extendSubscription: boolean;
-}
-
-export class RejectSubscriptionPaymentDto {
-  @ApiProperty()
-  @Transform(trim)
-  @IsString()
-  @Length(3, 300)
-  reason: string;
-}
-
-export class SubscriptionPaymentsQueryDto {
-  @ApiPropertyOptional({ enum: SUBSCRIPTION_PAYMENT_STATUSES })
-  @IsOptional()
-  @IsIn(SUBSCRIPTION_PAYMENT_STATUSES)
-  status?: SubscriptionPaymentStatus;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsUUID('4')
-  organizationId?: string;
-}
 
 // ─── Sprint 11A : Ocall Suite ───
 
@@ -239,6 +165,34 @@ export class CreateProductDto {
   @ArrayMaxSize(40)
   @Matches(/^[a-z][a-z0-9-]{1,39}$/, { each: true })
   features?: string[];
+
+  @ApiPropertyOptional({ description: 'Identifiant public de la page produit (ex. ocall-park).' })
+  @IsOptional()
+  @Matches(/^[a-z0-9]+(-[a-z0-9]+)*$/)
+  @MaxLength(60)
+  slug?: string;
+
+  @ApiPropertyOptional({ description: 'Accroche du site public.' })
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(140)
+  tagline?: string;
+
+  @ApiPropertyOptional({ description: 'Affiché dans le catalogue public.' })
+  @IsOptional()
+  @IsBoolean()
+  listed?: boolean;
+
+  @ApiPropertyOptional({ description: 'Adresse https de l’application, si elle est déployée.' })
+  @IsOptional()
+  @Matches(/^https:\/\/[^\s]{3,200}$/)
+  appUrl?: string | null;
+
+  @ApiPropertyOptional({ description: 'Date de disponibilité validée (AAAA-MM-JJ).' })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  availableAt?: string | null;
 }
 
 export class UpdateProductDto {
@@ -267,6 +221,34 @@ export class UpdateProductDto {
   @ArrayMaxSize(40)
   @Matches(/^[a-z][a-z0-9-]{1,39}$/, { each: true })
   features?: string[];
+
+  @ApiPropertyOptional({ description: 'Identifiant public de la page produit (ex. ocall-park).' })
+  @IsOptional()
+  @Matches(/^[a-z0-9]+(-[a-z0-9]+)*$/)
+  @MaxLength(60)
+  slug?: string;
+
+  @ApiPropertyOptional({ description: 'Accroche du site public.' })
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(140)
+  tagline?: string;
+
+  @ApiPropertyOptional({ description: 'Affiché dans le catalogue public.' })
+  @IsOptional()
+  @IsBoolean()
+  listed?: boolean;
+
+  @ApiPropertyOptional({ description: 'Adresse https de l’application, si elle est déployée.' })
+  @IsOptional()
+  @Matches(/^https:\/\/[^\s]{3,200}$/)
+  appUrl?: string | null;
+
+  @ApiPropertyOptional({ description: 'Date de disponibilité validée (AAAA-MM-JJ).' })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  availableAt?: string | null;
 }
 
 export class CreatePlanDto {
@@ -302,6 +284,14 @@ export class CreatePlanDto {
   @Min(0)
   @Max(1_000_000)
   storageQuotaMb?: number;
+
+  @ApiPropertyOptional({
+    enum: ACTIVATION_MODES,
+    description: 'Activation après paiement vérifié : AUTO ou ADMIN_APPROVAL (défaut).',
+  })
+  @IsOptional()
+  @IsIn(ACTIVATION_MODES)
+  activationMode?: ActivationMode;
 }
 
 export class SubscribeProductDto {

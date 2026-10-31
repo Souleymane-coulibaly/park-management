@@ -14,7 +14,17 @@ export async function GET(request: NextRequest) {
   const origin = `${request.nextUrl.protocol}//${host}`;
   const entries = await fetchSitemap(host);
   const marketing = isAppHost(host)
-    ? ['/', '/tarifs', '/fonctionnalites', '/metiers'].map((p) => ({
+    ? [
+        '/',
+        '/solutions',
+        '/solutions/ocall-park',
+        '/solutions/ocall-restaurant',
+        '/solutions/ocall-school',
+        '/tarifs',
+        '/demo',
+        '/a-propos',
+        '/contact',
+      ].map((p) => ({
         url: `${origin}${p}`,
         lastModified: null as string | null,
       }))

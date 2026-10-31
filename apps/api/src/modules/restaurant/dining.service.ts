@@ -229,15 +229,17 @@ export class DiningService {
   /**
    * Table et zone d'une commande, contrôlées dans l'établissement : une table d'un autre
    * établissement ou d'une autre organisation est « introuvable ». La zone d'une table est déduite.
+   * Appelée dans une transaction, passer son client `db` (sinon une seconde connexion est prise).
    */
   async resolveLocation(
     auth: TenantContext,
     establishmentId: string,
     tableId?: string | null,
     zoneId?: string | null,
+    db: Pick<Prisma.TransactionClient, 'diningTable' | 'diningZone'> = this.prisma,
   ): Promise<{ tableId: string | null; zoneId: string | null }> {
     if (tableId) {
-      const table = await this.prisma.diningTable.findFirst({
+      const table = await db.diningTable.findFirst({
         where: {
           id: tableId,
           organizationId: auth.membership.organizationId,
@@ -256,7 +258,7 @@ export class DiningService {
       return { tableId: table.id, zoneId: table.zoneId };
     }
     if (zoneId) {
-      const zone = await this.prisma.diningZone.findFirst({
+      const zone = await db.diningZone.findFirst({
         where: {
           id: zoneId,
           organizationId: auth.membership.organizationId,

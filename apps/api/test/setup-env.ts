@@ -12,6 +12,9 @@ process.env.LOGIN_THROTTLE_LIMIT = '10000';
 process.env.ACCOUNT_LOCK_THRESHOLD = '3';
 // Les demandes de commande QR des tests viennent toutes de la même IP (limite testée à part).
 process.env.PUBLIC_ORDER_THROTTLE_LIMIT = '10000';
+process.env.PUBLIC_LEAD_THROTTLE_LIMIT = '10000';
+// Paiement en ligne : prestataire simulé uniquement (aucun appel réel).
+process.env.ONLINE_PAYMENT_PROVIDER = 'simulated';
 // Battement rapide des flux temps réel : une session révoquée ferme le flux en ~1 s.
 process.env.REALTIME_HEARTBEAT_MS = '1000';
 // IA : fournisseur simulé, déterministe, sans réseau ni coût. Aucun appel réel dans les tests.

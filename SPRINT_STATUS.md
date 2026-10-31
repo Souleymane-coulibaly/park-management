@@ -1,20 +1,21 @@
 # Ocall Park — suivi des sprints
 
-| Sprint | Périmètre                                                     | Branche            | Statut                                            |
-| ------ | ------------------------------------------------------------- | ------------------ | ------------------------------------------------- |
-| 1      | Socle SaaS multi-tenant, frontend, établissements             | `claude/sprint-1`  | ✅ Validé                                         |
-| 2      | Caisse POS restaurant                                         | `claude/sprint-2`  | ✅ Validé                                         |
-| 3      | POS Android, impression thermique, tiroir-caisse              | `claude/sprint-3`  | ✅ Validé (validation matérielle à faire)         |
-| 4      | Billetterie Parc, QR codes, contrôle d’accès                  | `claude/sprint-4`  | ✅ CP-03 : GO SOUS RÉSERVES (A1, A2, A5 ouvertes) |
-| 5      | Restaurant : commandes, KDS, QR, tables, stocks, réservations | `claude/sprint-5`  | 🟡 Terminé — local, push à autoriser              |
-| 6      | Bornes de commande, CRM, fidélité, planning du personnel      | `claude/sprint-6`  | 🟡 En cours — tests base bloqués (Neon `test`)    |
-| 7      | Paiement des abonnements (CinetPay)                           | —                  | ⏸️ Reporté par le commanditaire (plan présenté)   |
-| 8      | IA : import de carte, copilote, commande vocale               | `claude/sprint-8`  | 🟡 En cours — tests base bloqués (Neon `test`)    |
-| 9A     | Analyses : CA, produits × heures, parc, marges, exports CSV   | `claude/sprint-9`  | 🟡 En cours — tests base bloqués (Neon `test`)    |
-| 9B     | Copilote enrichi, statistiques SaaS, règlements d’abonnement  | `claude/sprint-9`  | 🟡 En cours — tests base bloqués (Neon `test`)    |
-| 10     | Sites vitrines publics, domaines, tarifs SaaS                 | `claude/sprint-10` | 🟡 En cours — tests base bloqués (Neon `test`)    |
-| 11A    | Ocall Suite : produits, abonnements, factures, rôles, MFA     | `claude/sprint-11` | 🟡 Terminé — local, non commité, à valider        |
-| 11B    | Stockage privé, quotas IA, support, production, pilote        | `claude/sprint-11` | 🟡 Terminé — local, non commité ; CP-10 préparé   |
+| Sprint | Périmètre                                                               | Branche            | Statut                                                |
+| ------ | ----------------------------------------------------------------------- | ------------------ | ----------------------------------------------------- |
+| 1      | Socle SaaS multi-tenant, frontend, établissements                       | `claude/sprint-1`  | ✅ Validé                                             |
+| 2      | Caisse POS restaurant                                                   | `claude/sprint-2`  | ✅ Validé                                             |
+| 3      | POS Android, impression thermique, tiroir-caisse                        | `claude/sprint-3`  | ✅ Validé (validation matérielle à faire)             |
+| 4      | Billetterie Parc, QR codes, contrôle d’accès                            | `claude/sprint-4`  | ✅ CP-03 : GO SOUS RÉSERVES (A1, A2, A5 ouvertes)     |
+| 5      | Restaurant : commandes, KDS, QR, tables, stocks, réservations           | `claude/sprint-5`  | 🟡 Terminé — local, push à autoriser                  |
+| 6      | Bornes de commande, CRM, fidélité, planning du personnel                | `claude/sprint-6`  | 🟡 En cours — tests base bloqués (Neon `test`)        |
+| 7      | Paiement des abonnements (CinetPay)                                     | —                  | ⏸️ Reporté par le commanditaire (plan présenté)       |
+| 8      | IA : import de carte, copilote, commande vocale                         | `claude/sprint-8`  | 🟡 En cours — tests base bloqués (Neon `test`)        |
+| 9A     | Analyses : CA, produits × heures, parc, marges, exports CSV             | `claude/sprint-9`  | 🟡 En cours — tests base bloqués (Neon `test`)        |
+| 9B     | Copilote enrichi, statistiques SaaS, règlements d’abonnement            | `claude/sprint-9`  | 🟡 En cours — tests base bloqués (Neon `test`)        |
+| 10     | Sites vitrines publics, domaines, tarifs SaaS                           | `claude/sprint-10` | 🟡 En cours — tests base bloqués (Neon `test`)        |
+| 11A    | Ocall Suite : produits, abonnements, factures, rôles, MFA               | `claude/sprint-11` | 🟡 Poussé `e1efd33` — CP-10 à auditer                 |
+| 11B    | Stockage privé, quotas IA, support, production, pilote                  | `claude/sprint-11` | 🟡 Poussé `e1efd33` — CP-10 à auditer                 |
+| 12A    | Site Ocall Suite, catalogue, Super Admin, règlements, paiement en ligne | `claude/sprint-12` | 🟡 Terminé localement — non commité ; CP-10 à auditer |
 
 Environnements : base Neon de **développement** (préservée), branche Neon **`test`** réservée aux
 tests automatisés, base de **production non configurée**. Aucune fusion dans `main`, aucun déploiement.
@@ -43,7 +44,34 @@ Checkpoints Codex :
 
 ---
 
-## Sprint 11B — Exploitation Ocall Suite (terminé localement, non commité)
+## Sprint 12A — Ocall Suite : site public, catalogue, règlements, paiement en ligne (terminé localement, non commité)
+
+Démarré le 2026-10-31 sur décision du commanditaire (« commence, on fait l'audit après ») : **l'audit
+Codex CP-10 n'est pas fait** ; les anomalies ouvertes restent ouvertes. Branche `claude/sprint-12`
+depuis `e1efd33`. Extensions ajoutées en cours de sprint, validées par le commanditaire : paiement
+en ligne CinetPay (socle + simulateur), double mode d'activation, paiement en espèces.
+
+- **Correctifs CP-10** : A50 (commande restaurant hors transaction), A51 (suite 9A rendue
+  exécutable : 13/14, le test de charge exige Neon), A44 (MRR au tarif accepté partout), A45
+  (produit retiré non facturable), A46 (prolongation refusée pour produit indisponible ou abonnement
+  résilié / suspendu), A47 (historique des tarifs), A49 (actions d'administration des abonnements),
+  A28 (expiration automatique des abonnements échus), A27 (quatre yeux sur tous les règlements
+  manuels).
+- **Site Ocall Suite** : accueil, solutions, pages produits, tarifs, démonstration (anti-spam),
+  à propos, contact, pages légales à compléter (non indexées) — [SITE-OCALL-SUITE.md](docs/SITE-OCALL-SUITE.md).
+- **Super Admin** : statuts produits, présentation publique, mode d'activation des offres, actions
+  d'abonnement, règlements (déclaration / confirmation / activation / remboursement), paiements en
+  ligne, caisse et remises, demandes de démo, nouveaux indicateurs.
+- **Règlements et paiement en ligne** : [GUIDE-PAIEMENT-MANUEL.md](docs/GUIDE-PAIEMENT-MANUEL.md),
+  [PAIEMENT-EN-LIGNE.md](docs/PAIEMENT-EN-LIGNE.md). Adaptateur CinetPay réel **non livré** (API du
+  compte marchand à confirmer) ; aucun appel réel.
+- Migration additive `20261101000000_ocall_suite_12a` (renommages de valeurs sans perte, 4 produits
+  futurs, historique des tarifs repris), **non appliquée** ; vérifiée sur base vierge (schéma
+  identique).
+- Anomalie **A52** (documentée, décision reportée) : le statut d'abonnement ne conditionne aucun
+  accès à l'application client (seulement la publication du site vitrine).
+
+## Sprint 11B — Exploitation Ocall Suite (poussé `e1efd33`, CP-10 à auditer)
 
 Même branche `claude/sprint-11`. Documents : [PRODUCTION.md](docs/PRODUCTION.md),
 [PILOTE.md](docs/PILOTE.md), [GUIDE-PAIEMENT-MANUEL.md](docs/GUIDE-PAIEMENT-MANUEL.md),
@@ -72,7 +100,8 @@ Même branche `claude/sprint-11`. Documents : [PRODUCTION.md](docs/PRODUCTION.md
   blocage avec un pool réduit), spec Sprint 8 (code HTTP attendu erroné), formulaire des réglages IA
   du client (saisie réinitialisée à chaque rendu), rapports plateforme passés à un nombre de
   requêtes constant.
-- Migration `20261031020000_ocall_suite_support_quotas`, additive, **non appliquée**.
+- Migration `20261031020000_ocall_suite_support_quotas`, additive, **appliquée sur la base de
+  développement** le 2026-10-31 (pas sur `test`).
 - Tests :
   - unitaires : shared 145/145, API 81/81 ; lint, type-check, Prettier, build : OK ;
   - intégration sur PostgreSQL **local jetable** (PGlite) : 11B 8/8, 11A 6/6, Sprint 10 12/12,
@@ -84,7 +113,7 @@ Même branche `claude/sprint-11`. Documents : [PRODUCTION.md](docs/PRODUCTION.md
 
 ---
 
-## Sprint 11A — Ocall Suite : administration centrale (terminé localement, non commité)
+## Sprint 11A — Ocall Suite : administration centrale (poussé `e1efd33`, CP-10 à auditer)
 
 Branche `claude/sprint-11`, depuis `6bcee39`. Guide : [docs/OCALL-SUITE.md](docs/OCALL-SUITE.md).
 Découpage décidé par le commanditaire : **11A** puis **11B** (stockage, quotas IA, support,
@@ -109,7 +138,7 @@ préparation production, CP-10) après validation.
   impayés, échéances, par produit), produits, fiche organisation, factures, comptes internes,
   journal d'audit, sécurité du compte, page `/double-authentification`.
 - Migration `20261031010000_ocall_suite_plateforme` (reprise des abonnements existants vers leur
-  produit), **non appliquée**.
+  produit), **appliquée sur la base de développement** le 2026-10-31 (pas sur `test`).
 - Tests :
   - unitaires : shared 138/138, API 72/72 ; lint, type-check, build : OK ;
   - intégration `sprint11a-suite` 6/6, Sprints 1 et 10 OK, exécutés sur une base PostgreSQL
@@ -138,7 +167,8 @@ du Sprint 11A est mis de côté localement (`git stash`, sur `claude/sprint-11`)
 - Éditeur : catalogue des thèmes, couleur d'accent, étiquettes, chiffres clés, photo par attraction,
   restaurant, **aperçu instantané**.
 - Images optimisées par Next.js (`sharp` 0.33.5, version figée).
-- Migration additive `20261031000000_theme_aqua_premium`, **non appliquée**.
+- Migration additive `20261031000000_theme_aqua_premium`, appliquée sur la base de développement
+  (pas sur `test`).
 - Tests :
   - unitaires : shared 130/130, API 62/62 ;
   - lint, type-check, build : OK ;

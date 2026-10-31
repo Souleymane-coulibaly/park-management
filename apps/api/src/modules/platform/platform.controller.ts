@@ -1,15 +1,11 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { AuthContext } from '../../common/auth-context';
 import { CurrentAuth, RequirePlatformPermission, SuperAdminOnly } from '../../common/decorators';
 import {
   CreateOrganizationByAdminDto,
-  RecordSubscriptionPaymentDto,
-  RejectSubscriptionPaymentDto,
   SetOrganizationStatusDto,
-  SubscriptionPaymentsQueryDto,
   UpdatePlanDto,
-  ValidateSubscriptionPaymentDto,
 } from './platform.dto';
 import { PlatformService } from './platform.service';
 import { SaasService } from './saas.service';
@@ -79,40 +75,5 @@ export class PlatformController {
   @Get('saas-stats')
   saasStats() {
     return this.saas.stats();
-  }
-
-  @RequirePlatformPermission('platform.billing.read')
-  @Get('subscription-payments')
-  subscriptionPayments(@Query() query: SubscriptionPaymentsQueryDto) {
-    return this.saas.listPayments(query);
-  }
-
-  @RequirePlatformPermission('platform.billing.manage')
-  @Post('subscription-payments')
-  recordSubscriptionPayment(
-    @CurrentAuth() auth: AuthContext,
-    @Body() dto: RecordSubscriptionPaymentDto,
-  ) {
-    return this.saas.recordPayment(auth, dto);
-  }
-
-  @RequirePlatformPermission('platform.billing.validate')
-  @Post('subscription-payments/:id/validate')
-  validateSubscriptionPayment(
-    @CurrentAuth() auth: AuthContext,
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: ValidateSubscriptionPaymentDto,
-  ) {
-    return this.saas.validatePayment(auth, id, dto);
-  }
-
-  @RequirePlatformPermission('platform.billing.validate')
-  @Post('subscription-payments/:id/reject')
-  rejectSubscriptionPayment(
-    @CurrentAuth() auth: AuthContext,
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: RejectSubscriptionPaymentDto,
-  ) {
-    return this.saas.rejectPayment(auth, id, dto);
   }
 }

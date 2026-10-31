@@ -3,6 +3,9 @@
 import { type FormEvent, useState } from 'react';
 import { Package, Plus } from 'lucide-react';
 import {
+  ACTIVATION_MODES,
+  ACTIVATION_MODE_LABELS,
+  type ActivationMode,
   PARK_APP_PRODUCT_CODES,
   SAAS_PRODUCT_STATUSES,
   SAAS_PRODUCT_STATUS_LABELS,
@@ -19,14 +22,11 @@ import { InputField, SelectField } from '@/components/ui/field';
 import { PageHeader } from '@/components/ui/page-header';
 import { Alert, ApiErrorAlert, EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
 import { ApiError, api } from '@/lib/api';
+import { PRODUCT_STATUS_TONE } from '@/lib/format';
 import type { SuiteProduct } from '@/lib/types';
 import { useApi } from '@/lib/use-api';
 
-const STATUS_TONE: Record<SaasProductStatus, 'forest' | 'savanna' | 'neutral'> = {
-  AVAILABLE: 'forest',
-  UPCOMING: 'savanna',
-  RETIRED: 'neutral',
-};
+const STATUS_TONE = PRODUCT_STATUS_TONE;
 
 const statusOptions = SAAS_PRODUCT_STATUSES.map((s) => ({
   value: s,
@@ -43,6 +43,7 @@ export default function ProductsPage() {
   const canManagePlans = useCanPlatform('platform.plans.manage');
   const [creating, setCreating] = useState(false);
   const [planFor, setPlanFor] = useState<SuiteProduct | null>(null);
+  const [editing, setEditing] = useState<SuiteProduct | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
 
@@ -141,6 +142,21 @@ export default function ProductsPage() {
                     </Button>
                   )}
                   <p className="mt-3 text-sm text-muted">{p.subscriptions} abonnement(s)</p>
+                  <p className="mt-1 text-sm text-muted">
+                    Page publique : /solutions/{p.slug}
+                    {p.listed ? '' : ' (non listée)'}
+                    {p.availableAt ? ` · disponible le ${p.availableAt}` : ''}
+                  </p>
+                  {canManage && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="mt-2"
+                      onClick={() => setEditing(p)}
+                    >
+                      Modifier la présentation
+                    </Button>
+                  )}
                   {canManage && (
                     <div className="mt-4 max-w-xs">
                       <SelectField
@@ -156,6 +172,17 @@ export default function ProductsPage() {
             ))}
           </div>
         ))}
+      {editing && (
+        <EditProductDialog
+          product={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            setNotice(`Présentation de ${editing.name} enregistrée.`);
+            products.reload();
+          }}
+        />
+      )}
       <CreatePlanDialog
         product={planFor}
         onClose={() => setPlanFor(null)}
@@ -203,7 +230,7 @@ function CreateProductDialog({
           name: form.name.trim(),
           ...(form.description.trim() ? { description: form.description.trim() } : {}),
           // Un nouveau produit démarre « à venir » : il devient commercialisable avec une offre active.
-          status: 'UPCOMING',
+          status: 'COMING_SOON',
           features: form.features
             .split('\n')
             .map((f) => f.trim())
@@ -282,6 +309,7 @@ function CreatePlanDialog({
   onCreated: (name: string) => void;
 }) {
   const [form, setForm] = useState({ name: '', monthlyPrice: '', setupFee: '' });
+  const [mode, setMode] = useState<ActivationMode>('ADMIN_APPROVAL');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
 
@@ -297,6 +325,7 @@ function CreatePlanDialog({
           name: form.name.trim(),
           monthlyPrice: Number(form.monthlyPrice),
           setupFee: Number(form.setupFee || 0),
+          activationMode: mode,
         },
       });
       onCreated(form.name.trim());
@@ -339,6 +368,14 @@ function CreatePlanDialog({
             onChange={(e) => setForm({ ...form, setupFee: e.target.value })}
           />
         </div>
+        <SelectField
+          label="Activation après paiement vérifié"
+          hint="Figé pour chaque nouvel abonnement : un changement n’est jamais rétroactif."
+          value={mode}
+          onChange={(e) => setMode(e.target.value as ActivationMode)}
+          options={ACTIVATION_MODES.map((m) => ({ value: m, label: ACTIVATION_MODE_LABELS[m] }))}
+        />
+
         <ApiErrorAlert error={error} />
         <div className="flex justify-end gap-2">
           <Button type="button" variant="secondary" onClick={onClose}>
@@ -350,6 +387,121 @@ function CreatePlanDialog({
             disabled={form.name.trim().length < 2 || form.monthlyPrice === ''}
           >
             Créer l’offre
+          </Button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+/** Présentation publique d'un produit (Sprint 12A) : jamais de date promise sans validation. */
+function EditProductDialog({
+  product,
+  onClose,
+  onSaved,
+}: {
+  product: SuiteProduct;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [form, setForm] = useState({
+    name: product.name,
+    tagline: product.tagline,
+    description: product.description,
+    slug: product.slug,
+    listed: product.listed,
+    appUrl: product.appUrl ?? '',
+    availableAt: product.availableAt ?? '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      await api(`/platform/products/${product.id}`, {
+        method: 'PATCH',
+        body: {
+          name: form.name.trim(),
+          tagline: form.tagline.trim(),
+          description: form.description.trim(),
+          slug: form.slug.trim(),
+          listed: form.listed,
+          appUrl: form.appUrl.trim() || null,
+          availableAt: form.availableAt || null,
+        },
+      });
+      onSaved();
+    } catch (e) {
+      setError(e instanceof ApiError ? e : null);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      title={`Présentation — ${product.name}`}
+      description="Contenu de la page produit du site Ocall Suite."
+    >
+      <form onSubmit={submit} className="space-y-3">
+        <InputField
+          label="Nom commercial"
+          required
+          value={form.name}
+          onChange={(e) => setForm({ ...form, name: e.target.value })}
+        />
+        <InputField
+          label="Accroche"
+          value={form.tagline}
+          onChange={(e) => setForm({ ...form, tagline: e.target.value })}
+        />
+        <InputField
+          label="Description"
+          value={form.description}
+          onChange={(e) => setForm({ ...form, description: e.target.value })}
+        />
+        <div className="grid gap-3 sm:grid-cols-2">
+          <InputField
+            label="Identifiant public"
+            hint="Minuscules, chiffres et tirets."
+            required
+            value={form.slug}
+            onChange={(e) => setForm({ ...form, slug: e.target.value })}
+          />
+          <InputField
+            label="Disponible le"
+            type="date"
+            hint="Seulement si la date est validée."
+            value={form.availableAt}
+            onChange={(e) => setForm({ ...form, availableAt: e.target.value })}
+          />
+        </div>
+        <InputField
+          label="Adresse de l’application (https)"
+          value={form.appUrl}
+          onChange={(e) => setForm({ ...form, appUrl: e.target.value })}
+        />
+        <label className="flex min-h-11 items-center gap-3 text-sm">
+          <input
+            type="checkbox"
+            className="h-5 w-5 accent-forest"
+            checked={form.listed}
+            onChange={(e) => setForm({ ...form, listed: e.target.checked })}
+          />
+          Afficher dans le catalogue public
+        </label>
+        <ApiErrorAlert error={error} />
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Annuler
+          </Button>
+          <Button type="submit" loading={saving}>
+            Enregistrer
           </Button>
         </div>
       </form>

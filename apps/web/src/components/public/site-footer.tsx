@@ -1,55 +1,63 @@
 import Link from 'next/link';
 import { Logo } from '@/components/brand/logo';
 
+const COLUMNS = [
+  {
+    title: 'Solutions',
+    links: [
+      { href: '/solutions/ocall-park', label: 'Ocall Park' },
+      { href: '/solutions/ocall-restaurant', label: 'Ocall Restaurant' },
+      { href: '/solutions', label: 'Toutes les solutions' },
+      { href: '/tarifs', label: 'Tarifs' },
+    ],
+  },
+  {
+    title: 'Ocall Suite',
+    links: [
+      { href: '/a-propos', label: 'À propos' },
+      { href: '/contact', label: 'Contact' },
+      { href: '/demo', label: 'Demander une démo' },
+      { href: '/connexion', label: 'Connexion' },
+    ],
+  },
+  {
+    title: 'Informations',
+    links: [
+      { href: '/mentions-legales', label: 'Mentions légales' },
+      { href: '/confidentialite', label: 'Confidentialité' },
+      { href: '/cgu', label: 'Conditions d’utilisation' },
+    ],
+  },
+];
+
 export function SiteFooter() {
   return (
     <footer className="pattern-bogolan bg-charcoal text-ivory/80">
-      <div className="mx-auto grid max-w-6xl gap-8 px-4 py-12 sm:px-6 md:grid-cols-[2fr_1fr_1fr]">
+      <div className="mx-auto grid max-w-6xl gap-8 px-4 py-12 sm:px-6 md:grid-cols-[2fr_1fr_1fr_1fr]">
         <div>
-          <Logo inverted />
+          <Logo inverted product="Suite" />
           <p className="mt-3 max-w-sm text-sm">
-            Le logiciel de gestion des parcs aquatiques, espaces de loisirs et restaurants, conçu
-            pour l’Afrique de l’Ouest. Disponible d’abord au Mali.
+            Des logiciels de gestion spécialisés pour les entreprises africaines : parcs aquatiques,
+            restaurants, et bientôt écoles, cliniques, ressources humaines, solaire et documents.
           </p>
         </div>
-        <div>
-          <p className="mb-3 text-sm font-semibold text-ivory">Produit</p>
-          <ul className="space-y-2 text-sm">
-            <li>
-              <Link href="/metiers" className="hover:text-savanna">
-                Métiers
-              </Link>
-            </li>
-            <li>
-              <Link href="/fonctionnalites" className="hover:text-savanna">
-                Fonctionnalités
-              </Link>
-            </li>
-            <li>
-              <Link href="/tarifs" className="hover:text-savanna">
-                Tarifs
-              </Link>
-            </li>
-          </ul>
-        </div>
-        <div>
-          <p className="mb-3 text-sm font-semibold text-ivory">Compte</p>
-          <ul className="space-y-2 text-sm">
-            <li>
-              <Link href="/connexion" className="hover:text-savanna">
-                Connexion
-              </Link>
-            </li>
-            <li>
-              <Link href="/inscription" className="hover:text-savanna">
-                Créer une organisation
-              </Link>
-            </li>
-          </ul>
-        </div>
+        {COLUMNS.map((c) => (
+          <div key={c.title}>
+            <p className="mb-3 text-sm font-semibold text-ivory">{c.title}</p>
+            <ul className="space-y-2 text-sm">
+              {c.links.map((l) => (
+                <li key={l.href}>
+                  <Link href={l.href} className="hover:text-savanna">
+                    {l.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
       </div>
       <div className="border-t border-ivory/10 py-4 text-center text-xs text-ivory/60">
-        © {new Date().getFullYear()} Ocall Park · Prix en FCFA (XOF)
+        © {new Date().getFullYear()} Ocall Suite · Prix en FCFA (XOF)
       </div>
     </footer>
   );

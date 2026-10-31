@@ -4,6 +4,7 @@ import { type FormEvent, use, useState } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Plus } from 'lucide-react';
 import {
+  ACTIVATION_MODE_LABELS,
   BUSINESS_TYPE_LABELS,
   INVOICE_STATUS_LABELS,
   SUBSCRIPTION_PAYMENT_METHOD_LABELS,
@@ -16,7 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { Dialog } from '@/components/ui/dialog';
-import { SelectField } from '@/components/ui/field';
+import { InputField, SelectField } from '@/components/ui/field';
 import { PageHeader } from '@/components/ui/page-header';
 import { Alert, ApiErrorAlert, ErrorState, LoadingState } from '@/components/ui/states';
 import { Table, Td } from '@/components/ui/table';
@@ -30,6 +31,7 @@ export default function OrganizationDetailPage({ params }: { params: Promise<{ i
   const { id } = use(params);
   const org = useApi<SuiteOrganization>(`/platform/organizations/${id}`);
   const canSubscribe = useCanPlatform('platform.subscriptions.manage');
+  const products = useApi<SuiteProduct[]>(canSubscribe ? '/platform/products' : null);
   const [subscribing, setSubscribing] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -68,7 +70,7 @@ export default function OrganizationDetailPage({ params }: { params: Promise<{ i
                 title="Abonnements"
                 description="Tarif accepté figé à l'activation (validation d'un règlement)."
               />
-              <Table head={['Produit', 'Offre', 'Tarif accepté', 'Statut', 'Échéance']}>
+              <Table head={['Produit', 'Offre', 'Tarif accepté', 'Statut', 'Échéance', '']}>
                 {org.data.subscriptions.map((s) => (
                   <tr key={s.id}>
                     <Td className="font-medium">{s.product.name}</Td>
@@ -93,8 +95,29 @@ export default function OrganizationDetailPage({ params }: { params: Promise<{ i
                       <Badge tone={s.status === 'ACTIVE' ? 'forest' : 'savanna'}>
                         {SUBSCRIPTION_STATUS_LABELS[s.status]}
                       </Badge>
+                      <span className="block text-xs text-muted">
+                        {ACTIVATION_MODE_LABELS[s.activationMode]}
+                      </span>
                     </Td>
                     <Td>{formatDate(s.expiresAt)}</Td>
+                    <Td>
+                      {canSubscribe && (
+                        <SubscriptionActions
+                          subscription={s}
+                          plans={
+                            products.state === 'success'
+                              ? (products.data
+                                  .find((p) => p.id === s.product.id)
+                                  ?.plans.filter((pl) => pl.isActive && pl.id !== s.plan.id) ?? [])
+                              : []
+                          }
+                          onDone={(msg) => {
+                            setNotice(msg);
+                            org.reload();
+                          }}
+                        />
+                      )}
+                    </Td>
                   </tr>
                 ))}
               </Table>
@@ -191,7 +214,10 @@ function SubscribeDialog({
   const sellable =
     products.state === 'success'
       ? products.data.filter(
-          (p) => p.status === 'AVAILABLE' && !owned.has(p.id) && p.plans.some((pl) => pl.isActive),
+          (p) =>
+            (p.status === 'ACTIVE' || p.status === 'PILOT') &&
+            !owned.has(p.id) &&
+            p.plans.some((pl) => pl.isActive),
         )
       : [];
   const product = sellable.find((p) => p.id === productId);
@@ -278,5 +304,128 @@ function SubscribeDialog({
         </div>
       </form>
     </Dialog>
+  );
+}
+
+type SubAction = 'suspend' | 'reactivate' | 'cancel' | 'change-plan';
+const SUB_ACTIONS: Record<SubAction, { label: string; done: string; allowed: string[] }> = {
+  suspend: {
+    label: 'Suspendre',
+    done: 'Abonnement suspendu.',
+    allowed: ['ACTIVE', 'PAST_DUE', 'PENDING_ACTIVATION', 'NOT_ACTIVATED'],
+  },
+  reactivate: { label: 'Réactiver', done: 'Abonnement réactivé.', allowed: ['SUSPENDED'] },
+  'change-plan': {
+    label: 'Changer d’offre',
+    done: 'Offre changée : nouveau tarif accepté et historisé.',
+    allowed: ['NOT_ACTIVATED', 'ACTIVE', 'PAST_DUE', 'EXPIRED', 'SUSPENDED', 'PENDING_ACTIVATION'],
+  },
+  cancel: {
+    label: 'Résilier',
+    done: 'Abonnement résilié (définitif).',
+    allowed: ['NOT_ACTIVATED', 'ACTIVE', 'PAST_DUE', 'EXPIRED', 'SUSPENDED', 'PENDING_ACTIVATION'],
+  },
+};
+
+/** Actions d'administration d'un abonnement (Sprint 12A) : motivées et journalisées. */
+function SubscriptionActions({
+  subscription: s,
+  plans,
+  onDone,
+}: {
+  subscription: SuiteOrganization['subscriptions'][number];
+  plans: { id: string; name: string; monthlyPrice: number }[];
+  onDone: (msg: string) => void;
+}) {
+  const [action, setAction] = useState<SubAction | null>(null);
+  const [reason, setReason] = useState('');
+  const [planId, setPlanId] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+  const available = (Object.keys(SUB_ACTIONS) as SubAction[]).filter(
+    (a) => SUB_ACTIONS[a].allowed.includes(s.status) && (a !== 'change-plan' || plans.length > 0),
+  );
+  if (available.length === 0) return null;
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!action) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await api(`/platform/subscriptions/${s.id}/${action}`, {
+        method: 'POST',
+        body: action === 'change-plan' ? { reason, planId } : { reason },
+      });
+      onDone(SUB_ACTIONS[action].done);
+      setAction(null);
+      setReason('');
+    } catch (e) {
+      setError(e as ApiError);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <SelectField
+        label="Action"
+        value=""
+        onChange={(e) => setAction((e.target.value || null) as SubAction | null)}
+        options={[
+          { value: '', label: 'Choisir…' },
+          ...available.map((a) => ({ value: a, label: SUB_ACTIONS[a].label })),
+        ]}
+      />
+      <Dialog
+        open={action !== null}
+        onClose={() => setAction(null)}
+        title={action ? `${SUB_ACTIONS[action].label} — ${s.product.name}` : ''}
+        description={
+          action === 'cancel'
+            ? 'La résiliation est définitive : un règlement ne pourra plus réactiver cet abonnement.'
+            : 'Action journalisée. Aucun encaissement ni prolongation n’est fait ici.'
+        }
+      >
+        <form onSubmit={submit} className="space-y-3">
+          {action === 'change-plan' && (
+            <SelectField
+              label="Nouvelle offre"
+              required
+              value={planId}
+              onChange={(e) => setPlanId(e.target.value)}
+              options={[
+                { value: '', label: 'Choisir…' },
+                ...plans.map((p) => ({
+                  value: p.id,
+                  label: `${p.name} · ${formatXof(p.monthlyPrice)}/mois`,
+                })),
+              ]}
+            />
+          )}
+          <InputField
+            label="Motif"
+            required
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+          />
+          <ApiErrorAlert error={error} />
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="secondary" onClick={() => setAction(null)}>
+              Fermer
+            </Button>
+            <Button
+              type="submit"
+              variant={action === 'cancel' ? 'danger' : 'primary'}
+              loading={saving}
+              disabled={reason.trim().length < 3 || (action === 'change-plan' && !planId)}
+            >
+              Confirmer
+            </Button>
+          </div>
+        </form>
+      </Dialog>
+    </>
   );
 }

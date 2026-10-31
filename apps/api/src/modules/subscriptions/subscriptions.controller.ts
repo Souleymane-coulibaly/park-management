@@ -16,7 +16,7 @@ export class SubscriptionsController {
   plans() {
     return this.prisma.subscriptionPlan.findMany({
       // Page Tarifs : offres actives des produits Ocall Park commercialisés.
-      where: { isActive: true, businessType: { not: null }, product: { status: 'AVAILABLE' } },
+      where: { isActive: true, businessType: { not: null }, product: { status: 'ACTIVE' } },
       select: {
         id: true,
         businessType: true,

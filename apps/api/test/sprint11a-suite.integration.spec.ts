@@ -182,7 +182,7 @@ describe('Sprint 11A — Ocall Suite (intégration)', () => {
           'OCALL_SCHOOL',
         ]),
       );
-      expect(byCode('OCALL_SCHOOL').status).toBe('UPCOMING');
+      expect(byCode('OCALL_SCHOOL').status).toBe('COMING_SOON');
       const refused = await owner.agent
         .post(api(`/platform/organizations/${park.organizationId}/subscriptions`))
         .send({ productId: byCode('OCALL_SCHOOL').id, planId: randomUUID() });
@@ -201,12 +201,12 @@ describe('Sprint 11A — Ocall Suite (intégration)', () => {
       const product = (
         await owner.agent
           .post(api('/platform/products'))
-          .send({ code: productCode, name: `Produit test ${RUN}`, status: 'UPCOMING' })
+          .send({ code: productCode, name: `Produit test ${RUN}`, status: 'COMING_SOON' })
           .expect(201)
       ).body;
       const noPlan = await owner.agent
         .patch(api(`/platform/products/${product.id}`))
-        .send({ status: 'AVAILABLE' });
+        .send({ status: 'ACTIVE' });
       expect(noPlan.body.code).toBe('PRODUCT_WITHOUT_PLAN');
       // Les comptes sans gestion des offres ne peuvent pas en créer.
       await billing.agent
@@ -234,7 +234,7 @@ describe('Sprint 11A — Ocall Suite (intégration)', () => {
       expect(parkPlan.body.code).toBe('PARK_PLAN_FIXED');
       await owner.agent
         .patch(api(`/platform/products/${product.id}`))
-        .send({ status: 'AVAILABLE' })
+        .send({ status: 'ACTIVE' })
         .expect(200);
       await billing.agent
         .post(api(`/platform/organizations/${park.organizationId}/subscriptions`))
@@ -254,7 +254,7 @@ describe('Sprint 11A — Ocall Suite (intégration)', () => {
   });
 
   describe('factures et règlements manuels', () => {
-    it('facture au tarif de l’offre, rapproche un règlement exact et fige le tarif accepté', async () => {
+    it('facture au tarif de l’offre, règlement confirmé à quatre yeux, tarif figé', async () => {
       const sub = await prisma.subscription.findFirstOrThrow({
         where: { organizationId: park.organizationId, product: { code: 'OCALL_PARK' } },
         include: { plan: true },
@@ -278,21 +278,32 @@ describe('Sprint 11A — Ocall Suite (intégration)', () => {
           organizationId: park.organizationId,
           invoiceId: invoice.id,
           amount,
-          method: 'BANK_TRANSFER',
+          currency: 'XOF',
+          method: 'MANUAL_TRANSFER',
           reference: `VIR-S11-${amount}`,
           paidAt: new Date().toISOString().slice(0, 10),
           periodStart: '2026-11-01',
           periodEnd: '2026-12-31',
         });
-      expect((await record(expected - 1)).body.code).toBe('PAYMENT_AMOUNT_MISMATCH');
+      // Surpaiement refusé (reste dû), puis règlement du total.
+      expect((await record(expected + 1)).body.code).toBe('PAYMENT_EXCEEDS_REMAINING');
       const payment = (await record(expected).expect(201)).body;
+      expect(payment.status).toBe('PENDING_VERIFICATION');
+      // Quatre yeux : le déclarant ne confirme pas lui-même.
+      await billing.agent
+        .post(api(`/platform/subscription-payments/${payment.id}/confirm`))
+        .expect(403);
       const validated = (
-        await billing.agent
-          .post(api(`/platform/subscription-payments/${payment.id}/validate`))
-          .send({ extendSubscription: true })
-          .expect(201)
+        await owner.agent
+          .post(api(`/platform/subscription-payments/${payment.id}/confirm`))
+          .expect(200)
       ).body;
       expect(validated.invoicePaid).toBe(true);
+      // Offre en mode ADMIN_APPROVAL (défaut) : activation à approuver.
+      expect(validated.activation).toMatchObject({ mode: 'ADMIN_APPROVAL', result: 'pending' });
+      await billing.agent
+        .post(api(`/platform/subscription-payments/${payment.id}/approve-activation`))
+        .expect(200);
 
       const paid = await prisma.invoice.findUniqueOrThrow({ where: { id: invoice.id } });
       expect(paid.status).toBe('PAID');

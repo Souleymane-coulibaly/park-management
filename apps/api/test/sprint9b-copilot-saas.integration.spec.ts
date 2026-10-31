@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import type { PrismaService } from '../src/prisma/prisma.service';
 import {
@@ -24,6 +25,7 @@ describe('Sprint 9B — copilote enrichi et statistiques SaaS (intégration)', (
   let estR: string;
   let supervisor: Agent;
   let superAdmin: Agent;
+  let checker: Agent;
 
   const api = (path: string) => `/api/v1${path}`;
   const sim = (value: unknown) => `OCALL-SIM:${JSON.stringify(value)}:FIN`;
@@ -90,6 +92,7 @@ describe('Sprint 9B — copilote enrichi et statistiques SaaS (intégration)', (
 
     // Compte interne historique SUPER_ADMIN : double authentification enrôlée (Sprint 11A).
     superAdmin = (await internalAccount(app, prisma, 's9badmin', 'SUPER_ADMIN')).agent;
+    checker = (await internalAccount(app, prisma, 's9bchecker', 'BILLING_MANAGER')).agent;
   }, 300_000);
 
   afterAll(async () => {
@@ -191,59 +194,61 @@ describe('Sprint 9B — copilote enrichi et statistiques SaaS (intégration)', (
     });
   });
 
-  describe('25. statistiques SaaS : règlements hors plateforme validés manuellement', () => {
-    it('saisie → validation sans / avec prolongation → rejet ; seuls les validés sont des encaissements', async () => {
+  describe('25. statistiques SaaS : règlements déclarés puis confirmés (Sprint 12A)', () => {
+    it('déclaration → confirmation à quatre yeux → rejet ; seuls les confirmés sont des encaissements', async () => {
       const before = (await superAdmin.get(api('/platform/saas-stats')).expect(200)).body;
-      const record = (body: Record<string, unknown>) =>
+      const sub = await prisma.subscription.findFirstOrThrow({
+        where: { organizationId: resto.organizationId },
+      });
+      const issue = async (months: number) =>
+        (
+          await superAdmin
+            .post(api('/platform/invoices'))
+            .send({
+              subscriptionId: sub.id,
+              lines: [{ kind: 'MONTHLY', months }],
+              idempotencyKey: randomUUID(),
+            })
+            .expect(201)
+        ).body as { id: string; total: number };
+      const record = (invoice: { id: string }, body: Record<string, unknown>) =>
         superAdmin.post(api('/platform/subscription-payments')).send({
           organizationId: resto.organizationId,
-          method: 'BANK_TRANSFER',
+          invoiceId: invoice.id,
+          currency: 'XOF',
+          method: 'MANUAL_TRANSFER',
           paidAt: new Date().toISOString().slice(0, 10),
           periodStart: '2026-11-01',
           periodEnd: '2026-11-30',
           ...body,
         });
 
-      const p1 = (await record({ amount: 25000, reference: 'VIR-S9B-1' }).expect(201)).body;
-      expect(p1).toMatchObject({ status: 'PENDING', amount: 25000 });
-      expect((await record({ amount: 25000, reference: 'vir-s9b-1' }).expect(409)).body.code).toBe(
-        'PAYMENT_DUPLICATE',
-      );
-      await record({ amount: 0 }).expect(400);
+      const i1 = await issue(1);
+      const p1 = (await record(i1, { amount: i1.total, reference: 'VIR-S9B-1' }).expect(201)).body;
+      expect(p1).toMatchObject({ status: 'PENDING_VERIFICATION', amount: i1.total });
+      const i2 = await issue(1);
+      expect(
+        (await record(i2, { amount: i2.total, reference: 'vir-s9b-1' }).expect(409)).body.code,
+      ).toBe('PAYMENT_DUPLICATE');
+      await record(i2, { amount: 0 }).expect(400);
 
       const mid = (await superAdmin.get(api('/platform/saas-stats')).expect(200)).body;
       expect(mid.payments.validatedTotal).toBe(before.payments.validatedTotal); // à vérifier ≠ encaissé
       expect(mid.payments.pending.count).toBe(before.payments.pending.count + 1);
 
-      // Validation sans prolongation : abonnement inchangé.
-      const subBefore = await prisma.subscription.findFirstOrThrow({
-        where: { organizationId: resto.organizationId },
-      });
+      // Quatre yeux : le déclarant ne confirme pas ; un second compte habilité confirme.
+      await superAdmin.post(api(`/platform/subscription-payments/${p1.id}/confirm`)).expect(403);
       const v1 = (
-        await superAdmin
-          .post(api(`/platform/subscription-payments/${p1.id}/validate`))
-          .send({ extendSubscription: false })
-          .expect(201)
+        await checker.post(api(`/platform/subscription-payments/${p1.id}/confirm`)).expect(200)
       ).body;
-      expect(v1.subscription).toBeNull();
-      const subMid = await prisma.subscription.findFirstOrThrow({
-        where: { organizationId: resto.organizationId },
-      });
-      expect(subMid.status).toBe(subBefore.status);
-      await superAdmin
-        .post(api(`/platform/subscription-payments/${p1.id}/validate`))
-        .send({ extendSubscription: true })
-        .expect(409);
+      expect(v1.invoicePaid).toBe(true);
+      expect(v1.activation).toMatchObject({ mode: 'ADMIN_APPROVAL', result: 'pending' });
+      await checker.post(api(`/platform/subscription-payments/${p1.id}/confirm`)).expect(409);
 
-      // Validation avec prolongation explicite : actif jusqu'au 30/11 inclus.
-      const p2 = (await record({ amount: 25000, reference: 'VIR-S9B-2' }).expect(201)).body;
-      const v2 = (
-        await superAdmin
-          .post(api(`/platform/subscription-payments/${p2.id}/validate`))
-          .send({ extendSubscription: true })
-          .expect(201)
-      ).body;
-      expect(v2.subscription).toMatchObject({ status: 'ACTIVE', changed: true });
+      // Approbation d'Ocall : actif jusqu'au 30/11 inclus.
+      await superAdmin
+        .post(api(`/platform/subscription-payments/${p1.id}/approve-activation`))
+        .expect(200);
       const subAfter = await prisma.subscription.findFirstOrThrow({
         where: { organizationId: resto.organizationId },
         include: { events: { orderBy: { createdAt: 'desc' }, take: 1 } },
@@ -253,16 +258,14 @@ describe('Sprint 9B — copilote enrichi et statistiques SaaS (intégration)', (
       expect(subAfter.events[0]).toMatchObject({ type: 'STATUS_CHANGED', toStatus: 'ACTIVE' });
 
       // Rejet motivé.
-      const p3 = (
-        await record({ amount: 10000, method: 'CHECK', reference: 'CHQ-S9B' }).expect(201)
-      ).body;
-      await superAdmin
+      const p3 = (await record(i2, { amount: i2.total, reference: 'VIR-S9B-3' }).expect(201)).body;
+      await checker
         .post(api(`/platform/subscription-payments/${p3.id}/reject`))
-        .send({ reason: 'Chèque refusé' })
-        .expect(201);
+        .send({ reason: 'Virement introuvable' })
+        .expect(200);
 
       const after = (await superAdmin.get(api('/platform/saas-stats')).expect(200)).body;
-      expect(after.payments.validatedTotal).toBe(before.payments.validatedTotal + 50000);
+      expect(after.payments.validatedTotal).toBe(before.payments.validatedTotal + i1.total);
       expect(after.payments.rejectedCount).toBe(before.payments.rejectedCount + 1);
       const list = (
         await superAdmin
@@ -271,17 +274,16 @@ describe('Sprint 9B — copilote enrichi et statistiques SaaS (intégration)', (
           .expect(200)
       ).body;
       expect(list.map((p: { status: string }) => p.status).sort()).toEqual([
+        'CONFIRMED',
         'REJECTED',
-        'VALIDATED',
-        'VALIDATED',
       ]);
       const audits = await prisma.auditLog.count({
         where: {
           action: { startsWith: 'platform.subscription_payment' },
-          targetId: { in: [p1.id, p2.id, p3.id] },
+          targetId: { in: [p1.id, p3.id] },
         },
       });
-      expect(audits).toBe(6);
+      expect(audits).toBe(4);
     });
 
     it('réservé au Super Admin ; jamais mélangé aux recettes des établissements', async () => {

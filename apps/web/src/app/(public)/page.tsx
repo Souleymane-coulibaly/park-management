@@ -1,175 +1,222 @@
-import { ArrowRight, Building2, Globe2, ShieldCheck, Users } from 'lucide-react';
-import { BusinessCard } from '@/components/public/business-cards';
+import Link from 'next/link';
+import {
+  ArrowRight,
+  CheckCircle2,
+  Cloud,
+  Headphones,
+  Lock,
+  Smartphone,
+  Sparkles,
+  Wallet,
+} from 'lucide-react';
 import { ButtonLink } from '@/components/ui/button';
+import { type PublicProduct, loadCatalog, productIcon } from '@/lib/suite-catalog';
 
-const PILLARS = [
+export const revalidate = 300;
+
+const ADVANTAGES = [
   {
-    icon: <Building2 className="h-5 w-5" />,
-    title: 'Multi-établissements',
-    text: 'Gérez un ou plusieurs sites depuis un seul compte, chacun avec son fuseau horaire.',
+    icon: Smartphone,
+    title: 'Pensé pour le mobile',
+    text: 'Sur ordinateur, tablette ou téléphone, même avec une connexion 4G.',
   },
   {
-    icon: <Users className="h-5 w-5" />,
-    title: 'Équipes nominatives',
-    text: 'Chaque employé a son identifiant personnel et un rôle adapté : caisse, cuisine, entrée, supervision.',
+    icon: Wallet,
+    title: 'Prix clairs en FCFA',
+    text: 'Une mise en service puis un abonnement mensuel. Aucun prélèvement automatique.',
   },
   {
-    icon: <ShieldCheck className="h-5 w-5" />,
-    title: 'Sécurité et traçabilité',
-    text: 'Données isolées par organisation, droits par rôle et journal de chaque action sensible.',
+    icon: Lock,
+    title: 'Vos données protégées',
+    text: 'Chaque entreprise ne voit que ses propres données. Accès par rôle, actions journalisées.',
   },
   {
-    icon: <Globe2 className="h-5 w-5" />,
-    title: 'Pensé pour l’Afrique',
-    text: 'Prix en FCFA, interface en français, utilisable sur tablette et mobile. Lancement au Mali.',
+    icon: Sparkles,
+    title: 'Une IA qui aide',
+    text: 'Un copilote qui répond à partir de vos chiffres, sans rien inventer ni rien modifier.',
+  },
+  {
+    icon: Headphones,
+    title: 'Un accompagnement local',
+    text: 'Installation, formation des équipes et support depuis l’application.',
+  },
+  {
+    icon: Cloud,
+    title: 'Toujours à jour',
+    text: 'Logiciel en ligne : pas d’installation lourde, des améliorations régulières.',
   },
 ];
 
-export default function HomePage() {
+const STEPS = [
+  {
+    title: 'Démonstration',
+    text: 'Nous découvrons votre activité et vous montrons la solution adaptée.',
+  },
+  {
+    title: 'Mise en service',
+    text: 'Configuration de vos établissements, de vos produits et de vos équipes.',
+  },
+  {
+    title: 'Formation et suivi',
+    text: 'Vos équipes sont formées ; le support Ocall reste disponible.',
+  },
+];
+
+function ProductCard({ p }: { p: PublicProduct }) {
+  const Icon = productIcon(p.slug);
+  const live = p.status === 'ACTIVE';
   return (
-    <>
-      <section className="relative overflow-hidden bg-forest text-ivory">
-        <div className="pattern-bogolan absolute inset-0" aria-hidden />
-        <div
-          className="absolute -right-24 -top-24 h-96 w-96 rounded-full bg-savanna/20 blur-3xl"
+    <Link
+      href={`/solutions/${p.slug}`}
+      className="group flex h-full flex-col rounded-2xl border border-line/80 bg-surface p-5 shadow-card transition-transform hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-forest"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <span
+          className={`grid h-11 w-11 place-items-center rounded-xl ${live ? 'bg-forest text-ivory' : 'bg-savanna-light text-charcoal'}`}
+        >
+          <Icon className="h-5 w-5" aria-hidden />
+        </span>
+        <span
+          className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${live ? 'bg-forest/10 text-forest' : 'bg-savanna-light text-charcoal'}`}
+        >
+          {p.statusLabel}
+        </span>
+      </div>
+      <h3 className="mt-4 font-display text-lg font-bold">{p.name}</h3>
+      <p className="mt-1 flex-1 text-sm text-muted">{p.tagline}</p>
+      <span className="mt-4 inline-flex items-center gap-1 text-sm font-semibold text-forest">
+        Découvrir{' '}
+        <ArrowRight
+          className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
           aria-hidden
         />
-        <div className="relative mx-auto grid max-w-6xl items-center gap-12 px-4 py-16 sm:px-6 sm:py-24 lg:grid-cols-[1.15fr_1fr]">
-          <div>
-            <p className="mb-4 inline-flex items-center gap-2 rounded-full border border-ivory/20 bg-ivory/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-savanna">
-              Parcs · Restaurants · Loisirs
-            </p>
-            <h1 className="text-4xl font-bold leading-[1.1] sm:text-5xl lg:text-6xl">
-              Gérez votre établissement avec <span className="text-savanna">l’élégance</span> qu’il
-              mérite.
-            </h1>
-            <p className="mt-5 max-w-xl text-lg text-ivory/80">
-              Ocall Park réunit vos établissements, vos équipes et vos accès dans un logiciel simple
-              et sécurisé, conçu pour les parcs aquatiques et les restaurants africains.
-            </p>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <ButtonLink href="/inscription" variant="accent" size="lg">
-                Créer mon organisation <ArrowRight className="h-4 w-4" />
-              </ButtonLink>
-              <ButtonLink
-                href="/tarifs"
-                variant="secondary"
-                size="lg"
-                className="border-ivory/30 bg-transparent text-ivory hover:bg-ivory/10"
-              >
-                Voir les tarifs
-              </ButtonLink>
-            </div>
-          </div>
-          <HeroArt />
-        </div>
-        <div
-          className="h-3 bg-[repeating-linear-gradient(90deg,#D99B38_0_24px,#C46A43_24px_48px,#24352F_48px_72px)]"
-          aria-hidden
-        />
-      </section>
-
-      <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20">
-        <div className="mb-10 max-w-2xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-terracotta-dark">
-            Trois métiers
-          </p>
-          <h2 className="mt-2 text-3xl font-bold sm:text-4xl">
-            Un logiciel qui s’adapte à votre activité
-          </h2>
-          <p className="mt-3 text-muted">
-            Vous choisissez votre métier à l’inscription : la navigation et les modules s’adaptent.
-            Vous pourrez ajouter la seconde activité plus tard, sans perdre vos données.
-          </p>
-        </div>
-        <div className="grid gap-5 md:grid-cols-3">
-          <BusinessCard type="PARK" />
-          <BusinessCard type="RESTAURANT" />
-          <BusinessCard type="PARK_RESTAURANT" />
-        </div>
-      </section>
-
-      <section className="border-y border-line/70 bg-surface">
-        <div className="mx-auto grid max-w-6xl gap-8 px-4 py-16 sm:grid-cols-2 sm:px-6 lg:grid-cols-4">
-          {PILLARS.map((p) => (
-            <div key={p.title}>
-              <div className="mb-3 grid h-10 w-10 place-items-center rounded-xl bg-forest-light text-forest">
-                {p.icon}
-              </div>
-              <h3 className="font-semibold">{p.title}</h3>
-              <p className="mt-1.5 text-sm text-muted">{p.text}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20">
-        <div className="pattern-kente relative overflow-hidden rounded-3xl bg-savanna-light/70 px-6 py-12 text-center sm:px-12">
-          <h2 className="text-3xl font-bold">Prêt à structurer votre établissement ?</h2>
-          <p className="mx-auto mt-3 max-w-xl text-charcoal-soft">
-            Créez votre organisation en quelques minutes, ajoutez vos établissements et invitez
-            votre équipe.
-          </p>
-          <ButtonLink href="/inscription" size="lg" className="mt-7">
-            Commencer maintenant <ArrowRight className="h-4 w-4" />
-          </ButtonLink>
-        </div>
-      </section>
-    </>
+      </span>
+    </Link>
   );
 }
 
-/** Illustration géométrique : soleil, vagues et losanges inspirés des tissages ouest-africains. */
-function HeroArt() {
+export default async function HomePage() {
+  const catalog = await loadCatalog();
   return (
-    <div className="relative mx-auto hidden aspect-square w-full max-w-md lg:block" aria-hidden>
-      <svg viewBox="0 0 400 400" className="h-full w-full">
-        <defs>
-          <clipPath id="disc">
-            <circle cx="200" cy="200" r="170" />
-          </clipPath>
-        </defs>
-        <circle
-          cx="200"
-          cy="200"
-          r="170"
-          fill="#F6F0E5"
-          fillOpacity="0.08"
-          stroke="#D99B38"
-          strokeOpacity="0.5"
-          strokeWidth="2"
-        />
-        <g clipPath="url(#disc)">
-          <circle cx="200" cy="150" r="62" fill="#D99B38" />
-          {[0, 1, 2, 3].map((i) => (
-            <path
-              key={i}
-              d={`M20 ${245 + i * 30} q45 -26 90 0 t90 0 t90 0 t90 0 t90 0`}
-              stroke={i % 2 ? '#C46A43' : '#F6F0E5'}
-              strokeWidth="9"
-              fill="none"
-              strokeLinecap="round"
-              opacity={1 - i * 0.15}
-            />
+    <>
+      {/* ─── Hero ─── */}
+      <section className="relative overflow-hidden bg-forest text-ivory">
+        <div className="pattern-kente absolute inset-0 opacity-10" aria-hidden />
+        <div className="relative mx-auto grid max-w-6xl gap-10 px-4 py-16 sm:px-6 md:py-24 lg:grid-cols-[1.2fr_1fr] lg:items-center">
+          <div>
+            <p className="text-sm font-semibold uppercase tracking-wider text-savanna">
+              Ocall Suite
+            </p>
+            <h1 className="mt-3 font-display text-4xl font-bold leading-tight sm:text-5xl">
+              Les logiciels de gestion des entreprises africaines
+            </h1>
+            <p className="mt-5 max-w-xl text-lg text-ivory/85">
+              Une suite d’applications spécialisées, simples et en ligne, pour piloter votre
+              activité au quotidien : ventes, clients, équipes et chiffres.
+            </p>
+            <div className="mt-8 flex flex-wrap gap-3">
+              <ButtonLink href="/demo" variant="accent">
+                Demander une démonstration
+              </ButtonLink>
+              <ButtonLink href="/solutions" variant="secondary">
+                Voir nos solutions
+              </ButtonLink>
+            </div>
+          </div>
+          <ul className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-1">
+            {[
+              'Parcs aquatiques et loisirs',
+              'Restaurants',
+              'Bientôt : écoles, cliniques, RH, solaire, documents',
+            ].map((t) => (
+              <li
+                key={t}
+                className="flex items-center gap-3 rounded-xl bg-ivory/10 px-4 py-3 backdrop-blur"
+              >
+                <CheckCircle2 className="h-5 w-5 shrink-0 text-savanna" aria-hidden />
+                {t}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      {/* ─── Proposition de valeur ─── */}
+      <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+        <div className="max-w-3xl">
+          <h2 className="font-display text-3xl font-bold">Un métier, une application dédiée</h2>
+          <p className="mt-3 text-muted">
+            Chaque solution Ocall est conçue pour un métier précis, avec ses propres règles. Elles
+            partagent les mêmes fondations : comptes sécurisés, abonnements en FCFA, support et
+            mises à jour.
+          </p>
+        </div>
+        {catalog ? (
+          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {catalog.map((p) => (
+              <ProductCard key={p.slug} p={p} />
+            ))}
+          </div>
+        ) : (
+          <p className="mt-8 text-sm text-muted">
+            Le catalogue est momentanément indisponible.{' '}
+            <Link className="underline" href="/solutions">
+              Réessayer
+            </Link>
+          </p>
+        )}
+      </section>
+
+      {/* ─── Avantages ─── */}
+      <section className="bg-ivory-dark/40">
+        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+          <h2 className="font-display text-3xl font-bold">Pourquoi Ocall Suite</h2>
+          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {ADVANTAGES.map(({ icon: Icon, title, text }) => (
+              <div key={title} className="rounded-2xl bg-surface p-5 shadow-card">
+                <Icon className="h-6 w-6 text-terracotta-dark" aria-hidden />
+                <h3 className="mt-3 font-semibold">{title}</h3>
+                <p className="mt-1 text-sm text-muted">{text}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ─── Fonctionnement ─── */}
+      <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+        <h2 className="font-display text-3xl font-bold">Comment ça marche</h2>
+        <ol className="mt-8 grid gap-4 md:grid-cols-3">
+          {STEPS.map((s, i) => (
+            <li key={s.title} className="rounded-2xl border border-line/80 p-5">
+              <span className="grid h-9 w-9 place-items-center rounded-full bg-savanna font-display font-bold text-charcoal">
+                {i + 1}
+              </span>
+              <h3 className="mt-3 font-semibold">{s.title}</h3>
+              <p className="mt-1 text-sm text-muted">{s.text}</p>
+            </li>
           ))}
-        </g>
-        {[
-          [200, 18],
-          [382, 200],
-          [200, 382],
-          [18, 200],
-        ].map(([x, y]) => (
-          <rect
-            key={`${x}-${y}`}
-            x={x! - 12}
-            y={y! - 12}
-            width="24"
-            height="24"
-            transform={`rotate(45 ${x} ${y})`}
-            fill="#C46A43"
-          />
-        ))}
-      </svg>
-    </div>
+        </ol>
+      </section>
+
+      {/* ─── Appel à l'action ─── */}
+      <section className="mx-auto max-w-6xl px-4 pb-16 sm:px-6">
+        <div className="rounded-3xl bg-charcoal px-6 py-10 text-ivory sm:px-10">
+          <h2 className="font-display text-2xl font-bold sm:text-3xl">Parlons de votre activité</h2>
+          <p className="mt-2 max-w-2xl text-ivory/80">
+            Une démonstration gratuite, sans engagement, pour voir si Ocall correspond à vos
+            besoins.
+          </p>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <ButtonLink href="/demo" variant="accent">
+              Demander une démonstration
+            </ButtonLink>
+            <ButtonLink href="/tarifs" variant="secondary">
+              Voir les tarifs
+            </ButtonLink>
+          </div>
+        </div>
+      </section>
+    </>
   );
 }

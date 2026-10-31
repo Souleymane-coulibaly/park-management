@@ -7,7 +7,11 @@ import { PageHeader } from '@/components/ui/page-header';
 import { Alert } from '@/components/ui/states';
 import type { Plan } from '@/lib/types';
 
-export const metadata: Metadata = { title: 'Tarifs' };
+export const metadata: Metadata = {
+  title: 'Tarifs',
+  description: 'Tarifs Ocall Park en FCFA : Restaurant, Parc, Parc + Restaurant.',
+  alternates: { canonical: '/tarifs' },
+};
 // Rendu à la demande : les prix (gérés par le Super Admin) sont mis en cache 5 minutes.
 export const dynamic = 'force-dynamic';
 
@@ -29,7 +33,7 @@ export default async function TarifsPage() {
       <PageHeader
         eyebrow="Tarifs"
         title="Un abonnement mensuel simple, en FCFA"
-        description="Choisissez l’offre de votre métier. Le paiement en ligne sera disponible prochainement."
+        description="Offres Ocall Park : une mise en service unique, puis un abonnement mensuel réglé sur facture. Aucun prélèvement ni renouvellement automatique."
       />
       {!plans ? (
         <Alert tone="info" title="Tarifs momentanément indisponibles">

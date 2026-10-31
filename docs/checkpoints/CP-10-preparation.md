@@ -1,6 +1,7 @@
 # Checkpoint CP-10 — préparation (Sprints 1 à 11)
 
 Ce document prépare l'audit indépendant Codex CP-10. Il ne constitue pas l'audit lui-même.
+Consigne de l'auditeur : [CP-10-consigne-codex.md](CP-10-consigne-codex.md).
 
 ## Contexte de décision
 
@@ -11,15 +12,37 @@ Ce document prépare l'audit indépendant Codex CP-10. Il ne constitue pas l'aud
   multi-produits, factures, rôles internes, MFA, tableau de bord commercial) puis **11B**
   (stockage privé et quotas, quotas IA, support, préparation production, pilote).
 - **CP-10 doit couvrir les Sprints 1 à 6 et 8 à 11** (le Sprint 7, paiement CinetPay, est reporté).
+- Décision du commanditaire (2026-10-31) : le Sprint 12A ne démarre qu'après présentation des
+  résultats de CP-10 ; les anomalies ouvertes ne sont pas considérées comme résolues.
 
 ## Référentiel
 
-- Branche `claude/sprint-11`, depuis `6bcee39` (thème Aqua Premium, poussé). Sprint 11 **ni commité
-  ni poussé** à la date de ce document.
-- Migrations **non appliquées** (ni développement, ni `test`) : `20261031010000_ocall_suite_plateforme`
-  (assouplit deux contraintes d'unicité, reprend les abonnements vers leur produit) et
-  `20261031020000_ocall_suite_support_quotas` (additive ; pose `idle_in_transaction_session_timeout`).
+- Branche `claude/sprint-11`, commit **`e1efd33`**, poussé sur `origin/claude/sprint-11`
+  (2026-10-31). Contient le thème Aqua Premium (`6bcee39`).
+- Migrations `20261031010000_ocall_suite_plateforme` et `20261031020000_ocall_suite_support_quotas`
+  **appliquées sur la base de développement** le 2026-10-31, avec l'accord du commanditaire :
+  52 → 59 tables (7 nouvelles, dont `SaasProduct` avec 4 lignes), aucun comptage existant modifié,
+  3 offres et 3 abonnements rattachés à leur produit, `idle_in_transaction_session_timeout=60s`
+  enregistré. Base `test` : aucune migration des Sprints 6 à 11 (A11).
+- Région de production validée : Europe (A43 résolue). Base de production non créée.
 - Aucune nouvelle dépendance au Sprint 11.
+
+## Blocage Neon `test` (A11) — diagnostic du 2026-10-31
+
+Diagnostic sans secret (script en lecture seule, `SELECT 1`) :
+
+| Base                            | DNS | TCP 5432 | Authentification                                    |
+| ------------------------------- | --- | -------- | --------------------------------------------------- |
+| `test` (`ep-odd-rice-…-pooler`) | OK  | OK       | **refusée** : identifiants invalides pour ce rôle   |
+| développement                   | OK  | OK       | OK (`SELECT 1` en 1,5 s depuis le poste, us-east-2) |
+
+Cause : le mot de passe (ou le rôle) de `TEST_DATABASE_URL` dans `apps/api/.env` n'est plus valide
+(mot de passe régénéré ou rôle supprimé côté Neon). Ce n'est ni un problème réseau ni un problème
+de code. **Résolution** : le commanditaire copie depuis la console Neon (branche `test`, rôle
+propriétaire) les URL _pooled_ et directe, les place dans `TEST_DATABASE_URL` / `TEST_DIRECT_URL`
+(jamais dans Git), puis : `pnpm db:migrate:deploy:test` → `pnpm test:integration` →
+`pnpm test:e2e`. En attendant, l'intégration tourne sur PostgreSQL embarqué (PGlite) : preuve
+utile, mais pas sur Neon (A37).
 
 ## Commandes de vérification
 
@@ -66,24 +89,41 @@ pnpm build; pnpm test:e2e
 6. **Correctifs** : consigne de simulation exclue des données autorisées du copilote, lecture du
    délai de conservation hors transaction (commande vocale), formulaire des réglages IA.
 
-## Résultats à la date de préparation
+## Résultats au 2026-10-31 (commit `e1efd33`)
 
-| Contrôle                                                                                         | Résultat                                                                                           |
-| ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------- |
-| Unitaires                                                                                        | shared 145/145, API 81/81                                                                          |
-| Typecheck, lint, Prettier, build, `migrate:check`                                                | OK (voir SPRINT_STATUS.md pour la dernière exécution)                                              |
-| Intégration sur PostgreSQL **local jetable** (PGlite, toutes les migrations, vrai client Prisma) | 11A 6/6, 11B 8/8, Sprint 10 12/12, Sprint 9B 7/7, Sprint 8 15/15, Sprint 1 : voir SPRINT_STATUS.md |
-| Intégration sur Neon `test`                                                                      | **non exécutée** (A11)                                                                             |
-| Régression des Sprints 2 à 6 et 9A                                                               | **non exécutée** dans ce sprint                                                                    |
-| E2E navigateur                                                                                   | **non exécuté**                                                                                    |
-| Matériel (Android, imprimantes, scanners)                                                        | **non vérifiable ici**                                                                             |
-| Test de restauration                                                                             | **non réalisé** (base de production non créée)                                                     |
+| Contrôle                                               | Résultat                                           |
+| ------------------------------------------------------ | -------------------------------------------------- |
+| Unitaires                                              | shared 145/145, API 81/81, database 13/13          |
+| Typecheck, lint, Prettier, build web, `migrate:check`  | OK                                                 |
+| Intégration sur Neon `test`                            | **non exécutée** : authentification refusée (A11)  |
+| Intégration sur PostgreSQL embarqué (PGlite, pool à 1) | voir tableau suivant — **10 suites vertes sur 12** |
+| E2E navigateur                                         | **non exécuté** (exige une base de test autorisée) |
+| Matériel (Android, imprimantes, scanners)              | **non vérifiable ici**                             |
+| Test de restauration                                   | **non réalisé** (base de production non créée)     |
+
+Intégration, une base embarquée neuve par suite, toutes les migrations, vrai client Prisma :
+
+| Suite                           | Résultat  | Remarque                                           |
+| ------------------------------- | --------- | -------------------------------------------------- |
+| Sprint 1 — socle                | 33/33     |                                                    |
+| Sprint 2 — POS                  | 26/26     | première exécution depuis le Sprint 11             |
+| Sprint 3 — matériel             | 17/17     | idem                                               |
+| Sprint 4 — billetterie          | 26/26     | idem                                               |
+| Sprint 5 — restaurant           | **26/27** | **A50** : défaut réel (connexion hors transaction) |
+| Sprint 6 — borne, CRM, planning | 15/15     | première exécution depuis le Sprint 11             |
+| Sprint 8 — IA                   | 15/15     |                                                    |
+| Sprint 9A — analyses            | **0/14**  | **A51** : test jamais exécutable                   |
+| Sprint 9B — copilote, SaaS      | 7/7       |                                                    |
+| Sprint 10 — sites vitrines      | 12/12     |                                                    |
+| Sprint 11A — Ocall Suite        | 6/6       |                                                    |
+| Sprint 11B — exploitation       | 8/8       |                                                    |
 
 ## Anomalies et limites
 
 ### Reportées
 
-A1 à A36 : voir les préparations CP-04 à CP-09. **A11 (base `test` inaccessible) bloque toujours la
+A1 à A36 : voir les préparations CP-04 à CP-09, en particulier A27 (validation d'un règlement sans
+double contrôle) et A28 (abonnements échus jamais passés « expirés »). **A11 bloque toujours la
 preuve sur Neon.** Anomalies historiques réexaminées : [ANOMALIES-HISTORIQUES.md](../ANOMALIES-HISTORIQUES.md).
 
 ### Nouvelles au Sprint 11
@@ -98,13 +138,33 @@ preuve sur Neon.** Anomalies historiques réexaminées : [ANOMALIES-HISTORIQUES.
 | A42 — supervision et sauvegarde logique non branchées                            | Haute (avant pilote) | Procédures écrites ([PRODUCTION.md](../PRODUCTION.md)), à activer avec accord |
 | A43 — région de production                                                       | Résolue (2026-10-31) | Europe validée ; base de production à créer avec accord                       |
 
+### Constatées pendant la préparation de CP-10 (2026-10-31, non corrigées)
+
+Chaque anomalie a été vérifiée dans le code ; aucune n'est corrigée à ce stade.
+
+| Anomalie                                                                                                                                                                                                                                          | Gravité               | Impact et suite                                                                                                      |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| A44 — MRR calculé sur le **prix catalogue** dans l'ancien tableau de bord (`platform.service.ts:55`) et les statistiques 9B (`saas.service.ts`, `theoreticalMonthlyRevenue`), alors que le tableau de bord commercial utilise le **prix convenu** | Moyenne (facturation) | Deux MRR différents selon l'écran ; harmoniser sur le prix convenu                                                   |
+| A45 — un produit **retiré** reste facturable : `issueInvoice` ne refuse que « à venir » (`suite.service.ts:549`)                                                                                                                                  | Moyenne (facturation) | Règle unique « produit facturable / souscriptible » côté serveur                                                     |
+| A46 — la validation d'un règlement avec prolongation ne vérifie ni le statut du produit ni celui de l'abonnement : elle peut réactiver un abonnement résilié (`saas.service.ts`, `validatePayment`)                                               | Moyenne (facturation) | Refuser ou exiger une action explicite ; tester                                                                      |
+| A47 — changer le métier d'une organisation remet à zéro les prix convenus (`organizations.service.ts:95-104`) ; l'ancien tarif ne survit qu'en texte dans l'évènement                                                                             | Moyenne (facturation) | Historique des tarifs appliqués (table dédiée)                                                                       |
+| A48 — un règlement sans facture n'est rattachable qu'à l'abonnement Ocall Park (`saas.service.ts:197-208`)                                                                                                                                        | Basse                 | Produits hors Parc : passer par une facture ; à documenter ou généraliser                                            |
+| A49 — aucune action d'administration pour suspendre, résilier ou changer d'offre un abonnement (aggrave A28)                                                                                                                                      | Moyenne               | Actions journalisées, permissions dédiées                                                                            |
+| A50 — **modification d'une commande restaurant** : la table est recherchée hors de la transaction ouverte (`orders.service.ts:172` → `dining.service.ts:240` via `this.prisma`) ; deux connexions par requête, blocage avec un pool à 1 connexion | Haute (avant pilote)  | Même famille que la commande vocale corrigée au 11B ; risque d'épuisement du pool en pointe ; passer `tx`            |
+| A51 — la suite d'intégration **Sprint 9A n'a jamais pu passer** : elle ouvre deux sessions de caisse avec le même propriétaire, refusé par la règle « une session ouverte par employé » (en place depuis `eed1c11`, Sprint 2)                     | Haute (preuve)        | Les analyses 9A (CA, marges, heures, exports) n'ont **aucune preuve d'intégration** ; corriger le test, puis rejouer |
+
+Constat de méthode : A50 et A51 n'apparaissaient qu'en exécutant réellement les suites ; les
+« suites écrites mais non exécutées » des sprints précédents ne valent pas preuve.
+
 ## Proposition de décision
 
 **GO SOUS RÉSERVES pour la préparation du pilote ; NO-GO pour le démarrage du pilote réel** tant que :
 
 1. les suites d'intégration et E2E des Sprints 1 à 11 n'ont pas tourné sur Neon `test` (A11, A37) ;
-2. la base de production n'est pas créée en Europe (région validée le 2026-10-31, A43) ;
-3. la supervision et le test de restauration ne sont pas faits (A42) ;
-4. la recette matérielle n'est pas faite sur le premier site (anomalies historiques 5 à 7).
+2. A50 n'est pas corrigée et la suite 9A n'est pas rendue exécutable et verte (A51) ;
+3. les anomalies de facturation A44 à A47 ne sont pas corrigées ou acceptées par écrit ;
+4. la base de production n'est pas créée en Europe (région validée le 2026-10-31, A43) ;
+5. la supervision et le test de restauration ne sont pas faits (A42) ;
+6. la recette matérielle n'est pas faite sur le premier site (anomalies historiques 5 à 7).
 
 Décision finale : commanditaire, après l'audit Codex CP-10.

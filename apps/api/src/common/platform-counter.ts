@@ -11,7 +11,7 @@ export const PLATFORM_TIMEZONE = 'Africa/Bamako';
  */
 export async function nextPlatformSequence(
   tx: Prisma.TransactionClient,
-  prefix: 'invoice' | 'support',
+  prefix: 'invoice' | 'support' | 'receipt' | 'remittance' | 'demo',
 ): Promise<{ year: number; sequence: number }> {
   const year = Number(localMoment(new Date(), PLATFORM_TIMEZONE).date.slice(0, 4));
   const [counter] = await tx.$queryRaw<{ value: number }[]>`

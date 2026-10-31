@@ -22,14 +22,21 @@ export function LogoMark({ className = 'h-9 w-9' }: { className?: string }) {
   );
 }
 
-export function Logo({ inverted = false }: { inverted?: boolean }) {
+/** `product` : nom affiché après « Ocall » (Park pour l'application, Suite pour le site commercial). */
+export function Logo({
+  inverted = false,
+  product = 'Park',
+}: {
+  inverted?: boolean;
+  product?: 'Park' | 'Suite';
+}) {
   return (
     <span className="inline-flex items-center gap-2.5">
       <LogoMark />
       <span
         className={`font-display text-lg font-bold tracking-tight ${inverted ? 'text-ivory' : 'text-charcoal'}`}
       >
-        Ocall <span className={inverted ? 'text-savanna' : 'text-forest'}>Park</span>
+        Ocall <span className={inverted ? 'text-savanna' : 'text-forest'}>{product}</span>
       </span>
     </span>
   );

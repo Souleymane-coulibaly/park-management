@@ -6,8 +6,11 @@ règlements.
 
 ## Principe commercial
 
-Les clients paient Ocall **directement, hors plateforme** (espèces, virement, mobile money). Aucun
-prestataire de paiement, aucun encaissement ni renouvellement automatique.
+> **Sprint 12A** : les règlements sont désormais **déclarés puis confirmés par une autre personne**
+> (virement, espèces avec reçu numéroté) ou payés **en ligne** (vérification serveur). L'activation
+> suit le **mode figé** de l'abonnement (AUTO ou ADMIN_APPROVAL). Les étapes 3 et 4 ci-dessous sont
+> remplacées par [GUIDE-PAIEMENT-MANUEL.md](GUIDE-PAIEMENT-MANUEL.md) et
+> [PAIEMENT-EN-LIGNE.md](PAIEMENT-EN-LIGNE.md). Aucun prélèvement ni renouvellement automatique.
 
 1. **Souscription** : fiche organisation → « Ajouter un produit » (produits commercialisés
    uniquement). L'abonnement est créé **non activé**.
@@ -50,13 +53,13 @@ Les offres Ocall Park (une par métier, utilisées à l'inscription) se modifien
 
 ## Rôles internes
 
-| Rôle                   | Accès                                                                    | MFA         |
-| ---------------------- | ------------------------------------------------------------------------ | ----------- |
-| Propriétaire           | Tout, y compris les comptes internes                                     | Obligatoire |
-| Administrateur délégué | Tout sauf les comptes internes                                           | Obligatoire |
-| Facturation            | Tableau de bord, organisations, abonnements, factures, règlements        | Obligatoire |
-| Assistance             | Tableau de bord, organisations, domaines, **support**                    | Facultative |
-| Consultation et audit  | Lecture : tableau de bord, organisations, facturation, audit, paramètres | Facultative |
+| Rôle                   | Accès                                                                                                   | MFA         |
+| ---------------------- | ------------------------------------------------------------------------------------------------------- | ----------- |
+| Propriétaire           | Tout, y compris les comptes internes                                                                    | Obligatoire |
+| Administrateur délégué | Tout sauf les comptes internes                                                                          | Obligatoire |
+| Facturation            | Tableau de bord, organisations, abonnements, factures, règlements, espèces, activations, démonstrations | Obligatoire |
+| Assistance             | Tableau de bord, organisations, domaines, **support**, démonstrations                                   | Facultative |
+| Consultation et audit  | Lecture : tableau de bord, organisations, facturation, audit, paramètres                                | Facultative |
 
 Quotas et purge du stockage : propriétaire et administrateur délégué.
 
@@ -126,3 +129,21 @@ Migrations : `20261031010000_ocall_suite_plateforme` et `20261031020000_ocall_su
 (additive : quotas, fichiers privés, support, borne des transactions inactives). La première est additive, reprend chaque abonnement
 existant vers le produit de son offre et assouplit deux contraintes d'unicité (un abonnement par
 organisation, une offre par métier).
+
+## Sprint 12A — catalogue, règlements, administration
+
+- **Catalogue** : statuts `PLANNED`, `COMING_SOON`, `PILOT`, `ACTIVE`, `SUSPENDED`, `RETIRED` ; règle
+  serveur unique (seul `ACTIVE` souscriptible, `PILOT` par Ocall ; facturation et activation
+  seulement `ACTIVE` ou `PILOT`). Produits Ocall Clinic, RH, Solar et Docs ajoutés « Bientôt
+  disponible », sans offre. Présentation publique : voir [SITE-OCALL-SUITE.md](SITE-OCALL-SUITE.md).
+- **Offres** : mode d'activation `AUTO` / `ADMIN_APPROVAL` (défaut), figé sur chaque abonnement.
+- **Abonnements** : suspendre, réactiver, changer d'offre (tarif historisé dans
+  `SubscriptionPriceHistory`), résilier (définitif) ; passage automatique « Expiré » à échéance.
+- **Règlements** : déclaration, confirmation à quatre yeux, rejet, annulation, remboursement,
+  décisions d'activation ; espèces avec reçu numéroté, remises et rapprochement de caisse.
+- **Paiement en ligne** : socle et prestataire simulé ; adaptateur CinetPay réel à livrer après
+  confirmation de l'API du compte marchand.
+- **Nouvelles permissions** : `platform.billing.cash.declare`, `platform.activations.approve`,
+  `platform.demo.manage` ; côté client : `subscription.pay` (propriétaire, administrateur).
+- **Nouvelles sections** : Paiements en ligne, Caisse et remises, Demandes de démo ; tableau de bord :
+  activations à approuver, démonstrations, encaissé par canal, remboursé.

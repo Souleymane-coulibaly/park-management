@@ -199,6 +199,7 @@ export class RestaurantOrdersService {
           sale.establishmentId,
           dto.tableId === undefined ? sale.tableId : dto.tableId,
           dto.zoneId === undefined && dto.tableId === undefined ? sale.zoneId : dto.zoneId,
+          tx,
         );
         data.tableId = location.tableId;
         data.zoneId = location.zoneId;

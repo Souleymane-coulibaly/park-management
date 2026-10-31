@@ -8,43 +8,47 @@ import { Logo } from '@/components/brand/logo';
 import { ButtonLink } from '@/components/ui/button';
 
 const LINKS = [
-  { href: '/metiers', label: 'Métiers' },
-  { href: '/fonctionnalites', label: 'Fonctionnalités' },
+  { href: '/solutions', label: 'Nos solutions' },
   { href: '/tarifs', label: 'Tarifs' },
+  { href: '/a-propos', label: 'À propos' },
+  { href: '/contact', label: 'Contact' },
 ];
 
+/** En-tête du site commercial Ocall Suite (distinct des sites vitrines des clients). */
 export function SiteHeader() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const active = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
   return (
     <header className="sticky top-0 z-30 border-b border-line/60 bg-ivory/90 backdrop-blur">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
-        <Link href="/" aria-label="Ocall Park — accueil">
-          <Logo />
+        <Link href="/" aria-label="Ocall Suite — accueil">
+          <Logo product="Suite" />
         </Link>
-        <nav className="hidden items-center gap-1 md:flex" aria-label="Navigation principale">
+        <nav className="hidden items-center gap-1 lg:flex" aria-label="Navigation principale">
           {LINKS.map((l) => (
             <Link
               key={l.href}
               href={l.href}
-              className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${pathname === l.href ? 'text-forest' : 'text-charcoal-soft hover:text-charcoal'}`}
+              aria-current={active(l.href) ? 'page' : undefined}
+              className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${active(l.href) ? 'text-forest' : 'text-charcoal-soft hover:text-charcoal'}`}
             >
               {l.label}
             </Link>
           ))}
         </nav>
-        <div className="hidden items-center gap-2 md:flex">
+        <div className="hidden items-center gap-2 lg:flex">
           <ButtonLink href="/connexion" variant="ghost" size="sm">
             Connexion
           </ButtonLink>
-          <ButtonLink href="/inscription" size="sm">
-            Créer mon compte
+          <ButtonLink href="/demo" size="sm">
+            Demander une démo
           </ButtonLink>
         </div>
         <button
           type="button"
-          className="rounded-lg p-2 text-charcoal md:hidden"
+          className="rounded-lg p-2 text-charcoal lg:hidden"
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
           aria-controls="mobile-menu"
@@ -56,7 +60,7 @@ export function SiteHeader() {
       {open && (
         <nav
           id="mobile-menu"
-          className="border-t border-line/60 bg-ivory px-4 pb-4 pt-2 md:hidden"
+          className="border-t border-line/60 bg-ivory px-4 pb-4 pt-2 lg:hidden"
           aria-label="Navigation mobile"
         >
           {LINKS.map((l) => (
@@ -73,7 +77,7 @@ export function SiteHeader() {
             <ButtonLink href="/connexion" variant="secondary">
               Connexion
             </ButtonLink>
-            <ButtonLink href="/inscription">S’inscrire</ButtonLink>
+            <ButtonLink href="/demo">Démo</ButtonLink>
           </div>
         </nav>
       )}

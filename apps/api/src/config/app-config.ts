@@ -1,6 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import { type AiConfig, loadAiConfig } from '../modules/ai/ai.config';
 import { type SitesConfig, loadSitesConfig } from '../modules/public-sites/sites.config';
+import {
+  type OnlinePaymentsConfig,
+  loadOnlinePaymentsConfig,
+} from '../modules/online-payments/online-payments.config';
 
 /**
  * Configuration typée, lue une seule fois depuis l'environnement.
@@ -22,6 +26,10 @@ export interface AppConfig {
   trustProxyHops: number;
   /** Demandes de commande publiques (QR code) acceptées par IP sur 10 minutes. */
   publicOrderThrottleLimit: number;
+  /** Demandes de démonstration du site public acceptées par IP sur 10 minutes (Sprint 12A). */
+  publicLeadThrottleLimit: number;
+  /** Paiement en ligne des factures SaaS (Sprint 12A). */
+  onlinePayments: OnlinePaymentsConfig;
   /** Intervalle des battements des flux temps réel (et de revérification de la session), en ms. */
   realtimeHeartbeatMs: number;
   /** Fournisseur IA, modèles et garde-fous des appels réels (Sprint 8). */
@@ -114,8 +122,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     swaggerEnabled: env.SWAGGER_ENABLED ? env.SWAGGER_ENABLED === 'true' : nodeEnv !== 'production',
     trustProxyHops: int(env, 'TRUST_PROXY_HOPS', 1),
     publicOrderThrottleLimit: int(env, 'PUBLIC_ORDER_THROTTLE_LIMIT', 30),
+    publicLeadThrottleLimit: int(env, 'PUBLIC_LEAD_THROTTLE_LIMIT', 5),
     realtimeHeartbeatMs: int(env, 'REALTIME_HEARTBEAT_MS', 25_000),
     ai: loadAiConfig(env, nodeEnv),
+    onlinePayments: loadOnlinePaymentsConfig(env, nodeEnv),
     sites: loadSitesConfig(env, nodeEnv),
     mfaEncryptionKey: mfaKey(env, nodeEnv),
     storageSigningKey: storageSigningKey(env, nodeEnv),

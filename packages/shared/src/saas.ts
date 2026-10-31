@@ -4,36 +4,112 @@ import type { SubscriptionStatus } from './subscription';
 /**
  * Statistiques SaaS du Super Admin et registre des règlements d'abonnement (Sprint 9B).
  *
- * Règle métier : les abonnements sont payés directement à Ocall, HORS plateforme ; le Super Admin
- * saisit le règlement, le vérifie et le valide MANUELLEMENT. Aucun paiement en ligne, aucun
+ * Règle métier : les abonnements sont payés à Ocall, soit HORS plateforme (le Super Admin saisit
+ * le règlement, le vérifie et le valide manuellement), soit EN LIGNE (Sprint 12A : confirmé
+ * uniquement après vérification serveur auprès du prestataire). Aucun prélèvement ni
  * renouvellement automatique. Ces encaissements ne sont jamais mélangés aux recettes des
  * établissements clients.
  */
 
-export const SUBSCRIPTION_PAYMENT_METHODS = [
-  'CASH',
-  'BANK_TRANSFER',
-  'MOBILE_MONEY',
-  'CHECK',
-  'OTHER',
-] as const;
-export type SubscriptionPaymentMethod = (typeof SUBSCRIPTION_PAYMENT_METHODS)[number];
+/** Moyens saisissables à la main (Sprint 12A) ; le paiement en ligne n'est jamais saisi. */
+export const SUBSCRIPTION_PAYMENT_METHODS = ['CASH', 'MANUAL_TRANSFER'] as const;
+export type ManualSubscriptionPaymentMethod = (typeof SUBSCRIPTION_PAYMENT_METHODS)[number];
+/** Paiement en ligne vérifié (CinetPay). */
+export const ONLINE_PAYMENT_METHODS = ['CINETPAY_CARD', 'CINETPAY_MOBILE_MONEY'] as const;
+/** Anciens moyens hors plateforme : affichés pour l'historique, plus saisissables. */
+export const LEGACY_PAYMENT_METHODS = ['MOBILE_MONEY', 'CHECK', 'OTHER'] as const;
+export type SubscriptionPaymentMethod =
+  | ManualSubscriptionPaymentMethod
+  | (typeof ONLINE_PAYMENT_METHODS)[number]
+  | (typeof LEGACY_PAYMENT_METHODS)[number];
 
 export const SUBSCRIPTION_PAYMENT_METHOD_LABELS: Record<SubscriptionPaymentMethod, string> = {
   CASH: 'Espèces',
-  BANK_TRANSFER: 'Virement bancaire',
-  MOBILE_MONEY: 'Mobile money (hors plateforme)',
-  CHECK: 'Chèque',
-  OTHER: 'Autre',
+  MANUAL_TRANSFER: 'Virement',
+  CINETPAY_CARD: 'Carte bancaire (CinetPay)',
+  CINETPAY_MOBILE_MONEY: 'Mobile money (CinetPay)',
+  MOBILE_MONEY: 'Mobile money hors plateforme (historique)',
+  CHECK: 'Chèque (historique)',
+  OTHER: 'Autre (historique)',
 };
 
-export const SUBSCRIPTION_PAYMENT_STATUSES = ['PENDING', 'VALIDATED', 'REJECTED'] as const;
+export const SUBSCRIPTION_PAYMENT_STATUSES = [
+  'DECLARED',
+  'PENDING_VERIFICATION',
+  'CONFIRMED',
+  'REJECTED',
+  'CANCELLED',
+  'REFUNDED',
+] as const;
 export type SubscriptionPaymentStatus = (typeof SUBSCRIPTION_PAYMENT_STATUSES)[number];
 
 export const SUBSCRIPTION_PAYMENT_STATUS_LABELS: Record<SubscriptionPaymentStatus, string> = {
-  PENDING: 'À vérifier',
-  VALIDATED: 'Validé',
+  DECLARED: 'Déclaré',
+  PENDING_VERIFICATION: 'À vérifier',
+  CONFIRMED: 'Confirmé',
   REJECTED: 'Rejeté',
+  CANCELLED: 'Annulé',
+  REFUNDED: 'Remboursé',
+};
+
+/** Règlements qui réservent une part de la facture (reste dû) sans être encore encaissés. */
+export const OPEN_PAYMENT_STATUSES: readonly SubscriptionPaymentStatus[] = [
+  'DECLARED',
+  'PENDING_VERIFICATION',
+];
+
+/**
+ * Contrôle à quatre yeux (Sprint 12A) : un règlement manuel est confirmé par un utilisateur
+ * distinct de celui qui l'a déclaré et de celui qui a collecté les espèces.
+ */
+export function canConfirmPayment(
+  confirmerId: string,
+  payment: { recordedById: string; collectedById: string | null },
+): boolean {
+  return confirmerId !== payment.recordedById && confirmerId !== payment.collectedById;
+}
+
+/** Reste dû d'une facture : total moins règlements confirmés et en cours (déclarés, à vérifier). */
+export function invoiceRemaining(
+  total: number,
+  payments: { amount: number; status: SubscriptionPaymentStatus }[],
+): number {
+  const reserved = payments
+    .filter((p) => p.status === 'CONFIRMED' || OPEN_PAYMENT_STATUSES.includes(p.status))
+    .reduce((t, p) => t + p.amount, 0);
+  return Math.max(0, total - reserved);
+}
+
+/** Numéro de reçu d'espèces : REC-2026-00042. */
+export function formatReceiptNumber(year: number, sequence: number): string {
+  return `REC-${year}-${String(sequence).padStart(5, '0')}`;
+}
+/** Numéro de remise de caisse : RCA-2026-00007. */
+export function formatRemittanceNumber(year: number, sequence: number): string {
+  return `RCA-${year}-${String(sequence).padStart(5, '0')}`;
+}
+
+// ─── Activation après paiement en ligne (Sprint 12A) ───
+
+export const ACTIVATION_MODES = ['AUTO', 'ADMIN_APPROVAL'] as const;
+export type ActivationMode = (typeof ACTIVATION_MODES)[number];
+export const ACTIVATION_MODE_LABELS: Record<ActivationMode, string> = {
+  AUTO: 'Automatique après paiement vérifié',
+  ADMIN_APPROVAL: 'Approbation par Ocall après paiement vérifié',
+};
+
+export const PAYMENT_ACTIVATION_STATUSES = [
+  'NOT_REQUIRED',
+  'PENDING',
+  'APPROVED',
+  'REFUSED',
+] as const;
+export type PaymentActivationStatus = (typeof PAYMENT_ACTIVATION_STATUSES)[number];
+export const PAYMENT_ACTIVATION_STATUS_LABELS: Record<PaymentActivationStatus, string> = {
+  NOT_REQUIRED: 'Sans objet',
+  PENDING: 'Activation à approuver',
+  APPROVED: 'Activation approuvée',
+  REFUSED: 'Activation refusée (à rembourser)',
 };
 
 /** Montant maximal d'un règlement saisi (FCFA) : garde-fou contre une faute de frappe. */
@@ -62,6 +138,18 @@ export interface SubscriptionPaymentView {
   rejectionReason: string | null;
   subscriptionExtended: boolean;
   createdAt: string;
+  /** Sprint 12A. */
+  invoice: { id: string; number: string } | null;
+  recordedById: string;
+  collectedById: string | null;
+  collectedBy: string | null;
+  receiptNumber: string | null;
+  receiptReference: string | null;
+  activationStatus: PaymentActivationStatus;
+  activationDecisionReason: string | null;
+  refundedAt: string | null;
+  refundReason: string | null;
+  remittanceNumber: string | null;
 }
 
 export interface SaasRenewal {

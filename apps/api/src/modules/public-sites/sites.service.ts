@@ -40,7 +40,7 @@ type Db = Prisma.TransactionClient | PrismaService;
 export const publicMediaUrl = (key: string) => `/api/v1/public/media/${key}`;
 
 /**
- * Disponibilité publique selon l'abonnement : organisation suspendue, abonnement expiré ou
+ * Disponibilité publique selon l'abonnement : organisation suspendue, abonnement expiré, suspendu ou
  * résilié → site hors ligne, SANS perte de contenu (il revient à la réactivation).
  */
 export function siteAvailability(
@@ -48,7 +48,10 @@ export function siteAvailability(
   subscriptionStatus: string | null | undefined,
 ): boolean {
   return (
-    orgStatus === 'ACTIVE' && subscriptionStatus !== 'EXPIRED' && subscriptionStatus !== 'CANCELED'
+    orgStatus === 'ACTIVE' &&
+    subscriptionStatus !== 'EXPIRED' &&
+    subscriptionStatus !== 'CANCELED' &&
+    subscriptionStatus !== 'SUSPENDED'
   );
 }
 

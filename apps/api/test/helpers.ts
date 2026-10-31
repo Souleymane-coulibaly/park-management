@@ -175,5 +175,16 @@ export async function cleanup(prisma: PrismaService): Promise<void> {
     where: { OR: [{ organizationId: { in: orgIds } }, { actorUserId: { in: userIds } }] },
   });
   await prisma.organization.deleteMany({ where: { id: { in: orgIds } } });
+  // Sprint 12A : remises d'espèces (liées aux comptes internes) et demandes de démonstration.
+  await prisma.subscriptionPayment.updateMany({
+    where: { remittance: { collectorId: { in: userIds } } },
+    data: { remittanceId: null },
+  });
+  await prisma.cashRemittance.deleteMany({
+    where: { OR: [{ collectorId: { in: userIds } }, { recordedById: { in: userIds } }] },
+  });
+  await prisma.demoRequest.deleteMany({
+    where: { email: { endsWith: `${RUN}@test.ocallpark.local` } },
+  });
   await prisma.user.deleteMany({ where: { id: { in: userIds } } });
 }

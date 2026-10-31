@@ -124,6 +124,19 @@ const ACTION_LABELS: Record<string, string> = {
 
 export const actionLabel = (action: string) => ACTION_LABELS[action] ?? action;
 
+/** Couleur d'un statut commercial de produit (Sprint 12A). */
+export const PRODUCT_STATUS_TONE: Record<
+  'PLANNED' | 'COMING_SOON' | 'PILOT' | 'ACTIVE' | 'SUSPENDED' | 'RETIRED',
+  'forest' | 'savanna' | 'terracotta' | 'neutral'
+> = {
+  PLANNED: 'neutral',
+  COMING_SOON: 'savanna',
+  PILOT: 'savanna',
+  ACTIVE: 'forest',
+  SUSPENDED: 'terracotta',
+  RETIRED: 'neutral',
+};
+
 export function initials(firstName: string, lastName: string): string {
   return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
 }

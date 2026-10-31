@@ -34,7 +34,7 @@ export class PlatformService {
         this.prisma.subscription.groupBy({ by: ['status'], _count: { _all: true } }),
         this.prisma.subscription.findMany({
           where: { status: 'ACTIVE' },
-          select: { plan: { select: { monthlyPrice: true } } },
+          select: { agreedMonthlyPrice: true, plan: { select: { monthlyPrice: true } } },
         }),
         this.prisma.organizationMembership.count({
           where: { isActive: true, organization: { status: 'ACTIVE' } },
@@ -51,8 +51,11 @@ export class PlatformService {
         byBusinessType: count(byBusinessType, 'businessType'),
       },
       subscriptions: { byStatus: count(subscriptionsByStatus, 'status') },
-      /** Revenu mensuel récurrent des abonnements actifs, en FCFA. */
-      monthlyRecurringRevenue: activeSubscriptions.reduce((s, sub) => s + sub.plan.monthlyPrice, 0),
+      /** Revenu mensuel récurrent contractuel des abonnements actifs (tarif accepté), en FCFA. */
+      monthlyRecurringRevenue: activeSubscriptions.reduce(
+        (s, sub) => s + (sub.agreedMonthlyPrice ?? sub.plan.monthlyPrice),
+        0,
+      ),
       activeAccounts,
     };
   }
@@ -210,8 +213,13 @@ export class PlatformService {
               isActive: plan.isActive,
               aiMonthlyCallQuota: plan.aiMonthlyCallQuota,
               storageQuotaMb: plan.storageQuotaMb,
+              activationMode: plan.activationMode,
             },
             after: { ...dto },
+            // Le mode figé des abonnements existants n'est jamais modifié (pas de rétroactivité).
+            ...(dto.activationMode && dto.activationMode !== plan.activationMode
+              ? { activationModeChanged: true }
+              : {}),
           },
         },
         tx,

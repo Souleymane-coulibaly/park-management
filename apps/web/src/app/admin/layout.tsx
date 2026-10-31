@@ -48,6 +48,24 @@ const NAV: (NavItem & { permission: PlatformPermission | null })[] = [
     permission: 'platform.billing.read',
   },
   {
+    key: 'platform-online-payments',
+    label: 'Paiements en ligne',
+    href: '/admin/paiements-en-ligne',
+    permission: 'platform.billing.read',
+  },
+  {
+    key: 'platform-cash',
+    label: 'Caisse et remises',
+    href: '/admin/caisse',
+    permission: 'platform.billing.read',
+  },
+  {
+    key: 'platform-demo-requests',
+    label: 'Demandes de démo',
+    href: '/admin/demandes-demo',
+    permission: 'platform.demo.manage',
+  },
+  {
     key: 'platform-domains',
     label: 'Domaines',
     href: '/admin/domaines',
