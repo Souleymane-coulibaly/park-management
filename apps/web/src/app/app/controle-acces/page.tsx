@@ -1,20 +1,19 @@
 'use client';
 
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
-import { CheckCircle2, ScanLine, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, RotateCw, ScanLine, XCircle } from 'lucide-react';
 import { SCAN_REFUSAL_LABELS } from '@ocall/shared';
 import { AccessDenied } from '@/components/app/access-denied';
 import { useCan } from '@/components/app/session-context';
 import { ParkEstablishmentScope } from '@/components/park/park-establishment';
 import { ParkNav } from '@/components/park/park-nav';
+import { ScanHistoryList } from '@/components/park/scan-history';
 import { OfflineBanner, toApiError } from '@/components/pos/cash-session';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { InputField } from '@/components/ui/field';
 import { ErrorState, LoadingState } from '@/components/ui/states';
 import { type ApiError, api } from '@/lib/api';
-import { formatDateTime } from '@/lib/format';
 import { useOnline, useWakeLock } from '@/lib/hardware/use-terminal';
 import { newRequestId } from '@/lib/request-id';
 import type { ParkEstablishment, TicketScanView } from '@/lib/types';
@@ -24,6 +23,8 @@ import { CameraScanner } from './camera-scanner';
 const ENTRY_POINT_KEY = 'ocp.gate.entryPoint';
 /** Un même QR relu par la caméra dans ce délai n'est pas renvoyé (le visiteur tient encore son billet). */
 const SAME_CODE_COOLDOWN_MS = 4000;
+/** Au-delà, l'agent n'attend plus : le résultat passe à l'orange et il peut vérifier à nouveau. */
+const SCAN_TIMEOUT_MS = 10_000;
 
 const timeFormatter = new Intl.DateTimeFormat('fr-FR', { hour: '2-digit', minute: '2-digit' });
 
@@ -44,7 +45,12 @@ export default function ControleAccesPage() {
   );
 }
 
-type Outcome = { kind: 'scan'; scan: TicketScanView } | { kind: 'error'; error: ApiError };
+type Outcome =
+  | { kind: 'scan'; scan: TicketScanView }
+  | { kind: 'error'; error: ApiError; qr: string; uncertain: boolean };
+
+/** Sans réponse exploitable (réseau, délai, 5xx), le serveur a pu enregistrer l'entrée. */
+const isUncertainFailure = (error: ApiError) => error.status === 0 || error.status >= 500;
 
 function Gate({ park }: { park: ParkEstablishment }) {
   const online = useOnline();
@@ -54,6 +60,8 @@ function Gate({ park }: { park: ParkEstablishment }) {
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
   const last = useRef<{ text: string; at: number } | null>(null);
+  /** Billets dont le résultat n'a pas été reçu, avec leur clé d'idempotence (en mémoire uniquement). */
+  const unconfirmed = useRef(new Map<string, string>());
   const history = useApi<TicketScanView[]>(`/access/scans?establishmentId=${park.id}&limit=30`);
 
   useEffect(() => {
@@ -74,32 +82,47 @@ function Gate({ park }: { park: ParkEstablishment }) {
     }
   }
 
+  const { reload: reloadHistory } = history;
+  useEffect(() => {
+    if (online) reloadHistory();
+  }, [online, reloadHistory]);
+
   const submit = useCallback(
-    async (qr: string) => {
+    async (rawQr: string) => {
+      const qr = rawQr.trim();
       // Hors connexion, aucun billet n'est validé : la décision appartient au serveur seul.
-      if (!online || busy || !qr.trim()) return;
+      if (!online || busy || !qr) return;
       setBusy(true);
+      // Même billet après une réponse perdue : même clé, le serveur renvoie le résultat déjà enregistré.
+      const clientRequestId = unconfirmed.current.get(qr) ?? newRequestId();
+      unconfirmed.current.set(qr, clientRequestId);
       try {
         const scan = await api<TicketScanView>('/access/scans', {
           method: 'POST',
+          timeoutMs: SCAN_TIMEOUT_MS,
           body: {
             establishmentId: park.id,
             entryPoint: entryPoint.trim() || 'Entrée',
-            qr: qr.trim(),
-            clientRequestId: newRequestId(),
+            qr,
+            clientRequestId,
           },
         });
+        unconfirmed.current.delete(qr);
         setOutcome({ kind: 'scan', scan });
         navigator.vibrate?.(scan.result === 'ACCEPTED' ? 120 : [300, 100, 300]);
-        history.reload();
+        reloadHistory();
       } catch (e) {
-        setOutcome({ kind: 'error', error: toApiError(e) });
+        const error = toApiError(e);
+        const uncertain = isUncertainFailure(error);
+        // Refus explicite du serveur (droits, validation) : le scan n'a pas eu lieu, la clé est libérée.
+        if (!uncertain) unconfirmed.current.delete(qr);
+        setOutcome({ kind: 'error', error, qr, uncertain });
         navigator.vibrate?.([300, 100, 300]);
       } finally {
         setBusy(false);
       }
     },
-    [online, busy, park.id, entryPoint, history],
+    [online, busy, park.id, entryPoint, reloadHistory],
   );
 
   function onCamera(text: string) {
@@ -124,13 +147,16 @@ function Gate({ park }: { park: ParkEstablishment }) {
         </OfflineBanner>
       )}
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-        <div className="space-y-3">
-          <InputField
-            label="Point d’entrée"
-            value={entryPoint}
-            onChange={(e) => saveEntryPoint(e.target.value.slice(0, 60))}
-            maxLength={60}
+        {/* Sur téléphone, le résultat reste visible au-dessus de la caméra. */}
+        <div className="sticky top-[4.5rem] z-20 order-first self-start lg:static lg:order-last">
+          <ScanResult
+            outcome={outcome}
+            offline={!online}
+            busy={busy}
+            onRetry={(qr) => void submit(qr)}
           />
+        </div>
+        <div className="space-y-3">
           <CameraScanner paused={busy || !online} onDetect={onCamera} />
           <form onSubmit={onManual} className="flex items-end gap-2">
             <div className="flex-1">
@@ -151,8 +177,13 @@ function Gate({ park }: { park: ParkEstablishment }) {
               Valider
             </Button>
           </form>
+          <InputField
+            label="Point d’entrée"
+            value={entryPoint}
+            onChange={(e) => saveEntryPoint(e.target.value.slice(0, 60))}
+            maxLength={60}
+          />
         </div>
-        <ScanResult outcome={outcome} />
       </div>
 
       <Card>
@@ -160,58 +191,67 @@ function Gate({ park }: { park: ParkEstablishment }) {
           <h2 className="font-semibold">Derniers passages</h2>
         </div>
         {history.state === 'loading' && <LoadingState />}
-        {history.state === 'error' && <ErrorState error={history.error} onRetry={history.reload} />}
-        {history.state === 'success' &&
-          (history.data.length === 0 ? (
-            <p className="px-4 py-6 text-center text-sm text-muted">Aucun passage enregistré.</p>
-          ) : (
-            <ul className="divide-y divide-line/70" data-testid="scan-history">
-              {history.data.map((s) => (
-                <li key={s.id} className="flex flex-wrap items-center gap-3 px-4 py-2.5 text-sm">
-                  <span className="w-28 text-muted">{formatDateTime(s.createdAt)}</span>
-                  {s.result === 'ACCEPTED' ? (
-                    <Badge tone="forest">Accepté</Badge>
-                  ) : (
-                    <Badge tone="terracotta">
-                      {s.refusalReason ? SCAN_REFUSAL_LABELS[s.refusalReason] : 'Refusé'}
-                    </Badge>
-                  )}
-                  <span className="flex-1 truncate">
-                    {s.ticket ? `${s.ticket.visitorName} · ${s.ticket.categoryName}` : '—'}
-                  </span>
-                  <span className="text-muted">
-                    {s.entryPoint} · {s.scannedBy}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ))}
+        {history.state === 'error' && <ErrorState error={history.error} onRetry={reloadHistory} />}
+        {history.state === 'success' && <ScanHistoryList scans={history.data} />}
       </Card>
     </>
   );
 }
 
 /** Résultat en très grand : lisible à bout de bras, en plein soleil. */
-function ScanResult({ outcome }: { outcome: Outcome | null }) {
-  if (!outcome) {
-    return (
-      <div className="grid min-h-64 place-items-center rounded-3xl border-2 border-dashed border-line p-6 text-center text-muted">
-        Présentez le QR code du billet devant la caméra.
-      </div>
-    );
-  }
-  if (outcome.kind === 'error') {
+function ScanResult({
+  outcome,
+  offline,
+  busy,
+  onRetry,
+}: {
+  outcome: Outcome | null;
+  offline: boolean;
+  busy: boolean;
+  onRetry: (qr: string) => void;
+}) {
+  // Orange : ni entrée ni refus. Seule une réponse du serveur peut faire entrer ou refuser un visiteur.
+  if (offline || outcome?.kind === 'error') {
+    const failure = outcome?.kind === 'error' ? outcome : null;
     return (
       <div
         role="status"
-        className="flex min-h-64 flex-col items-center justify-center gap-3 rounded-3xl bg-terracotta-dark p-6 text-center text-white"
+        aria-live="assertive"
+        className="flex min-h-40 flex-col items-center justify-center gap-2 rounded-3xl bg-savanna p-4 text-center text-charcoal lg:min-h-64 lg:gap-3 lg:p-6"
         data-testid="scan-result"
-        data-result="ERROR"
+        data-result="UNCERTAIN"
       >
-        <XCircle className="h-20 w-20" aria-hidden />
-        <p className="font-display text-3xl font-bold">Validation impossible</p>
-        <p className="text-lg">{outcome.error.message}</p>
-        <p className="text-sm text-white/80">Aucune entrée n’a été enregistrée.</p>
+        <AlertTriangle className="h-12 w-12 lg:h-20 lg:w-20" aria-hidden />
+        <p className="font-display text-2xl font-bold lg:text-3xl">Vérification impossible</p>
+        <p className="text-base font-semibold lg:text-lg">
+          {offline ? 'Réseau absent.' : failure!.error.message} Ne laissez pas entrer pour
+          l’instant.
+        </p>
+        {failure && (
+          <p className="text-sm">
+            {failure.uncertain
+              ? 'L’entrée a peut-être été enregistrée : vérifiez à nouveau ce billet.'
+              : 'Aucune entrée n’a été enregistrée.'}
+          </p>
+        )}
+        {failure && !offline && (
+          <Button
+            variant="secondary"
+            size="lg"
+            loading={busy}
+            icon={<RotateCw className="h-5 w-5" />}
+            onClick={() => onRetry(failure.qr)}
+          >
+            Vérifier à nouveau
+          </Button>
+        )}
+      </div>
+    );
+  }
+  if (!outcome) {
+    return (
+      <div className="hidden min-h-64 place-items-center rounded-3xl border-2 border-dashed border-line p-6 text-center text-muted lg:grid">
+        Présentez le QR code du billet devant la caméra.
       </div>
     );
   }
@@ -221,16 +261,16 @@ function ScanResult({ outcome }: { outcome: Outcome | null }) {
     <div
       role="status"
       aria-live="assertive"
-      className={`flex min-h-64 flex-col items-center justify-center gap-3 rounded-3xl p-6 text-center text-white ${accepted ? 'bg-forest' : 'bg-terracotta-dark'}`}
+      className={`flex min-h-40 flex-col items-center justify-center gap-2 rounded-3xl p-4 text-center text-white lg:min-h-64 lg:gap-3 lg:p-6 ${accepted ? 'bg-forest' : 'bg-terracotta-dark'}`}
       data-testid="scan-result"
       data-result={scan.result}
     >
       {accepted ? (
-        <CheckCircle2 className="h-24 w-24" aria-hidden />
+        <CheckCircle2 className="h-14 w-14 lg:h-24 lg:w-24" aria-hidden />
       ) : (
-        <XCircle className="h-24 w-24" aria-hidden />
+        <XCircle className="h-14 w-14 lg:h-24 lg:w-24" aria-hidden />
       )}
-      <p className="font-display text-4xl font-bold">
+      <p className="font-display text-3xl font-bold lg:text-4xl">
         {accepted ? 'Entrée autorisée' : 'Entrée refusée'}
       </p>
       {!accepted && scan.refusalReason && (

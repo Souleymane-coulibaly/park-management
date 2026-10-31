@@ -37,8 +37,15 @@ const nextConfig: NextConfig = {
           { key: 'X-Frame-Options', value: 'DENY' },
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-          { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+          // Caméra autorisée à l'application elle-même (scanner de billets), jamais à un tiers. Valeur
+          // globale : une navigation interne conserve la politique de la page d'arrivée (connexion).
+          { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=()' },
         ],
+      },
+      {
+        // Le navigateur doit toujours revérifier le Service Worker : c'est lui qui annonce une mise à jour.
+        source: '/sw.js',
+        headers: [{ key: 'Cache-Control', value: 'no-cache, no-store, must-revalidate' }],
       },
     ];
   },

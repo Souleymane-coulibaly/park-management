@@ -15,9 +15,31 @@ export const metadata: Metadata = {
     'Ocall Park est le logiciel de gestion des parcs aquatiques, espaces de loisirs et restaurants en Afrique : établissements, équipes, rôles et abonnement en FCFA.',
   applicationName: 'Ocall Park',
   manifest: '/manifest.webmanifest',
+  icons: { apple: '/icons/apple-touch-icon.png' },
+  // iPhone : installation par « Sur l'écran d'accueil », écrans de lancement par format d'appareil.
+  appleWebApp: {
+    capable: true,
+    title: 'Ocall Park',
+    statusBarStyle: 'default',
+    startupImage: [
+      [375, 667, 2, 750, 1334],
+      [414, 896, 2, 828, 1792],
+      [390, 844, 3, 1170, 2532],
+      [393, 852, 3, 1179, 2556],
+      [430, 932, 3, 1290, 2796],
+    ].map(([w, h, ratio, pw, ph]) => ({
+      url: `/icons/splash-${pw}x${ph}.png`,
+      media: `(device-width: ${w}px) and (device-height: ${h}px) and (-webkit-device-pixel-ratio: ${ratio}) and (orientation: portrait)`,
+    })),
+  },
 };
 
-export const viewport: Viewport = { themeColor: '#176B53', width: 'device-width', initialScale: 1 };
+export const viewport: Viewport = {
+  themeColor: '#176B53',
+  width: 'device-width',
+  initialScale: 1,
+  viewportFit: 'cover',
+};
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (

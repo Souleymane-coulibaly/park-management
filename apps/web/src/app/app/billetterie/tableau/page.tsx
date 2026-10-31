@@ -94,7 +94,12 @@ function Dashboard({ park }: { park: ParkEstablishment }) {
         <KpiCard
           label="Billets du jour non utilisés"
           value={today.unused}
-          hint={`${today.cancelled} annulé(s) · ${today.refused} passage(s) refusé(s)`}
+          hint={
+            <>
+              <span data-testid="park-valid-unused">{dash.data.validUnused}</span> encore valable(s)
+              au total · {today.cancelled} annulé(s) · {today.refused} refusé(s)
+            </>
+          }
           icon={<TicketX className="h-5 w-5" />}
           accent="terracotta"
         />

@@ -333,12 +333,52 @@ export class ScansQueryDto {
   @Min(1)
   @Max(200)
   limit?: number;
+
+  @ApiPropertyOptional({ description: 'Journée locale du parc (AAAA-MM-JJ).' })
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  date?: string;
 }
 
 export class TicketsQueryDto {
   @ApiProperty()
   @IsUUID('4')
   saleId: string;
+}
+
+export const TICKET_SEARCH_STATUSES = ['VALID', 'USED', 'EXPIRED', 'CANCELLED'] as const;
+
+export class TicketSearchQueryDto {
+  @ApiProperty()
+  @IsUUID('4')
+  establishmentId: string;
+
+  @ApiPropertyOptional({ description: 'Journée de vente, heure locale du parc (AAAA-MM-JJ).' })
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  date?: string;
+
+  @ApiPropertyOptional({ description: 'Prénom du visiteur ou numéro de vente.' })
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(60)
+  q?: string;
+
+  @ApiPropertyOptional({ enum: TICKET_SEARCH_STATUSES })
+  @IsOptional()
+  @IsIn(TICKET_SEARCH_STATUSES)
+  status?: (typeof TICKET_SEARCH_STATUSES)[number];
+
+  @ApiPropertyOptional({ default: 100 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  limit?: number;
 }
 
 export class CancelTicketDto {

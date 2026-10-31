@@ -23,11 +23,12 @@ test.describe('Sprint 12A — site Ocall Suite', () => {
       .getByRole('link', { name: /Découvrir la solution/ })
       .first()
       .click();
-    await expect(page.getByText('Disponible', { exact: true })).toBeVisible();
+    await expect(page.getByText('Disponible', { exact: true }).first()).toBeVisible();
 
     await page.goto('/solutions/ocall-school');
     await expect(page.getByText('Bientôt disponible').first()).toBeVisible();
-    await expect(page.getByText(/FCFA/)).toHaveCount(0); // aucun tarif scolaire publié
+    // Aucun tarif scolaire publié (le pied de page commun mentionne la devise).
+    await expect(page.getByRole('main').getByText(/FCFA/)).toHaveCount(0);
     await expect(page.getByRole('link', { name: 'Être informé du lancement' })).toBeVisible();
   });
 

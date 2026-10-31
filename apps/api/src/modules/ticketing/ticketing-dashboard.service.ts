@@ -37,7 +37,7 @@ export class TicketingDashboardService {
     ]);
 
     const todayRange = range(today);
-    const [byCategory, categories, soldAt, enteredAt, opening] = await Promise.all([
+    const [byCategory, categories, soldAt, enteredAt, opening, validUnused] = await Promise.all([
       this.prisma.ticket.groupBy({
         by: ['ticketCategoryId'],
         where: {
@@ -69,6 +69,10 @@ export class TicketingDashboardService {
         select: { createdAt: true },
       }),
       this.schedule.get(auth, establishment.id),
+      // Tous les billets encore utilisables, y compris ceux vendus un autre jour (validité de plusieurs jours).
+      this.prisma.ticket.count({
+        where: { establishmentId, status: 'VALID', validUntil: { gte: new Date() } },
+      }),
     ]);
 
     const names = new Map(categories.map((c) => [c.id, c]));
@@ -101,6 +105,7 @@ export class TicketingDashboardService {
       establishment: { id: establishment.id, name: establishment.name, timezone: tz },
       today: current,
       yesterday: previous,
+      validUnused,
       openToday: opening.openToday,
       status: opening.status,
       byCategory: byCategory

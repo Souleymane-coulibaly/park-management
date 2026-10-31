@@ -1,6 +1,12 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@ocall/database';
-import { evaluateOpening, parseTicketQr, type ScanRefusalReason } from '@ocall/shared';
+import {
+  addDays,
+  evaluateOpening,
+  parseTicketQr,
+  type ScanRefusalReason,
+  zonedMidnight,
+} from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { TenantContext } from '../../common/auth-context';
 import { findSellingEstablishment } from '../pos/pos-scope';
@@ -195,11 +201,22 @@ export class AccessControlService {
 
   /** Historique des scans du point de contrôle (le plus récent d'abord). */
   async list(auth: TenantContext, query: ScansQueryDto) {
-    await findSellingEstablishment(this.prisma, auth, query.establishmentId, 'PARK');
+    const establishment = await findSellingEstablishment(
+      this.prisma,
+      auth,
+      query.establishmentId,
+      'PARK',
+    );
     const rows = await this.prisma.ticketScan.findMany({
       where: {
         organizationId: auth.membership.organizationId,
         establishmentId: query.establishmentId,
+        ...(query.date && {
+          createdAt: {
+            gte: zonedMidnight(query.date, establishment.timezone),
+            lt: zonedMidnight(addDays(query.date, 1), establishment.timezone),
+          },
+        }),
       },
       orderBy: { createdAt: 'desc' },
       take: query.limit ?? 50,

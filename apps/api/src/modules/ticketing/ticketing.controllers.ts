@@ -29,6 +29,7 @@ import {
   ScansQueryDto,
   ScanTicketDto,
   TicketQuoteDto,
+  TicketSearchQueryDto,
   TicketsQueryDto,
   UpdateTicketCategoryDto,
 } from './ticketing.dto';
@@ -138,6 +139,13 @@ export class TicketsController {
   @Get()
   list(@CurrentAuth() auth: AuthContext, @Query() query: TicketsQueryDto) {
     return this.tickets.forSale(requireTenant(auth), query.saleId);
+  }
+
+  /** Visiteurs d'une journée (sans QR), réservés aux responsables. */
+  @RequirePermission('sale.read_all')
+  @Get('search')
+  search(@CurrentAuth() auth: AuthContext, @Query() query: TicketSearchQueryDto) {
+    return this.tickets.search(requireTenant(auth), query);
   }
 
   @RequirePermission('ticket.cancel')

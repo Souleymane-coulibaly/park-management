@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { useConnectivity } from '@/lib/connectivity';
 import type { PosTerminal } from '@/lib/types';
 import { useApi } from '@/lib/use-api';
 
@@ -55,19 +56,7 @@ export function rememberDeviceTerminal(establishmentId: string, terminalId: stri
 
 /** État de la connexion réseau de l'appareil (tablette en Wi-Fi ou 4G). */
 export function useOnline(): boolean {
-  const [online, setOnline] = useState(true);
-  useEffect(() => {
-    setOnline(navigator.onLine);
-    const on = () => setOnline(true);
-    const off = () => setOnline(false);
-    window.addEventListener('online', on);
-    window.addEventListener('offline', off);
-    return () => {
-      window.removeEventListener('online', on);
-      window.removeEventListener('offline', off);
-    };
-  }, []);
-  return online;
+  return useConnectivity();
 }
 
 /** Garde l'écran de la tablette allumé pendant que la caisse est ouverte (si le navigateur le permet). */

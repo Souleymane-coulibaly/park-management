@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
 import { BUSINESS_TYPE_LABELS } from '@ocall/shared';
 import { AppShell, type NavItem } from '@/components/app/app-shell';
+import { ParkMobileNav } from '@/components/park/park-mobile-nav';
+import { PwaRuntime } from '@/components/pwa/pwa-runtime';
 import { requireMemberSession } from '@/lib/server-api';
 
 export const dynamic = 'force-dynamic';
@@ -27,6 +29,12 @@ export default async function MemberLayout({ children }: { children: ReactNode }
       homeHref="/app"
       accountHref="/app/compte"
       wideRoutes={['/app/caisse']}
+      mobileExtras={
+        <>
+          <ParkMobileNav moduleHrefs={nav.filter((n) => !n.upcoming).map((n) => n.href)} />
+          <PwaRuntime />
+        </>
+      }
       headerNote={
         <>
           Fuseau : <span className="font-medium text-charcoal">{org.timezone}</span>

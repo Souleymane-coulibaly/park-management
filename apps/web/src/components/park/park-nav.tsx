@@ -16,9 +16,12 @@ export function ParkNav() {
     seesStats && { href: '/app/billetterie/tableau', label: 'Tableau de bord' },
     canManage && { href: '/app/billetterie/configuration', label: 'Tarifs et horaires' },
     canScan && { href: '/app/controle-acces', label: 'Contrôle des entrées' },
+    seesStats && { href: '/app/parc/visiteurs', label: 'Visiteurs' },
+    canScan && { href: '/app/parc/historique', label: 'Historique' },
   ].filter((l): l is { href: string; label: string } => !!l);
   return (
-    <nav aria-label="Billetterie" className="flex flex-wrap gap-2 text-sm font-semibold">
+    // Sur petit écran, la barre du bas (ParkMobileNav) remplace ces onglets.
+    <nav aria-label="Billetterie" className="hidden flex-wrap gap-2 text-sm font-semibold lg:flex">
       {links.map((l) => (
         <Link
           key={l.href}

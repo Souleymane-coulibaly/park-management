@@ -1,3 +1,5 @@
+import { checkConnectivity } from './connectivity';
+
 /** Erreur d'API au format unique { statusCode, code, message, details }. */
 export class ApiError extends Error {
   constructor(
@@ -23,12 +25,13 @@ export class ApiError extends Error {
  */
 export async function api<T>(
   path: string,
-  init: { method?: string; body?: unknown } = {},
+  init: { method?: string; body?: unknown; timeoutMs?: number } = {},
 ): Promise<T> {
   return send<T>(path, {
     method: init.method ?? 'GET',
     headers: init.body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
     body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
+    signal: init.timeoutMs ? AbortSignal.timeout(init.timeoutMs) : undefined,
   });
 }
 
@@ -41,11 +44,18 @@ export function apiUpload<T>(path: string, form: FormData): Promise<T> {
 }
 
 async function send<T>(path: string, init: RequestInit): Promise<T> {
-  const res = await fetch(`/api/v1${path}`, {
-    ...init,
-    credentials: 'same-origin',
-    cache: 'no-store',
-  });
+  let res: Response;
+  try {
+    res = await fetch(`/api/v1${path}`, {
+      ...init,
+      credentials: 'same-origin',
+      cache: 'no-store',
+    });
+  } catch {
+    // Délai dépassé ou réseau coupé : la requête a pu atteindre le serveur, son effet est inconnu.
+    void checkConnectivity();
+    throw new ApiError(0, 'NETWORK', 'Connexion au serveur impossible.');
+  }
   if (res.status === 204) return undefined as T;
   const data: unknown = await res.json().catch(() => null);
   if (!res.ok) {

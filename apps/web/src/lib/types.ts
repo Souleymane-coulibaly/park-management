@@ -501,6 +501,23 @@ export interface TicketScanView {
   } | null;
 }
 
+/** Visiteurs d'une journée de vente (sans QR). */
+export interface ParkVisitors {
+  date: string;
+  total: number;
+  items: {
+    id: string;
+    visitorName: string;
+    status: TicketStatus;
+    validUntil: string;
+    usedAt: string | null;
+    createdAt: string;
+    saleId: string;
+    saleNumber: number;
+    categoryName: string;
+  }[];
+}
+
 export interface ParkDayStats {
   date: string;
   ticketsSold: number;
@@ -516,6 +533,8 @@ export interface ParkDashboard {
   establishment: ParkEstablishment;
   today: ParkDayStats;
   yesterday: ParkDayStats;
+  /** Billets encore utilisables, quel que soit leur jour de vente. */
+  validUnused: number;
   openToday: boolean;
   status: OpeningVerdict;
   byCategory: {

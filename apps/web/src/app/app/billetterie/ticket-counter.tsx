@@ -385,7 +385,7 @@ export function TicketCounter({
       />
 
       {/* Barre fixe sur mobile et tablette en portrait : total et encaissement toujours accessibles. */}
-      <div className="fixed inset-x-0 bottom-0 z-20 flex items-center justify-between gap-3 border-t border-line bg-surface px-4 py-3 shadow-lift lg:hidden">
+      <div className="fixed inset-x-0 bottom-[calc(4.5rem+env(safe-area-inset-bottom))] z-20 flex items-center justify-between gap-3 border-t border-line bg-surface px-4 py-3 shadow-lift lg:hidden">
         <span className="font-display text-2xl font-bold">
           {total !== undefined ? formatXof(total) : '—'}
         </span>

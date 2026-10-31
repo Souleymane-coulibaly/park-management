@@ -6,6 +6,7 @@ import { type ReactNode, useEffect, useState } from 'react';
 import { Menu } from 'lucide-react';
 import { ROLE_LABELS } from '@ocall/shared';
 import { Logo } from '@/components/brand/logo';
+import { ConnectivityBadge } from '@/components/pwa/pwa-runtime';
 import { initials } from '@/lib/format';
 import type { Me } from '@/lib/types';
 import { LogoutButton } from './logout-button';
@@ -29,6 +30,8 @@ interface ShellProps {
   headerNote?: ReactNode;
   /** Routes affichées en pleine largeur (ex. la caisse sur tablette). */
   wideRoutes?: string[];
+  /** Éléments propres à un espace, sous le contenu (navigation mobile du parc, PWA). */
+  mobileExtras?: ReactNode;
   children: ReactNode;
 }
 
@@ -96,6 +99,7 @@ export function AppShell({
   accountHref,
   headerNote,
   wideRoutes = [],
+  mobileExtras,
   children,
 }: ShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -159,6 +163,7 @@ export function AppShell({
             </button>
             <div className="hidden text-sm text-muted lg:block">{headerNote}</div>
             <div className="flex items-center gap-2">
+              <ConnectivityBadge />
               {accountHref ? (
                 <Link
                   href={accountHref}
@@ -177,6 +182,7 @@ export function AppShell({
           >
             {children}
           </main>
+          {mobileExtras}
         </div>
       </div>
     </SessionProvider>

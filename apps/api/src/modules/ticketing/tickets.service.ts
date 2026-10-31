@@ -1,10 +1,12 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { ticketQrPayload } from '@ocall/shared';
+import type { Prisma } from '@ocall/database';
+import { addDays, localMoment, ticketQrPayload, zonedMidnight } from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
 import type { TenantContext } from '../../common/auth-context';
 import { establishmentScope } from '../../common/tenant-scope';
-import { visibleSalesWhere } from '../pos/pos-scope';
+import { findSellingEstablishment, visibleSalesWhere } from '../pos/pos-scope';
+import type { TicketSearchQueryDto } from './ticketing.dto';
 
 const TICKET_NOT_FOUND = { code: 'TICKET_NOT_FOUND', message: 'Billet introuvable.' };
 
@@ -49,6 +51,74 @@ export class TicketsService {
       // Le QR ne contient que le jeton aléatoire : ni nom, ni prix, ni secret applicatif.
       qr: ticketQrPayload(token),
     }));
+  }
+
+  /**
+   * Visiteurs d'une journée de vente, pour les responsables. Jamais de jeton ni de QR : cette liste
+   * sert à retrouver un visiteur, pas à présenter un billet.
+   */
+  async search(auth: TenantContext, query: TicketSearchQueryDto) {
+    const establishment = await findSellingEstablishment(
+      this.prisma,
+      auth,
+      query.establishmentId,
+      'PARK',
+    );
+    const now = new Date();
+    const date = query.date ?? localMoment(now, establishment.timezone).date;
+    const q = query.q?.trim();
+    const where: Prisma.TicketWhereInput = {
+      organizationId: auth.membership.organizationId,
+      establishmentId: establishment.id,
+      createdAt: {
+        gte: zonedMidnight(date, establishment.timezone),
+        lt: zonedMidnight(addDays(date, 1), establishment.timezone),
+      },
+      ...(query.status === 'VALID' && { status: 'VALID', validUntil: { gte: now } }),
+      ...(query.status === 'EXPIRED' && {
+        OR: [{ status: 'EXPIRED' }, { status: 'VALID', validUntil: { lt: now } }],
+      }),
+      ...((query.status === 'USED' || query.status === 'CANCELLED') && { status: query.status }),
+      ...(q && {
+        AND: [
+          {
+            OR: [
+              { visitorName: { contains: q, mode: 'insensitive' } },
+              ...(/^\d{1,9}$/.test(q) ? [{ sale: { number: Number(q) } }] : []),
+            ],
+          },
+        ],
+      }),
+    };
+    const [total, rows] = await Promise.all([
+      this.prisma.ticket.count({ where }),
+      this.prisma.ticket.findMany({
+        where,
+        orderBy: [{ createdAt: 'desc' }, { position: 'asc' }],
+        take: query.limit ?? 100,
+        select: {
+          id: true,
+          visitorName: true,
+          status: true,
+          validUntil: true,
+          usedAt: true,
+          createdAt: true,
+          saleId: true,
+          sale: { select: { number: true } },
+          ticketCategory: { select: { name: true } },
+        },
+      }),
+    ]);
+    return {
+      date,
+      total,
+      items: rows.map(({ sale, ticketCategory, ...t }) => ({
+        ...t,
+        status: t.status === 'VALID' && t.validUntil < now ? ('EXPIRED' as const) : t.status,
+        saleNumber: sale.number,
+        categoryName: ticketCategory.name,
+      })),
+    };
   }
 
   /** Annulation d'un billet encore valide. Atomique : un billet scanné entre-temps ne s'annule pas. */
