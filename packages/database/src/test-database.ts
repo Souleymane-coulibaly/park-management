@@ -39,3 +39,38 @@ export function resolveTestDatabase(env: NodeJS.ProcessEnv = process.env): TestD
   }
   return { databaseUrl, directUrl: env.TEST_DIRECT_URL ?? databaseUrl };
 }
+
+/**
+ * Marqueur d'environnement (Sprint 13) : une base distante n'est utilisée par les tests que si
+ * elle porte le marqueur `environment = test` (table `_ocall_environment`, posée une seule fois par
+ * `pnpm db:mark-test`). Une base de production ou de développement, qui ne l'a jamais, est donc
+ * refusée même si son URL est placée par erreur dans TEST_DATABASE_URL. Les bases locales
+ * éphémères (CI, PostgreSQL embarqué) en sont dispensées.
+ */
+export const TEST_MARKER_TABLE = '_ocall_environment';
+export const TEST_MARKER_QUERY = `SELECT "value" FROM "${TEST_MARKER_TABLE}" WHERE "key" = 'environment'`;
+
+export function isLocalDatabase(url: string): boolean {
+  return LOCAL_HOSTS.has(identity(url).host);
+}
+
+export async function assertTestDatabaseMarker(
+  query: (sql: string) => Promise<unknown>,
+  databaseUrl: string,
+): Promise<void> {
+  if (isLocalDatabase(databaseUrl)) return;
+  let rows: unknown;
+  try {
+    rows = await query(TEST_MARKER_QUERY);
+  } catch {
+    rows = [];
+  }
+  const value = Array.isArray(rows) ? (rows[0] as { value?: unknown } | undefined)?.value : null;
+  if (value !== 'test') {
+    throw new Error(
+      'La base TEST_DATABASE_URL ne porte pas le marqueur d’environnement « test » : les tests refusent ' +
+        'de s’y exécuter (protection contre une base de développement ou de production). Si c’est bien la ' +
+        'branche Neon « test », posez le marqueur avec `pnpm db:mark-test`.',
+    );
+  }
+}

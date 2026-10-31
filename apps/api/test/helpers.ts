@@ -2,7 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { randomBytes } from 'node:crypto';
 import request from 'supertest';
-import { resolveTestDatabase } from '@ocall/database';
+import { PrismaClient, assertTestDatabaseMarker, resolveTestDatabase } from '@ocall/database';
 import { type BusinessType, type StoredPlatformRole, platformRoleRequiresMfa } from '@ocall/shared';
 import { hash } from 'argon2';
 import { currentStep, totpCode } from '../src/common/security/totp';
@@ -22,6 +22,13 @@ export type Agent = ReturnType<typeof request.agent>;
  */
 export async function createTestApp(): Promise<{ app: INestApplication; prisma: PrismaService }> {
   const testDb = resolveTestDatabase();
+  // Base distante : refusée sans le marqueur d'environnement « test » (Sprint 13).
+  const probe = new PrismaClient({ datasourceUrl: testDb.databaseUrl });
+  try {
+    await assertTestDatabaseMarker((sql) => probe.$queryRawUnsafe(sql), testDb.databaseUrl);
+  } finally {
+    await probe.$disconnect();
+  }
   process.env.DATABASE_URL = testDb.databaseUrl;
   process.env.DIRECT_URL = testDb.directUrl;
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();

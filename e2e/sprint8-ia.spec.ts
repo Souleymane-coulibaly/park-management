@@ -17,15 +17,17 @@ const NETWORK_WAIT = { timeout: 30_000 };
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const sim = (value: unknown) => `OCALL-SIM:${JSON.stringify(value)}:FIN`;
 
+// Micro factice de Chromium : l'enregistrement fonctionne sans matériel. Au niveau du fichier :
+// des options de lancement dans un groupe imposent un nouveau processus, ce que Playwright refuse.
+test.use({
+  permissions: ['microphone'],
+  launchOptions: {
+    args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
+  },
+});
+
 test.describe('Sprint 8 — IA (fournisseur simulé)', () => {
   test.setTimeout(300_000);
-  // Micro factice de Chromium : l'enregistrement fonctionne sans matériel.
-  test.use({
-    permissions: ['microphone'],
-    launchOptions: {
-      args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
-    },
-  });
 
   test('import de carte → copilote → commande vocale → désactivation', async ({ page }) => {
     await signupOrganization(page, {
