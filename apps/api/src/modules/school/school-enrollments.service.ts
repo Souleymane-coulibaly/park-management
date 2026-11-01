@@ -520,33 +520,35 @@ export class SchoolEnrollmentsService {
   /** Effectifs d'une année, limités aux classes de l'enseignant pour ce rôle. */
   async rosters(ctx: SchoolContext, schoolYearId: string) {
     const year = await this.findYear(ctx, schoolYearId);
-    const own = await this.students.ownClasses(ctx);
     const canSeeTeachers = hasSchoolPermission(ctx.role, 'school.structure.manage');
-    const classes = await this.db.schoolClass.findMany({
-      where: {
-        organizationId: ctx.organizationId,
-        schoolYearId: year.id,
-        ...(own ? { id: { in: own } } : {}),
-      },
-      orderBy: { name: 'asc' },
-      select: {
-        id: true,
-        name: true,
-        nameAr: true,
-        capacity: true,
-        level: { select: { id: true, name: true, nameAr: true } },
-        track: { select: { id: true, name: true, nameAr: true } },
-        _count: { select: { enrollments: { where: { status: 'VALIDATED' } } } },
-        ...(canSeeTeachers
-          ? {
-              teachers: {
-                select: {
-                  member: { select: { id: true, firstName: true, lastName: true } },
+    const classes = await this.students.snapshot(async (tx) => {
+      const own = await this.students.ownClasses(ctx, tx);
+      return tx.schoolClass.findMany({
+        where: {
+          organizationId: ctx.organizationId,
+          schoolYearId: year.id,
+          ...(own ? { id: { in: own } } : {}),
+        },
+        orderBy: { name: 'asc' },
+        select: {
+          id: true,
+          name: true,
+          nameAr: true,
+          capacity: true,
+          level: { select: { id: true, name: true, nameAr: true } },
+          track: { select: { id: true, name: true, nameAr: true } },
+          _count: { select: { enrollments: { where: { status: 'VALIDATED' } } } },
+          ...(canSeeTeachers
+            ? {
+                teachers: {
+                  select: {
+                    member: { select: { id: true, firstName: true, lastName: true } },
+                  },
                 },
-              },
-            }
-          : {}),
-      },
+              }
+            : {}),
+        },
+      });
     });
     return classes.map(({ _count, ...c }) => ({ ...c, enrolled: _count.enrollments }));
   }
@@ -565,10 +567,10 @@ export class SchoolEnrollmentsService {
     });
     if (!cls) throw new NotFoundException(NOT_FOUND);
     await this.school.assertSchool(ctx, cls.year.schoolId);
-    const own = await this.students.ownClasses(ctx);
-    if (own && !own.includes(classId)) throw new NotFoundException(NOT_FOUND);
-    const enrollments = await this.students.snapshot((tx) =>
-      tx.schoolEnrollment.findMany({
+    const enrollments = await this.students.snapshot(async (tx) => {
+      const own = await this.students.ownClasses(ctx, tx);
+      if (own && !own.includes(classId)) throw new NotFoundException(NOT_FOUND);
+      return tx.schoolEnrollment.findMany({
         where: {
           organizationId: ctx.organizationId,
           classId,
@@ -590,8 +592,8 @@ export class SchoolEnrollmentsService {
             },
           },
         },
-      }),
-    );
+      });
+    });
     return {
       class: cls,
       students: enrollments.map((e) => ({ enrollmentId: e.id, ...e.student })),

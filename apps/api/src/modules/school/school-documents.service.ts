@@ -253,7 +253,13 @@ export class SchoolDocumentsService {
 
   private async find(ctx: SchoolContext, studentId: string, id: string) {
     const document = await this.db.schoolStudentDocument.findFirst({
-      where: { id, organizationId: ctx.organizationId, studentId, deletedAt: null },
+      where: {
+        id,
+        organizationId: ctx.organizationId,
+        studentId,
+        deletedAt: null,
+        ...this.students.linkedStudentScope(ctx),
+      },
       select: { id: true, storageKey: true, category: true },
     });
     if (!document) throw new NotFoundException(NOT_FOUND);

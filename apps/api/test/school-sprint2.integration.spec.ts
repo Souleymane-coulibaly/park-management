@@ -1710,6 +1710,53 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       }
     });
 
+    it('S2-16 : un enseignant retiré de sa classe après le contrôle ne lit plus rien', async () => {
+      const s = await structure(ownerA, `Retrait ${++counter}`);
+      const prof = await member(ownerA, 'TEACHER', [s.schoolId]);
+      const classTeachers = `/api/v1/school/classes/${s.classId}/teachers`;
+      await ownerA.post(classTeachers).send({ memberId: prof.id }).expect(201);
+      const { id } = await enrolled(ownerA, s);
+      await prof.agent.get(`/api/v1/school/students/${id}`).expect(200);
+      const students = app.get(SchoolStudentsService);
+      const original = students.findStudent.bind(students);
+      const spy = jest
+        .spyOn(students, 'findStudent')
+        .mockImplementationOnce(async (ctx, target) => {
+          const seen = await original(ctx, target);
+          await ownerA.delete(`${classTeachers}/${prof.id}`).expect(204);
+          return seen;
+        });
+      try {
+        await prof.agent.get(`/api/v1/school/students/${id}`).expect(404);
+      } finally {
+        spy.mockRestore();
+      }
+      const list = await prof.agent
+        .get(`/api/v1/school/students?schoolId=${s.schoolId}`)
+        .expect(200);
+      expect(list.body.items).toEqual([]);
+      await prof.agent.get(`/api/v1/school/classes/${s.classId}/students`).expect(404);
+    });
+
+    it('S2-17 : aucun lien de document après un transfert survenu après le contrôle', async () => {
+      const s = await structure(ownerA, `Lien ${++counter}`);
+      const staff = await member(ownerA, 'SECRETARY', [s.schoolId]);
+      const created = await student(ownerA, s.schoolId).expect(201);
+      const url = `/api/v1/school/students/${created.body.id}/documents`;
+      const doc = await ownerA
+        .post(url)
+        .field('category', 'OTHER')
+        .attach('file', PDF, 'p.pdf')
+        .expect(201);
+      await staff.agent.get(`${url}/${doc.body.id}/link`).expect(200);
+      const spy = transferAfterCheck(created.body.id);
+      try {
+        await staff.agent.get(`${url}/${doc.body.id}/link`).expect(404);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
     it('S2-03 : un transfert survenu après le contrôle bloque le rattachement à ce dossier', async () => {
       const s = await structure(ownerA, `Rattache ${++counter}`);
       const staff = await member(ownerA, 'SECRETARY', [s.schoolId]);

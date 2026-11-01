@@ -359,29 +359,29 @@ export class SchoolStudentsService {
   async list(ctx: SchoolContext, q: StudentsQueryDto) {
     const page = q.page ?? 1;
     const pageSize = q.pageSize ?? 25;
-    const where = await this.listWhere(ctx, q);
-    const [items, total] = await Promise.all([
-      this.snapshot((tx) =>
-        tx.schoolStudent.findMany({
-          where,
-          orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }, { id: 'asc' }],
-          skip: (page - 1) * pageSize,
-          take: pageSize,
-          select: LIMITED_SELECT,
-        }),
-      ),
-      this.db.schoolStudent.count({ where }),
-    ]);
-    const own = await this.ownClasses(ctx);
+    const base = await this.listWhere(ctx, q);
+    // Droits de l'enseignant, données et total dans le même instantané.
+    const { items, total, own } = await this.snapshot(async (tx) => {
+      const own = await this.ownClasses(ctx, tx);
+      const where = { AND: [base, this.ownClassesFilter(own)] };
+      const items = await tx.schoolStudent.findMany({
+        where,
+        orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }, { id: 'asc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+        select: LIMITED_SELECT,
+      });
+      return { items, total: await tx.schoolStudent.count({ where }), own };
+    });
     return { items: items.map((s) => hideOtherClass(flatten(s), own)), total, page, pageSize };
   }
 
   async get(ctx: SchoolContext, id: string) {
     const full = hasSchoolPermission(ctx.role, 'school.students.read_full');
     await this.findStudent(ctx, id);
-    const own = await this.ownClasses(ctx);
-    const student = await this.snapshot((tx) =>
-      tx.schoolStudent.findFirst({
+    const { own, student } = await this.snapshot(async (tx) => {
+      const own = await this.ownClasses(ctx, tx);
+      const student = await tx.schoolStudent.findFirst({
         where: {
           id,
           organizationId: ctx.organizationId,
@@ -389,8 +389,9 @@ export class SchoolStudentsService {
           ...this.ownClassesFilter(own),
         },
         select: full ? FULL_SELECT : LIMITED_SELECT,
-      }),
-    );
+      });
+      return { own, student };
+    });
     if (!student) throw new NotFoundException(NOT_FOUND);
     if (full) {
       await this.school.log(ctx, 'school.student_viewed', 'SchoolStudent', id, {});
@@ -676,10 +677,13 @@ export class SchoolStudentsService {
   }
 
   /** Classes de l'enseignant ; null pour les rôles qui ne sont pas limités à leurs classes. */
-  async ownClasses(ctx: SchoolContext): Promise<string[] | null> {
+  async ownClasses(
+    ctx: SchoolContext,
+    db: Tx | SchoolPrismaService = this.db,
+  ): Promise<string[] | null> {
     if (!isLimitedToOwnClasses(ctx.role)) return null;
     if (!ctx.memberId) return [];
-    const rows = await this.db.schoolClassTeacher.findMany({
+    const rows = await db.schoolClassTeacher.findMany({
       where: {
         organizationId: ctx.organizationId,
         memberId: ctx.memberId,
@@ -744,7 +748,6 @@ export class SchoolStudentsService {
           : {}),
       ...(q.status ? { status: q.status } : {}),
       AND: [
-        this.ownClassesFilter(await this.ownClasses(ctx)),
         ...(Object.keys(enrollment).length > 0
           ? [
               {
