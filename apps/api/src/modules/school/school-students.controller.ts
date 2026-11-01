@@ -22,7 +22,6 @@ import { ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { SCHOOL_DOCUMENT_MAX_BYTES, SCHOOL_IMPORT_MAX_BYTES } from '@ocall/shared';
-import { Public } from '../../common/decorators';
 import { requestMeta } from '../../common/request-meta';
 import {
   CurrentSchool,
@@ -459,21 +458,26 @@ export class SchoolStudentsController {
   }
 }
 
-/** Téléchargement par lien temporaire signé : en pièce jointe, sans exécution possible dans le navigateur. */
+/**
+ * Téléchargement : le lien signé ne suffit jamais. Chaque accès exige la session de son bénéficiaire et
+ * repasse le contrôle complet (compte, contrat, rôle, établissement actuel de l'élève).
+ */
 @ApiTags('Ocall School — élèves')
-@Public()
+@UseGuards(SchoolAccessGuard)
 @Controller('school/files')
 export class SchoolFilesController {
   constructor(private readonly documents: SchoolDocumentsService) {}
 
   @Throttle({ global: { ttl: 60_000, limit: 60 } })
+  @RequireSchoolPermission('school.documents.read')
   @Get(':token')
   async download(
+    @CurrentSchool() ctx: SchoolContext,
     @Param('token') token: string,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const file = await this.documents.download(token, requestMeta(req));
+    const file = await this.documents.download(ctx, token, requestMeta(req));
     res.setHeader('Content-Type', file.mimeType);
     res.setHeader('Cache-Control', 'private, no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');

@@ -26,6 +26,7 @@ function zipOf(content: Buffer, declaredSize: number): Buffer {
   const end = Buffer.alloc(22);
   end.writeUInt32LE(0x06054b50, 0);
   end.writeUInt16LE(1, 10);
+  end.writeUInt32LE(46 + name.length, 12);
   end.writeUInt32LE(30 + name.length + data.length, 16);
   return Buffer.concat([local, name, data, central, name, end]);
 }
@@ -34,6 +35,20 @@ describe('fichiers piégés', () => {
   it('refuse une bombe zip qui annonce une taille nulle', () => {
     const bomb = zipOf(Buffer.alloc(2 * 1024 * 1024), 0);
     expect(() => assertZipWithinLimit(bomb, 1024 * 1024)).toThrow('décompressé');
+  });
+
+  it('refuse une archive qui minore son nombre d’entrées', () => {
+    const zip = zipOf(Buffer.from('bonjour'), 7);
+    zip.writeUInt16LE(0, zip.length - 22 + 10);
+    expect(() => assertZipWithinLimit(zip)).toThrow('illisible');
+    zip.writeUInt32LE(0, zip.length - 22 + 12);
+    expect(() => assertZipWithinLimit(zip)).toThrow('illisible');
+  });
+
+  it('refuse un répertoire central qui ne précède pas la fin d’archive', () => {
+    const zip = zipOf(Buffer.from('bonjour'), 7);
+    zip.writeUInt32LE(0, zip.length - 22 + 12);
+    expect(() => assertZipWithinLimit(zip)).toThrow('illisible');
   });
 
   it('accepte une archive sous la limite', () => {

@@ -197,24 +197,28 @@ export class SchoolDocumentsService {
     };
   }
 
-  /** Téléchargement par lien signé : relit le document en base, un document supprimé est refusé. */
-  async download(token: string, meta: RequestMeta) {
+  /** Le jeton désigne le document et son seul bénéficiaire ; le périmètre actuel de celui-ci décide. */
+  async download(ctx: SchoolContext, token: string, meta: RequestMeta) {
     const gone = new NotFoundException({
       code: 'FILE_NOT_FOUND',
       message: 'Lien expiré ou fichier introuvable.',
     });
-    if (!this.config.school.enabled) throw gone;
     const claims = verifyFileToken(token, this.config.storageSigningKey);
-    if (!claims) throw gone;
+    if (!claims || claims.o !== ctx.organizationId || claims.u !== ctx.userId) throw gone;
     const document = await this.db.schoolStudentDocument.findFirst({
-      where: { id: claims.f, organizationId: claims.o, deletedAt: null },
+      where: {
+        id: claims.f,
+        organizationId: ctx.organizationId,
+        deletedAt: null,
+        ...this.students.linkedStudentScope(ctx),
+      },
       select: { id: true, storageKey: true, mimeType: true, displayName: true, category: true },
     });
     const body = document ? await this.storage.get(document.storageKey) : null;
     if (!document || !body) throw gone;
     await this.audit.record({
-      organizationId: claims.o,
-      actorUserId: claims.u,
+      organizationId: ctx.organizationId,
+      actorUserId: ctx.userId,
       action: 'school.document_downloaded',
       targetType: 'SchoolStudentDocument',
       targetId: document.id,

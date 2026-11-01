@@ -40,7 +40,10 @@ export function assertZipWithinLimit(zip: Buffer, limit = XLSX_MAX_UNCOMPRESSED)
   }
   if (end < 0) throw unreadable();
   const entries = zip.readUInt16LE(end + 10);
+  const directorySize = zip.readUInt32LE(end + 12);
   let offset = zip.readUInt32LE(end + 16);
+  const directoryEnd = offset + directorySize;
+  if (entries === 0 || directoryEnd !== end) throw unreadable();
   let budget = limit;
   for (let n = 0; n < entries; n++) {
     if (offset + 46 > zip.length || zip.readUInt32LE(offset) !== CENTRAL) throw unreadable();
@@ -71,6 +74,7 @@ export function assertZipWithinLimit(zip: Buffer, limit = XLSX_MAX_UNCOMPRESSED)
       zip.readUInt16LE(offset + 30) +
       zip.readUInt16LE(offset + 32);
   }
+  if (offset !== directoryEnd) throw unreadable();
 }
 
 /** Texte d'un CSV : UTF-8 (arabe compris), sinon l'encodage Windows d'un ancien Excel. */

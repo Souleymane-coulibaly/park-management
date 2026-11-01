@@ -144,7 +144,9 @@ la même année, deux affectations ouvertes la même année et deux responsables
 - **Transfert dans le groupe** : réservé à qui a accès aux deux établissements. Le même dossier suit, une
   nouvelle inscription attend validation ; un nouveau matricule n'est attribué qu'en cas de collision.
 - **Besoins particuliers** : chiffrés en AES-256-GCM, route dédiée, chaque consultation est journalisée.
-- **Documents** : type réel contrôlé, 5 Mo, stockage privé, lien signé de 5 minutes, téléchargement
+- **Documents** : type réel contrôlé, 5 Mo, stockage privé. Le lien signé de 5 minutes ne suffit jamais :
+  chaque téléchargement exige la session de son bénéficiaire et revérifie compte, contrat, rôle et
+  établissement actuel de l'élève. Une perte de droits vaut donc dès l'accès suivant. Téléchargement
   journalisé. Une suppression retire le fichier et garde la trace.
 - **Import** : CSV ou XLSX, 1 000 lignes, 100 colonnes, 50 Mo décompressés réels, analyse sans écriture, puis une transaction par ligne. Un second
   envoi ne recrée rien. Le fichier n'est pas conservé et le rapport ne contient aucune donnée personnelle.
@@ -192,6 +194,22 @@ SCHOOL_DATA_ENCRYPTION_KEY=<32 octets aléatoires en base64>
 En production, l'API refuse de démarrer sans cette clé quand School est activé. Le stockage privé existant
 doit être configuré sur un disque persistant ou un bucket (`MEDIA_STORAGE`) : sur un disque éphémère, les
 documents disparaîtraient au redéploiement. Les nouvelles pages sont dans le web : redéployez-le aussi.
+
+### Activation d'un membre entre les deux bases
+
+Il n'y a pas de transaction commune. L'ordre d'écriture garantit qu'une panne ne donne jamais plus que les droits validés dans School :
+School valide d'abord la décision et les droits, puis Suite recopie l'état validé dans School. L'accès exige
+les deux bases ouvertes, et seuls les comptes dédiés à School (`PRODUCT_USER`) y entrent, en plus du
+propriétaire de l'organisation. Le tableau part de deux bases à l'état précédent de la décision.
+
+| Décision interrompue par une panne de Suite | School | Suite  | Effet                                       |
+| ------------------------------------------- | ------ | ------ | ------------------------------------------- |
+| Désactivation                               | Fermé  | Ouvert | School refusé aussitôt                      |
+| Réactivation, avec ou sans restriction      | Ouvert | Fermé  | Connexion refusée, nouveaux droits en place |
+
+Une panne de School avant sa validation ne change rien. L'administrateur reçoit une erreur et rejoue la
+décision. Une demande d'activation d'un membre partagé, même à valeur égale, est réservée à qui couvre tous ses
+établissements. Reste à livrer au Sprint 3 : reprise automatique, sans intervention de l'administrateur.
 
 ## 9. Limites actuelles
 

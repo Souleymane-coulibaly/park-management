@@ -146,8 +146,9 @@ export class SchoolMembersService {
       // Le rôle et l'activation valent pour tous ses établissements : décision de qui les couvre tous.
       const sharedElsewhere =
         ctx.schoolIds && target.assignments.some((a) => !ctx.schoolIds!.includes(a.schoolId));
-      const global =
-        role !== target.role || (dto.isActive !== undefined && dto.isActive !== target.isActive);
+      // Même à valeur égale : après une panne, School peut différer de Suite, et cette demande rouvrirait
+      // le compte dans tous ses établissements.
+      const global = role !== target.role || dto.isActive !== undefined;
       if (sharedElsewhere && global) {
         throw new ForbiddenException({
           code: 'SCHOOL_MEMBER_SHARED',
@@ -172,9 +173,6 @@ export class SchoolMembersService {
           })),
         });
       }
-      // Compte réservé à School : désactiver le membre ferme ses sessions Ocall Suite. Sous le verrou du
-      // membre : deux décisions s'appliquent aux deux bases dans le même ordre ; un échec annule School.
-      if (dto.isActive !== undefined) await this.syncAccount(ctx, target.userId, dto.isActive);
       return { target, role };
     });
     await this.audit.record({
@@ -185,16 +183,29 @@ export class SchoolMembersService {
       targetId: id,
       metadata: { fields: Object.keys(dto), role },
     });
+    // Après la validation School : droits restreints et fermeture valent avant toute réouverture de Suite.
+    if (dto.isActive !== undefined) await this.syncAccount(ctx, id, target.userId);
     return { id, role, isActive: dto.isActive ?? target.isActive };
   }
 
-  private async syncAccount(ctx: SchoolContext, userId: string, isActive: boolean) {
+  /**
+   * Compte réservé à School : l'accès exige School et Suite ouverts. Suite recopie l'état validé dans School,
+   * jamais la décision de la requête : une panne laisse le compte fermé, l'administrateur rejoue la décision,
+   * et une synchronisation tardive ne peut pas écraser une décision plus récente.
+   */
+  private async syncAccount(ctx: SchoolContext, memberId: string, userId: string) {
     await this.core.$transaction(async (tx) => {
       const memberships = await tx.organizationMembership.findMany({
         where: { organizationId: ctx.organizationId, userId, role: 'PRODUCT_USER' },
         select: { id: true },
       });
       const ids = memberships.map((m) => m.id);
+      await tx.$queryRaw`
+        SELECT id FROM "OrganizationMembership" WHERE id = ANY(${ids}::uuid[]) FOR UPDATE`;
+      const { isActive } = await this.db.schoolMember.findUniqueOrThrow({
+        where: { id: memberId },
+        select: { isActive: true },
+      });
       await tx.organizationMembership.updateMany({
         where: { id: { in: ids } },
         data: { isActive },

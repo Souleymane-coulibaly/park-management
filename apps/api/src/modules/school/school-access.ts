@@ -97,12 +97,12 @@ export class SchoolAccessGuard implements CanActivate {
     }
 
     const member =
-      auth.membership.role === 'OWNER'
-        ? null
-        : await this.db.schoolMember.findFirst({
+      auth.membership.role === 'PRODUCT_USER'
+        ? await this.db.schoolMember.findFirst({
             where: { organizationId, userId: auth.user.id, isActive: true },
             select: { id: true, role: true, assignments: { select: { schoolId: true } } },
-          });
+          })
+        : null;
     if (auth.membership.role !== 'OWNER' && !member) throw this.denied();
     const role: SchoolRole = member?.role ?? 'GROUP_DIRECTOR';
 
