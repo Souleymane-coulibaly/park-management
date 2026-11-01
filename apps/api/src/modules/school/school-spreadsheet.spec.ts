@@ -40,6 +40,11 @@ describe('fichiers piégés', () => {
     expect(() => assertZipWithinLimit(zipOf(Buffer.from('bonjour'), 7))).not.toThrow();
   });
 
+  it('refuse une ligne de données trop large, et une cellule démesurée', () => {
+    expect(() => parseCsv(`a;b\n${';'.repeat(100_000)}\n`)).toThrow('colonnes');
+    expect(() => parseCsv(`a;b\n"${'x'.repeat(20_000)}";y\n`)).toThrow('trop longue');
+  });
+
   it('refuse trop de colonnes', async () => {
     const headers = Array.from({ length: 101 }, (_, i) => `c${i}`).join(';');
     await expect(parseSheet(Buffer.from(`${headers}\n`))).rejects.toThrow('colonnes');

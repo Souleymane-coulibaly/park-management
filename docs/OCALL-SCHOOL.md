@@ -133,12 +133,14 @@ la même année, deux affectations ouvertes la même année et deux responsables
   transfert, la réponse est un message neutre (`STUDENT_REVIEW_REQUIRED`), sans élève, établissement ni
   identifiant, et aucun contournement n'est possible ; la demande est journalisée sans donnée personnelle.
   Seul un utilisateur habilité sur les deux écoles voit le dossier, confirme un homonyme ou organise le
-  transfert. Une collision de matricule à l'échelle du groupe reste signalée comme telle.
+  transfert. Après un transfert, l'ancien établissement ne voit plus l'inscription dans ses listes. Une collision de matricule à l'échelle du groupe reste signalée comme telle.
 - **Inscription** : brouillon, en attente, validée, annulée, terminée. Le secrétariat soumet, la direction
   valide. La validation exige une classe, un responsable et les pièces obligatoires de l'établissement.
 - **Sortie** : transfert hors du groupe, départ ou abandon termine l'inscription et garde le dossier.
 - **Clôture d'une année** : affectations fermées, statut des élèves remis à jour. L'inscription reste dans
   l'historique, et plus aucune validation, sortie ni changement de classe n'est accepté sur cette année.
+- **Concurrence** : les opérations qui exigent une année ouverte prennent un verrou partagé sur l'établissement,
+  que la clôture prend en exclusif. Toute écriture sur un dossier le verrouille et revérifie son établissement.
 - **Transfert dans le groupe** : réservé à qui a accès aux deux établissements. Le même dossier suit, une
   nouvelle inscription attend validation ; un nouveau matricule n'est attribué qu'en cas de collision.
 - **Besoins particuliers** : chiffrés en AES-256-GCM, route dédiée, chaque consultation est journalisée.

@@ -81,6 +81,8 @@ export class SchoolEnrollmentsService {
           : {}),
       ...(q.schoolYearId ? { schoolYearId: q.schoolYearId } : {}),
       ...(q.status ? { status: q.status } : {}),
+      // Après un transfert, l'ancien établissement ne lit plus le dossier actuel par cette jointure.
+      ...(ctx.schoolIds ? { student: { schoolId: { in: ctx.schoolIds } } } : {}),
     };
     const [items, total] = await Promise.all([
       this.db.schoolEnrollment.findMany({
@@ -110,6 +112,7 @@ export class SchoolEnrollmentsService {
     const created = await this.school.unique(
       () =>
         this.db.$transaction(async (tx) => {
+          await this.school.guardSchools(tx, [student.schoolId]);
           const locked = await this.lockStudent(tx, ctx, dto.studentId);
           if (locked.schoolId !== student.schoolId) throw this.changed();
           const { submit, ...placement } = dto;
@@ -177,24 +180,27 @@ export class SchoolEnrollmentsService {
 
   /** La validation appartient à la direction ; le secrétariat prépare et soumet. */
   async setStatus(ctx: SchoolContext, id: string, dto: EnrollmentStatusDto) {
-    const enrollment = await this.find(ctx, id);
-    if (!canTransitionEnrollment(enrollment.status, dto.status)) {
-      throw new ConflictException({
-        code: 'ENROLLMENT_TRANSITION_REFUSED',
-        message: 'Ce changement de statut n’est pas autorisé.',
-      });
-    }
-    if (dto.status === 'VALIDATED' || enrollment.status === 'VALIDATED') {
-      this.students.requirePermission(ctx, 'school.enrollments.validate');
-    }
-    if (enrollment.status === 'VALIDATED' && !dto.note) {
-      throw new BadRequestException({
-        code: 'NOTE_REQUIRED',
-        message: 'Indiquez le motif de l’annulation.',
-      });
-    }
-    await this.db.$transaction(async (tx) => {
-      await this.lockStudent(tx, ctx, enrollment.studentId);
+    const { schoolId, studentId } = await this.find(ctx, id);
+    const from = await this.db.$transaction(async (tx) => {
+      await this.school.guardSchools(tx, [schoolId]);
+      await this.lockStudent(tx, ctx, studentId);
+      // Relue sous verrou : classe et statut sont ceux que les contrôles et les écritures utilisent.
+      const enrollment = await tx.schoolEnrollment.findUniqueOrThrow({ where: { id } });
+      if (!canTransitionEnrollment(enrollment.status, dto.status)) {
+        throw new ConflictException({
+          code: 'ENROLLMENT_TRANSITION_REFUSED',
+          message: 'Ce changement de statut n’est pas autorisé.',
+        });
+      }
+      if (dto.status === 'VALIDATED' || enrollment.status === 'VALIDATED') {
+        this.students.requirePermission(ctx, 'school.enrollments.validate');
+      }
+      if (enrollment.status === 'VALIDATED' && !dto.note) {
+        throw new BadRequestException({
+          code: 'NOTE_REQUIRED',
+          message: 'Indiquez le motif de l’annulation.',
+        });
+      }
       if (dto.status === 'VALIDATED' || enrollment.status === 'VALIDATED') {
         await this.assertYearOpen(tx, ctx, enrollment.schoolYearId);
       }
@@ -209,17 +215,18 @@ export class SchoolEnrollmentsService {
       if (count === 0) throw this.changed();
       if (dto.status === 'VALIDATED') await this.validate(tx, ctx, enrollment);
       if (enrollment.status === 'VALIDATED') {
-        await this.closeAssignment(tx, ctx, enrollment.studentId, enrollment.schoolYearId);
-        await this.refreshStudentStatus(tx, ctx, enrollment.studentId);
+        await this.closeAssignment(tx, ctx, studentId, enrollment.schoolYearId);
+        await this.refreshStudentStatus(tx, ctx, studentId);
       }
-      await this.students.event(tx, ctx, enrollment.studentId, 'ENROLLMENT_STATUS', {
+      await this.students.event(tx, ctx, studentId, 'ENROLLMENT_STATUS', {
         enrollmentId: id,
         from: enrollment.status,
         to: dto.status,
       });
+      return enrollment.status;
     });
     await this.school.log(ctx, 'school.enrollment_status_changed', 'SchoolEnrollment', id, {
-      from: enrollment.status,
+      from,
       to: dto.status,
     });
     return this.db.schoolEnrollment.findUniqueOrThrow({ where: { id }, select: VIEW });
@@ -290,32 +297,33 @@ export class SchoolEnrollmentsService {
 
   /** Avant validation, la classe prévue change seule ; après, l'ancienne affectation reste dans l'historique. */
   async changeClass(ctx: SchoolContext, id: string, dto: ChangeClassDto) {
-    const enrollment = await this.find(ctx, id);
-    if (!['DRAFT', 'PENDING', 'VALIDATED'].includes(enrollment.status)) throw this.changed();
-    if (enrollment.classId === dto.classId) {
-      throw new ConflictException({
-        code: 'SAME_CLASS',
-        message: 'L’élève est déjà dans cette classe.',
-      });
-    }
+    const { schoolId, studentId } = await this.find(ctx, id);
     await this.db.$transaction(async (tx) => {
-      await this.lockStudent(tx, ctx, enrollment.studentId);
+      await this.school.guardSchools(tx, [schoolId]);
+      await this.lockStudent(tx, ctx, studentId);
+      const enrollment = await tx.schoolEnrollment.findUniqueOrThrow({ where: { id } });
+      if (!['DRAFT', 'PENDING', 'VALIDATED'].includes(enrollment.status)) throw this.changed();
+      if (enrollment.classId === dto.classId) {
+        throw new ConflictException({
+          code: 'SAME_CLASS',
+          message: 'L’élève est déjà dans cette classe.',
+        });
+      }
       const target = await this.findClass(tx, ctx, dto.classId, enrollment.schoolYearId);
-      const { count } = await tx.schoolEnrollment.updateMany({
-        where: { id, status: enrollment.status, classId: enrollment.classId },
+      await tx.schoolEnrollment.update({
+        where: { id },
         data: {
           classId: target.id,
           levelId: target.levelId,
           trackId: target.trackId,
         },
       });
-      if (count === 0) throw this.changed();
       if (enrollment.status === 'VALIDATED') {
         await this.assertRoom(tx, ctx, target.id);
-        await this.closeAssignment(tx, ctx, enrollment.studentId, enrollment.schoolYearId);
+        await this.closeAssignment(tx, ctx, studentId, enrollment.schoolYearId);
         await this.openAssignment(tx, ctx, enrollment, target.id, dto.reason ?? null);
       }
-      await this.students.event(tx, ctx, enrollment.studentId, 'CLASS_CHANGED', {
+      await this.students.event(tx, ctx, studentId, 'CLASS_CHANGED', {
         enrollmentId: id,
         from: enrollment.classId,
         to: target.id,
@@ -337,6 +345,7 @@ export class SchoolEnrollmentsService {
       });
     }
     await this.db.$transaction(async (tx) => {
+      await this.school.guardSchools(tx, [enrollment.schoolId]);
       await this.lockStudent(tx, ctx, enrollment.studentId);
       await this.assertYearOpen(tx, ctx, enrollment.schoolYearId);
       await this.endEnrollment(tx, ctx, enrollment, dto.reason, toDate(dto.exitedOn), dto.note);
@@ -387,6 +396,7 @@ export class SchoolEnrollmentsService {
     const result = await this.school.unique(
       () =>
         this.db.$transaction(async (tx) => {
+          await this.school.guardSchools(tx, [visible.schoolId, dto.targetSchoolId]);
           const student = await this.lockStudent(tx, ctx, studentId);
           if (student.schoolId !== visible.schoolId) throw this.changed();
           const settings = await this.students.readSettings(
@@ -537,7 +547,12 @@ export class SchoolEnrollmentsService {
     const own = await this.students.ownClasses(ctx);
     if (own && !own.includes(classId)) throw new NotFoundException(NOT_FOUND);
     const enrollments = await this.db.schoolEnrollment.findMany({
-      where: { organizationId: ctx.organizationId, classId, status: 'VALIDATED' },
+      where: {
+        organizationId: ctx.organizationId,
+        classId,
+        status: 'VALIDATED',
+        ...(ctx.schoolIds ? { student: { schoolId: { in: ctx.schoolIds } } } : {}),
+      },
       orderBy: [{ student: { lastName: 'asc' } }, { student: { firstName: 'asc' } }],
       select: {
         id: true,
@@ -615,7 +630,11 @@ export class SchoolEnrollmentsService {
 
   private async find(ctx: SchoolContext, id: string) {
     const enrollment = await this.db.schoolEnrollment.findFirst({
-      where: { id, organizationId: ctx.organizationId },
+      where: {
+        id,
+        organizationId: ctx.organizationId,
+        ...(ctx.schoolIds ? { student: { schoolId: { in: ctx.schoolIds } } } : {}),
+      },
     });
     if (!enrollment) throw new NotFoundException(NOT_FOUND);
     await this.school.assertSchool(ctx, enrollment.schoolId);
@@ -633,19 +652,8 @@ export class SchoolEnrollmentsService {
   }
 
   /** Sérialise les opérations sur un même élève, et relit son état sous ce verrou. */
-  private async lockStudent(tx: Tx, ctx: SchoolContext, studentId: string) {
-    await tx.$queryRaw`SELECT id FROM "SchoolStudent" WHERE id = ${studentId}::uuid FOR UPDATE`;
-    return tx.schoolStudent.findFirstOrThrow({
-      where: { id: studentId, organizationId: ctx.organizationId },
-      select: {
-        schoolId: true,
-        matricule: true,
-        lastName: true,
-        firstName: true,
-        lastNameAr: true,
-        firstNameAr: true,
-      },
-    });
+  private lockStudent(tx: Tx, ctx: SchoolContext, studentId: string) {
+    return this.students.lockInScope(tx, ctx, studentId);
   }
 
   private async assertYearOpen(tx: Tx, ctx: SchoolContext, schoolYearId: string) {

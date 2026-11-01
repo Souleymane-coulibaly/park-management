@@ -128,6 +128,27 @@ export class SchoolGuardiansService {
     });
   }
 
+  /**
+   * Responsable réutilisable par un import : accessible à l'utilisateur, même téléphone, mêmes nom et
+   * prénom. Dans le doute, un nouveau responsable est créé : jamais de fusion approximative.
+   */
+  async findReusable(
+    tx: Tx,
+    ctx: SchoolContext,
+    schoolId: string,
+    wanted: { lastName: string; firstName: string; phone: string },
+  ) {
+    const rows = await tx.schoolGuardian.findMany({
+      where: { ...this.scope(ctx), schoolId, phone: wanted.phone },
+      select: { id: true, lastName: true, firstName: true },
+    });
+    return rows.find(
+      (r) =>
+        normalizeSearch(r.lastName) === normalizeSearch(wanted.lastName) &&
+        normalizeSearch(r.firstName) === normalizeSearch(wanted.firstName),
+    );
+  }
+
   async update(ctx: SchoolContext, id: string, dto: UpdateGuardianDto) {
     const current = await this.find(ctx, id);
     const guardian = await this.db.schoolGuardian.update({
@@ -187,7 +208,7 @@ export class SchoolGuardiansService {
     guardianId: string,
     rights: GuardianLinkRightsDto & { relation: LinkGuardianDto['relation'] },
   ) {
-    await tx.$queryRaw`SELECT id FROM "SchoolStudent" WHERE id = ${studentId}::uuid FOR UPDATE`;
+    await this.students.lockInScope(tx, ctx, studentId);
     const existing = await tx.schoolStudentGuardian.count({
       where: { organizationId: ctx.organizationId, studentId },
     });
@@ -217,7 +238,7 @@ export class SchoolGuardiansService {
   ) {
     await this.students.findStudent(ctx, studentId);
     await this.db.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM "SchoolStudent" WHERE id = ${studentId}::uuid FOR UPDATE`;
+      await this.students.lockInScope(tx, ctx, studentId);
       if (dto.isPrimary === false) {
         throw new ConflictException({
           code: 'PRIMARY_REQUIRED',
@@ -246,7 +267,7 @@ export class SchoolGuardiansService {
   async unlink(ctx: SchoolContext, studentId: string, guardianId: string) {
     await this.students.findStudent(ctx, studentId);
     await this.db.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM "SchoolStudent" WHERE id = ${studentId}::uuid FOR UPDATE`;
+      await this.students.lockInScope(tx, ctx, studentId);
       const student = await tx.schoolStudent.findUniqueOrThrow({
         where: { id: studentId },
         select: { status: true },

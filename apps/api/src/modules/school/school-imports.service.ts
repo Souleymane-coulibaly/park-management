@@ -202,22 +202,14 @@ export class SchoolImportsService {
     year: number,
   ) {
     const { line: _line, levelId, classId, guardian, ...identity } = row;
+    await this.school.guardSchools(tx, [dto.schoolId]);
     const student = await this.students.createInTx(tx, ctx, {
       ...identity,
       schoolId: dto.schoolId,
       matriculeYearNumber: year,
     });
     if (guardian) {
-      const key = normalizeSearch(guardian.lastName);
-      const known = await tx.schoolGuardian.findFirst({
-        where: {
-          organizationId: ctx.organizationId,
-          schoolId: dto.schoolId,
-          phone: guardian.phone,
-          searchText: { startsWith: key },
-        },
-        select: { id: true },
-      });
+      const known = await this.guardians.findReusable(tx, ctx, dto.schoolId, guardian);
       const guardianId =
         known?.id ??
         (await this.guardians.createWith(tx, ctx, { ...guardian, schoolId: dto.schoolId })).id;

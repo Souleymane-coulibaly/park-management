@@ -370,10 +370,15 @@ export class SchoolStudentsService {
   async get(ctx: SchoolContext, id: string) {
     const full = hasSchoolPermission(ctx.role, 'school.students.read_full');
     await this.findStudent(ctx, id);
-    const student = await this.db.schoolStudent.findFirstOrThrow({
-      where: { id, organizationId: ctx.organizationId },
+    const student = await this.db.schoolStudent.findFirst({
+      where: {
+        id,
+        organizationId: ctx.organizationId,
+        ...(ctx.schoolIds ? { schoolId: { in: ctx.schoolIds } } : {}),
+      },
       select: full ? FULL_SELECT : LIMITED_SELECT,
     });
+    if (!student) throw new NotFoundException(NOT_FOUND);
     if (full) {
       await this.school.log(ctx, 'school.student_viewed', 'SchoolStudent', id, {});
     }
@@ -382,19 +387,6 @@ export class SchoolStudentsService {
 
   /** Une modification garde le matricule : sa correction a sa propre route, motivée et journalisée. */
   async update(ctx: SchoolContext, id: string, dto: UpdateStudentDto) {
-    const current = await this.db.schoolStudent.findFirst({
-      where: { id, organizationId: ctx.organizationId },
-    });
-    if (!current) throw new NotFoundException(NOT_FOUND);
-    await this.school.assertSchool(ctx, current.schoolId);
-    const names = {
-      lastName: dto.lastName ?? current.lastName,
-      firstName: dto.firstName ?? current.firstName,
-      lastNameAr: dto.lastNameAr === undefined ? current.lastNameAr : dto.lastNameAr,
-      firstNameAr: dto.firstNameAr === undefined ? current.firstNameAr : dto.firstNameAr,
-    };
-    const birthDate = dto.birthDate ?? toDay(current.birthDate);
-    const settings = await this.readSettings(this.db, ctx.organizationId, current.schoolId);
     for (const required of ['lastName', 'firstName', 'birthDate'] as const) {
       if (dto[required] === null) {
         throw new BadRequestException({
@@ -403,9 +395,16 @@ export class SchoolStudentsService {
         });
       }
     }
-    const identityKey = studentIdentityKey(names, birthDate);
     const { birthDate: _birth, customFields, ...fields } = dto;
     const updated = await this.db.$transaction(async (tx) => {
+      const current = await this.lockInScope(tx, ctx, id);
+      const names = {
+        lastName: dto.lastName ?? current.lastName,
+        firstName: dto.firstName ?? current.firstName,
+        lastNameAr: dto.lastNameAr === undefined ? current.lastNameAr : dto.lastNameAr,
+        firstNameAr: dto.firstNameAr === undefined ? current.firstNameAr : dto.firstNameAr,
+      };
+      const identityKey = studentIdentityKey(names, dto.birthDate ?? toDay(current.birthDate));
       if (identityKey !== current.identityKey) {
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${ctx.organizationId}|${identityKey}`}))`;
         const twins = await tx.schoolStudent.findMany({
@@ -414,6 +413,7 @@ export class SchoolStudentsService {
         });
         await this.assertNoTwin(ctx, current.schoolId, twins, false);
       }
+      const settings = await this.readSettings(tx, ctx.organizationId, current.schoolId);
       const student = await tx.schoolStudent.update({
         where: { id },
         data: {
@@ -437,17 +437,17 @@ export class SchoolStudentsService {
   }
 
   async correctMatricule(ctx: SchoolContext, id: string, dto: CorrectMatriculeDto) {
-    const student = await this.findStudent(ctx, id);
+    await this.findStudent(ctx, id);
     if (!isValidMatricule(dto.matricule)) {
       throw new BadRequestException({
         code: 'MATRICULE_INVALID',
         message: 'Matricule invalide : lettres, chiffres, tirets, points ou barres obliques.',
       });
     }
-    const full = await this.db.schoolStudent.findUniqueOrThrow({ where: { id: student.id } });
     await this.school.unique(
       () =>
         this.db.$transaction(async (tx) => {
+          const full = await this.lockInScope(tx, ctx, id);
           await tx.schoolStudent.update({
             where: { id },
             data: {
@@ -472,10 +472,15 @@ export class SchoolStudentsService {
 
   async readSensitive(ctx: SchoolContext, id: string) {
     await this.findStudent(ctx, id);
-    const row = await this.db.schoolStudent.findUniqueOrThrow({
-      where: { id },
+    const row = await this.db.schoolStudent.findFirst({
+      where: {
+        id,
+        organizationId: ctx.organizationId,
+        ...(ctx.schoolIds ? { schoolId: { in: ctx.schoolIds } } : {}),
+      },
       select: { specialNeedsEnc: true },
     });
+    if (!row) throw new NotFoundException(NOT_FOUND);
     await this.school.log(ctx, 'school.student_sensitive_viewed', 'SchoolStudent', id, {});
     return {
       specialNeeds: row.specialNeedsEnc ? decryptSecret(row.specialNeedsEnc, this.dataKey()) : null,
@@ -486,6 +491,7 @@ export class SchoolStudentsService {
     await this.findStudent(ctx, id);
     const specialNeedsEnc = specialNeeds ? encryptSecret(specialNeeds, this.dataKey()) : null;
     await this.db.$transaction(async (tx) => {
+      await this.lockInScope(tx, ctx, id);
       await tx.schoolStudent.update({ where: { id }, data: { specialNeedsEnc } });
       await this.event(tx, ctx, id, 'SENSITIVE_UPDATED', {});
     });
@@ -617,6 +623,21 @@ export class SchoolStudentsService {
     });
     if (!student) throw new NotFoundException(NOT_FOUND);
     await this.school.assertSchool(ctx, student.schoolId);
+    return student;
+  }
+
+  /**
+   * Sérialise les écritures sur un dossier et relit son établissement sous verrou : l'autorisation lue
+   * avant ne vaut plus si un transfert concurrent l'a déplacé hors du périmètre de l'utilisateur.
+   */
+  async lockInScope(tx: Tx, ctx: SchoolContext, id: string) {
+    await tx.$queryRaw`SELECT id FROM "SchoolStudent" WHERE id = ${id}::uuid FOR UPDATE`;
+    const student = await tx.schoolStudent.findFirst({
+      where: { id, organizationId: ctx.organizationId },
+    });
+    if (!student || (ctx.schoolIds && !ctx.schoolIds.includes(student.schoolId))) {
+      throw new NotFoundException(NOT_FOUND);
+    }
     return student;
   }
 

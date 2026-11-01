@@ -255,6 +255,24 @@ export class SchoolService {
     return updated;
   }
 
+  /**
+   * Verrou partagé des opérations qui exigent une année ouverte, pris avant tout autre verrou. La clôture
+   * prend ce même établissement en exclusif : elle attend ces opérations, et elles relisent ensuite l'année.
+   */
+  async guardSchools(tx: Prisma.TransactionClient, schoolIds: string[]) {
+    for (const id of [...new Set(schoolIds)].sort()) {
+      await tx.$queryRaw`SELECT id FROM "School" WHERE id = ${id}::uuid FOR SHARE`;
+    }
+  }
+
+  private async assertYearStillOpen(tx: Prisma.TransactionClient, id: string) {
+    const { status } = await tx.schoolYear.findUniqueOrThrow({
+      where: { id },
+      select: { status: true },
+    });
+    if (status === 'CLOSED') throw this.closed();
+  }
+
   async createPeriod(ctx: SchoolContext, dto: CreatePeriodDto) {
     const year = await this.findYear(ctx, dto.schoolYearId);
     if (year.status === 'CLOSED') throw this.closed();
@@ -268,7 +286,9 @@ export class SchoolService {
       });
     }
     const period = await this.db.$transaction(async (tx) => {
+      await this.guardSchools(tx, [year.schoolId]);
       await tx.$queryRaw`SELECT id FROM "SchoolYear" WHERE id = ${year.id}::uuid FOR UPDATE`;
+      await this.assertYearStillOpen(tx, year.id);
       const existing = await tx.academicPeriod.findMany({
         where: { schoolYearId: year.id },
         select: { startsOn: true, endsOn: true, position: true },
@@ -409,16 +429,20 @@ export class SchoolService {
     if (dto.trackId) await this.assertTrackInSchool(ctx, dto.trackId, year.schoolId);
     const created = await this.unique(
       () =>
-        this.db.schoolClass.create({
-          data: {
-            organizationId: ctx.organizationId,
-            schoolYearId: year.id,
-            levelId: dto.levelId,
-            trackId: dto.trackId ?? null,
-            name: dto.name,
-            nameAr: dto.nameAr ?? null,
-            capacity: dto.capacity ?? null,
-          },
+        this.db.$transaction(async (tx) => {
+          await this.guardSchools(tx, [year.schoolId]);
+          await this.assertYearStillOpen(tx, year.id);
+          return tx.schoolClass.create({
+            data: {
+              organizationId: ctx.organizationId,
+              schoolYearId: year.id,
+              levelId: dto.levelId,
+              trackId: dto.trackId ?? null,
+              name: dto.name,
+              nameAr: dto.nameAr ?? null,
+              capacity: dto.capacity ?? null,
+            },
+          });
         }),
       'SCHOOL_NAME_USED',
       'Cette classe existe déjà pour cette année.',

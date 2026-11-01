@@ -12,6 +12,7 @@ export interface ParsedSheet {
 
 const XLSX_MAX_UNCOMPRESSED = 50 * 1024 * 1024;
 const MAX_COLUMNS = 100;
+const MAX_CELL_LENGTH = 10_000;
 /** Lignes physiques lues, vides comprises : la limite d'import s'applique ensuite aux lignes utiles. */
 const MAX_PHYSICAL_ROWS = SCHOOL_IMPORT_MAX_ROWS * 2;
 
@@ -94,6 +95,7 @@ export function parseCsv(text: string): string[][] {
   let quoted = false;
   for (let i = 0; i < text.length; i++) {
     const c = text[i]!;
+    if (cell.length > MAX_CELL_LENGTH) throw invalid('Une cellule du fichier est trop longue.');
     if (quoted) {
       if (c === '"' && text[i + 1] === '"') {
         cell += '"';
@@ -106,6 +108,7 @@ export function parseCsv(text: string): string[][] {
     } else if (c === '"' && cell === '') {
       quoted = true;
     } else if (c === delimiter) {
+      if (row.length + 1 >= MAX_COLUMNS) throw invalid(`${MAX_COLUMNS} colonnes au plus.`);
       row.push(cell);
       cell = '';
     } else if (c === '\n' || c === '\r') {

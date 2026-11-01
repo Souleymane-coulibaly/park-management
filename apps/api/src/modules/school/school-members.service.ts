@@ -42,7 +42,9 @@ export class SchoolMembersService {
     });
     return rows.map(({ assignments, ...m }) => ({
       ...m,
-      schoolIds: assignments.map((a) => a.schoolId),
+      schoolIds: assignments
+        .map((a) => a.schoolId)
+        .filter((schoolId) => !ctx.schoolIds || ctx.schoolIds.includes(schoolId)),
     }));
   }
 
@@ -137,6 +139,18 @@ export class SchoolMembersService {
     if (dto.role) this.assertCanAssign(ctx, dto.role);
     const role = dto.role ?? target.role;
     if (dto.schoolIds) await this.assertSchools(ctx, role, dto.schoolIds);
+    // Le rôle et l'activation valent pour tous ses établissements : décision de qui les couvre tous.
+    const sharedElsewhere =
+      ctx.schoolIds && target.assignments.some((a) => !ctx.schoolIds!.includes(a.schoolId));
+    const global =
+      role !== target.role || (dto.isActive !== undefined && dto.isActive !== target.isActive);
+    if (sharedElsewhere && global) {
+      throw new ForbiddenException({
+        code: 'SCHOOL_MEMBER_SHARED',
+        message:
+          'Ce compte relève aussi d’un autre périmètre : adressez-vous à la direction du groupe.',
+      });
+    }
 
     await this.db.$transaction(async (tx) => {
       await tx.schoolMember.update({
@@ -144,7 +158,10 @@ export class SchoolMembersService {
         data: { role: dto.role, isActive: dto.isActive },
       });
       if (dto.schoolIds) {
-        await tx.schoolMemberAssignment.deleteMany({ where: { memberId: id } });
+        // Seules les affectations du périmètre de l'utilisateur changent.
+        await tx.schoolMemberAssignment.deleteMany({
+          where: { memberId: id, ...(ctx.schoolIds ? { schoolId: { in: ctx.schoolIds } } : {}) },
+        });
         await tx.schoolMemberAssignment.createMany({
           data: [...new Set(dto.schoolIds)].map((schoolId) => ({
             memberId: id,

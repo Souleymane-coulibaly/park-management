@@ -17,6 +17,7 @@ import {
   pdfHasActiveContent,
   type SchoolDocumentCategory,
 } from '@ocall/shared';
+import type { Prisma } from '@ocall/school-database';
 import { AuditService } from '../../common/audit/audit.service';
 import type { RequestMeta } from '../../common/request-meta';
 import { signFileToken, verifyFileToken } from '../../common/storage/signed-url';
@@ -114,15 +115,7 @@ export class SchoolDocumentsService {
         message: 'Ce PDF contient du contenu actif : enregistrez-le de nouveau sous forme simple.',
       });
     }
-    const count = await this.db.schoolStudentDocument.count({
-      where: { organizationId: ctx.organizationId, studentId, deletedAt: null },
-    });
-    if (count >= SCHOOL_DOCUMENTS_PER_STUDENT) {
-      throw new ConflictException({
-        code: 'DOCUMENT_LIMIT',
-        message: `${SCHOOL_DOCUMENTS_PER_STUDENT} pièces au plus par dossier.`,
-      });
-    }
+    await this.assertRoomForDocument(this.db, ctx, studentId);
     const id = randomUUID();
     const storageKey = privateKey(
       ctx.organizationId,
@@ -131,8 +124,11 @@ export class SchoolDocumentsService {
       EXTENSION[mimeType as keyof typeof EXTENSION],
     );
     await this.storage.put(storageKey, file.buffer, mimeType);
+    let document;
     try {
-      const document = await this.db.$transaction(async (tx) => {
+      document = await this.db.$transaction(async (tx) => {
+        await this.students.lockInScope(tx, ctx, studentId);
+        await this.assertRoomForDocument(tx, ctx, studentId);
         const created = await tx.schoolStudentDocument.create({
           data: {
             id,
@@ -154,13 +150,30 @@ export class SchoolDocumentsService {
         });
         return created;
       });
-      await this.school.log(ctx, 'school.document_added', 'SchoolStudentDocument', id, {
-        category,
-      });
-      return document;
     } catch (error) {
       await this.storage.delete(storageKey).catch(() => undefined);
       throw error;
+    }
+    // Hors du bloc : le document est validé en base, son fichier ne doit plus jamais être retiré.
+    await this.school.log(ctx, 'school.document_added', 'SchoolStudentDocument', id, {
+      category,
+    });
+    return document;
+  }
+
+  private async assertRoomForDocument(
+    db: Prisma.TransactionClient | SchoolPrismaService,
+    ctx: SchoolContext,
+    studentId: string,
+  ) {
+    const count = await db.schoolStudentDocument.count({
+      where: { organizationId: ctx.organizationId, studentId, deletedAt: null },
+    });
+    if (count >= SCHOOL_DOCUMENTS_PER_STUDENT) {
+      throw new ConflictException({
+        code: 'DOCUMENT_LIMIT',
+        message: `${SCHOOL_DOCUMENTS_PER_STUDENT} pièces au plus par dossier.`,
+      });
     }
   }
 
@@ -214,6 +227,7 @@ export class SchoolDocumentsService {
     await this.students.findStudent(ctx, studentId);
     const document = await this.find(ctx, studentId, id);
     await this.db.$transaction(async (tx) => {
+      await this.students.lockInScope(tx, ctx, studentId);
       await tx.schoolStudentDocument.update({
         where: { id },
         data: { deletedAt: new Date(), deletedByUserId: ctx.userId },

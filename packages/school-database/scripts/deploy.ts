@@ -9,7 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { parse } from 'dotenv';
-import { findDestructiveStatements } from '@ocall/database';
+import { findDestructiveStatements, schoolMigrationTargetProblem } from '@ocall/database';
 
 const envFile = resolve(__dirname, '../../../apps/api/.env');
 const env = { ...(existsSync(envFile) ? parse(readFileSync(envFile)) : {}), ...process.env };
@@ -19,21 +19,13 @@ if (env.SCHOOL_ENABLED !== 'true') {
   process.exit(0);
 }
 
-const databaseUrl = env.SCHOOL_DATABASE_URL;
+const problem = schoolMigrationTargetProblem(env);
+if (problem) {
+  console.error(problem);
+  process.exit(1);
+}
+const databaseUrl = env.SCHOOL_DATABASE_URL!;
 const directUrl = env.SCHOOL_DIRECT_URL ?? databaseUrl;
-if (!databaseUrl || !directUrl) {
-  console.error('SCHOOL_DATABASE_URL est obligatoire quand SCHOOL_ENABLED=true.');
-  process.exit(1);
-}
-
-const identity = (url: string) => {
-  const u = new URL(url);
-  return `${u.host.replace('-pooler.', '.')}/${u.pathname.slice(1)}`;
-};
-if (env.DATABASE_URL && identity(env.DATABASE_URL) === identity(databaseUrl)) {
-  console.error('Refus : la base School doit être distincte de la base Ocall Suite.');
-  process.exit(1);
-}
 
 const root = join(__dirname, '..', 'prisma', 'migrations');
 for (const entry of readdirSync(root, { withFileTypes: true })) {

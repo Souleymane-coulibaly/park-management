@@ -289,7 +289,9 @@ export class SuiteContractsService {
     }
   }
 
+  /** Verrouille le contrat : deux changements simultanés se sérialisent, le second relit l'état validé. */
   private async find(tx: Prisma.TransactionClient, id: string) {
+    await tx.$queryRaw`SELECT id FROM "SuiteContract" WHERE id = ${id}::uuid FOR UPDATE`;
     const contract = await tx.suiteContract.findUnique({
       where: { id },
       select: { status: true, organizationId: true, endsOn: true },

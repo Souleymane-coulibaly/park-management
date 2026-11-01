@@ -1,5 +1,6 @@
 import { Workbook } from 'exceljs';
 import type { INestApplication } from '@nestjs/common';
+import { AuditService } from '../src/common/audit/audit.service';
 import { SchoolGuardiansService } from '../src/modules/school/school-guardians.service';
 import { SchoolPrismaService } from '../src/modules/school/school-prisma.service';
 import { PrismaService } from '../src/prisma/prisma.service';
@@ -1174,9 +1175,11 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       const rows = await db.schoolStudent.findMany({ where: { schoolId: s.schoolId } });
       expect(rows.map((r) => r.firstNameAr)).toEqual(['إبراهيم', 'إبراهيم']);
       const enrollments = await db.schoolEnrollment.findMany({ where: { schoolId: s.schoolId } });
-      expect(enrollments.every((e) => e.status === 'PENDING' && e.classId === s.classId)).toBe(
-        true,
-      );
+      expect(enrollments).toHaveLength(2);
+      expect(enrollments.map((e) => e.studentId).sort()).toEqual(rows.map((r) => r.id).sort());
+      for (const e of enrollments) {
+        expect(e).toMatchObject({ status: 'PENDING', classId: s.classId, schoolYearId: s.yearId });
+      }
       expect(await db.schoolStudentGuardian.count({ where: { studentId: rows[0]!.id } })).toBe(1);
 
       const again = await upload(ownerA, '/api/v1/school/imports', csv, 'e.csv', {
@@ -1366,6 +1369,297 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       expect(dash.body.byLevel[0]).toMatchObject({ name: 'CP1', count: 1 });
       expect(dash.body.byClass[0]).toMatchObject({ name: 'CP1 A', count: 1 });
       await secretary.get(`/api/v1/school/students/dashboard?schoolId=${s.schoolId}`).expect(404);
+    });
+  });
+
+  describe('corrections de l’audit', () => {
+    const transferBody = (s: Structure) => ({
+      targetSchoolId: s.schoolId,
+      targetSchoolYearId: s.yearId,
+      targetLevelId: s.levelId,
+      effectiveOn: '2026-11-15',
+      reason: 'Déménagement',
+    });
+
+    /** Dossier avec responsable et inscription en attente de validation. */
+    async function pending(owner: Agent, s: Structure, classId = s.classId) {
+      const created = await student(owner, s.schoolId).expect(201);
+      const parent = await guardian(owner, s.schoolId).expect(201);
+      await owner
+        .post(`/api/v1/school/students/${created.body.id}/guardians`)
+        .send({ guardianId: parent.body.id, relation: 'FATHER' })
+        .expect(201);
+      const enrollment = await owner
+        .post('/api/v1/school/enrollments')
+        .send({
+          studentId: created.body.id,
+          schoolYearId: s.yearId,
+          levelId: s.levelId,
+          classId,
+          submit: true,
+        })
+        .expect(201);
+      return { id: created.body.id as string, enrollmentId: enrollment.body.id as string };
+    }
+
+    it('S2-01 : un échec du journal après validation ne supprime pas le fichier', async () => {
+      const created = await student(ownerA, a1.schoolId).expect(201);
+      const url = `/api/v1/school/students/${created.body.id}/documents`;
+      const audit = app.get(AuditService);
+      const original = audit.record.bind(audit);
+      const spy = jest.spyOn(audit, 'record').mockImplementation((entry, tx) => {
+        if (entry.action === 'school.document_added') {
+          return Promise.reject(new Error('journal indisponible'));
+        }
+        return original(entry, tx);
+      });
+      try {
+        await ownerA.post(url).field('category', 'OTHER').attach('file', PDF, 'p.pdf').expect(500);
+      } finally {
+        spy.mockRestore();
+      }
+      const list = await ownerA.get(url).expect(200);
+      expect(list.body).toHaveLength(1);
+      const link = await ownerA.get(`${url}/${list.body[0].id}/link`).expect(200);
+      await ownerA.get(link.body.url).expect(200);
+    });
+
+    it('S2-02 : après transfert, l’ancienne école ne lit plus le dossier par ses listes', async () => {
+      const s = await structure(ownerA, `Ancienne ${++counter}`);
+      const staff = await member(ownerA, 'SECRETARY', [s.schoolId]);
+      const { id, enrollmentId } = await enrolled(ownerA, s);
+      await staff.agent.get(`/api/v1/school/classes/${s.classId}/students`).expect(200);
+      await ownerA
+        .post(`/api/v1/school/students/${id}/transfer`)
+        .send(transferBody(a2))
+        .expect(200);
+      await ownerA
+        .patch(`/api/v1/school/students/${id}`)
+        .send({ firstName: 'Nouveauprenom' })
+        .expect(200);
+
+      const list = await staff.agent
+        .get(`/api/v1/school/enrollments?schoolId=${s.schoolId}`)
+        .expect(200);
+      expect(JSON.stringify(list.body)).not.toContain('Nouveauprenom');
+      expect(list.body.items.map((e: { id: string }) => e.id)).not.toContain(enrollmentId);
+      const roster = await staff.agent
+        .get(`/api/v1/school/classes/${s.classId}/students`)
+        .expect(200);
+      expect(JSON.stringify(roster.body)).not.toContain('Nouveauprenom');
+      await staff.agent
+        .post(`/api/v1/school/enrollments/${enrollmentId}/status`)
+        .send({ status: 'CANCELLED', note: 'Essai' })
+        .expect(404);
+      const all = await ownerA.get(`/api/v1/school/students/${id}/enrollments`).expect(200);
+      expect(all.body.map((e: { id: string }) => e.id)).toContain(enrollmentId);
+    });
+
+    it('S2-03 : un import ne rattache ni un responsable inaccessible, ni un simple préfixe', async () => {
+      const s = await structure(ownerA, `Parents ${++counter}`);
+      const staff = await member(ownerA, 'SECRETARY', [s.schoolId]);
+      const created = await student(ownerA, s.schoolId).expect(201);
+      const phone = '+223 70 55 44 33';
+      const parent = await ownerA
+        .post('/api/v1/school/guardians')
+        .send({ schoolId: s.schoolId, lastName: 'Sylla', firstName: 'Oumar', phone })
+        .expect(201);
+      await ownerA
+        .post(`/api/v1/school/students/${created.body.id}/guardians`)
+        .send({ guardianId: parent.body.id, relation: 'FATHER' })
+        .expect(201);
+      await ownerA
+        .post(`/api/v1/school/students/${created.body.id}/transfer`)
+        .send(transferBody(a2))
+        .expect(200);
+
+      const line = (last: string, guardianFirst: string) =>
+        `${last};Awa;14/03/2017;Sylla;${guardianFirst};${phone}`;
+      const csv = Buffer.from(
+        `Nom;Prénom;Date de naissance;Nom du responsable;Prénom du responsable;Téléphone du responsable\r\n${line(`Import${RUN}a`, 'Oumar')}\r\n`,
+      );
+      await staff.agent
+        .post('/api/v1/school/imports')
+        .field('schoolId', s.schoolId)
+        .attach('file', csv, 'e.csv')
+        .expect(201);
+      const links = await db.schoolStudentGuardian.count({ where: { guardianId: parent.body.id } });
+      expect(links).toBe(1);
+      const homonym = await ownerA
+        .post('/api/v1/school/guardians')
+        .send({
+          schoolId: s.schoolId,
+          lastName: 'Sylla',
+          firstName: 'Ali',
+          phone: '+223 70 55 44 34',
+        })
+        .expect(201);
+      const other = Buffer.from(
+        `Nom;Prénom;Date de naissance;Nom du responsable;Prénom du responsable;Téléphone du responsable\r\n${`Import${RUN}b`};Awa;14/03/2017;Sylla;Aliou;+223 70 55 44 34\r\n`,
+      );
+      await staff.agent
+        .post('/api/v1/school/imports')
+        .field('schoolId', s.schoolId)
+        .attach('file', other, 'e.csv')
+        .expect(201);
+      expect(await db.schoolStudentGuardian.count({ where: { guardianId: homonym.body.id } })).toBe(
+        0,
+      );
+    });
+
+    it('S2-04 : une écriture reçue après le transfert ne touche pas le dossier déplacé', async () => {
+      const s = await structure(ownerA, `Course ${++counter}`);
+      const staff = await member(ownerA, 'SECRETARY', [s.schoolId]);
+      const created = await student(ownerA, s.schoolId).expect(201);
+      const id = created.body.id as string;
+      const [write, move] = await Promise.all([
+        staff.agent.patch(`/api/v1/school/students/${id}`).send({ birthPlace: 'Kayes' }),
+        ownerA.post(`/api/v1/school/students/${id}/transfer`).send(transferBody(a2)),
+      ]);
+      expect(move.status).toBe(200);
+      expect([200, 404]).toContain(write.status);
+      await staff.agent
+        .patch(`/api/v1/school/students/${id}`)
+        .send({ birthPlace: 'Gao' })
+        .expect(404);
+      const row = await db.schoolStudent.findUniqueOrThrow({ where: { id } });
+      expect(row.birthPlace).not.toBe('Gao');
+      expect(row.schoolId).toBe(a2.schoolId);
+    });
+
+    it('S2-05 : validation et changement de classe simultanés restent cohérents', async () => {
+      const s = await structure(ownerA, `Valid ${++counter}`);
+      const { id, enrollmentId } = await pending(ownerA, s);
+      const [validated, moved] = await Promise.all([
+        ownerA
+          .post(`/api/v1/school/enrollments/${enrollmentId}/status`)
+          .send({ status: 'VALIDATED' }),
+        ownerA
+          .post(`/api/v1/school/enrollments/${enrollmentId}/class`)
+          .send({ classId: s.otherClassId, reason: 'Essai' }),
+      ]);
+      expect(validated.status).toBe(200);
+      expect(moved.status).toBe(200);
+      const enrollment = await db.schoolEnrollment.findUniqueOrThrow({
+        where: { id: enrollmentId },
+      });
+      const open = await db.schoolClassAssignment.findMany({
+        where: { studentId: id, endedAt: null },
+      });
+      expect(open).toHaveLength(1);
+      expect(open[0]!.classId).toBe(enrollment.classId);
+    });
+
+    it('S2-06 : une validation simultanée de la clôture ne laisse aucune affectation ouverte', async () => {
+      const s = await structure(ownerA, `Cloture ${++counter}`);
+      const { id, enrollmentId } = await pending(ownerA, s);
+      const [validated, closed] = await Promise.all([
+        ownerA
+          .post(`/api/v1/school/enrollments/${enrollmentId}/status`)
+          .send({ status: 'VALIDATED' }),
+        ownerA.post(`/api/v1/school/years/${s.yearId}/status`).send({ status: 'CLOSED' }),
+      ]);
+      expect(closed.status).toBe(200);
+      expect([200, 409]).toContain(validated.status);
+      expect(
+        await db.schoolClassAssignment.count({ where: { studentId: id, endedAt: null } }),
+      ).toBe(0);
+      const row = await db.schoolStudent.findUniqueOrThrow({ where: { id } });
+      expect(row.status).toBe('REGISTERED');
+    });
+
+    it('S1-04 : aucune classe ni période ajoutée en même temps que la clôture ne reste ouverte', async () => {
+      const s = await structure(ownerA, `Periode ${++counter}`);
+      const [closed, cls] = await Promise.all([
+        ownerA.post(`/api/v1/school/years/${s.yearId}/status`).send({ status: 'CLOSED' }),
+        ownerA
+          .post('/api/v1/school/classes')
+          .send({ schoolYearId: s.yearId, levelId: s.levelId, name: 'CP1 Z' }),
+      ]);
+      expect(closed.status).toBe(200);
+      expect([201, 409]).toContain(cls.status);
+      await ownerA
+        .post('/api/v1/school/classes')
+        .send({ schoolYearId: s.yearId, levelId: s.levelId, name: 'CP1 Y' })
+        .expect(409);
+    });
+
+    it('S2-07 : deux modifications simultanées gardent une identité exacte', async () => {
+      const created = await student(ownerA, a1.schoolId, {
+        lastName: `Ancien${RUN}`,
+        firstName: 'Prenom',
+        birthDate: '2014-06-06',
+      }).expect(201);
+      const id = created.body.id as string;
+      const url = `/api/v1/school/students/${id}`;
+      const [a, b] = await Promise.all([
+        ownerA.patch(url).send({ lastName: `Nouveau${RUN}` }),
+        ownerA.patch(url).send({ firstName: 'Autre' }),
+      ]);
+      expect(a.status).toBe(200);
+      expect(b.status).toBe(200);
+      const dup = await student(ownerA, a1.schoolId, {
+        lastName: `Nouveau${RUN}`,
+        firstName: 'Autre',
+        birthDate: '2014-06-06',
+      }).expect(409);
+      expect(dup.body.code).toBe('STUDENT_DUPLICATE');
+      expect(dup.body.details).toEqual([id]);
+    });
+
+    it('S2-08 : la limite de documents tient face aux envois simultanés', async () => {
+      const created = await student(ownerA, a1.schoolId).expect(201);
+      const id = created.body.id as string;
+      const url = `/api/v1/school/students/${id}/documents`;
+      const send = () => ownerA.post(url).field('category', 'OTHER').attach('file', PDF, 'p.pdf');
+      for (let i = 0; i < 29; i++) await send().expect(201);
+      const results = await Promise.all([send(), send()]);
+      expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
+      expect(
+        await db.schoolStudentDocument.count({ where: { studentId: id, deletedAt: null } }),
+      ).toBe(30);
+    });
+
+    it('S1-01 : un directeur ne modifie pas globalement un membre partagé', async () => {
+      const director = await member(ownerA, 'SCHOOL_DIRECTOR', [a1.schoolId]);
+      const shared = await member(ownerA, 'TEACHER', [a1.schoolId, a2.schoolId]);
+      const url = `/api/v1/school/members/${shared.id}`;
+      const role = await director.agent.patch(url).send({ role: 'SECRETARY' }).expect(403);
+      expect(role.body.code).toBe('SCHOOL_MEMBER_SHARED');
+      await director.agent.patch(url).send({ isActive: false }).expect(403);
+
+      const local = await structure(ownerA, `Membre ${++counter}`);
+      const both = await member(ownerA, 'SCHOOL_DIRECTOR', [a1.schoolId, local.schoolId]);
+      await both.agent
+        .patch(url)
+        .send({ schoolIds: [local.schoolId] })
+        .expect(200);
+      const assignments = await db.schoolMemberAssignment.findMany({
+        where: { memberId: shared.id },
+      });
+      expect(assignments.map((a) => a.schoolId).sort()).toEqual(
+        [a2.schoolId, local.schoolId].sort(),
+      );
+      const seen = await director.agent.get('/api/v1/school/members').expect(200);
+      expect(JSON.stringify(seen.body)).not.toContain(a2.schoolId);
+    });
+
+    it('S1-02 : un renouvellement simultané ne réactive pas un contrat résilié', async () => {
+      const c = await client(`renew${++counter}`);
+      const [renew, terminate] = await Promise.all([
+        platform.agent
+          .post(`/api/v1/platform/contracts/${c.contractId}/renew`)
+          .send({ endsOn: '2199-12-31', reason: 'Renouvellement' }),
+        platform.agent
+          .post(`/api/v1/platform/contracts/${c.contractId}/status`)
+          .send({ status: 'TERMINATED', reason: 'Résiliation' }),
+      ]);
+      expect(terminate.status).toBe(200);
+      expect([200, 409]).toContain(renew.status);
+      const row = await app.get(PrismaService).suiteContract.findUniqueOrThrow({
+        where: { id: c.contractId },
+      });
+      expect(row.status).toBe('TERMINATED');
     });
   });
 

@@ -1,6 +1,42 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { DESTRUCTIVE_APPROVAL_MARKER, findDestructiveStatements } from './migration-safety';
+import {
+  DESTRUCTIVE_APPROVAL_MARKER,
+  findDestructiveStatements,
+  schoolMigrationTargetProblem,
+} from './migration-safety';
+
+describe('schoolMigrationTargetProblem', () => {
+  const suite = 'postgresql://u:p@ep-suite-pooler.neon.tech/neondb';
+  const school = 'postgresql://u:p@ep-school-pooler.neon.tech/neondb';
+  const schoolDirect = 'postgresql://u:p@ep-school.neon.tech/neondb';
+
+  it('accepte une base School distincte, en URL poolée et directe', () => {
+    expect(
+      schoolMigrationTargetProblem({
+        DATABASE_URL: suite,
+        SCHOOL_DATABASE_URL: school,
+        SCHOOL_DIRECT_URL: schoolDirect,
+      }),
+    ).toBeNull();
+  });
+
+  it('refuse une URL directe qui désigne la base Suite', () => {
+    expect(
+      schoolMigrationTargetProblem({
+        DATABASE_URL: suite,
+        SCHOOL_DATABASE_URL: school,
+        SCHOOL_DIRECT_URL: 'postgresql://u:p@ep-suite.neon.tech/neondb',
+      }),
+    ).toContain('différentes');
+  });
+
+  it('refuse deux URL School identiques à la base Suite', () => {
+    expect(
+      schoolMigrationTargetProblem({ DIRECT_URL: suite, SCHOOL_DATABASE_URL: suite }),
+    ).toContain('distincte');
+  });
+});
 
 describe('findDestructiveStatements', () => {
   it.each([
