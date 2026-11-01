@@ -1667,6 +1667,39 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
         .expect(404);
     });
 
+    it('S2-03 : un transfert survenu après le contrôle bloque le rattachement à ce dossier', async () => {
+      const s = await structure(ownerA, `Rattache ${++counter}`);
+      const staff = await member(ownerA, 'SECRETARY', [s.schoolId]);
+      const created = await student(ownerA, s.schoolId).expect(201);
+      const parent = await guardian(ownerA, s.schoolId, 'Rattache').expect(201);
+      const spy = transferAfterCheck(created.body.id);
+      try {
+        await staff.agent
+          .post(`/api/v1/school/students/${created.body.id}/guardians`)
+          .send({ guardianId: parent.body.id, relation: 'OTHER' })
+          .expect(404);
+      } finally {
+        spy.mockRestore();
+      }
+      expect(await db.schoolStudentGuardian.count({ where: { studentId: created.body.id } })).toBe(
+        0,
+      );
+    });
+
+    it('S1-05 : l’activation reste identique dans les deux bases', async () => {
+      const m = await member(ownerA, 'TEACHER', [a1.schoolId]);
+      const url = `/api/v1/school/members/${m.id}`;
+      await Promise.all([
+        ownerA.patch(url).send({ isActive: false }),
+        ownerA.patch(url).send({ isActive: true }),
+      ]);
+      const row = await db.schoolMember.findUniqueOrThrow({ where: { id: m.id } });
+      const accounts = await app.get(PrismaService).organizationMembership.findMany({
+        where: { userId: row.userId, role: 'PRODUCT_USER' },
+      });
+      expect(accounts.map((a) => a.isActive)).toEqual([row.isActive]);
+    });
+
     it('S2-12 : un dossier créé pendant le changement de réglage suit le périmètre final', async () => {
       const s = await structure(ownerA, `Portee ${++counter}`);
       const settings = await ownerA

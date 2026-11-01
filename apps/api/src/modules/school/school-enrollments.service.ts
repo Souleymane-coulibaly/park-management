@@ -85,13 +85,15 @@ export class SchoolEnrollmentsService {
       ...(ctx.schoolIds ? { student: { schoolId: { in: ctx.schoolIds } } } : {}),
     };
     const [items, total] = await Promise.all([
-      this.db.schoolEnrollment.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-        select: VIEW,
-      }),
+      this.students.snapshot((tx) =>
+        tx.schoolEnrollment.findMany({
+          where,
+          orderBy: { createdAt: 'desc' },
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          select: VIEW,
+        }),
+      ),
       this.db.schoolEnrollment.count({ where }),
     ]);
     return { items, total, page, pageSize };
@@ -99,15 +101,17 @@ export class SchoolEnrollmentsService {
 
   async forStudent(ctx: SchoolContext, studentId: string) {
     await this.students.findStudent(ctx, studentId);
-    return this.db.schoolEnrollment.findMany({
-      where: {
-        organizationId: ctx.organizationId,
-        studentId,
-        ...this.students.linkedStudentScope(ctx),
-      },
-      orderBy: { createdAt: 'desc' },
-      select: VIEW,
-    });
+    return this.students.snapshot((tx) =>
+      tx.schoolEnrollment.findMany({
+        where: {
+          organizationId: ctx.organizationId,
+          studentId,
+          ...this.students.linkedStudentScope(ctx),
+        },
+        orderBy: { createdAt: 'desc' },
+        select: VIEW,
+      }),
+    );
   }
 
   /** Inscription ou réinscription : le même dossier, jamais un second. L'index partiel refuse le doublon. */
@@ -563,29 +567,31 @@ export class SchoolEnrollmentsService {
     await this.school.assertSchool(ctx, cls.year.schoolId);
     const own = await this.students.ownClasses(ctx);
     if (own && !own.includes(classId)) throw new NotFoundException(NOT_FOUND);
-    const enrollments = await this.db.schoolEnrollment.findMany({
-      where: {
-        organizationId: ctx.organizationId,
-        classId,
-        status: 'VALIDATED',
-        ...(ctx.schoolIds ? { student: { schoolId: { in: ctx.schoolIds } } } : {}),
-      },
-      orderBy: [{ student: { lastName: 'asc' } }, { student: { firstName: 'asc' } }],
-      select: {
-        id: true,
-        student: {
-          select: {
-            id: true,
-            matricule: true,
-            lastName: true,
-            firstName: true,
-            lastNameAr: true,
-            firstNameAr: true,
-            status: true,
+    const enrollments = await this.students.snapshot((tx) =>
+      tx.schoolEnrollment.findMany({
+        where: {
+          organizationId: ctx.organizationId,
+          classId,
+          status: 'VALIDATED',
+          ...(ctx.schoolIds ? { student: { schoolId: { in: ctx.schoolIds } } } : {}),
+        },
+        orderBy: [{ student: { lastName: 'asc' } }, { student: { firstName: 'asc' } }],
+        select: {
+          id: true,
+          student: {
+            select: {
+              id: true,
+              matricule: true,
+              lastName: true,
+              firstName: true,
+              lastNameAr: true,
+              firstNameAr: true,
+              status: true,
+            },
           },
         },
-      },
-    });
+      }),
+    );
     return {
       class: cls,
       students: enrollments.map((e) => ({ enrollmentId: e.id, ...e.student })),

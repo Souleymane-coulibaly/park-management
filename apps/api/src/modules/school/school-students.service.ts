@@ -361,13 +361,15 @@ export class SchoolStudentsService {
     const pageSize = q.pageSize ?? 25;
     const where = await this.listWhere(ctx, q);
     const [items, total] = await Promise.all([
-      this.db.schoolStudent.findMany({
-        where,
-        orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }, { id: 'asc' }],
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-        select: LIMITED_SELECT,
-      }),
+      this.snapshot((tx) =>
+        tx.schoolStudent.findMany({
+          where,
+          orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }, { id: 'asc' }],
+          skip: (page - 1) * pageSize,
+          take: pageSize,
+          select: LIMITED_SELECT,
+        }),
+      ),
       this.db.schoolStudent.count({ where }),
     ]);
     const own = await this.ownClasses(ctx);
@@ -377,14 +379,16 @@ export class SchoolStudentsService {
   async get(ctx: SchoolContext, id: string) {
     const full = hasSchoolPermission(ctx.role, 'school.students.read_full');
     await this.findStudent(ctx, id);
-    const student = await this.db.schoolStudent.findFirst({
-      where: {
-        id,
-        organizationId: ctx.organizationId,
-        ...(ctx.schoolIds ? { schoolId: { in: ctx.schoolIds } } : {}),
-      },
-      select: full ? FULL_SELECT : LIMITED_SELECT,
-    });
+    const student = await this.snapshot((tx) =>
+      tx.schoolStudent.findFirst({
+        where: {
+          id,
+          organizationId: ctx.organizationId,
+          ...(ctx.schoolIds ? { schoolId: { in: ctx.schoolIds } } : {}),
+        },
+        select: full ? FULL_SELECT : LIMITED_SELECT,
+      }),
+    );
     if (!student) throw new NotFoundException(NOT_FOUND);
     if (full) {
       await this.school.log(ctx, 'school.student_viewed', 'SchoolStudent', id, {});
@@ -639,6 +643,14 @@ export class SchoolStudentsService {
     if (!student) throw new NotFoundException(NOT_FOUND);
     await this.school.assertSchool(ctx, student.schoolId);
     return student;
+  }
+
+  /**
+   * Prisma lit les relations par requêtes successives : l'instantané unique garantit qu'elles voient le
+   * même état que le filtre de périmètre, sans donnée écrite après un transfert.
+   */
+  snapshot<T>(read: (tx: Tx) => Promise<T>): Promise<T> {
+    return this.db.$transaction(read, { isolationLevel: 'RepeatableRead' });
   }
 
   /** Filtre d'une table liée à l'élève : le périmètre vaut dans la requête qui renvoie les données. */

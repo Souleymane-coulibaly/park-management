@@ -67,38 +67,40 @@ export class SchoolGuardiansService {
   async list(ctx: SchoolContext, q: GuardiansQueryDto) {
     if (q.schoolId) await this.school.assertSchool(ctx, q.schoolId);
     const words = q.q ? normalizeSearch(q.q).split(' ').filter(Boolean) : [];
-    return this.db.schoolGuardian.findMany({
-      where: {
-        ...this.scope(ctx),
-        AND: [
-          ...(q.schoolId
-            ? [
-                {
-                  OR: [
-                    { schoolId: q.schoolId },
-                    { links: { some: { student: { schoolId: q.schoolId } } } },
-                  ],
-                },
-              ]
-            : []),
-          ...words.map((word) => ({ searchText: { contains: word } })),
-        ],
-      },
-      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
-      take: 50,
-      select: {
-        ...VIEW,
-        links: {
-          where: ctx.schoolIds ? { student: { schoolId: { in: ctx.schoolIds } } } : {},
-          select: {
-            relation: true,
-            student: {
-              select: { id: true, matricule: true, lastName: true, firstName: true },
+    return this.students.snapshot((tx) =>
+      tx.schoolGuardian.findMany({
+        where: {
+          ...this.scope(ctx),
+          AND: [
+            ...(q.schoolId
+              ? [
+                  {
+                    OR: [
+                      { schoolId: q.schoolId },
+                      { links: { some: { student: { schoolId: q.schoolId } } } },
+                    ],
+                  },
+                ]
+              : []),
+            ...words.map((word) => ({ searchText: { contains: word } })),
+          ],
+        },
+        orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+        take: 50,
+        select: {
+          ...VIEW,
+          links: {
+            where: ctx.schoolIds ? { student: { schoolId: { in: ctx.schoolIds } } } : {},
+            select: {
+              relation: true,
+              student: {
+                select: { id: true, matricule: true, lastName: true, firstName: true },
+              },
             },
           },
         },
-      },
-    });
+      }),
+    );
   }
 
   async create(ctx: SchoolContext, dto: CreateGuardianDto) {
@@ -192,23 +194,25 @@ export class SchoolGuardiansService {
 
   async forStudent(ctx: SchoolContext, studentId: string) {
     await this.students.findStudent(ctx, studentId);
-    return this.db.schoolStudentGuardian.findMany({
-      where: {
-        organizationId: ctx.organizationId,
-        studentId,
-        ...this.students.linkedStudentScope(ctx),
-      },
-      orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
-      select: {
-        relation: true,
-        isPrimary: true,
-        isEmergency: true,
-        canReceiveSms: true,
-        canViewSchoolInfo: true,
-        canPickUp: true,
-        guardian: { select: VIEW },
-      },
-    });
+    return this.students.snapshot((tx) =>
+      tx.schoolStudentGuardian.findMany({
+        where: {
+          organizationId: ctx.organizationId,
+          studentId,
+          ...this.students.linkedStudentScope(ctx),
+        },
+        orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
+        select: {
+          relation: true,
+          isPrimary: true,
+          isEmergency: true,
+          canReceiveSms: true,
+          canViewSchoolInfo: true,
+          canPickUp: true,
+          guardian: { select: VIEW },
+        },
+      }),
+    );
   }
 
   /** Le premier responsable rattaché devient principal ; aucun droit n'est accordé implicitement. */

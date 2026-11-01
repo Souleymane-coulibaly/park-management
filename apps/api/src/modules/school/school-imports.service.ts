@@ -203,13 +203,16 @@ export class SchoolImportsService {
   ) {
     const { line: _line, levelId, classId, guardian, ...identity } = row;
     await this.school.guardSchools(tx, [dto.schoolId]);
+    // Responsables avant le compteur de matricules : même ordre de verrous que le transfert.
+    const known = guardian
+      ? await this.guardians.findReusable(tx, ctx, dto.schoolId, guardian)
+      : undefined;
     const student = await this.students.createInTx(tx, ctx, {
       ...identity,
       schoolId: dto.schoolId,
       matriculeYearNumber: year,
     });
     if (guardian) {
-      const known = await this.guardians.findReusable(tx, ctx, dto.schoolId, guardian);
       const guardianId =
         known?.id ??
         (await this.guardians.createWith(tx, ctx, { ...guardian, schoolId: dto.schoolId })).id;

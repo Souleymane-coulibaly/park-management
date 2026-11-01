@@ -172,10 +172,11 @@ export class SchoolMembersService {
           })),
         });
       }
+      // Compte réservé à School : désactiver le membre ferme ses sessions Ocall Suite. Sous le verrou du
+      // membre : deux décisions s'appliquent aux deux bases dans le même ordre ; un échec annule School.
+      if (dto.isActive !== undefined) await this.syncAccount(ctx, target.userId, dto.isActive);
       return { target, role };
     });
-    // Compte réservé à School : désactiver le membre ferme ses sessions Ocall Suite.
-    if (dto.isActive !== undefined) await this.syncAccount(ctx, target.userId, dto.isActive);
     await this.audit.record({
       organizationId: ctx.organizationId,
       actorUserId: ctx.userId,
