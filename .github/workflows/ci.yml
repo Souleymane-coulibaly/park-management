@@ -66,8 +66,14 @@ jobs:
       - run: pnpm build
       - name: Migrations (base éphémère)
         run: pnpm db:migrate:deploy
+      - name: Base School éphémère et migrations
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -c 'CREATE DATABASE ocall_school_ci'
+          SCHOOL_ENABLED=true DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ocall_park_ci SCHOOL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ocall_school_ci pnpm db:school:migrate:deploy
       - name: Tests d'intégration API
         run: pnpm test:integration
+        env:
+          TEST_SCHOOL_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ocall_school_ci
       - run: pnpm exec playwright install --with-deps chromium
       - name: Tests E2E Playwright
         run: pnpm test:e2e

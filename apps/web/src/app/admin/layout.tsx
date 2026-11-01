@@ -30,6 +30,12 @@ const NAV: (NavItem & { permission: PlatformPermission | null })[] = [
     permission: 'platform.orgs.read',
   },
   {
+    key: 'platform-contracts',
+    label: 'Contrats',
+    href: '/admin/contrats',
+    permission: 'platform.orgs.read',
+  },
+  {
     key: 'platform-subscriptions',
     label: 'Abonnements et offres',
     href: '/admin/abonnements',

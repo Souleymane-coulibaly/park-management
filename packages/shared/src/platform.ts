@@ -63,6 +63,8 @@ export const PlatformPermission = {
   PARTNERS_MANAGE: 'platform.partners.manage',
   COMMISSIONS_VALIDATE: 'platform.commissions.validate',
   PAYOUTS_MANAGE: 'platform.payouts.manage',
+  /** Ocall School : contrats B2B et activation des produits vendus sur contrat. */
+  CONTRACTS_MANAGE: 'platform.contracts.manage',
 } as const;
 export type PlatformPermission = (typeof PlatformPermission)[keyof typeof PlatformPermission];
 export const PLATFORM_PERMISSIONS: readonly PlatformPermission[] =
@@ -181,12 +183,18 @@ export const isProductSlug = (slug: string) =>
   /^[a-z0-9]+(-[a-z0-9]+)*$/.test(slug) && slug.length <= 60;
 
 /** Produits de l'application Ocall Park actuelle, liés au métier de l'organisation. */
-export const PARK_APP_PRODUCTS: Record<BusinessType, string> = {
+export const PARK_APP_PRODUCTS: Record<Exclude<BusinessType, 'NONE'>, string> = {
   PARK: 'OCALL_PARK',
   RESTAURANT: 'OCALL_RESTAURANT',
   PARK_RESTAURANT: 'OCALL_PARK_RESTAURANT',
 };
 export const PARK_APP_PRODUCT_CODES = Object.values(PARK_APP_PRODUCTS);
+
+/** Produit Ocall Park d'un métier ; un client sans activité Park n'en a aucun. */
+export function parkProductCode(businessType: BusinessType): string {
+  if (businessType === 'NONE') throw new Error('Ce client n’a pas d’activité Ocall Park.');
+  return PARK_APP_PRODUCTS[businessType];
+}
 
 /** Code produit : majuscules, chiffres et soulignés (ex. OCALL_SCHOOL). */
 export const isProductCode = (code: string) => /^[A-Z][A-Z0-9_]{2,39}$/.test(code);

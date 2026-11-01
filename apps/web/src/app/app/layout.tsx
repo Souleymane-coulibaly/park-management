@@ -1,4 +1,6 @@
+import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { redirect } from 'next/navigation';
 import { BUSINESS_TYPE_LABELS } from '@ocall/shared';
 import { AppShell, type NavItem } from '@/components/app/app-shell';
 import { ParkMobileNav } from '@/components/park/park-mobile-nav';
@@ -15,6 +17,7 @@ export const dynamic = 'force-dynamic';
 export default async function MemberLayout({ children }: { children: ReactNode }) {
   const me = await requireMemberSession();
   const org = me.organization!;
+  if (org.businessType === 'NONE' || me.role === 'PRODUCT_USER') redirect('/suite');
   const nav: NavItem[] = me.navigation.map((item) => ({
     key: item.key,
     label: item.label,
@@ -38,6 +41,10 @@ export default async function MemberLayout({ children }: { children: ReactNode }
       headerNote={
         <>
           Fuseau : <span className="font-medium text-charcoal">{org.timezone}</span>
+          {' · '}
+          <Link href="/suite" className="font-medium text-forest hover:underline">
+            Mes applications
+          </Link>
         </>
       }
     >

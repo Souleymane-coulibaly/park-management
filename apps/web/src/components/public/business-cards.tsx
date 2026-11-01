@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 
 /** Présentation marketing des trois métiers, partagée par l'accueil, la page Métiers et l'inscription. */
 export const BUSINESS_PRESENTATION: Record<
-  BusinessType,
+  Exclude<BusinessType, 'NONE'>,
   { title: string; tagline: string; icon: ReactNode; points: string[]; accent: string }
 > = {
   PARK: {
@@ -42,7 +42,7 @@ export const BUSINESS_PRESENTATION: Record<
   },
 };
 
-export function BusinessCard({ type }: { type: BusinessType }) {
+export function BusinessCard({ type }: { type: Exclude<BusinessType, 'NONE'> }) {
   const b = BUSINESS_PRESENTATION[type];
   return (
     <article className="group flex flex-col rounded-2xl border border-line/80 bg-surface p-6 shadow-card transition-shadow hover:shadow-lift">

@@ -1,0 +1,190 @@
+/**
+ * Ocall School : types d'établissements, rôles et règles pédagogiques de base. Partagé par l'API
+ * (contrôle) et le frontend (affichage). Les rôles School sont indépendants des rôles Ocall Park.
+ */
+
+export const SCHOOL_PRODUCT_CODE = 'OCALL_SCHOOL';
+
+export const SCHOOL_TYPES = [
+  'PRESCHOOL',
+  'PRIMARY',
+  'MIDDLE',
+  'HIGH',
+  'FRANCO_ARABIC',
+  'COMPLEX',
+] as const;
+export type SchoolType = (typeof SCHOOL_TYPES)[number];
+
+export const SCHOOL_TYPE_LABELS: Record<SchoolType, string> = {
+  PRESCHOOL: 'École maternelle',
+  PRIMARY: 'École primaire',
+  MIDDLE: 'Collège',
+  HIGH: 'Lycée',
+  FRANCO_ARABIC: 'École franco-arabe',
+  COMPLEX: 'Complexe scolaire',
+};
+
+export const SCHOOL_LOCALES = ['FR', 'AR', 'BILINGUAL'] as const;
+export type SchoolLocale = (typeof SCHOOL_LOCALES)[number];
+
+export const SCHOOL_LOCALE_LABELS: Record<SchoolLocale, string> = {
+  FR: 'Français',
+  AR: 'Arabe',
+  BILINGUAL: 'Bilingue français et arabe',
+};
+
+export const SCHOOL_PERIOD_KINDS = ['TRIMESTER', 'SEMESTER', 'CUSTOM'] as const;
+export type SchoolPeriodKind = (typeof SCHOOL_PERIOD_KINDS)[number];
+
+export const SCHOOL_PERIOD_KIND_LABELS: Record<SchoolPeriodKind, string> = {
+  TRIMESTER: 'Trimestre',
+  SEMESTER: 'Semestre',
+  CUSTOM: 'Période personnalisée',
+};
+
+export const SCHOOL_YEAR_STATUSES = ['PLANNED', 'ACTIVE', 'CLOSED'] as const;
+export type SchoolYearStatus = (typeof SCHOOL_YEAR_STATUSES)[number];
+
+export const SCHOOL_YEAR_STATUS_LABELS: Record<SchoolYearStatus, string> = {
+  PLANNED: 'En préparation',
+  ACTIVE: 'En cours',
+  CLOSED: 'Clôturée',
+};
+
+/** Transitions d'une année scolaire : une année clôturée reste figée. */
+export function canTransitionSchoolYear(from: SchoolYearStatus, to: SchoolYearStatus): boolean {
+  return (from === 'PLANNED' && to === 'ACTIVE') || (from === 'ACTIVE' && to === 'CLOSED');
+}
+
+// ─── Rôles et permissions ───
+
+export const SCHOOL_ROLES = [
+  'GROUP_DIRECTOR',
+  'SCHOOL_DIRECTOR',
+  'SECRETARY',
+  'TEACHER',
+  'SUPERVISOR',
+  'ACCOUNTANT',
+] as const;
+export type SchoolRole = (typeof SCHOOL_ROLES)[number];
+
+export const SCHOOL_ROLE_LABELS: Record<SchoolRole, string> = {
+  GROUP_DIRECTOR: 'Direction du groupe',
+  SCHOOL_DIRECTOR: 'Directeur d’établissement',
+  SECRETARY: 'Secrétariat',
+  TEACHER: 'Enseignant',
+  SUPERVISOR: 'Surveillant',
+  ACCOUNTANT: 'Comptable',
+};
+
+export const SchoolPermission = {
+  STRUCTURE_READ: 'school.structure.read',
+  STRUCTURE_MANAGE: 'school.structure.manage',
+  SCHOOLS_MANAGE: 'school.schools.manage',
+  MEMBERS_READ: 'school.members.read',
+  MEMBERS_MANAGE: 'school.members.manage',
+  GRADING_MANAGE: 'school.grading.manage',
+  EXPORT: 'school.export',
+} as const;
+export type SchoolPermission = (typeof SchoolPermission)[keyof typeof SchoolPermission];
+
+const SP = SchoolPermission;
+const DIRECTION: readonly SchoolPermission[] = [
+  SP.STRUCTURE_READ,
+  SP.STRUCTURE_MANAGE,
+  SP.MEMBERS_READ,
+  SP.MEMBERS_MANAGE,
+  SP.GRADING_MANAGE,
+  SP.EXPORT,
+];
+
+/** Matrice appliquée par l'API. Les droits sur les élèves et les notes arrivent avec leurs modules. */
+export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermission[]> = {
+  GROUP_DIRECTOR: [...DIRECTION, SP.SCHOOLS_MANAGE],
+  SCHOOL_DIRECTOR: DIRECTION,
+  SECRETARY: [SP.STRUCTURE_READ, SP.MEMBERS_READ],
+  TEACHER: [SP.STRUCTURE_READ],
+  SUPERVISOR: [SP.STRUCTURE_READ],
+  ACCOUNTANT: [SP.STRUCTURE_READ],
+};
+
+export function hasSchoolPermission(role: SchoolRole, permission: SchoolPermission): boolean {
+  return SCHOOL_ROLE_PERMISSIONS[role].includes(permission);
+}
+
+/** Seule la direction du groupe voit tous les établissements ; les autres, ceux qui leur sont affectés. */
+export function hasAllSchoolsScope(role: SchoolRole): boolean {
+  return role === 'GROUP_DIRECTOR';
+}
+
+/** Un directeur d'établissement n'attribue ni la direction du groupe ni un autre poste de direction. */
+export function assignableSchoolRoles(actor: SchoolRole): readonly SchoolRole[] {
+  if (actor === 'GROUP_DIRECTOR') return SCHOOL_ROLES;
+  if (actor === 'SCHOOL_DIRECTOR') return ['SECRETARY', 'TEACHER', 'SUPERVISOR', 'ACCOUNTANT'];
+  return [];
+}
+
+// ─── Règles de notation versionnées ───
+
+export const SCHOOL_TIE_RULES = ['SHARED', 'DENSE'] as const;
+export type SchoolTieRule = (typeof SCHOOL_TIE_RULES)[number];
+
+/**
+ * Règles de calcul d'un établissement. Chaque modification crée une nouvelle version : un bulletin déjà
+ * publié garde les règles avec lesquelles il a été calculé. Les moteurs arrivent aux sprints suivants.
+ */
+export interface SchoolGradingRules {
+  /** Note maximale, ex. 20. */
+  scale: number;
+  /** Moyenne de passage, entre 0 et `scale`. */
+  passMark: number;
+  /** Décimales conservées sur les moyennes, de 0 à 3. */
+  decimals: number;
+  ranking: {
+    enabled: boolean;
+    /** SHARED : 1, 1, 3 ; DENSE : 1, 1, 2. */
+    ties: SchoolTieRule;
+    excludedSubjectIds: string[];
+  };
+}
+
+export const DEFAULT_SCHOOL_GRADING_RULES: SchoolGradingRules = {
+  scale: 20,
+  passMark: 10,
+  decimals: 2,
+  ranking: { enabled: true, ties: 'SHARED', excludedSubjectIds: [] },
+};
+
+/** Messages d'erreur des règles ; vide si elles sont valides. */
+export function validateGradingRules(rules: SchoolGradingRules): string[] {
+  const errors: string[] = [];
+  if (!Number.isFinite(rules.scale) || rules.scale <= 0 || rules.scale > 1000) {
+    errors.push('La note maximale doit être comprise entre 1 et 1000.');
+  }
+  if (!Number.isFinite(rules.passMark) || rules.passMark < 0 || rules.passMark > rules.scale) {
+    errors.push('La moyenne de passage doit être comprise entre 0 et la note maximale.');
+  }
+  if (!Number.isInteger(rules.decimals) || rules.decimals < 0 || rules.decimals > 3) {
+    errors.push('Le nombre de décimales doit être compris entre 0 et 3.');
+  }
+  if (!SCHOOL_TIE_RULES.includes(rules.ranking?.ties)) {
+    errors.push('La règle des ex æquo est invalide.');
+  }
+  return errors;
+}
+
+/** Deux dates AAAA-MM-JJ dans l'ordre, la fin strictement après le début. */
+export function isValidDateRange(startsOn: string, endsOn: string): boolean {
+  return new Date(startsOn).getTime() < new Date(endsOn).getTime();
+}
+
+/** Deux périodes se chevauchent si elles ont au moins un jour commun. */
+export function periodsOverlap(
+  a: { startsOn: string | Date; endsOn: string | Date },
+  b: { startsOn: string | Date; endsOn: string | Date },
+): boolean {
+  return (
+    new Date(a.startsOn).getTime() <= new Date(b.endsOn).getTime() &&
+    new Date(b.startsOn).getTime() <= new Date(a.endsOn).getTime()
+  );
+}

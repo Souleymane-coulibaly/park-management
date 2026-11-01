@@ -94,6 +94,9 @@ export default function ParametresParcPage() {
             Tarifs et horaires
           </Link>
         )}
+        <Link href="/suite" className={buttonClass('secondary')}>
+          Mes applications
+        </Link>
         <Link href="/app/compte" className={buttonClass('secondary')}>
           Mon compte
         </Link>

@@ -6,10 +6,18 @@ export const BusinessType = {
   PARK: 'PARK',
   RESTAURANT: 'RESTAURANT',
   PARK_RESTAURANT: 'PARK_RESTAURANT',
+  /** Client sans activité Ocall Park (ex. Ocall School sur contrat) ; jamais proposé à l'inscription. */
+  NONE: 'NONE',
 } as const;
 export type BusinessType = (typeof BusinessType)[keyof typeof BusinessType];
 
-export const BUSINESS_TYPES: readonly BusinessType[] = Object.values(BusinessType);
+/** Métiers Ocall Park proposés à l'inscription et à la création d'établissements. */
+export type ParkBusinessType = Exclude<BusinessType, 'NONE'>;
+export const BUSINESS_TYPES: readonly ParkBusinessType[] = [
+  BusinessType.PARK,
+  BusinessType.RESTAURANT,
+  BusinessType.PARK_RESTAURANT,
+];
 
 /** Activité élémentaire : le métier combiné couvre les deux. */
 export type Activity = 'PARK' | 'RESTAURANT';
@@ -18,6 +26,7 @@ export const BUSINESS_TYPE_LABELS: Record<BusinessType, string> = {
   PARK: 'Parc',
   RESTAURANT: 'Restaurant',
   PARK_RESTAURANT: 'Parc + Restaurant',
+  NONE: 'Sans activité Park',
 };
 
 export function activitiesOf(businessType: BusinessType): Activity[] {
@@ -28,6 +37,8 @@ export function activitiesOf(businessType: BusinessType): Activity[] {
       return ['RESTAURANT'];
     case 'PARK_RESTAURANT':
       return ['PARK', 'RESTAURANT'];
+    case 'NONE':
+      return [];
   }
 }
 
@@ -52,5 +63,6 @@ export function isCompatibleBusinessType(
  * refusées car elles rendraient des établissements et des rôles incohérents.
  */
 export function canChangeBusinessType(from: BusinessType, to: BusinessType): boolean {
-  return from !== to && to === 'PARK_RESTAURANT';
+  // Un client sur contrat n'obtient pas d'activité Park par ce biais.
+  return from !== 'NONE' && from !== to && to === 'PARK_RESTAURANT';
 }

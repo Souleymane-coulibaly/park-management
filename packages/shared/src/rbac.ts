@@ -8,9 +8,22 @@ export const MemberRole = {
   CASHIER: 'CASHIER',
   KITCHEN: 'KITCHEN',
   GATE_AGENT: 'GATE_AGENT',
+  /**
+   * Compte d'un autre produit Ocall Suite (ex. Ocall School) : aucune permission Ocall Park, le rôle
+   * réel est porté par le produit. Jamais attribuable depuis la gestion des employés Park.
+   */
+  PRODUCT_USER: 'PRODUCT_USER',
 } as const;
 export type MemberRole = (typeof MemberRole)[keyof typeof MemberRole];
-export const MEMBER_ROLES: readonly MemberRole[] = Object.values(MemberRole);
+/** Rôles attribuables dans Ocall Park. */
+export const MEMBER_ROLES: readonly MemberRole[] = [
+  MemberRole.OWNER,
+  MemberRole.ADMIN,
+  MemberRole.SUPERVISOR,
+  MemberRole.CASHIER,
+  MemberRole.KITCHEN,
+  MemberRole.GATE_AGENT,
+];
 
 /**
  * Rôle plateforme, distinct des rôles d'organisation : un SUPER_ADMIN gère le SaaS
@@ -40,6 +53,7 @@ export const ROLE_LABELS: Record<MemberRole | PlatformRole, string> = {
   CASHIER: 'Caissier',
   KITCHEN: 'Cuisine',
   GATE_AGENT: "Agent d'entrée",
+  PRODUCT_USER: 'Utilisateur de produit',
 };
 
 export const Permission = {
@@ -202,6 +216,7 @@ export const ROLE_PERMISSIONS: Record<MemberRole, readonly Permission[]> = {
   KITCHEN: [...OPERATOR_BASE, P.CATALOG_READ, P.KITCHEN_VIEW, P.KITCHEN_UPDATE, P.STOCK_READ],
   // L'agent d'entrée scanne les billets ; il ne vend pas et ne voit pas le chiffre d'affaires.
   GATE_AGENT: [...OPERATOR_BASE, P.ACCESS_SCAN],
+  PRODUCT_USER: [],
 };
 
 export function hasPermission(role: MemberRole, permission: Permission): boolean {
@@ -227,6 +242,7 @@ export function canManageRole(actor: MemberRole, target: MemberRole): boolean {
 
 /** KITCHEN exige une activité restaurant, GATE_AGENT une activité parc. */
 export function isRoleAvailableFor(role: MemberRole, businessType: BusinessType): boolean {
+  if (role === 'PRODUCT_USER') return false;
   if (role === 'KITCHEN') return coversActivity(businessType, 'RESTAURANT');
   if (role === 'GATE_AGENT') return coversActivity(businessType, 'PARK');
   return true;

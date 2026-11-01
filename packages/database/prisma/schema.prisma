@@ -15,6 +15,8 @@ enum BusinessType {
   PARK
   RESTAURANT
   PARK_RESTAURANT
+  /// Client sans activité Ocall Park (ex. Ocall School sur contrat).
+  NONE
 }
 
 enum MemberRole {
@@ -24,6 +26,8 @@ enum MemberRole {
   CASHIER
   KITCHEN
   GATE_AGENT
+  /// Compte d'un autre produit Ocall Suite : aucune permission Ocall Park.
+  PRODUCT_USER
 }
 
 enum PlatformRole {
@@ -96,6 +100,7 @@ model Organization {
   memberships          OrganizationMembership[]
   assignments          EstablishmentAssignment[]
   subscriptions        Subscription[]
+  suiteContracts       SuiteContract[]
   invoices             Invoice[]
   subscriptionPayments SubscriptionPayment[]
   publicSites          PublicSite[]
@@ -1960,6 +1965,7 @@ model SaasProduct {
 
   plans          SubscriptionPlan[]
   subscriptions  Subscription[]
+  suiteContracts SuiteContract[]
   supportTickets SupportTicket[]
   invoices       Invoice[]
   demoRequests   DemoRequest[]
@@ -2502,4 +2508,57 @@ model CommissionPayout {
   commissions Commission[]
 
   @@index([partnerId, paidAt])
+}
+
+/// Statut d'un contrat B2B Ocall Suite. Aucun statut ne supprime de données.
+enum SuiteContractStatus {
+  DRAFT
+  ACTIVE
+  SUSPENDED
+  EXPIRED
+  TERMINATED
+}
+
+/// Contrat B2B d'un produit vendu sur contrat (Ocall School) : aucun tarif public ni offre à prix fixe.
+model SuiteContract {
+  id               String              @id @default(uuid()) @db.Uuid
+  organizationId   String              @db.Uuid
+  productId        String              @db.Uuid
+  reference        String              @unique
+  status           SuiteContractStatus @default(DRAFT)
+  startsOn         DateTime            @db.Date
+  endsOn           DateTime            @db.Date
+  modules          String[]            @default([])
+  /// Limites contractuelles, ex. { "maxSchools": 3 }.
+  limits           Json                @default("{}")
+  /// Établissements couverts, identifiants de la base du produit ; vide = tous ceux du client.
+  coveredSchoolIds String[]            @default([]) @db.Uuid
+  createdById      String              @db.Uuid
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  product      SaasProduct          @relation(fields: [productId], references: [id], onDelete: Restrict)
+  events       SuiteContractEvent[]
+
+  @@index([organizationId, productId, status])
+  @@index([status, endsOn])
+}
+
+/// Historique d'un contrat, en ajout seul : activations, suspensions, renouvellements.
+model SuiteContractEvent {
+  id          String               @id @default(uuid()) @db.Uuid
+  contractId  String               @db.Uuid
+  type        String
+  fromStatus  SuiteContractStatus?
+  toStatus    SuiteContractStatus?
+  fromEndsOn  DateTime?            @db.Date
+  toEndsOn    DateTime?            @db.Date
+  reason      String?
+  actorUserId String               @db.Uuid
+  createdAt   DateTime             @default(now())
+
+  contract SuiteContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+
+  @@index([contractId, createdAt])
 }

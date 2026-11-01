@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 /**
  * Données de démonstration Ocall Park (Sprint 13, P1-1) — base de PRÉPRODUCTION uniquement.
  *

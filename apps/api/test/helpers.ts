@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 import { randomBytes } from 'node:crypto';
 import request from 'supertest';
 import { PrismaClient, assertTestDatabaseMarker, resolveTestDatabase } from '@ocall/database';
+import { SchoolPrismaClient } from '@ocall/school-database';
 import { type BusinessType, type StoredPlatformRole, platformRoleRequiresMfa } from '@ocall/shared';
 import { hash } from 'argon2';
 import { currentStep, totpCode } from '../src/common/security/totp';
@@ -31,6 +32,18 @@ export async function createTestApp(): Promise<{ app: INestApplication; prisma: 
   }
   process.env.DATABASE_URL = testDb.databaseUrl;
   process.env.DIRECT_URL = testDb.directUrl;
+  // Ocall School : activé seulement avec une base de test dédiée, soumise au même marqueur.
+  const schoolUrl = process.env.TEST_SCHOOL_DATABASE_URL;
+  if (schoolUrl) {
+    const schoolProbe = new SchoolPrismaClient({ datasourceUrl: schoolUrl });
+    try {
+      await assertTestDatabaseMarker((sql) => schoolProbe.$queryRawUnsafe(sql), schoolUrl);
+    } finally {
+      await schoolProbe.$disconnect();
+    }
+  }
+  process.env.SCHOOL_ENABLED = schoolUrl ? 'true' : 'false';
+  process.env.SCHOOL_DATABASE_URL = schoolUrl ?? '';
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   const app = moduleRef.createNestApplication();
   setupApp(app);
@@ -237,6 +250,7 @@ export async function cleanup(prisma: PrismaService): Promise<void> {
   await prisma.auditLog.deleteMany({
     where: { OR: [{ organizationId: { in: orgIds } }, { actorUserId: { in: userIds } }] },
   });
+  await prisma.suiteContract.deleteMany({ where: { organizationId: { in: orgIds } } });
   await prisma.organization.deleteMany({ where: { id: { in: orgIds } } });
   // Sprint 12A : remises d'espèces (liées aux comptes internes) et demandes de démonstration.
   await prisma.subscriptionPayment.updateMany({

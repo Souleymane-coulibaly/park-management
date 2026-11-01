@@ -4,7 +4,7 @@ import {
   type BusinessType,
   DEFAULT_TIMEZONE,
   SUPPORTED_COUNTRIES,
-  PARK_APP_PRODUCTS,
+  parkProductCode,
 } from '@ocall/shared';
 import { randomInt } from 'node:crypto';
 
@@ -51,7 +51,7 @@ export class OrganizationProvisioningService {
 
     // Offre active du produit Ocall Park correspondant au métier (la plus ancienne en cas de plusieurs).
     const plan = await tx.subscriptionPlan.findFirst({
-      where: { product: { code: PARK_APP_PRODUCTS[input.businessType] }, isActive: true },
+      where: { product: { code: parkProductCode(input.businessType) }, isActive: true },
       orderBy: { createdAt: 'asc' },
     });
     if (!plan)
@@ -98,7 +98,7 @@ export class OrganizationProvisioningService {
 
     // Abonnement au produit Ocall Park correspondant au métier (catalogue Ocall Suite).
     const product = await tx.saasProduct.findUniqueOrThrow({
-      where: { code: PARK_APP_PRODUCTS[input.businessType] },
+      where: { code: parkProductCode(input.businessType) },
       select: { id: true },
     });
     const subscription = await tx.subscription.create({
@@ -125,6 +125,51 @@ export class OrganizationProvisioningService {
       membershipId: membership.id,
       loginId,
     };
+  }
+
+  /**
+   * Client d'un produit vendu sur contrat (ex. Ocall School) : organisation sans activité Ocall Park,
+   * sans établissement Park ni abonnement, et propriétaire au mot de passe temporaire.
+   */
+  async provisionContractClient(
+    tx: Prisma.TransactionClient,
+    input: {
+      organizationName: string;
+      countryCode: string;
+      owner: { firstName: string; lastName: string; email: string; passwordHash: string };
+    },
+  ): Promise<{ organizationId: string; userId: string; loginId: string }> {
+    const country = SUPPORTED_COUNTRIES.find((c) => c.code === input.countryCode);
+    if (!country)
+      throw new BadRequestException({
+        code: 'UNSUPPORTED_COUNTRY',
+        message: 'Pays non pris en charge.',
+      });
+    const organization = await tx.organization.create({
+      data: {
+        name: input.organizationName,
+        code: await this.uniqueCode(tx, input.organizationName),
+        businessType: 'NONE',
+        countryCode: country.code,
+        currency: 'XOF',
+        timezone: country.timezone ?? DEFAULT_TIMEZONE,
+      },
+    });
+    const loginId = await this.allocateLoginId(tx, organization.id);
+    const user = await tx.user.create({
+      data: {
+        firstName: input.owner.firstName,
+        lastName: input.owner.lastName,
+        email: input.owner.email,
+        loginId,
+        passwordHash: input.owner.passwordHash,
+        mustChangePassword: true,
+      },
+    });
+    await tx.organizationMembership.create({
+      data: { organizationId: organization.id, userId: user.id, role: 'OWNER' },
+    });
+    return { organizationId: organization.id, userId: user.id, loginId };
   }
 
   /** Identifiant employé unique : CODE-0001, CODE-0002… (compteur atomique par organisation). */

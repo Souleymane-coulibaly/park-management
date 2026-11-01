@@ -1,0 +1,270 @@
+// Ocall School : base PostgreSQL distincte de la base Ocall Suite.
+//
+// `organizationId` et `userId` désignent des lignes de la base Suite : aucune clé étrangère entre bases,
+// l'API les contrôle. Dans cette base, chaque lien passe par une clé composée (organizationId, id) :
+// PostgreSQL refuse lui-même tout lien entre deux clients.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/school-client"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("SCHOOL_DATABASE_URL")
+  directUrl = env("SCHOOL_DIRECT_URL")
+}
+
+enum SchoolType {
+  PRESCHOOL
+  PRIMARY
+  MIDDLE
+  HIGH
+  FRANCO_ARABIC
+  COMPLEX
+}
+
+enum SchoolLocale {
+  FR
+  AR
+  BILINGUAL
+}
+
+enum SchoolRole {
+  GROUP_DIRECTOR
+  SCHOOL_DIRECTOR
+  SECRETARY
+  TEACHER
+  SUPERVISOR
+  ACCOUNTANT
+}
+
+enum SchoolYearStatus {
+  PLANNED
+  ACTIVE
+  CLOSED
+}
+
+enum SchoolPeriodKind {
+  TRIMESTER
+  SEMESTER
+  CUSTOM
+}
+
+/// Groupe scolaire : un par client contractant, y compris pour une école seule.
+model SchoolGroup {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @unique @db.Uuid
+  legalName      String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  schools School[]
+
+  @@unique([organizationId, id])
+}
+
+model School {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  groupId        String       @db.Uuid
+  name           String
+  nameAr         String?
+  type           SchoolType
+  countryCode    String       @db.Char(2)
+  timezone       String
+  defaultLocale  SchoolLocale @default(FR)
+  address        String?
+  phone          String?
+  email          String?
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  group       SchoolGroup            @relation(fields: [organizationId, groupId], references: [organizationId, id], onDelete: Restrict)
+  assignments SchoolMemberAssignment[]
+  years       SchoolYear[]
+  tracks      PedagogicalTrack[]
+  cycles      Cycle[]
+  subjects    Subject[]
+  policies    GradingPolicyVersion[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, name])
+}
+
+/// Rôle School d'un compte de la base Suite. Le propriétaire de l'organisation n'a pas besoin de ligne :
+/// il est direction du groupe d'office.
+model SchoolMember {
+  id             String     @id @default(uuid()) @db.Uuid
+  organizationId String     @db.Uuid
+  userId         String     @db.Uuid
+  firstName      String
+  lastName       String
+  loginId        String
+  role           SchoolRole
+  isActive       Boolean    @default(true)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  assignments SchoolMemberAssignment[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, userId])
+}
+
+model SchoolMemberAssignment {
+  organizationId String @db.Uuid
+  memberId       String @db.Uuid
+  schoolId       String @db.Uuid
+
+  member SchoolMember @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Cascade)
+  school School       @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+
+  @@id([memberId, schoolId])
+  @@index([organizationId, schoolId])
+}
+
+model SchoolYear {
+  id             String           @id @default(uuid()) @db.Uuid
+  organizationId String           @db.Uuid
+  schoolId       String           @db.Uuid
+  label          String
+  startsOn       DateTime         @db.Date
+  endsOn         DateTime         @db.Date
+  status         SchoolYearStatus @default(PLANNED)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  school  School           @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+  periods AcademicPeriod[]
+  classes SchoolClass[]
+
+  @@unique([organizationId, id])
+  @@unique([schoolId, label])
+  @@index([organizationId, schoolId, status])
+}
+
+model AcademicPeriod {
+  id             String           @id @default(uuid()) @db.Uuid
+  organizationId String           @db.Uuid
+  schoolYearId   String           @db.Uuid
+  kind           SchoolPeriodKind
+  label          String
+  labelAr        String?
+  position       Int
+  startsOn       DateTime         @db.Date
+  endsOn         DateTime         @db.Date
+  createdAt      DateTime         @default(now())
+
+  year SchoolYear @relation(fields: [organizationId, schoolYearId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([schoolYearId, position])
+  @@index([organizationId, schoolYearId])
+}
+
+/// Parcours pédagogique : un établissement peut en proposer plusieurs (classique, franco-arabe…).
+model PedagogicalTrack {
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @db.Uuid
+  schoolId       String       @db.Uuid
+  name           String
+  nameAr         String?
+  locale         SchoolLocale @default(FR)
+  createdAt      DateTime     @default(now())
+
+  school   School        @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+  classes  SchoolClass[]
+  subjects Subject[]
+
+  @@unique([organizationId, id])
+  @@unique([schoolId, name])
+}
+
+model Cycle {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  schoolId       String   @db.Uuid
+  name           String
+  nameAr         String?
+  position       Int
+  createdAt      DateTime @default(now())
+
+  school School  @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+  levels Level[]
+
+  @@unique([organizationId, id])
+  @@unique([schoolId, name])
+}
+
+model Level {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  cycleId        String   @db.Uuid
+  name           String
+  nameAr         String?
+  position       Int
+  createdAt      DateTime @default(now())
+
+  cycle   Cycle         @relation(fields: [organizationId, cycleId], references: [organizationId, id], onDelete: Restrict)
+  classes SchoolClass[]
+
+  @@unique([organizationId, id])
+  @@unique([cycleId, name])
+}
+
+model SchoolClass {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  schoolYearId   String   @db.Uuid
+  levelId        String   @db.Uuid
+  trackId        String?  @db.Uuid
+  name           String
+  nameAr         String?
+  capacity       Int?
+  createdAt      DateTime @default(now())
+
+  year  SchoolYear        @relation(fields: [organizationId, schoolYearId], references: [organizationId, id], onDelete: Restrict)
+  level Level             @relation(fields: [organizationId, levelId], references: [organizationId, id], onDelete: Restrict)
+  track PedagogicalTrack? @relation(fields: [organizationId, trackId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([schoolYearId, name])
+  @@index([organizationId, levelId])
+  @@index([organizationId, trackId])
+}
+
+/// Matière bilingue. `isReligious` n'existe que si l'établissement la crée : rien n'est imposé.
+model Subject {
+  id                 String   @id @default(uuid()) @db.Uuid
+  organizationId     String   @db.Uuid
+  schoolId           String   @db.Uuid
+  trackId            String?  @db.Uuid
+  name               String
+  nameAr             String?
+  isReligious        Boolean  @default(false)
+  defaultCoefficient Decimal  @default(1) @db.Decimal(5, 2)
+  createdAt          DateTime @default(now())
+
+  school School            @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+  track  PedagogicalTrack? @relation(fields: [organizationId, trackId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([schoolId, name])
+  @@index([organizationId, trackId])
+}
+
+/// Règles de calcul, en ajout seul : une modification crée une version, jamais une réécriture.
+model GradingPolicyVersion {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  schoolId        String   @db.Uuid
+  version         Int
+  rules           Json
+  effectiveFrom   DateTime @db.Date
+  createdByUserId String   @db.Uuid
+  createdAt       DateTime @default(now())
+
+  school School @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([schoolId, version])
+  @@index([organizationId, schoolId])
+}

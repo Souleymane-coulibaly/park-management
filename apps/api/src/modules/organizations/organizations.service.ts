@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { BUSINESS_TYPE_LABELS, canChangeBusinessType, PARK_APP_PRODUCTS } from '@ocall/shared';
+import { BUSINESS_TYPE_LABELS, canChangeBusinessType, parkProductCode } from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { parkSubscriptionWhere } from '../../common/park-subscription';
 import { AuditService } from '../../common/audit/audit.service';
@@ -75,7 +75,7 @@ export class OrganizationsService {
         });
       }
       const plan = await tx.subscriptionPlan.findFirstOrThrow({
-        where: { product: { code: PARK_APP_PRODUCTS[dto.businessType] }, isActive: true },
+        where: { product: { code: parkProductCode(dto.businessType) }, isActive: true },
         orderBy: { createdAt: 'asc' },
       });
       await tx.organization.update({
@@ -90,7 +90,7 @@ export class OrganizationsService {
       });
       if (current) {
         const product = await tx.saasProduct.findUniqueOrThrow({
-          where: { code: PARK_APP_PRODUCTS[dto.businessType] },
+          where: { code: parkProductCode(dto.businessType) },
           select: { id: true },
         });
         await tx.subscription.update({

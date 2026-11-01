@@ -18,7 +18,9 @@ export function destinationFor(me: Me, requested: string | null): string {
     if (me.mfa.required && !me.mfa.verified) return '/double-authentification';
     return me.accountKind === 'partner' ? '/partenaire' : '/admin';
   }
-  return requested?.startsWith('/app') ? requested : '/app';
+  if (requested && /^\/(app|school|suite)(\/|$)/.test(requested)) return requested;
+  // Client sur contrat sans activité Ocall Park, ou compte d'un autre produit : portail Ocall Suite.
+  return me.organization?.businessType === 'NONE' || me.role === 'PRODUCT_USER' ? '/suite' : '/app';
 }
 
 export function LoginForm() {

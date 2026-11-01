@@ -1,0 +1,29 @@
+{
+  "name": "@ocall/school-database",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Schéma Prisma, migrations et client de la base Ocall School, distincte de la base Ocall Suite.",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "generate": "prisma generate",
+    "build": "prisma generate && tsc -p tsconfig.build.json",
+    "postinstall": "prisma generate && tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "migrate:deploy": "tsx scripts/deploy.ts",
+    "migrate:status": "dotenv -e ../../apps/api/.env -- prisma migrate status",
+    "mark-test": "dotenv -e ../../apps/api/.env -- tsx scripts/mark-test-database.ts"
+  },
+  "dependencies": {
+    "@ocall/database": "workspace:*",
+    "@prisma/client": "^6.2.1",
+    "dotenv": "^16.4.7",
+    "dotenv-cli": "^8.0.0",
+    "prisma": "^6.2.1",
+    "tsx": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "typescript": "~5.7.3"
+  }
+}

@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { type AiConfig, loadAiConfig } from '../modules/ai/ai.config';
+import { type SchoolConfig, loadSchoolConfig } from '../modules/school/school.config';
 import { type SitesConfig, loadSitesConfig } from '../modules/public-sites/sites.config';
 import {
   type OnlinePaymentsConfig,
@@ -36,6 +37,8 @@ export interface AppConfig {
   ai: AiConfig;
   /** Sites vitrines : adresses publiques, domaines, stockage des médias (Sprint 10). */
   sites: SitesConfig;
+  /** Ocall School : désactivé par défaut, base PostgreSQL distincte. */
+  school: SchoolConfig;
   /**
    * Clé de chiffrement des secrets de double authentification (AES-256-GCM, 32 octets en base64).
    * Obligatoire en production ; absente en développement, l'enrôlement MFA est indisponible.
@@ -127,6 +130,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     ai: loadAiConfig(env, nodeEnv),
     onlinePayments: loadOnlinePaymentsConfig(env, nodeEnv),
     sites: loadSitesConfig(env, nodeEnv),
+    school: loadSchoolConfig(env),
     mfaEncryptionKey: mfaKey(env, nodeEnv),
     storageSigningKey: storageSigningKey(env, nodeEnv),
     logFormat:
