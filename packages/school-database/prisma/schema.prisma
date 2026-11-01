@@ -45,6 +45,67 @@ enum SchoolYearStatus {
   CLOSED
 }
 
+enum SchoolStudentStatus {
+  REGISTERED
+  ENROLLED
+  TRANSFERRED
+  LEFT
+  DROPPED_OUT
+}
+
+enum SchoolSex {
+  FEMALE
+  MALE
+}
+
+enum SchoolEnrollmentStatus {
+  DRAFT
+  PENDING
+  VALIDATED
+  CANCELLED
+  ENDED
+}
+
+enum SchoolEnrollmentKind {
+  NEW
+  RENEWAL
+  TRANSFER_IN
+}
+
+enum SchoolExitReason {
+  TRANSFERRED
+  LEFT
+  DROPPED_OUT
+}
+
+enum SchoolGuardianRelation {
+  MOTHER
+  FATHER
+  LEGAL_GUARDIAN
+  GRANDPARENT
+  SIBLING
+  OTHER
+}
+
+enum SchoolMatriculeScope {
+  SCHOOL
+  GROUP
+}
+
+enum SchoolDocumentCategory {
+  PHOTO
+  BIRTH_CERTIFICATE
+  SCHOOL_CERTIFICATE
+  PREVIOUS_REPORT
+  TRANSFER_CERTIFICATE
+  OTHER
+}
+
+enum SchoolImportFormat {
+  CSV
+  XLSX
+}
+
 enum SchoolPeriodKind {
   TRIMESTER
   SEMESTER
@@ -81,13 +142,18 @@ model School {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  group       SchoolGroup            @relation(fields: [organizationId, groupId], references: [organizationId, id], onDelete: Restrict)
+  group       SchoolGroup              @relation(fields: [organizationId, groupId], references: [organizationId, id], onDelete: Restrict)
   assignments SchoolMemberAssignment[]
   years       SchoolYear[]
   tracks      PedagogicalTrack[]
   cycles      Cycle[]
   subjects    Subject[]
   policies    GradingPolicyVersion[]
+  students    SchoolStudent[]
+  guardians   SchoolGuardian[]
+  enrollments SchoolEnrollment[]
+  settings    SchoolStudentSettings?
+  importJobs  SchoolImportJob[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, name])
@@ -108,6 +174,7 @@ model SchoolMember {
   updatedAt      DateTime   @updatedAt
 
   assignments SchoolMemberAssignment[]
+  classes     SchoolClassTeacher[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, userId])
@@ -136,11 +203,13 @@ model SchoolYear {
   createdAt      DateTime         @default(now())
   updatedAt      DateTime         @updatedAt
 
-  school  School           @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
-  periods AcademicPeriod[]
-  classes SchoolClass[]
+  school      School             @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+  periods     AcademicPeriod[]
+  classes     SchoolClass[]
+  enrollments SchoolEnrollment[]
 
   @@unique([organizationId, id])
+  @@unique([organizationId, schoolId, id])
   @@unique([schoolId, label])
   @@index([organizationId, schoolId, status])
 }
@@ -173,9 +242,10 @@ model PedagogicalTrack {
   locale         SchoolLocale @default(FR)
   createdAt      DateTime     @default(now())
 
-  school   School        @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
-  classes  SchoolClass[]
-  subjects Subject[]
+  school      School             @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+  classes     SchoolClass[]
+  subjects    Subject[]
+  enrollments SchoolEnrollment[]
 
   @@unique([organizationId, id])
   @@unique([schoolId, name])
@@ -206,8 +276,9 @@ model Level {
   position       Int
   createdAt      DateTime @default(now())
 
-  cycle   Cycle         @relation(fields: [organizationId, cycleId], references: [organizationId, id], onDelete: Restrict)
-  classes SchoolClass[]
+  cycle       Cycle              @relation(fields: [organizationId, cycleId], references: [organizationId, id], onDelete: Restrict)
+  classes     SchoolClass[]
+  enrollments SchoolEnrollment[]
 
   @@unique([organizationId, id])
   @@unique([cycleId, name])
@@ -224,10 +295,15 @@ model SchoolClass {
   capacity       Int?
   createdAt      DateTime @default(now())
 
-  year  SchoolYear        @relation(fields: [organizationId, schoolYearId], references: [organizationId, id], onDelete: Restrict)
-  level Level             @relation(fields: [organizationId, levelId], references: [organizationId, id], onDelete: Restrict)
-  track PedagogicalTrack? @relation(fields: [organizationId, trackId], references: [organizationId, id], onDelete: Restrict)
+  year        SchoolYear              @relation(fields: [organizationId, schoolYearId], references: [organizationId, id], onDelete: Restrict)
+  level       Level                   @relation(fields: [organizationId, levelId], references: [organizationId, id], onDelete: Restrict)
+  track       PedagogicalTrack?       @relation(fields: [organizationId, trackId], references: [organizationId, id], onDelete: Restrict)
+  enrollments SchoolEnrollment[]
+  assignments SchoolClassAssignment[]
+  teachers    SchoolClassTeacher[]
 
+  @@unique([organizationId, id])
+  @@unique([organizationId, schoolYearId, id])
   @@unique([schoolYearId, name])
   @@index([organizationId, levelId])
   @@index([organizationId, trackId])
@@ -267,4 +343,240 @@ model GradingPolicyVersion {
 
   @@unique([schoolId, version])
   @@index([organizationId, schoolId])
+}
+
+/// Réglages des dossiers d'un établissement ; sans ligne, les valeurs par défaut s'appliquent.
+model SchoolStudentSettings {
+  schoolId          String                   @id @db.Uuid
+  organizationId    String                   @db.Uuid
+  matriculeScope    SchoolMatriculeScope     @default(SCHOOL)
+  matriculePrefix   String                   @default("")
+  matriculeYear     Boolean                  @default(true)
+  matriculePadding  Int                      @default(6)
+  requiredDocuments SchoolDocumentCategory[]
+  customFields      Json                     @default("[]")
+  updatedAt         DateTime                 @updatedAt
+
+  school School @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, schoolId])
+}
+
+/// Compteur de matricules, incrémenté atomiquement : jamais de MAX + 1.
+model SchoolNumberCounter {
+  organizationId String @db.Uuid
+  counterKey     String
+  value          Int
+
+  @@id([organizationId, counterKey])
+}
+
+/// Dossier élève, unique dans le client : un transfert dans le groupe déplace ce dossier sans le recopier.
+/// `matriculeScope` vaut l'identifiant de l'établissement ou « GROUP », selon le périmètre choisi.
+/// Les besoins particuliers sont chiffrés par l'API : jamais en clair en base ni dans le journal.
+model SchoolStudent {
+  id              String              @id @default(uuid()) @db.Uuid
+  organizationId  String              @db.Uuid
+  schoolId        String              @db.Uuid
+  matricule       String
+  matriculeScope  String
+  lastName        String
+  firstName       String
+  lastNameAr      String?
+  firstNameAr     String?
+  birthDate       DateTime            @db.Date
+  birthPlace      String?
+  sex             SchoolSex?
+  nationality     String?
+  address         String?
+  adminNotes      String?
+  specialNeedsEnc String?
+  customFields    Json                @default("{}")
+  status          SchoolStudentStatus @default(REGISTERED)
+  searchText      String
+  identityKey     String
+  createdByUserId String              @db.Uuid
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  school      School                  @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+  guardians   SchoolStudentGuardian[]
+  enrollments SchoolEnrollment[]
+  documents   SchoolStudentDocument[]
+  events      SchoolStudentEvent[]
+  assignments SchoolClassAssignment[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, matriculeScope, matricule])
+  @@index([organizationId, schoolId, status])
+  @@index([organizationId, schoolId, lastName])
+  @@index([organizationId, identityKey])
+}
+
+/// Responsable légal. L'e-mail reste facultatif ; `portalUserId` prépare le futur portail parents.
+model SchoolGuardian {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  schoolId       String   @db.Uuid
+  lastName       String
+  firstName      String
+  phone          String
+  email          String?
+  address        String?
+  portalUserId   String?  @db.Uuid
+  searchText     String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  school School                  @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+  links  SchoolStudentGuardian[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, schoolId])
+  @@index([organizationId, phone])
+}
+
+/// Un élève a plusieurs responsables, un responsable plusieurs enfants ; chaque droit est propre au lien.
+model SchoolStudentGuardian {
+  organizationId    String                 @db.Uuid
+  studentId         String                 @db.Uuid
+  guardianId        String                 @db.Uuid
+  relation          SchoolGuardianRelation
+  isPrimary         Boolean                @default(false)
+  isEmergency       Boolean                @default(false)
+  canReceiveSms     Boolean                @default(false)
+  canViewSchoolInfo Boolean                @default(false)
+  canPickUp         Boolean                @default(false)
+  createdAt         DateTime               @default(now())
+
+  student  SchoolStudent  @relation(fields: [organizationId, studentId], references: [organizationId, id], onDelete: Restrict)
+  guardian SchoolGuardian @relation(fields: [organizationId, guardianId], references: [organizationId, id], onDelete: Restrict)
+
+  @@id([studentId, guardianId])
+  @@index([organizationId, guardianId])
+}
+
+model SchoolEnrollment {
+  id              String                 @id @default(uuid()) @db.Uuid
+  organizationId  String                 @db.Uuid
+  studentId       String                 @db.Uuid
+  schoolId        String                 @db.Uuid
+  schoolYearId    String                 @db.Uuid
+  levelId         String                 @db.Uuid
+  trackId         String?                @db.Uuid
+  classId         String?                @db.Uuid
+  kind            SchoolEnrollmentKind   @default(NEW)
+  status          SchoolEnrollmentStatus @default(DRAFT)
+  enrolledOn      DateTime?              @db.Date
+  exitReason      SchoolExitReason?
+  exitedOn        DateTime?              @db.Date
+  statusNote      String?
+  createdByUserId String                 @db.Uuid
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  student     SchoolStudent           @relation(fields: [organizationId, studentId], references: [organizationId, id], onDelete: Restrict)
+  school      School                  @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+  // Clé composée : PostgreSQL refuse une année d'un autre établissement, une classe d'une autre année.
+  year        SchoolYear              @relation(fields: [organizationId, schoolId, schoolYearId], references: [organizationId, schoolId, id], onDelete: Restrict)
+  level       Level                   @relation(fields: [organizationId, levelId], references: [organizationId, id], onDelete: Restrict)
+  track       PedagogicalTrack?       @relation(fields: [organizationId, trackId], references: [organizationId, id], onDelete: Restrict)
+  class       SchoolClass?            @relation(fields: [organizationId, schoolYearId, classId], references: [organizationId, schoolYearId, id], onDelete: Restrict)
+  assignments SchoolClassAssignment[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, schoolId, status])
+  @@index([organizationId, classId, status])
+  @@index([organizationId, studentId])
+  @@index([organizationId, schoolYearId, status])
+}
+
+/// Historique des affectations ; une seule ligne ouverte par élève et par année (index partiel).
+model SchoolClassAssignment {
+  id              String    @id @default(uuid()) @db.Uuid
+  organizationId  String    @db.Uuid
+  enrollmentId    String    @db.Uuid
+  studentId       String    @db.Uuid
+  schoolYearId    String    @db.Uuid
+  classId         String    @db.Uuid
+  startedAt       DateTime  @default(now())
+  endedAt         DateTime?
+  reason          String?
+  createdByUserId String    @db.Uuid
+
+  enrollment SchoolEnrollment @relation(fields: [organizationId, enrollmentId], references: [organizationId, id], onDelete: Restrict)
+  student    SchoolStudent    @relation(fields: [organizationId, studentId], references: [organizationId, id], onDelete: Restrict)
+  class      SchoolClass      @relation(fields: [organizationId, schoolYearId, classId], references: [organizationId, schoolYearId, id], onDelete: Restrict)
+
+  @@index([organizationId, studentId])
+  @@index([organizationId, classId])
+}
+
+/// Classes confiées à un enseignant : base du périmètre de lecture de ce rôle.
+model SchoolClassTeacher {
+  organizationId String @db.Uuid
+  classId        String @db.Uuid
+  memberId       String @db.Uuid
+
+  class  SchoolClass  @relation(fields: [organizationId, classId], references: [organizationId, id], onDelete: Restrict)
+  member SchoolMember @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Cascade)
+
+  @@id([classId, memberId])
+  @@index([organizationId, memberId])
+}
+
+/// Pièce du dossier. Le fichier reste dans le stockage privé, servi par lien temporaire uniquement.
+model SchoolStudentDocument {
+  id              String                 @id @default(uuid()) @db.Uuid
+  organizationId  String                 @db.Uuid
+  studentId       String                 @db.Uuid
+  category        SchoolDocumentCategory
+  displayName     String
+  mimeType        String
+  bytes           Int
+  sha256          String
+  storageKey      String
+  createdByUserId String                 @db.Uuid
+  createdAt       DateTime               @default(now())
+  deletedAt       DateTime?
+  deletedByUserId String?                @db.Uuid
+
+  student SchoolStudent @relation(fields: [organizationId, studentId], references: [organizationId, id], onDelete: Restrict)
+
+  @@index([organizationId, studentId, deletedAt])
+}
+
+/// Historique du dossier, en ajout seul : noms de champs et identifiants, jamais de valeur sensible.
+model SchoolStudentEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  studentId      String   @db.Uuid
+  type           String
+  details        Json     @default("{}")
+  actorUserId    String   @db.Uuid
+  createdAt      DateTime @default(now())
+
+  student SchoolStudent @relation(fields: [organizationId, studentId], references: [organizationId, id], onDelete: Restrict)
+
+  @@index([organizationId, studentId, createdAt])
+}
+
+/// Trace d'un import. Le fichier n'est pas conservé ; le rapport ne contient aucune donnée personnelle.
+model SchoolImportJob {
+  id              String             @id @default(uuid()) @db.Uuid
+  organizationId  String             @db.Uuid
+  schoolId        String             @db.Uuid
+  schoolYearId    String?            @db.Uuid
+  format          SchoolImportFormat
+  totalRows       Int
+  createdRows     Int
+  duplicateRows   Int
+  errorRows       Int
+  report          Json
+  createdByUserId String             @db.Uuid
+  createdAt       DateTime           @default(now())
+
+  school School @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+
+  @@index([organizationId, schoolId, createdAt])
 }

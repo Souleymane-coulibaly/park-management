@@ -48,6 +48,7 @@ describe('configuration School', () => {
     expect(loadSchoolConfig({ DATABASE_URL: core } as NodeJS.ProcessEnv)).toEqual({
       enabled: false,
       databaseUrl: null,
+      dataKey: null,
     });
   });
 

@@ -44,6 +44,8 @@ export async function createTestApp(): Promise<{ app: INestApplication; prisma: 
   }
   process.env.SCHOOL_ENABLED = schoolUrl ? 'true' : 'false';
   process.env.SCHOOL_DATABASE_URL = schoolUrl ?? '';
+  // Clé fictive, propre aux tests.
+  process.env.SCHOOL_DATA_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64');
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
   const app = moduleRef.createNestApplication();
   setupApp(app);

@@ -114,10 +114,93 @@ TEST_DATABASE_URL=… TEST_SCHOOL_DATABASE_URL=… pnpm --filter @ocall/api exec
 
 Une base School distante doit porter le marqueur de test (`pnpm db:school:mark-test`).
 
-## 8. Limites du Sprint 1
+## 8. Sprint 2 : dossiers élèves
+
+### Modèles et migration
+
+`20261104000000_dossiers_eleves`, base School uniquement, ajouts seuls : `SchoolStudent`, `SchoolGuardian`,
+`SchoolStudentGuardian`, `SchoolEnrollment`, `SchoolClassAssignment`, `SchoolClassTeacher`,
+`SchoolStudentDocument`, `SchoolStudentEvent`, `SchoolImportJob`, `SchoolStudentSettings`,
+`SchoolNumberCounter`. Trois index partiels, hors du schéma Prisma, interdisent deux inscriptions actives
+la même année, deux affectations ouvertes la même année et deux responsables principaux pour un élève.
+
+### Règles
+
+- **Matricule** : format et périmètre par établissement, compteur atomique, numéro déjà importé sauté. Le
+  périmètre ne change plus une fois des dossiers créés.
+  Fixe ensuite : seule une correction de la direction, motivée et historisée, le change.
+- **Doublon entre établissements** : détecté sur tout le groupe. Sans accès à l'autre école ou sans droit de
+  transfert, la réponse est un message neutre (`STUDENT_REVIEW_REQUIRED`), sans élève, établissement ni
+  identifiant, et aucun contournement n'est possible ; la demande est journalisée sans donnée personnelle.
+  Seul un utilisateur habilité sur les deux écoles voit le dossier, confirme un homonyme ou organise le
+  transfert. Une collision de matricule à l'échelle du groupe reste signalée comme telle.
+- **Inscription** : brouillon, en attente, validée, annulée, terminée. Le secrétariat soumet, la direction
+  valide. La validation exige une classe, un responsable et les pièces obligatoires de l'établissement.
+- **Sortie** : transfert hors du groupe, départ ou abandon termine l'inscription et garde le dossier.
+- **Clôture d'une année** : affectations fermées, statut des élèves remis à jour. L'inscription reste dans
+  l'historique, et plus aucune validation, sortie ni changement de classe n'est accepté sur cette année.
+- **Transfert dans le groupe** : réservé à qui a accès aux deux établissements. Le même dossier suit, une
+  nouvelle inscription attend validation ; un nouveau matricule n'est attribué qu'en cas de collision.
+- **Besoins particuliers** : chiffrés en AES-256-GCM, route dédiée, chaque consultation est journalisée.
+- **Documents** : type réel contrôlé, 5 Mo, stockage privé, lien signé de 5 minutes, téléchargement
+  journalisé. Une suppression retire le fichier et garde la trace.
+- **Import** : CSV ou XLSX, 1 000 lignes, 100 colonnes, 50 Mo décompressés réels, analyse sans écriture, puis une transaction par ligne. Un second
+  envoi ne recrée rien. Le fichier n'est pas conservé et le rapport ne contient aucune donnée personnelle.
+- **Export** : matricule, noms, naissance, niveau, classe et statuts. Jamais les adresses, observations ni
+  besoins particuliers. Les contacts des responsables ont leur propre export.
+
+### Droits
+
+| Permission                       | Direction groupe | Directeur      | Secrétariat | Surveillant, comptable | Enseignant  |
+| -------------------------------- | ---------------- | -------------- | ----------- | ---------------------- | ----------- |
+| Liste restreinte                 | Tous sites       | Son école      | Son école   | Son école              | Ses classes |
+| Dossier complet, historique      | Oui              | Oui            | Oui         | Non                    | Non         |
+| Créer, modifier un dossier       | Oui              | Oui            | Oui         | Non                    | Non         |
+| Besoins particuliers             | Oui              | Oui            | Non         | Non                    | Non         |
+| Corriger un matricule, réglages  | Oui              | Oui            | Non         | Non                    | Non         |
+| Préparer une inscription, classe | Oui              | Oui            | Oui         | Non                    | Non         |
+| Valider, annuler, sortie         | Oui              | Oui            | Non         | Non                    | Non         |
+| Transfert dans le groupe         | Oui              | Si deux écoles | Non         | Non                    | Non         |
+| Responsables, documents          | Oui              | Oui            | Oui         | Non                    | Non         |
+| Supprimer un document            | Oui              | Oui            | Non         | Non                    | Non         |
+| Importer, exporter               | Oui              | Oui            | Oui         | Non                    | Non         |
+
+Super Admin Ocall et clients Park : aucun accès aux dossiers.
+
+### API (`/api/v1/school`)
+
+| Domaine      | Routes                                                                                                                                                                                                     |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Élèves       | `GET, POST students` ; `GET students/dashboard` ; `GET, PATCH students/:id` ; `POST students/:id/matricule` ; `GET, PUT students/:id/sensitive` ; `GET students/:id/history` ; `GET, PUT student-settings` |
+| Inscriptions | `GET, POST enrollments` ; `GET students/:id/enrollments` ; `POST enrollments/:id/status`, `/class`, `/exit` ; `POST students/:id/transfer`                                                                 |
+| Classes      | `GET rosters` ; `GET classes/:id/students` ; `POST classes/:id/teachers` ; `DELETE classes/:id/teachers/:memberId`                                                                                         |
+| Responsables | `GET, POST guardians` ; `PATCH guardians/:id` ; `GET, POST students/:id/guardians` ; `PATCH, DELETE students/:id/guardians/:guardianId`                                                                    |
+| Documents    | `GET, POST students/:id/documents` ; `GET students/:id/documents/:documentId/link` ; `DELETE students/:id/documents/:documentId` ; `GET files/:token`                                                      |
+| Imports      | `POST imports/preview` ; `GET, POST imports` ; `GET exports/students` ; `GET exports/guardians`                                                                                                            |
+
+### Déploiement
+
+En plus de la procédure de la section 6, définissez sur Railway une clé propre à chaque environnement, et
+conservez-la : la perdre rend les besoins particuliers illisibles.
+
+```
+SCHOOL_DATA_ENCRYPTION_KEY=<32 octets aléatoires en base64>
+```
+
+En production, l'API refuse de démarrer sans cette clé quand School est activé. Le stockage privé existant
+doit être configuré sur un disque persistant ou un bucket (`MEDIA_STORAGE`) : sur un disque éphémère, les
+documents disparaîtraient au redéploiement. Les nouvelles pages sont dans le web : redéployez-le aussi.
+
+## 9. Limites actuelles
 
 - Un employé Park existant ne peut pas encore recevoir de rôle School : il faut un compte dédié.
-- Pas de logo, de matricule, d'élèves, de notes, de bulletins ni de SMS.
+- Pas de logo, de notes, de bulletins ni de SMS. Modèles de documents personnalisés non livrés.
+- Portail parents non livré : seul le contrôle des enfants autorisés est préparé.
+- Aucun antivirus : un contrôle du type réel et du contenu actif des PDF, et un téléchargement en pièce
+  jointe uniquement. Un PDF à flux compressé peut masquer du contenu actif.
+- Pas de purge automatique des documents : les durées légales de conservation restent à fixer par pays.
+- Les documents School ne sont pas comptés dans le quota de stockage de l'organisation.
+- Import synchrone, limité à 1 000 lignes par fichier.
 - Pas de PWA School : le Service Worker reste limité à `/app`.
 - Les dates de contrat s'apprécient en UTC.
 - La conformité des données de mineurs doit être validée pays par pays avant toute vraie donnée.

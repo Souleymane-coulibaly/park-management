@@ -231,6 +231,21 @@ export class SchoolService {
           message: 'Cette année vient de changer : rechargez la page.',
         });
       }
+      if (dto.status === 'CLOSED') {
+        await tx.schoolClassAssignment.updateMany({
+          where: { organizationId: ctx.organizationId, schoolYearId: id, endedAt: null },
+          data: { endedAt: new Date() },
+        });
+        await tx.schoolStudent.updateMany({
+          where: {
+            organizationId: ctx.organizationId,
+            schoolId: year.schoolId,
+            status: 'ENROLLED',
+            enrollments: { none: { status: 'VALIDATED', year: { status: { not: 'CLOSED' } } } },
+          },
+          data: { status: 'REGISTERED' },
+        });
+      }
       return tx.schoolYear.findUniqueOrThrow({ where: { id } });
     });
     await this.log(ctx, 'school.year_status_changed', 'SchoolYear', id, {
@@ -530,7 +545,7 @@ export class SchoolService {
     }
   }
 
-  private async findYear(ctx: SchoolContext, id: string) {
+  async findYear(ctx: SchoolContext, id: string) {
     const year = await this.db.schoolYear.findFirst({
       where: { id, organizationId: ctx.organizationId },
     });
@@ -570,7 +585,7 @@ export class SchoolService {
     });
   }
 
-  private async unique<T>(work: () => Promise<T>, code: string, message: string): Promise<T> {
+  async unique<T>(work: () => Promise<T>, code: string, message: string): Promise<T> {
     try {
       return await work();
     } catch (error) {
@@ -581,12 +596,12 @@ export class SchoolService {
     }
   }
 
-  private async log(
+  async log(
     ctx: SchoolContext,
     action: string,
     targetType: string,
     targetId: string | null,
-    metadata: Record<string, string | number | string[]>,
+    metadata: Record<string, string | number | string[] | null>,
   ) {
     await this.audit.record({
       organizationId: ctx.organizationId,

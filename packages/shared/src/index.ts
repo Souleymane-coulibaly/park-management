@@ -18,3 +18,4 @@ export * from './commercial';
 export * from './partners';
 export * from './suite-contracts';
 export * from './school';
+export * from './school-students';

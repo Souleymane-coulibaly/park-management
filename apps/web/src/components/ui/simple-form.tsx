@@ -36,6 +36,7 @@ export function SimpleForm<T>({
   submitLabel,
   onDone,
   testId,
+  sendEmpty = false,
 }: {
   fields: SimpleField[];
   path: string;
@@ -44,6 +45,8 @@ export function SimpleForm<T>({
   submitLabel: string;
   onDone: (result: T) => void;
   testId?: string;
+  /** Modification : un champ vidé est envoyé, pour effacer la valeur enregistrée. */
+  sendEmpty?: boolean;
 }) {
   const [values, setValues] = useState<Values>(() => initial(fields));
   const [error, setError] = useState<ApiError | null>(null);
@@ -56,7 +59,7 @@ export function SimpleForm<T>({
     const body: Record<string, unknown> = { ...extra };
     for (const f of fields) {
       const value = values[f.name];
-      if (value === '' || value === undefined) continue;
+      if (value === undefined || (value === '' && !sendEmpty)) continue;
       body[f.name] = f.type === 'number' ? Number(value) : value;
     }
     try {

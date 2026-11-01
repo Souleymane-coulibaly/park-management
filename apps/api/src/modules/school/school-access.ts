@@ -34,6 +34,8 @@ export interface SchoolContext {
   modules: string[];
   limits: { maxSchools?: number };
   role: SchoolRole;
+  /** Ligne School du compte ; null pour le propriétaire, direction du groupe d'office. */
+  memberId: string | null;
   /** Établissements accessibles ; null = tous ceux du client. */
   schoolIds: string[] | null;
 }
@@ -99,7 +101,7 @@ export class SchoolAccessGuard implements CanActivate {
         ? null
         : await this.db.schoolMember.findFirst({
             where: { organizationId, userId: auth.user.id, isActive: true },
-            select: { role: true, assignments: { select: { schoolId: true } } },
+            select: { id: true, role: true, assignments: { select: { schoolId: true } } },
           });
     if (auth.membership.role !== 'OWNER' && !member) throw this.denied();
     const role: SchoolRole = member?.role ?? 'GROUP_DIRECTOR';
@@ -120,6 +122,7 @@ export class SchoolAccessGuard implements CanActivate {
       modules: entitlement.modules,
       limits: entitlement.limits,
       role,
+      memberId: member?.id ?? null,
       schoolIds: resolveSchoolIds(assigned, entitlement.coveredSchoolIds),
     };
     return true;

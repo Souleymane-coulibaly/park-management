@@ -85,6 +85,26 @@ export const SchoolPermission = {
   MEMBERS_MANAGE: 'school.members.manage',
   GRADING_MANAGE: 'school.grading.manage',
   EXPORT: 'school.export',
+  /** Liste restreinte : matricule, noms, classe, statut. */
+  STUDENTS_READ: 'school.students.read',
+  /** Dossier complet : naissance, adresse, observations. */
+  STUDENTS_READ_FULL: 'school.students.read_full',
+  STUDENTS_MANAGE: 'school.students.manage',
+  /** Besoins particuliers, chiffrés et journalisés à chaque consultation. */
+  STUDENTS_SENSITIVE: 'school.students.sensitive',
+  MATRICULE_CORRECT: 'school.students.matricule_correct',
+  STUDENTS_SETTINGS: 'school.students.settings',
+  STUDENTS_IMPORT: 'school.students.import',
+  STUDENTS_EXPORT: 'school.students.export',
+  ENROLLMENTS_MANAGE: 'school.enrollments.manage',
+  ENROLLMENTS_VALIDATE: 'school.enrollments.validate',
+  /** Transfert entre deux établissements du groupe. */
+  TRANSFER: 'school.students.transfer',
+  GUARDIANS_READ: 'school.guardians.read',
+  GUARDIANS_MANAGE: 'school.guardians.manage',
+  DOCUMENTS_READ: 'school.documents.read',
+  DOCUMENTS_MANAGE: 'school.documents.manage',
+  DOCUMENTS_DELETE: 'school.documents.delete',
 } as const;
 export type SchoolPermission = (typeof SchoolPermission)[keyof typeof SchoolPermission];
 
@@ -96,16 +116,48 @@ const DIRECTION: readonly SchoolPermission[] = [
   SP.MEMBERS_MANAGE,
   SP.GRADING_MANAGE,
   SP.EXPORT,
+  SP.STUDENTS_READ,
+  SP.STUDENTS_READ_FULL,
+  SP.STUDENTS_MANAGE,
+  SP.STUDENTS_SENSITIVE,
+  SP.MATRICULE_CORRECT,
+  SP.STUDENTS_SETTINGS,
+  SP.STUDENTS_IMPORT,
+  SP.STUDENTS_EXPORT,
+  SP.ENROLLMENTS_MANAGE,
+  SP.ENROLLMENTS_VALIDATE,
+  SP.TRANSFER,
+  SP.GUARDIANS_READ,
+  SP.GUARDIANS_MANAGE,
+  SP.DOCUMENTS_READ,
+  SP.DOCUMENTS_MANAGE,
+  SP.DOCUMENTS_DELETE,
 ];
 
-/** Matrice appliquée par l'API. Les droits sur les élèves et les notes arrivent avec leurs modules. */
+/**
+ * Matrice appliquée par l'API. Le secrétariat prépare, la direction valide ; enseignant, surveillant et
+ * comptable n'ont que la liste restreinte, et l'enseignant seulement pour ses classes.
+ */
 export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermission[]> = {
   GROUP_DIRECTOR: [...DIRECTION, SP.SCHOOLS_MANAGE],
   SCHOOL_DIRECTOR: DIRECTION,
-  SECRETARY: [SP.STRUCTURE_READ, SP.MEMBERS_READ],
-  TEACHER: [SP.STRUCTURE_READ],
-  SUPERVISOR: [SP.STRUCTURE_READ],
-  ACCOUNTANT: [SP.STRUCTURE_READ],
+  SECRETARY: [
+    SP.STRUCTURE_READ,
+    SP.MEMBERS_READ,
+    SP.STUDENTS_READ,
+    SP.STUDENTS_READ_FULL,
+    SP.STUDENTS_MANAGE,
+    SP.STUDENTS_IMPORT,
+    SP.STUDENTS_EXPORT,
+    SP.ENROLLMENTS_MANAGE,
+    SP.GUARDIANS_READ,
+    SP.GUARDIANS_MANAGE,
+    SP.DOCUMENTS_READ,
+    SP.DOCUMENTS_MANAGE,
+  ],
+  TEACHER: [SP.STRUCTURE_READ, SP.STUDENTS_READ],
+  SUPERVISOR: [SP.STRUCTURE_READ, SP.STUDENTS_READ],
+  ACCOUNTANT: [SP.STRUCTURE_READ, SP.STUDENTS_READ],
 };
 
 export function hasSchoolPermission(role: SchoolRole, permission: SchoolPermission): boolean {
@@ -115,6 +167,11 @@ export function hasSchoolPermission(role: SchoolRole, permission: SchoolPermissi
 /** Seule la direction du groupe voit tous les établissements ; les autres, ceux qui leur sont affectés. */
 export function hasAllSchoolsScope(role: SchoolRole): boolean {
   return role === 'GROUP_DIRECTOR';
+}
+
+/** L'enseignant ne voit que les élèves des classes qui lui sont confiées. */
+export function isLimitedToOwnClasses(role: SchoolRole): boolean {
+  return role === 'TEACHER';
 }
 
 /** Un directeur d'établissement n'attribue ni la direction du groupe ni un autre poste de direction. */
