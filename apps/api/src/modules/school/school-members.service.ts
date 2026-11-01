@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@ocall/database';
+import type { Prisma as SchoolPrisma } from '@ocall/school-database';
 import { assignableSchoolRoles, hasAllSchoolsScope, type SchoolRole } from '@ocall/shared';
 import { AuditService } from '../../common/audit/audit.service';
 import { PasswordService } from '../../common/security/password.service';
@@ -50,7 +51,7 @@ export class SchoolMembersService {
 
   async create(ctx: SchoolContext, dto: CreateMemberDto) {
     this.assertCanAssign(ctx, dto.role);
-    await this.assertSchools(ctx, dto.role, dto.schoolIds);
+    await this.assertSchools(this.db, ctx, dto.role, dto.schoolIds);
     const temporaryPassword = generateTemporaryPassword();
     const passwordHash = await this.passwords.hash(temporaryPassword);
 
@@ -129,30 +130,31 @@ export class SchoolMembersService {
   }
 
   async update(ctx: SchoolContext, id: string, dto: UpdateMemberDto) {
-    const target = await this.findManageable(ctx, id);
-    if (target.userId === ctx.userId) {
-      throw new ForbiddenException({
-        code: 'SELF_CHANGE_REFUSED',
-        message: 'Vous ne pouvez pas modifier votre propre accès.',
-      });
-    }
     if (dto.role) this.assertCanAssign(ctx, dto.role);
-    const role = dto.role ?? target.role;
-    if (dto.schoolIds) await this.assertSchools(ctx, role, dto.schoolIds);
-    // Le rôle et l'activation valent pour tous ses établissements : décision de qui les couvre tous.
-    const sharedElsewhere =
-      ctx.schoolIds && target.assignments.some((a) => !ctx.schoolIds!.includes(a.schoolId));
-    const global =
-      role !== target.role || (dto.isActive !== undefined && dto.isActive !== target.isActive);
-    if (sharedElsewhere && global) {
-      throw new ForbiddenException({
-        code: 'SCHOOL_MEMBER_SHARED',
-        message:
-          'Ce compte relève aussi d’un autre périmètre : adressez-vous à la direction du groupe.',
-      });
-    }
-
-    await this.db.$transaction(async (tx) => {
+    const { target, role } = await this.db.$transaction(async (tx) => {
+      // Rôle et affectations relus sous verrou : ce sont eux qui fondent le droit de gérer ce membre.
+      await tx.$queryRaw`SELECT id FROM "SchoolMember" WHERE id = ${id}::uuid FOR UPDATE`;
+      const target = await this.findManageable(tx, ctx, id);
+      if (target.userId === ctx.userId) {
+        throw new ForbiddenException({
+          code: 'SELF_CHANGE_REFUSED',
+          message: 'Vous ne pouvez pas modifier votre propre accès.',
+        });
+      }
+      const role = dto.role ?? target.role;
+      if (dto.schoolIds) await this.assertSchools(tx, ctx, role, dto.schoolIds);
+      // Le rôle et l'activation valent pour tous ses établissements : décision de qui les couvre tous.
+      const sharedElsewhere =
+        ctx.schoolIds && target.assignments.some((a) => !ctx.schoolIds!.includes(a.schoolId));
+      const global =
+        role !== target.role || (dto.isActive !== undefined && dto.isActive !== target.isActive);
+      if (sharedElsewhere && global) {
+        throw new ForbiddenException({
+          code: 'SCHOOL_MEMBER_SHARED',
+          message:
+            'Ce compte relève aussi d’un autre périmètre : adressez-vous à la direction du groupe.',
+        });
+      }
       await tx.schoolMember.update({
         where: { id },
         data: { role: dto.role, isActive: dto.isActive },
@@ -170,6 +172,7 @@ export class SchoolMembersService {
           })),
         });
       }
+      return { target, role };
     });
     // Compte réservé à School : désactiver le membre ferme ses sessions Ocall Suite.
     if (dto.isActive !== undefined) await this.syncAccount(ctx, target.userId, dto.isActive);
@@ -204,8 +207,8 @@ export class SchoolMembersService {
     });
   }
 
-  private async findManageable(ctx: SchoolContext, id: string) {
-    const target = await this.db.schoolMember.findFirst({
+  private async findManageable(tx: SchoolPrisma.TransactionClient, ctx: SchoolContext, id: string) {
+    const target = await tx.schoolMember.findFirst({
       where: { id, organizationId: ctx.organizationId },
       include: { assignments: { select: { schoolId: true } } },
     });
@@ -227,7 +230,12 @@ export class SchoolMembersService {
     }
   }
 
-  private async assertSchools(ctx: SchoolContext, role: SchoolRole, schoolIds: string[]) {
+  private async assertSchools(
+    db: SchoolPrisma.TransactionClient | SchoolPrismaService,
+    ctx: SchoolContext,
+    role: SchoolRole,
+    schoolIds: string[],
+  ) {
     if (!hasAllSchoolsScope(role) && schoolIds.length === 0) {
       throw new ConflictException({
         code: 'SCHOOL_REQUIRED',
@@ -235,7 +243,7 @@ export class SchoolMembersService {
       });
     }
     const unique = [...new Set(schoolIds)];
-    const found = await this.db.school.count({
+    const found = await db.school.count({
       where: {
         id: { in: unique },
         organizationId: ctx.organizationId,

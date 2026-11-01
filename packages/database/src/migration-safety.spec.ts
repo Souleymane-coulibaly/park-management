@@ -2,6 +2,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   DESTRUCTIVE_APPROVAL_MARKER,
+  databaseIdentity,
   findDestructiveStatements,
   schoolMigrationTargetProblem,
 } from './migration-safety';
@@ -29,6 +30,21 @@ describe('schoolMigrationTargetProblem', () => {
         SCHOOL_DIRECT_URL: 'postgresql://u:p@ep-suite.neon.tech/neondb',
       }),
     ).toContain('différentes');
+  });
+
+  it('reconnaît la même base malgré le port explicite ou l’écriture de l’hôte', () => {
+    expect(
+      schoolMigrationTargetProblem({
+        DATABASE_URL: 'postgresql://u:p@db/suite',
+        SCHOOL_DATABASE_URL: 'postgresql://u:p@DB:5432/suite',
+      }),
+    ).toContain('distincte');
+    expect(databaseIdentity('postgresql://u:p@localhost/a')).toBe(
+      databaseIdentity('postgresql://v:q@127.0.0.1:5432/a?sslmode=disable'),
+    );
+    expect(databaseIdentity('postgresql://u:p@db:5433/a')).not.toBe(
+      databaseIdentity('postgresql://u:p@db:5432/a'),
+    );
   });
 
   it('refuse deux URL School identiques à la base Suite', () => {

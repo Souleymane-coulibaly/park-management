@@ -100,7 +100,11 @@ export class SchoolEnrollmentsService {
   async forStudent(ctx: SchoolContext, studentId: string) {
     await this.students.findStudent(ctx, studentId);
     return this.db.schoolEnrollment.findMany({
-      where: { organizationId: ctx.organizationId, studentId },
+      where: {
+        organizationId: ctx.organizationId,
+        studentId,
+        ...this.students.linkedStudentScope(ctx),
+      },
       orderBy: { createdAt: 'desc' },
       select: VIEW,
     });
@@ -181,7 +185,7 @@ export class SchoolEnrollmentsService {
   /** La validation appartient à la direction ; le secrétariat prépare et soumet. */
   async setStatus(ctx: SchoolContext, id: string, dto: EnrollmentStatusDto) {
     const { schoolId, studentId } = await this.find(ctx, id);
-    const from = await this.db.$transaction(async (tx) => {
+    const { from, view } = await this.db.$transaction(async (tx) => {
       await this.school.guardSchools(tx, [schoolId]);
       await this.lockStudent(tx, ctx, studentId);
       // Relue sous verrou : classe et statut sont ceux que les contrôles et les écritures utilisent.
@@ -223,13 +227,16 @@ export class SchoolEnrollmentsService {
         from: enrollment.status,
         to: dto.status,
       });
-      return enrollment.status;
+      return {
+        from: enrollment.status,
+        view: await tx.schoolEnrollment.findUniqueOrThrow({ where: { id }, select: VIEW }),
+      };
     });
     await this.school.log(ctx, 'school.enrollment_status_changed', 'SchoolEnrollment', id, {
       from,
       to: dto.status,
     });
-    return this.db.schoolEnrollment.findUniqueOrThrow({ where: { id }, select: VIEW });
+    return view;
   }
 
   /** Effectif contrôlé sous verrou de la classe : deux validations simultanées ne la dépassent pas. */
@@ -298,7 +305,7 @@ export class SchoolEnrollmentsService {
   /** Avant validation, la classe prévue change seule ; après, l'ancienne affectation reste dans l'historique. */
   async changeClass(ctx: SchoolContext, id: string, dto: ChangeClassDto) {
     const { schoolId, studentId } = await this.find(ctx, id);
-    await this.db.$transaction(async (tx) => {
+    const view = await this.db.$transaction(async (tx) => {
       await this.school.guardSchools(tx, [schoolId]);
       await this.lockStudent(tx, ctx, studentId);
       const enrollment = await tx.schoolEnrollment.findUniqueOrThrow({ where: { id } });
@@ -310,6 +317,8 @@ export class SchoolEnrollmentsService {
         });
       }
       const target = await this.findClass(tx, ctx, dto.classId, enrollment.schoolYearId);
+      // Verrou de capacité avant la référence : la clé étrangère ne peut plus croiser deux déplacements.
+      await this.lockClass(tx, target.id);
       await tx.schoolEnrollment.update({
         where: { id },
         data: {
@@ -328,11 +337,12 @@ export class SchoolEnrollmentsService {
         from: enrollment.classId,
         to: target.id,
       });
+      return tx.schoolEnrollment.findUniqueOrThrow({ where: { id }, select: VIEW });
     });
     await this.school.log(ctx, 'school.class_changed', 'SchoolEnrollment', id, {
       to: dto.classId,
     });
-    return this.db.schoolEnrollment.findUniqueOrThrow({ where: { id }, select: VIEW });
+    return view;
   }
 
   /** Transfert vers l'extérieur, départ ou abandon : l'inscription se termine, le dossier reste. */
@@ -344,7 +354,7 @@ export class SchoolEnrollmentsService {
         message: 'Seule une inscription validée peut prendre fin.',
       });
     }
-    await this.db.$transaction(async (tx) => {
+    const view = await this.db.$transaction(async (tx) => {
       await this.school.guardSchools(tx, [enrollment.schoolId]);
       await this.lockStudent(tx, ctx, enrollment.studentId);
       await this.assertYearOpen(tx, ctx, enrollment.schoolYearId);
@@ -373,11 +383,12 @@ export class SchoolEnrollmentsService {
           data: { status: dto.reason },
         });
       }
+      return tx.schoolEnrollment.findUniqueOrThrow({ where: { id }, select: VIEW });
     });
     await this.school.log(ctx, 'school.enrollment_exited', 'SchoolEnrollment', id, {
       reason: dto.reason,
     });
-    return this.db.schoolEnrollment.findUniqueOrThrow({ where: { id }, select: VIEW });
+    return view;
   }
 
   /**
@@ -399,6 +410,12 @@ export class SchoolEnrollmentsService {
           await this.school.guardSchools(tx, [visible.schoolId, dto.targetSchoolId]);
           const student = await this.lockStudent(tx, ctx, studentId);
           if (student.schoolId !== visible.schoolId) throw this.changed();
+          // L'accès aux responsables dépend de l'établissement de l'enfant : voir leur verrou d'écriture.
+          await tx.$queryRaw`
+            SELECT g.id FROM "SchoolGuardian" g
+            JOIN "SchoolStudentGuardian" l ON l."guardianId" = g.id
+            WHERE l."studentId" = ${studentId}::uuid
+            ORDER BY g.id FOR UPDATE OF g`;
           const settings = await this.students.readSettings(
             tx,
             ctx.organizationId,
@@ -742,9 +759,14 @@ export class SchoolEnrollmentsService {
     return cls;
   }
 
-  private async assertRoom(tx: Tx, ctx: SchoolContext, classId: string) {
+  private async lockClass(tx: Tx, classId: string) {
     const [cls] = await tx.$queryRaw<{ capacity: number | null }[]>`
       SELECT "capacity" FROM "SchoolClass" WHERE id = ${classId}::uuid FOR UPDATE`;
+    return cls;
+  }
+
+  private async assertRoom(tx: Tx, ctx: SchoolContext, classId: string) {
+    const cls = await this.lockClass(tx, classId);
     if (cls?.capacity == null) return;
     // L'inscription en cours est déjà enregistrée sur cette classe : elle est comptée.
     const enrolled = await tx.schoolEnrollment.count({

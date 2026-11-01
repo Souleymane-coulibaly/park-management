@@ -124,18 +124,6 @@ export class SchoolStudentsService {
 
   async saveSettings(ctx: SchoolContext, schoolId: string, dto: StudentSettingsDto) {
     await this.school.assertSchool(ctx, schoolId);
-    const current = await this.readSettings(this.db, ctx.organizationId, schoolId);
-    if (current.matriculeScope !== dto.matriculeScope) {
-      const students = await this.db.schoolStudent.count({
-        where: { organizationId: ctx.organizationId, schoolId },
-      });
-      if (students > 0) {
-        throw new ConflictException({
-          code: 'MATRICULE_SCOPE_LOCKED',
-          message: 'Le périmètre du matricule ne change plus une fois des dossiers créés.',
-        });
-      }
-    }
     const errors = validateCustomFields(dto.customFields);
     if (errors.length > 0) {
       throw new BadRequestException({
@@ -152,10 +140,26 @@ export class SchoolStudentsService {
       requiredDocuments: dto.requiredDocuments,
       customFields: dto.customFields as unknown as Prisma.InputJsonArray,
     };
-    await this.db.schoolStudentSettings.upsert({
-      where: { schoolId },
-      update: data,
-      create: { ...data, schoolId, organizationId: ctx.organizationId },
+    await this.db.$transaction(async (tx) => {
+      // Exclusif : les créations et transferts entrants prennent ce verrou en partage (guardSchools).
+      await tx.$queryRaw`SELECT id FROM "School" WHERE id = ${schoolId}::uuid FOR UPDATE`;
+      const current = await this.readSettings(tx, ctx.organizationId, schoolId);
+      if (current.matriculeScope !== dto.matriculeScope) {
+        const students = await tx.schoolStudent.count({
+          where: { organizationId: ctx.organizationId, schoolId },
+        });
+        if (students > 0) {
+          throw new ConflictException({
+            code: 'MATRICULE_SCOPE_LOCKED',
+            message: 'Le périmètre du matricule ne change plus une fois des dossiers créés.',
+          });
+        }
+      }
+      await tx.schoolStudentSettings.upsert({
+        where: { schoolId },
+        update: data,
+        create: { ...data, schoolId, organizationId: ctx.organizationId },
+      });
     });
     await this.school.log(ctx, 'school.student_settings_updated', 'School', schoolId, {});
     return this.readSettings(this.db, ctx.organizationId, schoolId);
@@ -251,7 +255,10 @@ export class SchoolStudentsService {
     const { schoolYearId: _year, ...input } = dto;
     const created = await this.school.unique(
       () =>
-        this.db.$transaction((tx) => this.createInTx(tx, ctx, { ...input, matriculeYearNumber })),
+        this.db.$transaction(async (tx) => {
+          await this.school.guardSchools(tx, [dto.schoolId]);
+          return this.createInTx(tx, ctx, { ...input, matriculeYearNumber });
+        }),
       'MATRICULE_USED',
       'Ce matricule est déjà utilisé.',
     );
@@ -515,13 +522,21 @@ export class SchoolStudentsService {
     await this.findStudent(ctx, id);
     const [events, assignments] = await Promise.all([
       this.db.schoolStudentEvent.findMany({
-        where: { organizationId: ctx.organizationId, studentId: id },
+        where: {
+          organizationId: ctx.organizationId,
+          studentId: id,
+          ...this.linkedStudentScope(ctx),
+        },
         orderBy: { createdAt: 'desc' },
         take: 200,
         select: { id: true, type: true, details: true, createdAt: true },
       }),
       this.db.schoolClassAssignment.findMany({
-        where: { organizationId: ctx.organizationId, studentId: id },
+        where: {
+          organizationId: ctx.organizationId,
+          studentId: id,
+          ...this.linkedStudentScope(ctx),
+        },
         orderBy: { startedAt: 'desc' },
         select: {
           id: true,
@@ -624,6 +639,11 @@ export class SchoolStudentsService {
     if (!student) throw new NotFoundException(NOT_FOUND);
     await this.school.assertSchool(ctx, student.schoolId);
     return student;
+  }
+
+  /** Filtre d'une table liée à l'élève : le périmètre vaut dans la requête qui renvoie les données. */
+  linkedStudentScope(ctx: SchoolContext) {
+    return ctx.schoolIds ? { student: { schoolId: { in: ctx.schoolIds } } } : {};
   }
 
   /**

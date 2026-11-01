@@ -3,6 +3,7 @@ import type { INestApplication } from '@nestjs/common';
 import { AuditService } from '../src/common/audit/audit.service';
 import { SchoolGuardiansService } from '../src/modules/school/school-guardians.service';
 import { SchoolPrismaService } from '../src/modules/school/school-prisma.service';
+import { SchoolStudentsService } from '../src/modules/school/school-students.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import {
   type Agent,
@@ -1478,11 +1479,18 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       const csv = Buffer.from(
         `Nom;Prénom;Date de naissance;Nom du responsable;Prénom du responsable;Téléphone du responsable\r\n${line(`Import${RUN}a`, 'Oumar')}\r\n`,
       );
-      await staff.agent
+      const first = await staff.agent
         .post('/api/v1/school/imports')
         .field('schoolId', s.schoolId)
         .attach('file', csv, 'e.csv')
         .expect(201);
+      expect(first.body).toMatchObject({ createdRows: 1, errorRows: 0 });
+      const imported = await db.schoolStudent.findFirstOrThrow({
+        where: { schoolId: s.schoolId, lastName: `Import${RUN}a` },
+        select: { guardians: { select: { guardianId: true } } },
+      });
+      expect(imported.guardians).toHaveLength(1);
+      expect(imported.guardians[0]!.guardianId).not.toBe(parent.body.id);
       const links = await db.schoolStudentGuardian.count({ where: { guardianId: parent.body.id } });
       expect(links).toBe(1);
       const homonym = await ownerA
@@ -1497,11 +1505,12 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       const other = Buffer.from(
         `Nom;Prénom;Date de naissance;Nom du responsable;Prénom du responsable;Téléphone du responsable\r\n${`Import${RUN}b`};Awa;14/03/2017;Sylla;Aliou;+223 70 55 44 34\r\n`,
       );
-      await staff.agent
+      const second = await staff.agent
         .post('/api/v1/school/imports')
         .field('schoolId', s.schoolId)
         .attach('file', other, 'e.csv')
         .expect(201);
+      expect(second.body).toMatchObject({ createdRows: 1, errorRows: 0 });
       expect(await db.schoolStudentGuardian.count({ where: { guardianId: homonym.body.id } })).toBe(
         0,
       );
@@ -1582,6 +1591,113 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
         .post('/api/v1/school/classes')
         .send({ schoolYearId: s.yearId, levelId: s.levelId, name: 'CP1 Y' })
         .expect(409);
+      await ownerA
+        .post('/api/v1/school/periods')
+        .send({
+          schoolYearId: s.yearId,
+          kind: 'TRIMESTER',
+          label: 'Trimestre',
+          startsOn: '2026-10-01',
+          endsOn: '2026-12-20',
+        })
+        .expect(409);
+    });
+
+    /** Fait aboutir un transfert exactement entre le contrôle d'accès et la suite de la requête. */
+    const transferAfterCheck = (id: string) => {
+      const students = app.get(SchoolStudentsService);
+      const original = students.findStudent.bind(students);
+      return jest.spyOn(students, 'findStudent').mockImplementationOnce(async (ctx, target) => {
+        const seen = await original(ctx, target);
+        await ownerA
+          .post(`/api/v1/school/students/${id}/transfer`)
+          .send(transferBody(a2))
+          .expect(200);
+        return seen;
+      });
+    };
+
+    it.each([
+      ['enrollments', (id: string) => `/api/v1/school/students/${id}/enrollments`],
+      ['guardians', (id: string) => `/api/v1/school/students/${id}/guardians`],
+      ['documents', (id: string) => `/api/v1/school/students/${id}/documents`],
+    ])('S2-11 : %s ne renvoie rien si le transfert suit le contrôle', async (_name, url) => {
+      const s = await structure(ownerA, `Lecture ${++counter}`);
+      const staff = await member(ownerA, 'SECRETARY', [s.schoolId]);
+      const { id } = await enrolled(ownerA, s);
+      const spy = transferAfterCheck(id);
+      try {
+        const res = await staff.agent.get(url(id)).expect(200);
+        expect(res.body).toEqual([]);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('S2-11 : l’historique ne renvoie rien si le transfert suit le contrôle', async () => {
+      const s = await structure(ownerA, `Histoire ${++counter}`);
+      const staff = await member(ownerA, 'SECRETARY', [s.schoolId]);
+      const { id } = await enrolled(ownerA, s);
+      const spy = transferAfterCheck(id);
+      try {
+        const res = await staff.agent.get(`/api/v1/school/students/${id}/history`).expect(200);
+        expect(res.body).toEqual({ events: [], assignments: [] });
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('S2-03 : l’ancienne école ne modifie ni ne rattache un responsable parti avec l’enfant', async () => {
+      const s = await structure(ownerA, `Parti ${++counter}`);
+      const staff = await member(ownerA, 'SECRETARY', [s.schoolId]);
+      const { id } = await enrolled(ownerA, s);
+      const links = await db.schoolStudentGuardian.findFirstOrThrow({ where: { studentId: id } });
+      const other = await student(staff.agent, s.schoolId).expect(201);
+      await ownerA
+        .post(`/api/v1/school/students/${id}/transfer`)
+        .send(transferBody(a2))
+        .expect(200);
+      await staff.agent
+        .patch(`/api/v1/school/guardians/${links.guardianId}`)
+        .send({ firstName: 'Modifie' })
+        .expect(404);
+      await staff.agent
+        .post(`/api/v1/school/students/${other.body.id}/guardians`)
+        .send({ guardianId: links.guardianId, relation: 'OTHER' })
+        .expect(404);
+    });
+
+    it('S2-12 : un dossier créé pendant le changement de réglage suit le périmètre final', async () => {
+      const s = await structure(ownerA, `Portee ${++counter}`);
+      const settings = await ownerA
+        .get(`/api/v1/school/student-settings?schoolId=${s.schoolId}`)
+        .expect(200);
+      const [saved, created] = await Promise.all([
+        ownerA
+          .put(`/api/v1/school/student-settings?schoolId=${s.schoolId}`)
+          .send({ ...settings.body, matriculeScope: 'GROUP' }),
+        student(ownerA, s.schoolId),
+      ]);
+      expect(created.status).toBe(201);
+      const row = await db.schoolStudent.findUniqueOrThrow({ where: { id: created.body.id } });
+      if (saved.status === 200) expect(row.matriculeScope).toBe('GROUP');
+      else {
+        expect(saved.status).toBe(409);
+        expect(row.matriculeScope).toBe(s.schoolId);
+      }
+    });
+
+    it('S2-13 : deux élèves déplacés en même temps vers la même classe aboutissent', async () => {
+      const s = await structure(ownerA, `Places ${++counter}`);
+      const [one, two] = [await enrolled(ownerA, s), await enrolled(ownerA, s)];
+      const results = await Promise.all(
+        [one, two].map((e) =>
+          ownerA
+            .post(`/api/v1/school/enrollments/${e.enrollmentId}/class`)
+            .send({ classId: s.otherClassId, reason: 'Essai' }),
+        ),
+      );
+      expect(results.map((r) => r.status)).toEqual([200, 200]);
     });
 
     it('S2-07 : deux modifications simultanées gardent une identité exacte', async () => {

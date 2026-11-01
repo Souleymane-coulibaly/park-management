@@ -138,6 +138,11 @@ export class SchoolGuardiansService {
     schoolId: string,
     wanted: { lastName: string; firstName: string; phone: string },
   ) {
+    await tx.$queryRaw`
+      SELECT id FROM "SchoolGuardian"
+      WHERE "organizationId" = ${ctx.organizationId}::uuid AND "schoolId" = ${schoolId}::uuid
+        AND phone = ${wanted.phone}
+      ORDER BY id FOR UPDATE`;
     const rows = await tx.schoolGuardian.findMany({
       where: { ...this.scope(ctx), schoolId, phone: wanted.phone },
       select: { id: true, lastName: true, firstName: true },
@@ -149,19 +154,35 @@ export class SchoolGuardiansService {
     );
   }
 
-  async update(ctx: SchoolContext, id: string, dto: UpdateGuardianDto) {
-    const current = await this.find(ctx, id);
-    const guardian = await this.db.schoolGuardian.update({
-      where: { id },
-      data: {
-        ...dto,
-        searchText: searchText({
-          lastName: dto.lastName ?? current.lastName,
-          firstName: dto.firstName ?? current.firstName,
-          phone: dto.phone ?? current.phone,
-        }),
-      },
+  /**
+   * Verrouille le responsable et revérifie l'accès : le transfert d'un enfant verrouille aussi ses
+   * responsables, l'accès ne peut donc pas changer entre ce contrôle et l'écriture.
+   */
+  private async lockInScope(tx: Tx, ctx: SchoolContext, id: string) {
+    await tx.$queryRaw`SELECT id FROM "SchoolGuardian" WHERE id = ${id}::uuid FOR UPDATE`;
+    const guardian = await tx.schoolGuardian.findFirst({
+      where: { ...this.scope(ctx), id },
       select: VIEW,
+    });
+    if (!guardian) throw new NotFoundException(NOT_FOUND);
+    return guardian;
+  }
+
+  async update(ctx: SchoolContext, id: string, dto: UpdateGuardianDto) {
+    const guardian = await this.db.$transaction(async (tx) => {
+      const current = await this.lockInScope(tx, ctx, id);
+      return tx.schoolGuardian.update({
+        where: { id },
+        data: {
+          ...dto,
+          searchText: searchText({
+            lastName: dto.lastName ?? current.lastName,
+            firstName: dto.firstName ?? current.firstName,
+            phone: dto.phone ?? current.phone,
+          }),
+        },
+        select: VIEW,
+      });
     });
     await this.school.log(ctx, 'school.guardian_updated', 'SchoolGuardian', id, {
       fields: Object.keys(dto),
@@ -172,7 +193,11 @@ export class SchoolGuardiansService {
   async forStudent(ctx: SchoolContext, studentId: string) {
     await this.students.findStudent(ctx, studentId);
     return this.db.schoolStudentGuardian.findMany({
-      where: { organizationId: ctx.organizationId, studentId },
+      where: {
+        organizationId: ctx.organizationId,
+        studentId,
+        ...this.students.linkedStudentScope(ctx),
+      },
       orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }],
       select: {
         relation: true,
@@ -209,6 +234,7 @@ export class SchoolGuardiansService {
     rights: GuardianLinkRightsDto & { relation: LinkGuardianDto['relation'] },
   ) {
     await this.students.lockInScope(tx, ctx, studentId);
+    await this.lockInScope(tx, ctx, guardianId);
     const existing = await tx.schoolStudentGuardian.count({
       where: { organizationId: ctx.organizationId, studentId },
     });

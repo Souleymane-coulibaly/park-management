@@ -28,6 +28,14 @@ export function findDestructiveStatements(sql: string): string[] {
   return DESTRUCTIVE_PATTERNS.filter(({ pattern }) => pattern.test(code)).map(({ label }) => label);
 }
 
+/** Identité d'une base : mêmes hôte, port effectif et nom, quelle que soit l'écriture de l'URL. */
+export function databaseIdentity(url: string): string {
+  const u = new URL(url);
+  const host = u.hostname.toLowerCase().replace('-pooler.', '.');
+  const name = decodeURIComponent(u.pathname.slice(1)) || decodeURIComponent(u.username);
+  return `${host === 'localhost' ? '127.0.0.1' : host}:${u.port || '5432'}/${name}`;
+}
+
 /**
  * Motif de refus de la cible des migrations School, sinon null. Prisma migre par l'URL directe : les deux
  * URL School doivent désigner la même base, et aucune la base Suite.
@@ -38,10 +46,7 @@ export function schoolMigrationTargetProblem(env: {
   SCHOOL_DATABASE_URL?: string;
   SCHOOL_DIRECT_URL?: string;
 }): string | null {
-  const identity = (url: string) => {
-    const u = new URL(url);
-    return `${u.host.replace('-pooler.', '.')}/${u.pathname.slice(1)}`;
-  };
+  const identity = databaseIdentity;
   if (!env.SCHOOL_DATABASE_URL)
     return 'SCHOOL_DATABASE_URL est obligatoire quand SCHOOL_ENABLED=true.';
   const school = identity(env.SCHOOL_DATABASE_URL);

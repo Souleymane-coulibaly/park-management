@@ -76,7 +76,12 @@ export class SchoolDocumentsService {
   async list(ctx: SchoolContext, studentId: string) {
     await this.students.findStudent(ctx, studentId);
     return this.db.schoolStudentDocument.findMany({
-      where: { organizationId: ctx.organizationId, studentId, deletedAt: null },
+      where: {
+        organizationId: ctx.organizationId,
+        studentId,
+        deletedAt: null,
+        ...this.students.linkedStudentScope(ctx),
+      },
       orderBy: { createdAt: 'desc' },
       select: VIEW,
     });
