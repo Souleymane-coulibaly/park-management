@@ -1579,14 +1579,23 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
 
     it('S1-04 : aucune classe ni période ajoutée en même temps que la clôture ne reste ouverte', async () => {
       const s = await structure(ownerA, `Periode ${++counter}`);
-      const [closed, cls] = await Promise.all([
+      const period = {
+        schoolYearId: s.yearId,
+        kind: 'TRIMESTER',
+        label: 'Trimestre',
+        startsOn: '2026-10-01',
+        endsOn: '2026-12-20',
+      };
+      const [closed, cls, concurrent] = await Promise.all([
         ownerA.post(`/api/v1/school/years/${s.yearId}/status`).send({ status: 'CLOSED' }),
         ownerA
           .post('/api/v1/school/classes')
           .send({ schoolYearId: s.yearId, levelId: s.levelId, name: 'CP1 Z' }),
+        ownerA.post('/api/v1/school/periods').send(period),
       ]);
       expect(closed.status).toBe(200);
       expect([201, 409]).toContain(cls.status);
+      expect([201, 409]).toContain(concurrent.status);
       await ownerA
         .post('/api/v1/school/classes')
         .send({ schoolYearId: s.yearId, levelId: s.levelId, name: 'CP1 Y' })
@@ -1625,6 +1634,12 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       const s = await structure(ownerA, `Lecture ${++counter}`);
       const staff = await member(ownerA, 'SECRETARY', [s.schoolId]);
       const { id } = await enrolled(ownerA, s);
+      await ownerA
+        .post(`/api/v1/school/students/${id}/documents`)
+        .field('category', 'OTHER')
+        .attach('file', PDF, 'p.pdf')
+        .expect(201);
+      expect((await staff.agent.get(url(id)).expect(200)).body).toHaveLength(1);
       const spy = transferAfterCheck(id);
       try {
         const res = await staff.agent.get(url(id)).expect(200);
@@ -1667,6 +1682,34 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
         .expect(404);
     });
 
+    it('S2-16 : un enseignant ne lit plus un élève sorti de sa classe après le contrôle', async () => {
+      const s = await structure(ownerA, `Prof ${++counter}`);
+      const prof = await member(ownerA, 'TEACHER', [s.schoolId]);
+      await ownerA
+        .post(`/api/v1/school/classes/${s.classId}/teachers`)
+        .send({ memberId: prof.id })
+        .expect(201);
+      const { id, enrollmentId } = await enrolled(ownerA, s);
+      await prof.agent.get(`/api/v1/school/students/${id}`).expect(200);
+      const students = app.get(SchoolStudentsService);
+      const original = students.findStudent.bind(students);
+      const spy = jest
+        .spyOn(students, 'findStudent')
+        .mockImplementationOnce(async (ctx, target) => {
+          const seen = await original(ctx, target);
+          await ownerA
+            .post(`/api/v1/school/enrollments/${enrollmentId}/class`)
+            .send({ classId: s.otherClassId, reason: 'Essai' })
+            .expect(200);
+          return seen;
+        });
+      try {
+        await prof.agent.get(`/api/v1/school/students/${id}`).expect(404);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
     it('S2-03 : un transfert survenu après le contrôle bloque le rattachement à ce dossier', async () => {
       const s = await structure(ownerA, `Rattache ${++counter}`);
       const staff = await member(ownerA, 'SECRETARY', [s.schoolId]);
@@ -1689,10 +1732,11 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
     it('S1-05 : l’activation reste identique dans les deux bases', async () => {
       const m = await member(ownerA, 'TEACHER', [a1.schoolId]);
       const url = `/api/v1/school/members/${m.id}`;
-      await Promise.all([
+      const results = await Promise.all([
         ownerA.patch(url).send({ isActive: false }),
         ownerA.patch(url).send({ isActive: true }),
       ]);
+      expect(results.map((r) => r.status)).toEqual([200, 200]);
       const row = await db.schoolMember.findUniqueOrThrow({ where: { id: m.id } });
       const accounts = await app.get(PrismaService).organizationMembership.findMany({
         where: { userId: row.userId, role: 'PRODUCT_USER' },

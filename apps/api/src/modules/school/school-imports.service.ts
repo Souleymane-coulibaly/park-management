@@ -482,38 +482,40 @@ export class SchoolImportsService {
 
   async exportStudents(ctx: SchoolContext, q: ExportQueryDto) {
     await this.school.assertSchool(ctx, q.schoolId);
-    const students = await this.db.schoolStudent.findMany({
-      where: {
-        organizationId: ctx.organizationId,
-        schoolId: q.schoolId,
-        ...(q.classId
-          ? { enrollments: { some: { classId: q.classId, status: 'VALIDATED' } } }
-          : {}),
-      },
-      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
-      select: {
-        matricule: true,
-        lastName: true,
-        firstName: true,
-        lastNameAr: true,
-        firstNameAr: true,
-        birthDate: true,
-        status: true,
-        enrollments: {
-          where: {
-            status: { in: ['DRAFT', 'PENDING', 'VALIDATED'] },
-            year: { status: { not: 'CLOSED' } },
-          },
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-          select: {
-            status: true,
-            level: { select: { name: true } },
-            class: { select: { name: true } },
+    const students = await this.students.snapshot((tx) =>
+      tx.schoolStudent.findMany({
+        where: {
+          organizationId: ctx.organizationId,
+          schoolId: q.schoolId,
+          ...(q.classId
+            ? { enrollments: { some: { classId: q.classId, status: 'VALIDATED' } } }
+            : {}),
+        },
+        orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
+        select: {
+          matricule: true,
+          lastName: true,
+          firstName: true,
+          lastNameAr: true,
+          firstNameAr: true,
+          birthDate: true,
+          status: true,
+          enrollments: {
+            where: {
+              status: { in: ['DRAFT', 'PENDING', 'VALIDATED'] },
+              year: { status: { not: 'CLOSED' } },
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+            select: {
+              status: true,
+              level: { select: { name: true } },
+              class: { select: { name: true } },
+            },
           },
         },
-      },
-    });
+      }),
+    );
     const table: TableExport = {
       headers: [
         'Matricule',
@@ -552,16 +554,18 @@ export class SchoolImportsService {
 
   async exportGuardians(ctx: SchoolContext, q: ExportQueryDto) {
     await this.school.assertSchool(ctx, q.schoolId);
-    const links = await this.db.schoolStudentGuardian.findMany({
-      where: { organizationId: ctx.organizationId, student: { schoolId: q.schoolId } },
-      orderBy: [{ student: { lastName: 'asc' } }],
-      select: {
-        relation: true,
-        isPrimary: true,
-        student: { select: { matricule: true } },
-        guardian: { select: { lastName: true, firstName: true, phone: true, email: true } },
-      },
-    });
+    const links = await this.students.snapshot((tx) =>
+      tx.schoolStudentGuardian.findMany({
+        where: { organizationId: ctx.organizationId, student: { schoolId: q.schoolId } },
+        orderBy: [{ student: { lastName: 'asc' } }],
+        select: {
+          relation: true,
+          isPrimary: true,
+          student: { select: { matricule: true } },
+          guardian: { select: { lastName: true, firstName: true, phone: true, email: true } },
+        },
+      }),
+    );
     const table: TableExport = {
       headers: ['Matricule', 'Nom', 'Prénom', 'Téléphone', 'E-mail', 'Lien', 'Principal'],
       rows: links.map((l) => [

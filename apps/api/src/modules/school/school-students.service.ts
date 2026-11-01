@@ -379,12 +379,14 @@ export class SchoolStudentsService {
   async get(ctx: SchoolContext, id: string) {
     const full = hasSchoolPermission(ctx.role, 'school.students.read_full');
     await this.findStudent(ctx, id);
+    const own = await this.ownClasses(ctx);
     const student = await this.snapshot((tx) =>
       tx.schoolStudent.findFirst({
         where: {
           id,
           organizationId: ctx.organizationId,
           ...(ctx.schoolIds ? { schoolId: { in: ctx.schoolIds } } : {}),
+          ...this.ownClassesFilter(own),
         },
         select: full ? FULL_SELECT : LIMITED_SELECT,
       }),
@@ -393,7 +395,7 @@ export class SchoolStudentsService {
     if (full) {
       await this.school.log(ctx, 'school.student_viewed', 'SchoolStudent', id, {});
     }
-    return hideOtherClass(flatten(student), await this.ownClasses(ctx));
+    return hideOtherClass(flatten(student), own);
   }
 
   /** Une modification garde le matricule : sa correction a sa propre route, motivée et journalisée. */
