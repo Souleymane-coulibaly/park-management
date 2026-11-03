@@ -283,7 +283,9 @@ export class SchoolService {
   /**
    * Publie au journal Suite les décisions en attente. Ne lève jamais : la décision reste en attente et sera
    * reprise. Une ligne verrouillée n'est traitée que par un seul appel ; si le marquage a échoué après une
-   * publication, `decisionId` évite le doublon.
+   * publication, `decisionId` évite le doublon dans le cas courant. Réserve S2-PUB-01 assumée : si la
+   * transaction School expire pendant une insertion Suite, deux entrées peuvent porter le même
+   * `decisionId` ; toute restitution doit donc dédoublonner sur ce champ.
    */
   async publishDecisions(organizationId: string): Promise<void> {
     try {

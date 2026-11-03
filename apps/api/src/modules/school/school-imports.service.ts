@@ -509,12 +509,17 @@ export class SchoolImportsService {
     return this.exportSlot(() => this.buildStudentsExport(ctx, q));
   }
 
-  private async buildStudentsExport(ctx: SchoolContext, q: ExportQueryDto) {
-    const where: Prisma.SchoolStudentWhereInput = {
+  /** Élèves exportés : établissement demandé, restreint à une classe si elle est précisée. */
+  private exportedStudents(ctx: SchoolContext, q: ExportQueryDto): Prisma.SchoolStudentWhereInput {
+    return {
       organizationId: ctx.organizationId,
       schoolId: q.schoolId,
       ...(q.classId ? { enrollments: { some: { classId: q.classId, status: 'VALIDATED' } } } : {}),
     };
+  }
+
+  private async buildStudentsExport(ctx: SchoolContext, q: ExportQueryDto) {
+    const where = this.exportedStudents(ctx, q);
     const students = await this.students.snapshot(async (tx) => {
       this.assertExportSize(await tx.schoolStudent.count({ where }));
       return tx.schoolStudent.findMany({
@@ -588,7 +593,7 @@ export class SchoolImportsService {
   private async buildGuardiansExport(ctx: SchoolContext, q: ExportQueryDto) {
     const where: Prisma.SchoolStudentGuardianWhereInput = {
       organizationId: ctx.organizationId,
-      student: { schoolId: q.schoolId },
+      student: this.exportedStudents(ctx, q),
     };
     const links = await this.students.snapshot(async (tx) => {
       this.assertExportSize(await tx.schoolStudentGuardian.count({ where }));
@@ -617,8 +622,9 @@ export class SchoolImportsService {
     };
     await this.school.log(ctx, 'school.guardians_exported', 'School', q.schoolId, {
       rows: table.rows.length,
+      ...(q.classId ? { classId: q.classId } : {}),
     });
-    return this.file(table, q.format, 'responsables');
+    return this.file(table, q.format, q.classId ? 'responsables-de-classe' : 'responsables');
   }
 
   /** Plafond de lignes, modifiable par les tests seulement pour éviter d'en créer des milliers. */

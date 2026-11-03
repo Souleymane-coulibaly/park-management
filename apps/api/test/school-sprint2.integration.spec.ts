@@ -1374,14 +1374,25 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
         expect(Reflect.getMetadata('exportRoute', route)).toBe(true);
       }
       const s = await structure(ownerA, `Plafond ${++counter}`);
-      await student(ownerA, s.schoolId).expect(201);
       const imports = app.get(SchoolImportsService) as unknown as {
         exportMaxRows: number;
         exportsRunning: number;
       };
-      const before = await prisma.auditLog.count({ where: { targetId: s.schoolId } });
       const max = imports.exportMaxRows;
       imports.exportMaxRows = 0;
+      try {
+        // Un export vide ne dépasse aucun plafond.
+        for (const kind of ['students', 'guardians']) {
+          await ownerA.get(`/api/v1/school/exports/${kind}?schoolId=${s.schoolId}`).expect(200);
+        }
+      } finally {
+        imports.exportMaxRows = max;
+      }
+      // Un élève avec son responsable dans chacune des deux classes.
+      await enrolled(ownerA, s);
+      await enrolled(ownerA, s, s.otherClassId);
+      const before = await prisma.auditLog.count({ where: { targetId: s.schoolId } });
+      imports.exportMaxRows = 1;
       try {
         for (const kind of ['students', 'guardians']) {
           const res = await ownerA
@@ -1389,9 +1400,18 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
             .expect(422);
           expect(res.body.code).toBe('EXPORT_TOO_LARGE');
         }
+        expect(await prisma.auditLog.count({ where: { targetId: s.schoolId } })).toBe(before);
+        // S2-EXP-02 : le fractionnement conseillé par le refus fonctionne aussi pour les responsables.
+        for (const kind of ['students', 'guardians']) {
+          const res = await ownerA
+            .get(`/api/v1/school/exports/${kind}?schoolId=${s.schoolId}&classId=${s.classId}`)
+            .expect(200);
+          expect(res.text.trim().split('\r\n')).toHaveLength(2);
+        }
       } finally {
         imports.exportMaxRows = max;
       }
+      const afterSplit = await prisma.auditLog.count({ where: { targetId: s.schoolId } });
       imports.exportsRunning = 2;
       try {
         const busy = await ownerA
@@ -1402,7 +1422,7 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
         imports.exportsRunning = 0;
       }
       // Refusé avant tout fichier : aucun export n'est journalisé.
-      expect(await prisma.auditLog.count({ where: { targetId: s.schoolId } })).toBe(before);
+      expect(await prisma.auditLog.count({ where: { targetId: s.schoolId } })).toBe(afterSplit);
       await ownerA.get(`/api/v1/school/exports/students?schoolId=${s.schoolId}`).expect(200);
     });
   });

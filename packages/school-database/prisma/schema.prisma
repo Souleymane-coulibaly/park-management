@@ -181,7 +181,8 @@ model SchoolMember {
 }
 
 /// Décision d'accès, écrite dans la transaction qui l'applique, puis publiée au journal Ocall Suite. Une
-/// panne du journal ne perd donc aucune trace : la publication reprend, sans doublon.
+/// panne du journal ne perd donc aucune trace : la publication reprend. Le journal peut, rarement, porter
+/// deux entrées pour un même `decisionId` (réserve S2-PUB-01) : dédoublonner sur ce champ.
 model SchoolAccessDecision {
   id             String    @id @default(uuid()) @db.Uuid
   organizationId String    @db.Uuid

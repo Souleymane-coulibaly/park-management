@@ -157,7 +157,8 @@ la même année, deux affectations ouvertes la même année et deux responsables
 - **Export** : matricule, noms, naissance, niveau, classe et statuts. Jamais les adresses, observations ni
   besoins particuliers. Les contacts des responsables ont leur propre export. Le fichier est construit en
   mémoire, donc borné : limiteur dédié (30 exports par 10 minutes et par IP), 20 000 lignes au plus
-  (`EXPORT_TOO_LARGE`, exporter par classe), deux exports simultanés par instance (`EXPORT_BUSY`).
+  (`EXPORT_TOO_LARGE`, exporter par classe : `classId` filtre les deux exports), deux exports simultanés
+  par instance (`EXPORT_BUSY`).
 
 ### Droits
 
