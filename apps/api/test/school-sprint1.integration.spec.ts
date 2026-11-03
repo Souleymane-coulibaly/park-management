@@ -24,7 +24,10 @@ import {
  * Ocall School, Sprint 1 : contrats, isolation, rôles, lecture seule, et aucune incidence sur Ocall Park.
  * Exige deux bases de test distinctes : TEST_DATABASE_URL et TEST_SCHOOL_DATABASE_URL.
  */
-const suite = process.env.TEST_SCHOOL_DATABASE_URL ? describe : describe.skip;
+const suite =
+  (process.env.SCHOOL_TEST_DATABASE_URL ?? process.env.TEST_SCHOOL_DATABASE_URL)
+    ? describe
+    : describe.skip;
 
 const TERMS = { startsOn: '2026-01-01', endsOn: '2099-12-31' };
 const ARABIC = 'مدرسة النور';

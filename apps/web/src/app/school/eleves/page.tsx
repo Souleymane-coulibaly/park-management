@@ -9,6 +9,7 @@ import {
 } from '@ocall/shared';
 import { SchoolPage, type SchoolPageApi } from '@/components/school/school-page';
 import {
+  Pager,
   StudentName,
   type StudentRow,
   StudentStatusBadge,
@@ -16,7 +17,6 @@ import {
   useLevels,
   useYears,
 } from '@/components/school/school-students';
-import { Button } from '@/components/ui/button';
 import { Card, CardBody } from '@/components/ui/card';
 import { InputField, SelectField } from '@/components/ui/field';
 import { ErrorState, LoadingState } from '@/components/ui/states';
@@ -191,29 +191,13 @@ function Students({ api, schoolId }: { api: SchoolPageApi; schoolId: string }) {
               </li>
             ))}
           </ul>
-          <div className="flex items-center justify-between gap-3 border-t border-line/70 px-4 py-3 text-sm">
-            <span className="text-muted">
-              {students.data.total} élève{students.data.total > 1 ? 's' : ''}
-            </span>
-            <span className="flex gap-2">
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={page <= 1}
-                onClick={() => setPage(page - 1)}
-              >
-                Précédent
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={page * students.data.pageSize >= students.data.total}
-                onClick={() => setPage(page + 1)}
-              >
-                Suivant
-              </Button>
-            </span>
-          </div>
+          <Pager
+            total={students.data.total}
+            page={page}
+            pageSize={students.data.pageSize}
+            label={(n) => `${n} élève${n > 1 ? 's' : ''}`}
+            onPage={setPage}
+          />
         </Card>
       )}
     </>

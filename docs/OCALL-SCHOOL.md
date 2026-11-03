@@ -112,7 +112,8 @@ pas touché et aucune donnée n'est supprimée.
 TEST_DATABASE_URL=… TEST_SCHOOL_DATABASE_URL=… pnpm --filter @ocall/api exec jest --runInBand school-sprint1
 ```
 
-Une base School distante doit porter le marqueur de test (`pnpm db:school:mark-test`).
+Une base School distante doit porter le marqueur de test (`pnpm db:school:mark-test`). La variable est
+`SCHOOL_TEST_DATABASE_URL`. Le workflow manuel `School Neon test` lit le secret GitHub du même nom.
 
 ## 8. Sprint 2 : dossiers élèves
 
@@ -150,8 +151,13 @@ la même année, deux affectations ouvertes la même année et deux responsables
   journalisé. Une suppression retire le fichier et garde la trace.
 - **Import** : CSV ou XLSX, 1 000 lignes, 100 colonnes, 50 Mo décompressés réels, analyse sans écriture, puis une transaction par ligne. Un second
   envoi ne recrée rien. Le fichier n'est pas conservé et le rapport ne contient aucune donnée personnelle.
+  Si des colonnes obligatoires ne sont pas reconnues, l'analyse renvoie les en-têtes et les colonnes
+  manquantes sans lire les lignes ; l'écran les fait associer, puis relance l'analyse. L'enregistrement
+  refuse toujours une correspondance incomplète.
 - **Export** : matricule, noms, naissance, niveau, classe et statuts. Jamais les adresses, observations ni
-  besoins particuliers. Les contacts des responsables ont leur propre export.
+  besoins particuliers. Les contacts des responsables ont leur propre export. Le fichier est construit en
+  mémoire, donc borné : limiteur dédié (30 exports par 10 minutes et par IP), 20 000 lignes au plus
+  (`EXPORT_TOO_LARGE`, exporter par classe), deux exports simultanés par instance (`EXPORT_BUSY`).
 
 ### Droits
 
@@ -207,7 +213,13 @@ propriétaire de l'organisation. Le tableau part de deux bases à l'état préc�
 | Désactivation                               | Fermé  | Ouvert | School refusé aussitôt                      |
 | Réactivation, avec ou sans restriction      | Ouvert | Fermé  | Connexion refusée, nouveaux droits en place |
 
-Une panne de School avant sa validation ne change rien. L'administrateur reçoit une erreur et rejoue la
+Chaque décision d'accès (membre, affectation d'enseignant) est écrite dans la transaction School qui l'applique
+(`SchoolAccessDecision`, migration `20261105000000_decisions_acces`), puis publiée au journal Suite. Si le
+journal est indisponible, la décision reste en attente et la publication reprend à l'opération suivante, sans
+doublon sauf cas extrême : une transaction School annulée pendant l'écriture dans Suite peut produire deux entrées
+de journal portant le même `decisionId`. Cette réserve se lève par une contrainte d'unicité dans la base Suite,
+non ajoutée tant qu'aucune migration côté Ocall Park n'est autorisée. Les changements d'année suivent le même
+chemin. Une panne de School avant sa validation ne change rien. L'administrateur reçoit une erreur et rejoue la
 décision. Une demande d'activation d'un membre partagé, même à valeur égale, est réservée à qui couvre tous ses
 établissements. Reste à livrer au Sprint 3 : reprise automatique, sans intervention de l'administrateur.
 

@@ -4,7 +4,44 @@ import type { ReactNode } from 'react';
 import type { SchoolEnrollmentStatus, SchoolStudentStatus, SchoolYearStatus } from '@ocall/shared';
 import { SCHOOL_STUDENT_STATUS_LABELS } from '@ocall/shared';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { useApi } from '@/lib/use-api';
+
+/** Pied de liste paginée : total, puis pages précédente et suivante. */
+export function Pager({
+  total,
+  page,
+  pageSize,
+  label,
+  onPage,
+}: {
+  total: number;
+  page: number;
+  pageSize: number;
+  label: (total: number) => string;
+  onPage: (page: number) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 border-t border-line/70 px-4 py-3 text-sm">
+      <span className="text-muted" data-testid="pager-total">
+        {label(total)}
+      </span>
+      <span className="flex gap-2">
+        <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => onPage(page - 1)}>
+          Précédent
+        </Button>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={page * pageSize >= total}
+          onClick={() => onPage(page + 1)}
+        >
+          Suivant
+        </Button>
+      </span>
+    </div>
+  );
+}
 
 export interface NamedView {
   id: string;

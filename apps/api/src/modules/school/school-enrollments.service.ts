@@ -626,13 +626,25 @@ export class SchoolEnrollmentsService {
     }
     await this.school.unique(
       () =>
-        this.db.schoolClassTeacher.create({
-          data: { organizationId: ctx.organizationId, classId, memberId },
+        this.db.$transaction(async (tx) => {
+          await tx.schoolClassTeacher.create({
+            data: { organizationId: ctx.organizationId, classId, memberId },
+          });
+          await this.school.recordDecision(
+            tx,
+            ctx,
+            'school.class_teacher_added',
+            'SchoolClass',
+            classId,
+            {
+              memberId,
+            },
+          );
         }),
       'TEACHER_ALREADY_ASSIGNED',
       'Cette classe est déjà confiée à cet enseignant.',
     );
-    await this.school.log(ctx, 'school.class_teacher_added', 'SchoolClass', classId, { memberId });
+    await this.school.publishDecisions(ctx.organizationId);
     return { classId, memberId };
   }
 
@@ -643,12 +655,22 @@ export class SchoolEnrollmentsService {
     });
     if (!cls) throw new NotFoundException(NOT_FOUND);
     await this.school.assertSchool(ctx, cls.year.schoolId);
-    await this.db.schoolClassTeacher.deleteMany({
-      where: { organizationId: ctx.organizationId, classId, memberId },
+    await this.db.$transaction(async (tx) => {
+      await tx.schoolClassTeacher.deleteMany({
+        where: { organizationId: ctx.organizationId, classId, memberId },
+      });
+      await this.school.recordDecision(
+        tx,
+        ctx,
+        'school.class_teacher_removed',
+        'SchoolClass',
+        classId,
+        {
+          memberId,
+        },
+      );
     });
-    await this.school.log(ctx, 'school.class_teacher_removed', 'SchoolClass', classId, {
-      memberId,
-    });
+    await this.school.publishDecisions(ctx.organizationId);
   }
 
   // ─── Outils ───

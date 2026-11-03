@@ -4,6 +4,8 @@ import type { INestApplication } from '@nestjs/common';
 import { AuditService } from '../src/common/audit/audit.service';
 import { SchoolEnrollmentsService } from '../src/modules/school/school-enrollments.service';
 import { SchoolGuardiansService } from '../src/modules/school/school-guardians.service';
+import { SchoolImportsService } from '../src/modules/school/school-imports.service';
+import { SchoolStudentsController } from '../src/modules/school/school-students.controller';
 import { SchoolPrismaService } from '../src/modules/school/school-prisma.service';
 import { SchoolMembersService } from '../src/modules/school/school-members.service';
 import { SchoolStudentsService } from '../src/modules/school/school-students.service';
@@ -28,7 +30,10 @@ import {
  * Ocall School, Sprint 2 : dossiers élèves, matricules, inscriptions, responsables, documents, imports.
  * Données entièrement fictives. Exige TEST_DATABASE_URL et TEST_SCHOOL_DATABASE_URL.
  */
-const suite = process.env.TEST_SCHOOL_DATABASE_URL ? describe : describe.skip;
+const suite =
+  (process.env.SCHOOL_TEST_DATABASE_URL ?? process.env.TEST_SCHOOL_DATABASE_URL)
+    ? describe
+    : describe.skip;
 
 const TERMS = { startsOn: '2026-01-01', endsOn: '2099-12-31' };
 const AR_LAST = 'الفقيرة';
@@ -237,6 +242,8 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
     await db.schoolClass.deleteMany({ where });
     await db.level.deleteMany({ where });
     await db.cycle.deleteMany({ where });
+    await db.academicPeriod.deleteMany({ where });
+    await db.schoolAccessDecision.deleteMany({ where });
     await db.schoolYear.deleteMany({ where });
     await db.schoolMember.deleteMany({ where });
     await db.school.deleteMany({ where });
@@ -1241,6 +1248,37 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       expect(res.body.code).toBe('IMPORT_FILE_INVALID');
     });
 
+    it('S2-IMP-01 : des en-têtes inconnus restent configurables, sans rien enregistrer', async () => {
+      const s = await structure(ownerA, `Entetes ${++counter}`);
+      const csv = Buffer.from('Family;Given;DOB\nSangaré;Oumou;05/06/2017\n');
+      const fields = { schoolId: s.schoolId };
+      const preview = await upload(
+        ownerA,
+        '/api/v1/school/imports/preview',
+        csv,
+        'e.csv',
+        fields,
+      ).expect(200);
+      expect(preview.body).toMatchObject({
+        headers: ['Family', 'Given', 'DOB'],
+        missing: ['lastName', 'firstName', 'birthDate'],
+        total: 1,
+        valid: 0,
+      });
+      // L'enregistrement, lui, exige toujours une correspondance complète.
+      const refused = await upload(ownerA, '/api/v1/school/imports', csv, 'e.csv', fields).expect(
+        400,
+      );
+      expect(refused.body.code).toBe('IMPORT_MAPPING_INCOMPLETE');
+      const mapping = JSON.stringify({ lastName: 'Family', firstName: 'Given', birthDate: 'DOB' });
+      const mapped = await upload(ownerA, '/api/v1/school/imports/preview', csv, 'e.csv', {
+        ...fields,
+        mapping,
+      }).expect(200);
+      expect(mapped.body).toMatchObject({ missing: [], valid: 1 });
+      expect(await db.schoolStudent.count({ where: { schoolId: s.schoolId } })).toBe(0);
+    });
+
     it('n’importe pas pour une école hors périmètre ou un autre client', async () => {
       const csv = Buffer.from(`${HEADER}\n${csvLine(3)}\n`);
       await upload(secretary, '/api/v1/school/imports', csv, 'e.csv', {
@@ -1328,6 +1366,44 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
         .get(`/api/v1/school/exports/students?schoolId=${s.schoolId}&classId=${s.classId}`)
         .expect(200);
       expect(res.text.trim().split('\r\n')).toHaveLength(2);
+    });
+
+    it('S2-EXP-01 : exports soumis au limiteur dédié, au plafond de lignes et aux places', async () => {
+      const proto = SchoolStudentsController.prototype;
+      for (const route of [proto.exportStudents, proto.exportGuardians]) {
+        expect(Reflect.getMetadata('exportRoute', route)).toBe(true);
+      }
+      const s = await structure(ownerA, `Plafond ${++counter}`);
+      await student(ownerA, s.schoolId).expect(201);
+      const imports = app.get(SchoolImportsService) as unknown as {
+        exportMaxRows: number;
+        exportsRunning: number;
+      };
+      const before = await prisma.auditLog.count({ where: { targetId: s.schoolId } });
+      const max = imports.exportMaxRows;
+      imports.exportMaxRows = 0;
+      try {
+        for (const kind of ['students', 'guardians']) {
+          const res = await ownerA
+            .get(`/api/v1/school/exports/${kind}?schoolId=${s.schoolId}&format=xlsx`)
+            .expect(422);
+          expect(res.body.code).toBe('EXPORT_TOO_LARGE');
+        }
+      } finally {
+        imports.exportMaxRows = max;
+      }
+      imports.exportsRunning = 2;
+      try {
+        const busy = await ownerA
+          .get(`/api/v1/school/exports/students?schoolId=${s.schoolId}`)
+          .expect(429);
+        expect(busy.body.code).toBe('EXPORT_BUSY');
+      } finally {
+        imports.exportsRunning = 0;
+      }
+      // Refusé avant tout fichier : aucun export n'est journalisé.
+      expect(await prisma.auditLog.count({ where: { targetId: s.schoolId } })).toBe(before);
+      await ownerA.get(`/api/v1/school/exports/students?schoolId=${s.schoolId}`).expect(200);
     });
   });
 
@@ -1476,6 +1552,157 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
     });
   });
 
+  describe('S1-06 : les décisions d’accès restent tracées malgré une panne du journal', () => {
+    const logged = (action: string, targetId: string) =>
+      app.get(PrismaService).auditLog.findMany({ where: { action, targetId } });
+    const failJournal = (action: string) => {
+      const audit = app.get(AuditService);
+      const original = audit.record.bind(audit);
+      return jest.spyOn(audit, 'record').mockImplementation((entry, tx) => {
+        if (entry.action === action) return Promise.reject(new Error('journal indisponible'));
+        return original(entry, tx);
+      });
+    };
+
+    it('membre : la décision survit à la panne, puis est publiée une seule fois avec son acteur', async () => {
+      const m = await member(ownerA, 'SECRETARY', [a1.schoolId]);
+      const spy = failJournal('school.member_updated');
+      try {
+        await ownerA
+          .patch(`/api/v1/school/members/${m.id}`)
+          .send({ isActive: false, role: 'TEACHER' })
+          .expect(200);
+      } finally {
+        spy.mockRestore();
+      }
+      expect(await logged('school.member_updated', m.id)).toHaveLength(0);
+      const [pending] = await db.schoolAccessDecision.findMany({
+        where: { targetId: m.id, publishedAt: null },
+      });
+      expect(pending!.metadata).toMatchObject({ isActive: false, role: 'TEACHER' });
+
+      await ownerA.get('/api/v1/school/members').expect(200);
+      await ownerA.get('/api/v1/school/members').expect(200);
+      const entries = await logged('school.member_updated', m.id);
+      expect(entries).toHaveLength(1);
+      expect(entries[0]!.metadata).toMatchObject({ decisionId: pending!.id, isActive: false });
+      expect(entries[0]!.actorUserId).toBe(pending!.actorUserId);
+      expect(
+        (await db.schoolAccessDecision.findUniqueOrThrow({ where: { id: pending!.id } }))
+          .publishedAt,
+      ).not.toBeNull();
+    });
+
+    it('une décision déjà publiée mais non marquée n’est pas journalisée deux fois', async () => {
+      const m = await member(ownerA, 'SECRETARY', [a1.schoolId]);
+      await ownerA.patch(`/api/v1/school/members/${m.id}`).send({ role: 'TEACHER' }).expect(200);
+      const decision = await db.schoolAccessDecision.findFirstOrThrow({
+        where: { targetId: m.id },
+      });
+      await db.schoolAccessDecision.update({
+        where: { id: decision.id },
+        data: { publishedAt: null },
+      });
+      await ownerA.get('/api/v1/school/members').expect(200);
+      expect(await logged('school.member_updated', m.id)).toHaveLength(1);
+    });
+
+    it('un échec de la transaction School n’enregistre ni le changement ni la décision', async () => {
+      const m = await member(ownerA, 'SECRETARY', [a1.schoolId]);
+      const spy = jest
+        .spyOn(app.get(SchoolService), 'recordDecision')
+        .mockRejectedValueOnce(new Error('School indisponible'));
+      try {
+        await ownerA.patch(`/api/v1/school/members/${m.id}`).send({ role: 'TEACHER' }).expect(500);
+      } finally {
+        spy.mockRestore();
+      }
+      const row = await db.schoolMember.findUniqueOrThrow({ where: { id: m.id } });
+      expect(row.role).toBe('SECRETARY');
+      expect(await db.schoolAccessDecision.count({ where: { targetId: m.id } })).toBe(0);
+    });
+
+    it('affectation d’un enseignant : ajout et retrait restent tracés malgré la panne', async () => {
+      const s = await structure(ownerA, `Trace ${++counter}`);
+      const prof = await member(ownerA, 'TEACHER', [s.schoolId]);
+      const url = `/api/v1/school/classes/${s.classId}/teachers`;
+      const spy = failJournal('school.class_teacher_added');
+      try {
+        await ownerA.post(url).send({ memberId: prof.id }).expect(201);
+      } finally {
+        spy.mockRestore();
+      }
+      expect(
+        await db.schoolAccessDecision.count({
+          where: { targetId: s.classId, action: 'school.class_teacher_added', publishedAt: null },
+        }),
+      ).toBe(1);
+      await ownerA.delete(`${url}/${prof.id}`).expect(204);
+      expect(await logged('school.class_teacher_added', s.classId)).toHaveLength(1);
+      expect(await logged('school.class_teacher_removed', s.classId)).toHaveLength(1);
+    });
+
+    it('une décision d’un client n’apparaît jamais dans le journal d’un autre', async () => {
+      const m = await member(ownerA, 'SECRETARY', [a1.schoolId]);
+      await ownerA.patch(`/api/v1/school/members/${m.id}`).send({ role: 'TEACHER' }).expect(200);
+      const [entry] = await logged('school.member_updated', m.id);
+      const [org] = await db.schoolAccessDecision.findMany({
+        where: { targetId: m.id },
+        select: { organizationId: true },
+      });
+      expect(entry!.organizationId).toBe(org!.organizationId);
+    });
+  });
+
+  describe('traçabilité du périmètre', () => {
+    it('une clôture d’année reste tracée malgré une panne du journal, avec son acteur', async () => {
+      const s = await structure(ownerA, `CloTrace ${++counter}`);
+      const audit = app.get(AuditService);
+      const original = audit.record.bind(audit);
+      const spy = jest.spyOn(audit, 'record').mockImplementation((entry, tx) => {
+        if (entry.action === 'school.year_status_changed') {
+          return Promise.reject(new Error('journal indisponible'));
+        }
+        return original(entry, tx);
+      });
+      try {
+        await ownerA
+          .post(`/api/v1/school/years/${s.yearId}/status`)
+          .send({ status: 'CLOSED' })
+          .expect(200);
+      } finally {
+        spy.mockRestore();
+      }
+      const pending = await db.schoolAccessDecision.findFirstOrThrow({
+        where: { targetId: s.yearId, publishedAt: null },
+      });
+      expect(pending.metadata).toMatchObject({ to: 'CLOSED' });
+      await ownerA.get('/api/v1/school/members').expect(200);
+      const entries = await app.get(PrismaService).auditLog.findMany({
+        where: { action: 'school.year_status_changed', targetId: s.yearId },
+      });
+      const closing = entries.filter((e) => (e.metadata as { to?: string }).to === 'CLOSED');
+      expect(closing).toHaveLength(1);
+      expect(closing[0]!.actorUserId).toBe(pending.actorUserId);
+    });
+
+    it('un changement de couverture conserve les établissements avant et après', async () => {
+      const c = await client(`scope${++counter}`);
+      const s = await structure(c.agent, `Couvert ${++counter}`);
+      await platform.agent
+        .patch(`/api/v1/platform/contracts/${c.contractId}`)
+        .send({ coveredSchoolIds: [s.schoolId] })
+        .expect(200);
+      const event = await app.get(PrismaService).suiteContractEvent.findFirstOrThrow({
+        where: { contractId: c.contractId, type: 'SCOPE_CHANGED' },
+      });
+      expect(JSON.parse(event.reason!)).toMatchObject({
+        fromSchoolIds: [],
+        toSchoolIds: [s.schoolId],
+      });
+    });
+  });
+
   describe('S1-05 : une panne entre les deux bases laisse toujours le compte fermé', () => {
     const syncService = () =>
       app.get(SchoolMembersService) as unknown as {
@@ -1594,6 +1821,58 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       expect(await suiteActive(m.id)).toEqual({ school: true, suite: true });
     });
 
+    it('après une réactivation interrompue, un directeur limité ne rouvre pas le compte partagé', async () => {
+      const director = await member(ownerA, 'SCHOOL_DIRECTOR', [a1.schoolId]);
+      const m = await member(ownerA, 'SECRETARY', [a1.schoolId, a2.schoolId]);
+      const url = `/api/v1/school/members/${m.id}`;
+      await ownerA.patch(url).send({ isActive: false }).expect(200);
+      const spy = failSuite();
+      try {
+        await ownerA.patch(url).send({ isActive: true }).expect(500);
+      } finally {
+        spy.mockRestore();
+      }
+      expect(await suiteActive(m.id)).toEqual({ school: true, suite: false });
+      const refused = await director.agent.patch(url).send({ isActive: true }).expect(403);
+      expect(refused.body.code).toBe('SCHOOL_MEMBER_SHARED');
+      expect(await suiteActive(m.id)).toEqual({ school: true, suite: false });
+    });
+
+    it('reprise avec restriction puis panne de School : Suite reste fermé, rien n’est rouvert', async () => {
+      const local = await structure(ownerA, `Panne ${++counter}`);
+      const m = await member(ownerA, 'SECRETARY', [local.schoolId, a2.schoolId]);
+      const url = `/api/v1/school/members/${m.id}`;
+      const spySuite = failSuite();
+      try {
+        await ownerA.patch(url).send({ isActive: false }).expect(500);
+        await ownerA.patch(url).send({ isActive: true }).expect(200);
+      } finally {
+        spySuite.mockRestore();
+      }
+      await app.get(PrismaService).organizationMembership.updateMany({
+        where: {
+          userId: (await db.schoolMember.findUniqueOrThrow({ where: { id: m.id } })).userId,
+        },
+        data: { isActive: false },
+      });
+      const spy = jest
+        .spyOn(app.get(SchoolService), 'recordDecision')
+        .mockRejectedValueOnce(new Error('School indisponible'));
+      try {
+        await ownerA
+          .patch(url)
+          .send({ isActive: true, role: 'TEACHER', schoolIds: [local.schoolId] })
+          .expect(500);
+      } finally {
+        spy.mockRestore();
+      }
+      expect(await suiteActive(m.id)).toEqual({ school: true, suite: false });
+      expect((await db.schoolMember.findUniqueOrThrow({ where: { id: m.id } })).role).toBe(
+        'SECRETARY',
+      );
+      expect((await login(app, m.loginId, PASSWORD)).status).not.toBe(200);
+    });
+
     it('une ligne School ne donne aucun accès à un compte qui n’est pas dédié à School', async () => {
       const m = await member(ownerA, 'SECRETARY', [a1.schoolId]);
       await m.agent.get('/api/v1/school/context').expect(200);
@@ -1607,31 +1886,52 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
   });
 
   // Exige plusieurs connexions réelles : ignoré sur PGlite, qui exécute tout en séquence.
-  const realDatabase = ![process.env.TEST_DATABASE_URL, process.env.TEST_SCHOOL_DATABASE_URL].some(
-    (url) => url?.includes('connection_limit=1'),
-  );
+  const realDatabase = ![
+    process.env.TEST_DATABASE_URL,
+    process.env.SCHOOL_TEST_DATABASE_URL ?? process.env.TEST_SCHOOL_DATABASE_URL,
+  ].some((url) => url?.includes('connection_limit=1'));
   (realDatabase ? describe : describe.skip)('S2-14 : entrelacements imposés', () => {
     // Une assertion en échec ne doit jamais laisser une opération en pause, verrous tenus.
     const cleanups: (() => void)[] = [];
     afterEach(async () => {
       for (const cleanup of cleanups.splice(0)) cleanup();
+      claimed.clear();
       await new Promise((resolve) => setTimeout(resolve, 200));
     });
     const started = <T>(request: PromiseLike<T>) => Promise.resolve(request);
-    /** Preuve par PostgreSQL : au moins `waiters` requêtes attendent un verrou, la nôtre non terminée. */
+    /** Connexion de l'opération en pause : son identifiant réel, lu dans sa transaction. */
+    let holder: number | null = null;
+    const backendPid = async (tx: { $queryRaw: PrismaService['$queryRaw'] }) => {
+      const [row] = await tx.$queryRaw<{ pid: number }[]>`SELECT pg_backend_pid() AS pid`;
+      return row!.pid;
+    };
+    /** Connexions bloquées déjà rattachées à une opération attendue de ce test. */
+    const claimed = new Set<number>();
+    /**
+     * Preuve par PostgreSQL : `pending` est la seule opération lancée depuis la précédente preuve, et
+     * exactement une nouvelle connexion, portant sur `table`, est bloquée par celle de l'opération en
+     * pause. Cette connexion est donc celle de `pending` : elle lui est rattachée, puis exclue des
+     * preuves suivantes. Lancer chaque opération attendue seulement après la preuve de la précédente.
+     */
     const isBlocked = async (
       pending: Promise<unknown>,
+      table: string,
       client: { $queryRaw: PrismaService['$queryRaw'] } = db as never,
-      waiters = 1,
     ) => {
       let done = false;
       void pending.then(() => (done = true));
+      const pattern = `%"${table}"%`;
       for (let i = 0; i < 100 && !done; i++) {
-        const [row] = await client.$queryRaw<{ n: number }[]>`
-          SELECT count(*)::int AS n FROM pg_stat_activity
-          WHERE datname = current_database() AND state = 'active'
-            AND cardinality(pg_blocking_pids(pid)) > 0`;
-        if (row!.n >= waiters) return !done;
+        const rows = await client.$queryRaw<{ pid: number }[]>`
+          SELECT w.pid FROM pg_stat_activity w
+          WHERE w.datname = current_database() AND w.state = 'active' AND w.query LIKE ${pattern}
+            AND ${holder}::int = ANY(pg_blocking_pids(w.pid))`;
+        const fresh = rows.map((r) => r.pid).filter((pid) => !claimed.has(pid));
+        if (fresh.length > 1) throw new Error('Plusieurs opérations attendues non rattachées.');
+        if (fresh.length === 1) {
+          claimed.add(fresh[0]!);
+          return !done;
+        }
         await new Promise((resolve) => setTimeout(resolve, 50));
       }
       return false;
@@ -1655,6 +1955,11 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
           const result = await original(...args);
           if (armed && when(...args)) {
             armed = false;
+            holder = await backendPid(
+              args.find(
+                (arg) => typeof arg === 'object' && arg !== null && '$queryRaw' in arg,
+              ) as never,
+            );
             reached();
             await gate;
           }
@@ -1692,6 +1997,7 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       const done = db.$transaction(async (tx) => {
         await tx.$queryRaw`SELECT id FROM "School" WHERE id = ${s.schoolId}::uuid FOR UPDATE`;
         await tx.schoolYear.update({ where: { id: s.yearId }, data: { status: 'CLOSED' } });
+        holder = await backendPid(tx as never);
         locked();
         await gate;
       });
@@ -1730,7 +2036,7 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
           .put(`/api/v1/school/student-settings?schoolId=${s.schoolId}`)
           .send({ ...settings, matriculeScope: 'GROUP' }),
       );
-      expect(await isBlocked(save)).toBe(true);
+      expect(await isBlocked(save, 'School')).toBe(true);
       pause.release();
       expect((await create).status).toBe(201);
       expect((await save).status).toBe(409);
@@ -1750,7 +2056,7 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       );
       await pause.at;
       const create = started(student(ownerA, s.schoolId));
-      expect(await isBlocked(create)).toBe(true);
+      expect(await isBlocked(create, 'School')).toBe(true);
       pause.release();
       expect((await save).status).toBe(200);
       const created = await create;
@@ -1777,7 +2083,7 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       const first = move(one.enrollmentId);
       await pause.at;
       const second = move(two.enrollmentId);
-      expect(await isBlocked(second)).toBe(true);
+      expect(await isBlocked(second, 'SchoolClass')).toBe(true);
       pause.release();
       expect((await first).status).toBe(200);
       const refused = await second;
@@ -1795,7 +2101,7 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       const promote = started(director.agent.patch(url).send({ role: 'SECRETARY' }));
       await pause.at;
       const extend = started(ownerA.patch(url).send({ schoolIds: [local.schoolId, a2.schoolId] }));
-      expect(await isBlocked(extend)).toBe(true);
+      expect(await isBlocked(extend, 'SchoolMember')).toBe(true);
       pause.release();
       expect((await promote).status).toBe(200);
       expect((await extend).status).toBe(200);
@@ -1816,7 +2122,7 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       );
       await pause.at;
       const closing = started(closeYear(s.yearId));
-      expect(await isBlocked(closing)).toBe(true);
+      expect(await isBlocked(closing, 'School')).toBe(true);
       pause.release();
       expect((await period).status).toBe(201);
       expect((await closing).status).toBe(200);
@@ -1837,13 +2143,14 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
           endsOn: '2026-12-20',
         }),
       );
+      // Chaque opération n'est lancée qu'une fois la précédente prouvée en attente.
+      expect(await isBlocked(period, 'School')).toBe(true);
       const validation = started(
         ownerA
           .post(`/api/v1/school/enrollments/${enrollmentId}/status`)
           .send({ status: 'VALIDATED' }),
       );
-      expect(await isBlocked(period)).toBe(true);
-      expect(await isBlocked(validation, db as never, 2)).toBe(true);
+      expect(await isBlocked(validation, 'School')).toBe(true);
       closure.commit();
       await closure.done;
       expect((await period).status).toBe(409);
@@ -1862,7 +2169,7 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       );
       await pause.at;
       const closing = started(closeYear(s.yearId));
-      expect(await isBlocked(closing)).toBe(true);
+      expect(await isBlocked(closing, 'School')).toBe(true);
       pause.release();
       expect((await validation).status).toBe(200);
       expect((await closing).status).toBe(200);
@@ -1890,7 +2197,7 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
           .post(`/api/v1/school/enrollments/${enrollmentId}/class`)
           .send({ classId: s.otherClassId, reason: 'Essai' }),
       );
-      expect(await isBlocked(moved)).toBe(true);
+      expect(await isBlocked(moved, 'SchoolStudent')).toBe(true);
       pause.release();
       expect((await validation).status).toBe(200);
       expect((await moved).status).toBe(200);
@@ -1912,7 +2219,7 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       const write = started(
         staff.agent.patch(`/api/v1/school/students/${id}`).send({ birthPlace: 'Gao' }),
       );
-      expect(await isBlocked(write)).toBe(true);
+      expect(await isBlocked(write, 'SchoolStudent')).toBe(true);
       pause.release();
       expect((await move).status).toBe(200);
       expect((await write).status).toBe(404);
@@ -1931,7 +2238,7 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       const write = started(
         staff.agent.patch(`/api/v1/school/guardians/${link.guardianId}`).send({ firstName: 'X' }),
       );
-      expect(await isBlocked(write)).toBe(true);
+      expect(await isBlocked(write, 'SchoolGuardian')).toBe(true);
       pause.release();
       expect((await move).status).toBe(200);
       expect((await write).status).toBe(404);
@@ -1949,7 +2256,7 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       );
       await pause.at;
       const move = started(transfer(ownerA, id));
-      expect(await isBlocked(move)).toBe(true);
+      expect(await isBlocked(move, 'SchoolGuardian')).toBe(true);
       pause.release();
       expect((await write).status).toBe(200);
       expect((await move).status).toBe(200);
@@ -1966,7 +2273,7 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       const first = send();
       await pause.at;
       const second = send();
-      expect(await isBlocked(second)).toBe(true);
+      expect(await isBlocked(second, 'SchoolStudent')).toBe(true);
       pause.release();
       expect((await first).status).toBe(201);
       expect((await second).status).toBe(409);
@@ -1985,7 +2292,7 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       const a = started(ownerA.patch(url).send({ lastName: `Finale${RUN}` }));
       await pause.at;
       const b = started(ownerA.patch(url).send({ firstName: 'Autre' }));
-      expect(await isBlocked(b)).toBe(true);
+      expect(await isBlocked(b, 'SchoolStudent')).toBe(true);
       pause.release();
       expect((await a).status).toBe(200);
       expect((await b).status).toBe(200);
@@ -2011,7 +2318,7 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
           .post(`/api/v1/platform/contracts/${c.contractId}/status`)
           .send({ status: 'TERMINATED', reason: 'Résiliation' }),
       );
-      expect(await isBlocked(stop, app.get(PrismaService))).toBe(true);
+      expect(await isBlocked(stop, 'SuiteContract', app.get(PrismaService))).toBe(true);
       pause.release();
       expect((await renew).status).toBe(200);
       expect((await stop).status).toBe(200);

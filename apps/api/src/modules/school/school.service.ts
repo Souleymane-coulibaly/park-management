@@ -3,6 +3,7 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { Prisma } from '@ocall/school-database';
 import {
@@ -35,6 +36,8 @@ const toDate = (day: string) => new Date(`${day}T00:00:00.000Z`);
 /** Tout accès passe par le client et le périmètre du contexte ; aucune suppression n'est proposée. */
 @Injectable()
 export class SchoolService {
+  private readonly logger = new Logger(SchoolService.name);
+
   constructor(
     private readonly db: SchoolPrismaService,
     private readonly core: PrismaService,
@@ -246,13 +249,78 @@ export class SchoolService {
           data: { status: 'REGISTERED' },
         });
       }
+      await this.recordDecision(tx, ctx, 'school.year_status_changed', 'SchoolYear', id, {
+        from: year.status,
+        to: dto.status,
+      });
       return tx.schoolYear.findUniqueOrThrow({ where: { id } });
     });
-    await this.log(ctx, 'school.year_status_changed', 'SchoolYear', id, {
-      from: year.status,
-      to: dto.status,
-    });
+    await this.publishDecisions(ctx.organizationId);
     return updated;
+  }
+
+  /** À appeler dans la transaction qui applique la décision : les deux réussissent ou échouent ensemble. */
+  async recordDecision(
+    tx: Prisma.TransactionClient,
+    ctx: SchoolContext,
+    action: string,
+    targetType: string,
+    targetId: string,
+    metadata: Record<string, string | number | boolean | string[] | null>,
+  ): Promise<void> {
+    await tx.schoolAccessDecision.create({
+      data: {
+        organizationId: ctx.organizationId,
+        actorUserId: ctx.userId,
+        action,
+        targetType,
+        targetId,
+        metadata,
+      },
+    });
+  }
+
+  /**
+   * Publie au journal Suite les décisions en attente. Ne lève jamais : la décision reste en attente et sera
+   * reprise. Une ligne verrouillée n'est traitée que par un seul appel ; si le marquage a échoué après une
+   * publication, `decisionId` évite le doublon.
+   */
+  async publishDecisions(organizationId: string): Promise<void> {
+    try {
+      await this.db.$transaction(async (tx) => {
+        const rows = await tx.$queryRaw<{ id: string }[]>`
+          SELECT id FROM "SchoolAccessDecision"
+          WHERE "organizationId" = ${organizationId}::uuid AND "publishedAt" IS NULL
+          ORDER BY "createdAt" LIMIT 100 FOR UPDATE SKIP LOCKED`;
+        for (const { id } of rows) {
+          const decision = await tx.schoolAccessDecision.findUniqueOrThrow({ where: { id } });
+          const known = await this.core.auditLog.count({
+            where: {
+              organizationId,
+              action: decision.action,
+              targetId: decision.targetId,
+              metadata: { path: ['decisionId'], equals: id },
+            },
+          });
+          if (known === 0) {
+            await this.audit.record({
+              organizationId,
+              actorUserId: decision.actorUserId,
+              action: decision.action,
+              targetType: decision.targetType,
+              targetId: decision.targetId,
+              metadata: { ...(decision.metadata as Record<string, never>), decisionId: id },
+            });
+          }
+          await tx.schoolAccessDecision.update({
+            where: { id },
+            data: { publishedAt: new Date() },
+          });
+        }
+      });
+    } catch (error) {
+      this.logger.warn(`Décisions d'accès en attente de publication : ${(error as Error).name}`);
+    }
   }
 
   /**

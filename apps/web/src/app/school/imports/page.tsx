@@ -26,6 +26,8 @@ interface Preview {
   format: 'CSV' | 'XLSX';
   headers: string[];
   mapping: SchoolImportMapping;
+  /** Colonnes obligatoires sans correspondance : à associer avant toute analyse des lignes. */
+  missing: SchoolImportField[];
   total: number;
   valid: number;
   duplicates: Issue[];
@@ -219,10 +221,20 @@ function Import({ page, schoolId }: { page: SchoolPageApi; schoolId: string }) {
           <Card>
             <CardBody>
               <h2 className="mb-2 font-semibold">Prévisualisation</h2>
-              <p className="text-sm" data-testid="import-summary">
-                {preview.total} ligne(s) : {preview.valid} à importer, {preview.duplicates.length}{' '}
-                doublon(s), {preview.errors.length} en erreur.
-              </p>
+              {preview.missing.length > 0 ? (
+                <div data-testid="import-missing">
+                  <Alert tone="info" title="Colonnes à associer">
+                    {preview.total} ligne(s) lue(s). Choisissez ci-dessus la colonne de :{' '}
+                    {preview.missing.map((f) => SCHOOL_IMPORT_FIELD_LABELS[f]).join(', ')}, puis
+                    analysez de nouveau.
+                  </Alert>
+                </div>
+              ) : (
+                <p className="text-sm" data-testid="import-summary">
+                  {preview.total} ligne(s) : {preview.valid} à importer, {preview.duplicates.length}{' '}
+                  doublon(s), {preview.errors.length} en erreur.
+                </p>
+              )}
               {preview.sample.length > 0 && (
                 <ul className="mt-3 space-y-1 text-sm">
                   {preview.sample.map((s) => (

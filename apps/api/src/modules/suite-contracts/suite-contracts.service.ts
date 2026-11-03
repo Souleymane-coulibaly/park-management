@@ -273,8 +273,15 @@ export class SuiteContractsService {
           limits: dto.limits ? ({ ...dto.limits } as Prisma.InputJsonObject) : undefined,
         },
       });
+      // Une liste vide signifie « tous les établissements » : la valeur exacte reste dans le motif.
       await this.event(tx, auth, id, current.organizationId, 'SCOPE_CHANGED', {
-        reason: Object.keys(dto).join(', '),
+        reason: JSON.stringify({
+          fields: Object.keys(dto),
+          fromModules: current.modules,
+          toModules: dto.modules ?? current.modules,
+          fromSchoolIds: current.coveredSchoolIds,
+          toSchoolIds: dto.coveredSchoolIds ?? current.coveredSchoolIds,
+        }),
       });
     });
     return this.get(id);
@@ -294,7 +301,13 @@ export class SuiteContractsService {
     await tx.$queryRaw`SELECT id FROM "SuiteContract" WHERE id = ${id}::uuid FOR UPDATE`;
     const contract = await tx.suiteContract.findUnique({
       where: { id },
-      select: { status: true, organizationId: true, endsOn: true },
+      select: {
+        status: true,
+        organizationId: true,
+        endsOn: true,
+        modules: true,
+        coveredSchoolIds: true,
+      },
     });
     if (!contract) throw new NotFoundException(NOT_FOUND);
     return contract;

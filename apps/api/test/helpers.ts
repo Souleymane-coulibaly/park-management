@@ -2,7 +2,12 @@ import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { randomBytes } from 'node:crypto';
 import request from 'supertest';
-import { PrismaClient, assertTestDatabaseMarker, resolveTestDatabase } from '@ocall/database';
+import {
+  PrismaClient,
+  assertTestDatabaseMarker,
+  resolveTestDatabase,
+  databaseIdentity,
+} from '@ocall/database';
 import { SchoolPrismaClient } from '@ocall/school-database';
 import { type BusinessType, type StoredPlatformRole, platformRoleRequiresMfa } from '@ocall/shared';
 import { hash } from 'argon2';
@@ -33,8 +38,11 @@ export async function createTestApp(): Promise<{ app: INestApplication; prisma: 
   process.env.DATABASE_URL = testDb.databaseUrl;
   process.env.DIRECT_URL = testDb.directUrl;
   // Ocall School : activé seulement avec une base de test dédiée, soumise au même marqueur.
-  const schoolUrl = process.env.TEST_SCHOOL_DATABASE_URL;
+  const schoolUrl = process.env.SCHOOL_TEST_DATABASE_URL ?? process.env.TEST_SCHOOL_DATABASE_URL;
   if (schoolUrl) {
+    if (databaseIdentity(schoolUrl) === databaseIdentity(testDb.databaseUrl)) {
+      throw new Error('Refus : la base School de test doit être distincte de la base Ocall Suite.');
+    }
     const schoolProbe = new SchoolPrismaClient({ datasourceUrl: schoolUrl });
     try {
       await assertTestDatabaseMarker((sql) => schoolProbe.$queryRawUnsafe(sql), schoolUrl);

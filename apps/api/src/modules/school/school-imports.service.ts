@@ -2,11 +2,14 @@ import {
   BadRequestException,
   ConflictException,
   HttpException,
+  HttpStatus,
   Injectable,
   NotFoundException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { Prisma } from '@ocall/school-database';
 import {
+  SCHOOL_EXPORT_MAX_ROWS,
   SCHOOL_IMPORT_MAX_BYTES,
   SCHOOL_PHONE,
   SCHOOL_ENROLLMENT_STATUS_LABELS,
@@ -32,6 +35,9 @@ import { SchoolService } from './school.service';
 
 const NOT_FOUND = { code: 'SCHOOL_RESOURCE_NOT_FOUND', message: 'Élément introuvable.' };
 const REPORT_MAX = 500;
+const REQUIRED_FIELDS: SchoolImportField[] = ['lastName', 'firstName', 'birthDate'];
+/** Exports construits en même temps par instance : au-delà, la demande est refusée, pas mise en file. */
+const EXPORT_SLOTS = 2;
 const IMPORT_LIMITS: [SchoolImportField, number][] = [
   ['lastNameAr', 120],
   ['firstNameAr', 120],
@@ -71,6 +77,8 @@ interface Analysis {
   format: 'CSV' | 'XLSX';
   headers: string[];
   mapping: SchoolImportMapping;
+  /** Colonnes obligatoires encore sans correspondance : aucune ligne n'est alors analysée. */
+  missing: SchoolImportField[];
   total: number;
   valid: CleanRow[];
   duplicates: LineIssue[];
@@ -88,12 +96,14 @@ export class SchoolImportsService {
     private readonly guardians: SchoolGuardiansService,
   ) {}
 
+  /** Une correspondance incomplète n'est pas une erreur ici : l'écran doit pouvoir la compléter. */
   async preview(ctx: SchoolContext, dto: ImportDto, file: Buffer | undefined) {
-    const analysis = await this.analyze(ctx, dto, file);
+    const analysis = await this.analyze(ctx, dto, file, false);
     return {
       format: analysis.format,
       headers: analysis.headers,
       mapping: analysis.mapping,
+      missing: analysis.missing,
       total: analysis.total,
       valid: analysis.valid.length,
       duplicates: analysis.duplicates,
@@ -113,7 +123,7 @@ export class SchoolImportsService {
   }
 
   async commit(ctx: SchoolContext, dto: ImportDto, file: Buffer | undefined) {
-    const analysis = await this.analyze(ctx, dto, file);
+    const analysis = await this.analyze(ctx, dto, file, true);
     if (analysis.errors.length > 0 && dto.skipInvalid !== 'true') {
       throw new ConflictException({
         code: 'IMPORT_HAS_ERRORS',
@@ -236,6 +246,7 @@ export class SchoolImportsService {
     ctx: SchoolContext,
     dto: ImportDto,
     file: Buffer | undefined,
+    requireMapping: boolean,
   ): Promise<Analysis> {
     await this.school.assertSchool(ctx, dto.schoolId);
     if (!file) {
@@ -249,13 +260,25 @@ export class SchoolImportsService {
     }
     const sheet = await parseSheet(file);
     const mapping = this.readMapping(dto.mapping, sheet.headers);
-    for (const required of ['lastName', 'firstName', 'birthDate'] as const) {
-      if (!mapping[required]) {
+    const missing = REQUIRED_FIELDS.filter((field) => !mapping[field]);
+    if (missing.length > 0) {
+      if (requireMapping) {
         throw new BadRequestException({
           code: 'IMPORT_MAPPING_INCOMPLETE',
           message: 'Associez au moins les colonnes Nom, Prénom et Date de naissance.',
         });
       }
+      // Aucune ligne n'est lue : les en-têtes suffisent pour compléter la correspondance.
+      return {
+        format: sheet.format,
+        headers: sheet.headers,
+        mapping,
+        missing,
+        total: sheet.rows.length,
+        valid: [],
+        duplicates: [],
+        errors: [],
+      };
     }
     const org = ctx.organizationId;
     const settings = await this.students.readSettings(this.db, org, dto.schoolId);
@@ -448,6 +471,7 @@ export class SchoolImportsService {
       format: sheet.format,
       headers: sheet.headers,
       mapping,
+      missing: [],
       total: sheet.rows.length,
       valid,
       duplicates,
@@ -482,15 +506,19 @@ export class SchoolImportsService {
 
   async exportStudents(ctx: SchoolContext, q: ExportQueryDto) {
     await this.school.assertSchool(ctx, q.schoolId);
-    const students = await this.students.snapshot((tx) =>
-      tx.schoolStudent.findMany({
-        where: {
-          organizationId: ctx.organizationId,
-          schoolId: q.schoolId,
-          ...(q.classId
-            ? { enrollments: { some: { classId: q.classId, status: 'VALIDATED' } } }
-            : {}),
-        },
+    return this.exportSlot(() => this.buildStudentsExport(ctx, q));
+  }
+
+  private async buildStudentsExport(ctx: SchoolContext, q: ExportQueryDto) {
+    const where: Prisma.SchoolStudentWhereInput = {
+      organizationId: ctx.organizationId,
+      schoolId: q.schoolId,
+      ...(q.classId ? { enrollments: { some: { classId: q.classId, status: 'VALIDATED' } } } : {}),
+    };
+    const students = await this.students.snapshot(async (tx) => {
+      this.assertExportSize(await tx.schoolStudent.count({ where }));
+      return tx.schoolStudent.findMany({
+        where,
         orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }],
         select: {
           matricule: true,
@@ -514,8 +542,8 @@ export class SchoolImportsService {
             },
           },
         },
-      }),
-    );
+      });
+    });
     const table: TableExport = {
       headers: [
         'Matricule',
@@ -554,9 +582,18 @@ export class SchoolImportsService {
 
   async exportGuardians(ctx: SchoolContext, q: ExportQueryDto) {
     await this.school.assertSchool(ctx, q.schoolId);
-    const links = await this.students.snapshot((tx) =>
-      tx.schoolStudentGuardian.findMany({
-        where: { organizationId: ctx.organizationId, student: { schoolId: q.schoolId } },
+    return this.exportSlot(() => this.buildGuardiansExport(ctx, q));
+  }
+
+  private async buildGuardiansExport(ctx: SchoolContext, q: ExportQueryDto) {
+    const where: Prisma.SchoolStudentGuardianWhereInput = {
+      organizationId: ctx.organizationId,
+      student: { schoolId: q.schoolId },
+    };
+    const links = await this.students.snapshot(async (tx) => {
+      this.assertExportSize(await tx.schoolStudentGuardian.count({ where }));
+      return tx.schoolStudentGuardian.findMany({
+        where,
         orderBy: [{ student: { lastName: 'asc' } }],
         select: {
           relation: true,
@@ -564,8 +601,8 @@ export class SchoolImportsService {
           student: { select: { matricule: true } },
           guardian: { select: { lastName: true, firstName: true, phone: true, email: true } },
         },
-      }),
-    );
+      });
+    });
     const table: TableExport = {
       headers: ['Matricule', 'Nom', 'Prénom', 'Téléphone', 'E-mail', 'Lien', 'Principal'],
       rows: links.map((l) => [
@@ -582,6 +619,38 @@ export class SchoolImportsService {
       rows: table.rows.length,
     });
     return this.file(table, q.format, 'responsables');
+  }
+
+  /** Plafond de lignes, modifiable par les tests seulement pour éviter d'en créer des milliers. */
+  exportMaxRows = SCHOOL_EXPORT_MAX_ROWS;
+  private exportsRunning = 0;
+
+  /** Borne la mémoire de l'API partagée : peu d'exports à la fois, chacun d'un volume plafonné. */
+  private async exportSlot<T>(build: () => Promise<T>): Promise<T> {
+    if (this.exportsRunning >= EXPORT_SLOTS) {
+      throw new HttpException(
+        {
+          code: 'EXPORT_BUSY',
+          message: 'Des exports sont déjà en cours : réessayez dans quelques instants.',
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+    this.exportsRunning++;
+    try {
+      return await build();
+    } finally {
+      this.exportsRunning--;
+    }
+  }
+
+  private assertExportSize(rows: number) {
+    if (rows > this.exportMaxRows) {
+      throw new UnprocessableEntityException({
+        code: 'EXPORT_TOO_LARGE',
+        message: `Export limité à ${this.exportMaxRows} lignes : exportez par classe.`,
+      });
+    }
   }
 
   private async file(table: TableExport, format: 'csv' | 'xlsx' | undefined, name: string) {

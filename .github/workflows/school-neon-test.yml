@@ -1,0 +1,55 @@
+# Tests School sur la branche Neon School `test`. Déclenchement manuel uniquement.
+# Suite reste une base éphémère : la base Ocall Park n'est jamais utilisée.
+name: School Neon test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  school-neon-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ocall_suite_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ocall_suite_ci
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/ocall_suite_ci
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ocall_suite_ci
+      TEST_DIRECT_URL: postgresql://postgres:postgres@localhost:5432/ocall_suite_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm db:migrate:deploy
+      - name: Vérifie le marqueur « test » de la base School, sans afficher son adresse
+        env:
+          SCHOOL_TEST_DATABASE_URL: ${{ secrets.SCHOOL_TEST_DATABASE_URL }}
+        run: |
+          value=$(psql "$SCHOOL_TEST_DATABASE_URL" -At -c "SELECT value FROM \"_ocall_environment\" WHERE key = 'environment'")
+          [ "$value" = "test" ] || { echo "Refus : cette base n'est pas marquée test."; exit 1; }
+      - name: Migrations School (ajouts seuls, refus de toute instruction destructrice)
+        run: pnpm db:school:migrate:deploy
+        env:
+          SCHOOL_ENABLED: 'true'
+          SCHOOL_DATABASE_URL: ${{ secrets.SCHOOL_TEST_DATABASE_URL }}
+      - name: Tests d'intégration School
+        env:
+          SCHOOL_TEST_DATABASE_URL: ${{ secrets.SCHOOL_TEST_DATABASE_URL }}
+        run: |
+          pnpm --filter @ocall/api exec jest --runInBand --json --outputFile=school-results.json school-sprint
+          node -e "const r=require('./apps/api/school-results.json');if(r.numPassedTests===0){console.error('Aucun test School execute.');process.exit(1)}"

@@ -13,6 +13,7 @@ import {
 import { SchoolPage, type SchoolPageApi } from '@/components/school/school-page';
 import {
   type NamedView,
+  Pager,
   StudentName,
   type StudentRow,
   useClasses,
@@ -56,9 +57,10 @@ export default function InscriptionsPage() {
 
 function Enrollments({ page, schoolId }: { page: SchoolPageApi; schoolId: string }) {
   const [status, setStatus] = useState<string>('PENDING');
+  const [pageNumber, setPageNumber] = useState(1);
   const [error, setError] = useState<ApiError | null>(null);
-  const list = useApi<{ items: EnrollmentRow[]; total: number }>(
-    `/school/enrollments?schoolId=${schoolId}${status ? `&status=${status}` : ''}`,
+  const list = useApi<{ items: EnrollmentRow[]; total: number; page: number; pageSize: number }>(
+    `/school/enrollments?schoolId=${schoolId}&page=${pageNumber}${status ? `&status=${status}` : ''}`,
   );
   const canManage = page.canWrite('school.enrollments.manage');
   const canValidate = page.canWrite('school.enrollments.validate');
@@ -82,7 +84,10 @@ function Enrollments({ page, schoolId }: { page: SchoolPageApi; schoolId: string
             <SelectField
               label="Statut"
               value={status}
-              onChange={(e) => setStatus(e.target.value)}
+              onChange={(e) => {
+                setStatus(e.target.value);
+                setPageNumber(1);
+              }}
               options={[
                 { value: '', label: 'Tous' },
                 ...SCHOOL_ENROLLMENT_STATUSES.map((s) => ({
@@ -146,6 +151,13 @@ function Enrollments({ page, schoolId }: { page: SchoolPageApi; schoolId: string
               </li>
             ))}
           </ul>
+          <Pager
+            total={list.data.total}
+            page={pageNumber}
+            pageSize={list.data.pageSize}
+            label={(n) => `${n} inscription${n > 1 ? 's' : ''}`}
+            onPage={setPageNumber}
+          />
         </Card>
       )}
     </>

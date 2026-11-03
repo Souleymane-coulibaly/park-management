@@ -14,6 +14,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { OrganizationProvisioningService } from '../organizations/organization-provisioning.service';
 import type { SchoolContext } from './school-access';
 import { SchoolPrismaService } from './school-prisma.service';
+import { SchoolService } from './school.service';
 import type { CreateMemberDto, UpdateMemberDto } from './school.dto';
 
 const NOT_FOUND = { code: 'SCHOOL_MEMBER_NOT_FOUND', message: 'Utilisateur introuvable.' };
@@ -30,9 +31,11 @@ export class SchoolMembersService {
     private readonly audit: AuditService,
     private readonly passwords: PasswordService,
     private readonly provisioning: OrganizationProvisioningService,
+    private readonly school: SchoolService,
   ) {}
 
   async list(ctx: SchoolContext) {
+    await this.school.publishDecisions(ctx.organizationId);
     const rows = await this.db.schoolMember.findMany({
       where: {
         organizationId: ctx.organizationId,
@@ -173,16 +176,15 @@ export class SchoolMembersService {
           })),
         });
       }
+      await this.school.recordDecision(tx, ctx, 'school.member_updated', 'SchoolMember', id, {
+        fields: Object.keys(dto),
+        role,
+        ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+        ...(dto.schoolIds ? { schoolIds: dto.schoolIds } : {}),
+      });
       return { target, role };
     });
-    await this.audit.record({
-      organizationId: ctx.organizationId,
-      actorUserId: ctx.userId,
-      action: 'school.member_updated',
-      targetType: 'SchoolMember',
-      targetId: id,
-      metadata: { fields: Object.keys(dto), role },
-    });
+    await this.school.publishDecisions(ctx.organizationId);
     // Après la validation School : droits restreints et fermeture valent avant toute réouverture de Suite.
     if (dto.isActive !== undefined) await this.syncAccount(ctx, id, target.userId);
     return { id, role, isActive: dto.isActive ?? target.isActive };

@@ -23,6 +23,7 @@ import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { SCHOOL_DOCUMENT_MAX_BYTES, SCHOOL_IMPORT_MAX_BYTES } from '@ocall/shared';
 import { requestMeta } from '../../common/request-meta';
+import { ExportRoute } from '../../common/throttling';
 import {
   CurrentSchool,
   RequireSchoolPermission,
@@ -438,6 +439,7 @@ export class SchoolStudentsController {
   }
 
   @RequireSchoolPermission('school.students.export')
+  @ExportRoute()
   @Get('exports/students')
   async exportStudents(
     @CurrentSchool() ctx: SchoolContext,
@@ -448,6 +450,7 @@ export class SchoolStudentsController {
   }
 
   @RequireSchoolPermission('school.students.export')
+  @ExportRoute()
   @Get('exports/guardians')
   async exportGuardians(
     @CurrentSchool() ctx: SchoolContext,

@@ -265,6 +265,8 @@ export function pdfHasActiveContent(bytes: Uint8Array): boolean {
 
 export const SCHOOL_IMPORT_MAX_BYTES = 5 * 1024 * 1024;
 export const SCHOOL_IMPORT_MAX_ROWS = 1000;
+/** Export borné : le fichier est construit en mémoire, il ne doit jamais dépendre du volume total. */
+export const SCHOOL_EXPORT_MAX_ROWS = 20_000;
 
 export const SCHOOL_IMPORT_FIELDS = {
   matricule: ['matricule', 'numero', 'n matricule', 'student id', 'الرقم'],
