@@ -15,6 +15,8 @@ export interface SimpleField {
   /** Saisie en arabe : écriture de droite à gauche. */
   rtl?: boolean;
   defaultValue?: string;
+  /** Champ affiché, et envoyé, seulement si un autre champ du formulaire a l'une de ces valeurs. */
+  visibleWhen?: { field: string; values: readonly string[] };
 }
 
 type Values = Record<string, string | boolean>;
@@ -51,13 +53,16 @@ export function SimpleForm<T>({
   const [values, setValues] = useState<Values>(() => initial(fields));
   const [error, setError] = useState<ApiError | null>(null);
   const [loading, setLoading] = useState(false);
+  const visible = fields.filter(
+    (f) => !f.visibleWhen || f.visibleWhen.values.includes(String(values[f.visibleWhen.field])),
+  );
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setLoading(true);
     setError(null);
     const body: Record<string, unknown> = { ...extra };
-    for (const f of fields) {
+    for (const f of visible) {
       const value = values[f.name];
       if (value === undefined || (value === '' && !sendEmpty)) continue;
       body[f.name] = f.type === 'number' ? Number(value) : value;
@@ -77,7 +82,7 @@ export function SimpleForm<T>({
     <form onSubmit={submit} className="space-y-3" data-testid={testId}>
       <ApiErrorAlert error={error} />
       <div className="grid gap-3 sm:grid-cols-2">
-        {fields.map((f) => {
+        {visible.map((f) => {
           if (f.type === 'select') {
             return (
               <SelectField

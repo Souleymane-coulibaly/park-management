@@ -4,12 +4,11 @@ import Link from 'next/link';
 import { useState } from 'react';
 import {
   SCHOOL_ENROLLMENT_STATUSES,
-  SCHOOL_ENROLLMENT_STATUS_LABELS,
   SCHOOL_SEXES,
-  SCHOOL_SEX_LABELS,
   canTransitionEnrollment,
   type SchoolEnrollmentStatus,
 } from '@ocall/shared';
+import { toApiError, useSchoolText } from '@/components/school/school-language';
 import { SchoolPage, type SchoolPageApi } from '@/components/school/school-page';
 import {
   type NamedView,
@@ -26,7 +25,7 @@ import { Card, CardBody } from '@/components/ui/card';
 import { InputField, SelectField } from '@/components/ui/field';
 import { SimpleForm } from '@/components/ui/simple-form';
 import { Alert, ApiErrorAlert, ErrorState, LoadingState } from '@/components/ui/states';
-import { ApiError, api } from '@/lib/api';
+import { type ApiError, api } from '@/lib/api';
 import { useApi } from '@/lib/use-api';
 
 interface EnrollmentRow {
@@ -42,20 +41,18 @@ interface EnrollmentRow {
   >;
 }
 
-const KIND_LABELS = { NEW: 'Nouvelle', RENEWAL: 'Réinscription', TRANSFER_IN: 'Transfert' };
+type PickedStudent = EnrollmentRow['student'];
 
 export default function InscriptionsPage() {
   return (
-    <SchoolPage
-      title="Inscriptions"
-      description="Le secrétariat prépare et soumet, la direction valide. Une réinscription garde le même dossier."
-    >
+    <SchoolPage title="enroll.title" description="enroll.desc">
       {(page) => <Enrollments key={page.school!.id} page={page} schoolId={page.school!.id} />}
     </SchoolPage>
   );
 }
 
 function Enrollments({ page, schoolId }: { page: SchoolPageApi; schoolId: string }) {
+  const { t, labels, name } = useSchoolText();
   const [status, setStatus] = useState<string>('PENDING');
   const [pageNumber, setPageNumber] = useState(1);
   const [error, setError] = useState<ApiError | null>(null);
@@ -71,7 +68,7 @@ function Enrollments({ page, schoolId }: { page: SchoolPageApi; schoolId: string
       await api(`/school/enrollments/${id}/status`, { method: 'POST', body: { status: to } });
       list.reload();
     } catch (e) {
-      setError(e instanceof ApiError ? e : new ApiError(0, 'NETWORK', 'Connexion impossible.'));
+      setError(toApiError(e));
     }
   }
 
@@ -82,17 +79,17 @@ function Enrollments({ page, schoolId }: { page: SchoolPageApi; schoolId: string
         <CardBody>
           <div className="max-w-xs">
             <SelectField
-              label="Statut"
+              label={t('field.status')}
               value={status}
               onChange={(e) => {
                 setStatus(e.target.value);
                 setPageNumber(1);
               }}
               options={[
-                { value: '', label: 'Tous' },
+                { value: '', label: t('common.all') },
                 ...SCHOOL_ENROLLMENT_STATUSES.map((s) => ({
                   value: s,
-                  label: SCHOOL_ENROLLMENT_STATUS_LABELS[s],
+                  label: labels.enrollmentStatus[s],
                 })),
               ]}
             />
@@ -106,7 +103,7 @@ function Enrollments({ page, schoolId }: { page: SchoolPageApi; schoolId: string
         <Card>
           <ul className="divide-y divide-line/70 text-sm" data-testid="enrollment-queue">
             {list.data.items.length === 0 && (
-              <li className="px-4 py-6 text-center text-muted">Aucune inscription.</li>
+              <li className="px-4 py-6 text-center text-muted">{t('enroll.empty')}</li>
             )}
             {list.data.items.map((e) => (
               <li key={e.id} className="space-y-2 px-4 py-3" data-testid="enrollment-row">
@@ -118,22 +115,22 @@ function Enrollments({ page, schoolId }: { page: SchoolPageApi; schoolId: string
                     <StudentName student={e.student} />
                   </Link>
                   <Badge tone={e.status === 'VALIDATED' ? 'forest' : 'neutral'}>
-                    {SCHOOL_ENROLLMENT_STATUS_LABELS[e.status]}
+                    {labels.enrollmentStatus[e.status]}
                   </Badge>
                 </p>
                 <p className="text-muted">
-                  {e.student.matricule} · {e.year.label} · {e.class?.name ?? e.level.name} ·{' '}
-                  {KIND_LABELS[e.kind]}
+                  <span dir="ltr">{e.student.matricule}</span> · {e.year.label} ·{' '}
+                  {e.class ? name(e.class) : name(e.level)} · {t(`enroll.kind.${e.kind}`)}
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {canManage && canTransitionEnrollment(e.status, 'PENDING') && (
                     <Button size="sm" onClick={() => change(e.id, 'PENDING')}>
-                      Soumettre
+                      {t('enroll.submit')}
                     </Button>
                   )}
                   {canValidate && canTransitionEnrollment(e.status, 'VALIDATED') && (
                     <Button size="sm" onClick={() => change(e.id, 'VALIDATED')}>
-                      Valider
+                      {t('enroll.validate')}
                     </Button>
                   )}
                   {canManage &&
@@ -144,7 +141,7 @@ function Enrollments({ page, schoolId }: { page: SchoolPageApi; schoolId: string
                         size="sm"
                         onClick={() => change(e.id, 'CANCELLED')}
                       >
-                        Annuler
+                        {t('common.cancel')}
                       </Button>
                     )}
                 </div>
@@ -155,7 +152,7 @@ function Enrollments({ page, schoolId }: { page: SchoolPageApi; schoolId: string
             total={list.data.total}
             page={pageNumber}
             pageSize={list.data.pageSize}
-            label={(n) => `${n} inscription${n > 1 ? 's' : ''}`}
+            label={(n) => t('enroll.count', { n })}
             onPage={setPageNumber}
           />
         </Card>
@@ -166,15 +163,13 @@ function Enrollments({ page, schoolId }: { page: SchoolPageApi; schoolId: string
 
 /** Nouvelle inscription : dossier d'abord, ou recherche d'un élève existant pour une réinscription. */
 function NewEnrollment({ schoolId, onDone }: { schoolId: string; onDone: () => void }) {
+  const { t, labels, fields } = useSchoolText();
   const [mode, setMode] = useState<'new' | 'existing'>('new');
-  const [student, setStudent] = useState<Pick<
-    StudentRow,
-    'id' | 'matricule' | 'lastName' | 'firstName' | 'lastNameAr' | 'firstNameAr'
-  > | null>(null);
+  const [student, setStudent] = useState<PickedStudent | null>(null);
   return (
     <Card>
       <CardBody>
-        <h2 className="mb-3 font-semibold">Nouvelle inscription</h2>
+        <h2 className="mb-3 font-semibold">{t('enroll.new')}</h2>
         {student ? (
           <Placement
             schoolId={schoolId}
@@ -192,47 +187,48 @@ function NewEnrollment({ schoolId, onDone }: { schoolId: string; onDone: () => v
                 variant={mode === 'new' ? 'primary' : 'secondary'}
                 onClick={() => setMode('new')}
               >
-                Nouvel élève
+                {t('enroll.newStudent')}
               </Button>
               <Button
                 size="sm"
                 variant={mode === 'existing' ? 'primary' : 'secondary'}
                 onClick={() => setMode('existing')}
               >
-                Réinscription
+                {t('enroll.renewal')}
               </Button>
             </div>
             {mode === 'new' ? (
-              <SimpleForm<NonNullable<typeof student>>
+              <SimpleForm<PickedStudent>
                 testId="new-student-form"
                 path="/school/students"
                 extra={{ schoolId }}
-                submitLabel="Créer le dossier et continuer"
+                submitLabel={t('enroll.createAndContinue')}
                 onDone={setStudent}
-                fields={[
-                  { name: 'lastName', label: 'Nom', required: true },
-                  { name: 'firstName', label: 'Prénom', required: true },
-                  { name: 'lastNameAr', label: 'Nom en arabe', rtl: true },
-                  { name: 'firstNameAr', label: 'Prénom en arabe', rtl: true },
-                  { name: 'birthDate', label: 'Date de naissance', type: 'date', required: true },
-                  { name: 'birthPlace', label: 'Lieu de naissance' },
+                fields={fields([
+                  { name: 'lastName', label: t('field.lastName'), required: true },
+                  { name: 'firstName', label: t('field.firstName'), required: true },
+                  { name: 'lastNameAr', label: t('field.lastNameAr'), rtl: true },
+                  { name: 'firstNameAr', label: t('field.firstNameAr'), rtl: true },
+                  {
+                    name: 'birthDate',
+                    label: t('field.birthDate'),
+                    type: 'date',
+                    required: true,
+                  },
+                  { name: 'birthPlace', label: t('field.birthPlace') },
                   {
                     name: 'sex',
-                    label: 'Sexe',
+                    label: t('field.sex'),
                     type: 'select',
                     options: [
-                      { value: '', label: 'Non renseigné' },
-                      ...SCHOOL_SEXES.map((v) => ({ value: v, label: SCHOOL_SEX_LABELS[v] })),
+                      { value: '', label: t('field.notSpecified') },
+                      ...SCHOOL_SEXES.map((v) => ({ value: v, label: labels.sex[v] })),
                     ],
                   },
-                  { name: 'address', label: 'Adresse' },
-                  { name: 'matricule', label: 'Matricule existant (sinon généré)' },
-                  {
-                    name: 'confirmHomonym',
-                    label: 'Homonyme vérifié : il s’agit d’une autre personne',
-                    type: 'checkbox',
-                  },
-                ]}
+                  { name: 'address', label: t('field.address') },
+                  { name: 'matricule', label: t('enroll.existingMatricule') },
+                  { name: 'confirmHomonym', label: t('enroll.homonym'), type: 'checkbox' },
+                ])}
               />
             ) : (
               <FindStudent schoolId={schoolId} onPick={setStudent} />
@@ -251,6 +247,7 @@ function FindStudent({
   schoolId: string;
   onPick: (student: StudentRow) => void;
 }) {
+  const { t, showArabic } = useSchoolText();
   const [q, setQ] = useState('');
   const found = useApi<{ items: StudentRow[] }>(
     q.length >= 2
@@ -260,24 +257,30 @@ function FindStudent({
   return (
     <>
       <InputField
-        label="Rechercher un élève"
-        placeholder="Nom, اسم, matricule"
+        label={t('enroll.findStudent')}
+        placeholder={t(
+          showArabic ? 'students.searchPlaceholderBilingual' : 'students.searchPlaceholder',
+        )}
+        dir="auto"
         value={q}
         onChange={(e) => setQ(e.target.value)}
       />
       {q.length >= 2 && found.state === 'success' && (
         <ul className="mt-2 divide-y divide-line/70 text-sm" data-testid="student-results">
           {found.data.items.length === 0 && (
-            <li className="py-2 text-muted">Aucun élève trouvé.</li>
+            <li className="py-2 text-muted">{t('enroll.notFound')}</li>
           )}
           {found.data.items.map((s) => (
             <li key={s.id}>
               <button
                 type="button"
-                className="min-h-11 w-full py-2 text-left hover:bg-ivory"
+                className="min-h-11 w-full py-2 text-start hover:bg-ivory"
                 onClick={() => onPick(s)}
               >
-                <StudentName student={s} /> <span className="text-muted">{s.matricule}</span>
+                <StudentName student={s} />{' '}
+                <span className="text-muted" dir="ltr">
+                  {s.matricule}
+                </span>
               </button>
             </li>
           ))}
@@ -293,12 +296,10 @@ function Placement({
   onDone,
 }: {
   schoolId: string;
-  student: Pick<
-    StudentRow,
-    'id' | 'matricule' | 'lastName' | 'firstName' | 'lastNameAr' | 'firstNameAr'
-  >;
+  student: PickedStudent;
   onDone: () => void;
 }) {
+  const { t, name } = useSchoolText();
   const years = useYears(schoolId);
   const levels = useLevels(schoolId);
   const open = years.state === 'success' ? years.data.filter((y) => y.status !== 'CLOSED') : [];
@@ -309,8 +310,8 @@ function Placement({
   if (years.state === 'loading') return <LoadingState />;
   if (open.length === 0 || levels.length === 0) {
     return (
-      <Alert tone="info" title="Structure à préparer">
-        Créez d’abord une année scolaire ouverte et au moins un niveau.
+      <Alert tone="info" title={t('enroll.prepareTitle')}>
+        {t('enroll.prepare')}
       </Alert>
     );
   }
@@ -320,13 +321,13 @@ function Placement({
         <span className="font-medium">
           <StudentName student={student} />
         </span>{' '}
-        <span className="text-muted" data-testid="placement-matricule">
+        <span className="text-muted" data-testid="placement-matricule" dir="ltr">
           {student.matricule}
         </span>
       </p>
       <div className="mb-3 max-w-sm">
         <SelectField
-          label="Année scolaire"
+          label={t('field.schoolYear')}
           value={schoolYearId}
           onChange={(e) => setYearId(e.target.value)}
           options={open.map((y) => ({ value: y.id, label: y.label }))}
@@ -337,41 +338,44 @@ function Placement({
         testId="placement-form"
         path="/school/enrollments"
         extra={{ studentId: student.id, schoolYearId, submit: true }}
-        submitLabel="Soumettre l’inscription"
+        submitLabel={t('enroll.submitEnrollment')}
         onDone={onDone}
         fields={[
           {
             name: 'levelId',
-            label: 'Niveau',
+            label: t('field.level'),
             type: 'select',
-            options: levels.map((l) => ({ value: l.id, label: `${l.cycleName} : ${l.name}` })),
+            options: levels.map((l) => ({
+              value: l.id,
+              label: `${name({ name: l.cycleName, nameAr: l.cycleNameAr })} : ${name(l)}`,
+            })),
           },
           {
             name: 'classId',
-            label: 'Classe',
+            label: t('field.class'),
             type: 'select',
             options: [
-              { value: '', label: 'À définir' },
-              ...classes.map((c) => ({ value: c.id, label: `${c.name} (${c.level.name})` })),
+              { value: '', label: t('enroll.toDefine') },
+              ...classes.map((c) => ({ value: c.id, label: `${name(c)} (${name(c.level)})` })),
             ],
           },
           {
             name: 'trackId',
-            label: 'Parcours',
+            label: t('field.track'),
             type: 'select',
             options: [
-              { value: '', label: 'Non précisé' },
+              { value: '', label: t('enroll.unspecified') },
               ...(tracks.state === 'success'
-                ? tracks.data.map((t) => ({ value: t.id, label: t.name }))
+                ? tracks.data.map((tr) => ({ value: tr.id, label: name(tr) }))
                 : []),
             ],
           },
         ]}
       />
       <p className="mt-3 text-sm text-muted">
-        Avant validation, rattachez un responsable et ajoutez les pièces depuis la{' '}
+        {t('enroll.before')}{' '}
         <Link href={`/school/eleves/${student.id}`} className="text-forest hover:underline">
-          fiche de l’élève
+          {t('enroll.sheetLink')}
         </Link>
         .
       </p>

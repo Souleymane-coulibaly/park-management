@@ -3,20 +3,20 @@
 import { type FormEvent, useState } from 'react';
 import {
   SCHOOL_DOCUMENT_CATEGORIES,
-  SCHOOL_DOCUMENT_CATEGORY_LABELS,
   SCHOOL_MATRICULE_SCOPES,
-  SCHOOL_MATRICULE_SCOPE_LABELS,
   buildMatricule,
+  customFieldKey,
   type SchoolCustomField,
   type SchoolDocumentCategory,
   type SchoolMatriculeScope,
 } from '@ocall/shared';
+import { toApiError, useSchoolText } from '@/components/school/school-language';
 import { SchoolPage } from '@/components/school/school-page';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody } from '@/components/ui/card';
 import { InputField, SelectField } from '@/components/ui/field';
 import { Alert, ApiErrorAlert, ErrorState, LoadingState } from '@/components/ui/states';
-import { ApiError, api } from '@/lib/api';
+import { type ApiError, api } from '@/lib/api';
 import { useApi } from '@/lib/use-api';
 
 interface Settings {
@@ -30,10 +30,7 @@ interface Settings {
 
 export default function ReglagesElevesPage() {
   return (
-    <SchoolPage
-      title="Réglages des dossiers"
-      description="Format du matricule, pièces obligatoires et champs complémentaires, par établissement."
-    >
+    <SchoolPage title="settings.title" description="settings.desc">
       {({ school, canWrite }) => (
         <Loader
           key={school!.id}
@@ -63,6 +60,7 @@ function Form({
   initial: Settings;
   canEdit: boolean;
 }) {
+  const { t, labels, name } = useSchoolText();
   const [values, setValues] = useState(initial);
   const [fieldLabel, setFieldLabel] = useState('');
   const [error, setError] = useState<ApiError | null>(null);
@@ -84,38 +82,31 @@ function Form({
       );
       setSaved(true);
     } catch (e) {
-      setError(e instanceof ApiError ? e : new ApiError(0, 'NETWORK', 'Connexion impossible.'));
+      setError(toApiError(e));
     } finally {
       setLoading(false);
     }
   }
 
   function addField() {
-    const key = fieldLabel
-      .normalize('NFD')
-      .replace(/[̀-ͯ]/g, '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '_')
-      .replace(/^_+|_+$/g, '')
-      .replace(/^[^a-z]+/, '');
-    if (!key || values.customFields.some((f) => f.key === key)) return;
-    setValues({
-      ...values,
-      customFields: [...values.customFields, { key: key.slice(0, 40), label: fieldLabel.trim() }],
-    });
+    const label = fieldLabel.trim();
+    if (!label) return;
+    const key = customFieldKey(label, values.customFields);
+    if (values.customFields.some((f) => f.key === key)) return;
+    setValues({ ...values, customFields: [...values.customFields, { key, label }] });
     setFieldLabel('');
   }
 
   return (
     <form onSubmit={submit} className="space-y-4" data-testid="student-settings">
       <ApiErrorAlert error={error} />
-      {saved && <Alert tone="success" title="Réglages enregistrés." />}
+      {saved && <Alert tone="success" title={t('settings.saved')} />}
       <Card>
         <CardBody>
-          <h2 className="mb-1 font-semibold">Matricule</h2>
+          <h2 className="mb-1 font-semibold">{t('settings.matricule')}</h2>
           <p className="mb-3 text-sm text-muted">
-            Exemple :{' '}
-            <span data-testid="matricule-example">
+            {t('settings.example')}{' '}
+            <span data-testid="matricule-example" dir="ltr">
               {buildMatricule(
                 {
                   prefix: values.matriculePrefix,
@@ -126,11 +117,11 @@ function Form({
                 45,
               )}
             </span>
-            . Un changement ne s’applique qu’aux prochains dossiers.
+            . {t('settings.nextOnly')}
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
             <SelectField
-              label="Unicité"
+              label={t('settings.scope')}
               disabled={!canEdit}
               value={values.matriculeScope}
               onChange={(e) =>
@@ -138,18 +129,18 @@ function Form({
               }
               options={SCHOOL_MATRICULE_SCOPES.map((s) => ({
                 value: s,
-                label: SCHOOL_MATRICULE_SCOPE_LABELS[s],
+                label: labels.matriculeScope[s],
               }))}
             />
             <InputField
-              label="Préfixe (lettres et chiffres)"
+              label={t('settings.prefix')}
               disabled={!canEdit}
               maxLength={10}
               value={values.matriculePrefix}
               onChange={(e) => setValues({ ...values, matriculePrefix: e.target.value })}
             />
             <InputField
-              label="Nombre de chiffres"
+              label={t('settings.padding')}
               type="number"
               min={3}
               max={8}
@@ -165,14 +156,14 @@ function Form({
                 checked={values.matriculeYear}
                 onChange={(e) => setValues({ ...values, matriculeYear: e.target.checked })}
               />
-              Inclure l’année
+              {t('settings.includeYear')}
             </label>
           </div>
         </CardBody>
       </Card>
       <Card>
         <CardBody>
-          <h2 className="mb-3 font-semibold">Pièces exigées pour valider une inscription</h2>
+          <h2 className="mb-3 font-semibold">{t('settings.requiredDocs')}</h2>
           <div className="grid gap-1 sm:grid-cols-2">
             {SCHOOL_DOCUMENT_CATEGORIES.map((c) => (
               <label key={c} className="flex min-h-11 items-center gap-2 text-sm">
@@ -190,7 +181,7 @@ function Form({
                     })
                   }
                 />
-                {SCHOOL_DOCUMENT_CATEGORY_LABELS[c]}
+                {labels.documentCategory[c]}
               </label>
             ))}
           </div>
@@ -198,15 +189,15 @@ function Form({
       </Card>
       <Card>
         <CardBody>
-          <h2 className="mb-1 font-semibold">Champs complémentaires</h2>
-          <p className="mb-3 text-sm text-muted">
-            Dix au plus. Les données sensibles (religion, santé, origine…) sont refusées.
-          </p>
+          <h2 className="mb-1 font-semibold">{t('settings.customFields')}</h2>
+          <p className="mb-3 text-sm text-muted">{t('settings.customHint')}</p>
           <ul className="mb-3 space-y-2 text-sm" data-testid="custom-fields">
-            {values.customFields.length === 0 && <li className="text-muted">Aucun champ.</li>}
+            {values.customFields.length === 0 && (
+              <li className="text-muted">{t('settings.noField')}</li>
+            )}
             {values.customFields.map((f) => (
               <li key={f.key} className="flex flex-wrap items-center justify-between gap-2">
-                {f.label}
+                <span dir="auto">{name({ name: f.label, nameAr: f.labelAr })}</span>
                 {canEdit && (
                   <Button
                     type="button"
@@ -219,7 +210,7 @@ function Form({
                       })
                     }
                   >
-                    Retirer
+                    {t('common.remove')}
                   </Button>
                 )}
               </li>
@@ -229,13 +220,14 @@ function Form({
             <div className="flex flex-wrap items-end gap-2">
               <div className="min-w-0 flex-1">
                 <InputField
-                  label="Nouveau champ"
+                  label={t('settings.newField')}
+                  dir="auto"
                   value={fieldLabel}
                   onChange={(e) => setFieldLabel(e.target.value)}
                 />
               </div>
               <Button type="button" variant="secondary" onClick={addField}>
-                Ajouter
+                {t('common.add')}
               </Button>
             </div>
           )}
@@ -243,7 +235,7 @@ function Form({
       </Card>
       {canEdit && (
         <Button type="submit" loading={loading}>
-          Enregistrer
+          {t('common.save')}
         </Button>
       )}
     </form>

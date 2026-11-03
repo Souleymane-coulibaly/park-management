@@ -2,18 +2,14 @@
 
 import { useState } from 'react';
 import { Download } from 'lucide-react';
-import {
-  SCHOOL_ROLE_LABELS,
-  SCHOOL_TYPE_LABELS,
-  hasSchoolPermission,
-  type SchoolType,
-} from '@ocall/shared';
-import { BiName, SchoolPage } from '@/components/school/school-page';
+import { hasSchoolPermission, type SchoolLocale, type SchoolType } from '@ocall/shared';
+import { toApiError, useSchoolText } from '@/components/school/school-language';
+import { BiName, SchoolPage, type SchoolSummary } from '@/components/school/school-page';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody } from '@/components/ui/card';
 import { Alert, ApiErrorAlert, ErrorState, LoadingState } from '@/components/ui/states';
-import { ApiError, api } from '@/lib/api';
+import { type ApiError, api } from '@/lib/api';
 import { useApi } from '@/lib/use-api';
 
 interface Dashboard {
@@ -33,28 +29,41 @@ interface Dashboard {
 /** Tableau de bord : uniquement des données réelles de la structure scolaire. */
 export default function SchoolDashboardPage() {
   return (
-    <SchoolPage title="Tableau de bord" needsSchool={false}>
-      {({ context }) => (
-        <>
-          <p className="text-sm text-muted" data-testid="school-role">
-            {SCHOOL_ROLE_LABELS[context.role]}
-          </p>
-          <SchoolCards />
-          {hasSchoolPermission(context.role, 'school.export') && <ExportButton />}
-        </>
-      )}
+    <SchoolPage title="dash.title" needsSchool={false}>
+      {({ context }) => <Dashboard role={context.role} schools={context.schools} />}
     </SchoolPage>
   );
 }
 
-function SchoolCards() {
+function Dashboard({
+  role,
+  schools,
+}: {
+  role: Parameters<typeof hasSchoolPermission>[0];
+  schools: SchoolSummary[];
+}) {
+  const { labels } = useSchoolText();
+  return (
+    <>
+      <p className="text-sm text-muted" data-testid="school-role">
+        {labels.role[role]}
+      </p>
+      <SchoolCards locales={new Map(schools.map((s) => [s.id, s.defaultLocale]))} />
+      {hasSchoolPermission(role, 'school.export') && <ExportButton />}
+    </>
+  );
+}
+
+/** Chaque carte suit la langue de son établissement, pas celle de l'établissement choisi. */
+function SchoolCards({ locales }: { locales: Map<string, SchoolLocale> }) {
+  const { t, labels } = useSchoolText();
   const dash = useApi<Dashboard>('/school/dashboard');
   if (dash.state === 'loading') return <LoadingState />;
   if (dash.state === 'error') return <ErrorState error={dash.error} onRetry={dash.reload} />;
   if (dash.data.schools.length === 0) {
     return (
-      <Alert tone="info" title="Commencez par votre premier établissement">
-        Rendez-vous dans « Établissements » pour le créer.
+      <Alert tone="info" title={t('dash.firstTitle')}>
+        {t('dash.first')}
       </Alert>
     );
   }
@@ -65,27 +74,27 @@ function SchoolCards() {
           <Card>
             <CardBody>
               <p className="font-display text-lg font-bold">
-                <BiName name={s.name} nameAr={s.nameAr} />
+                <BiName name={s.name} nameAr={s.nameAr} locale={locales.get(s.id) ?? 'FR'} />
               </p>
-              <p className="text-sm text-muted">{SCHOOL_TYPE_LABELS[s.type]}</p>
+              <p className="text-sm text-muted">{labels.type[s.type]}</p>
               <div className="mt-3">
                 {s.activeYear ? (
-                  <Badge tone="forest">Année {s.activeYear.label}</Badge>
+                  <Badge tone="forest">{t('dash.year', { label: s.activeYear.label })}</Badge>
                 ) : (
-                  <Badge tone="savanna">Aucune année en cours</Badge>
+                  <Badge tone="savanna">{t('dash.noYear')}</Badge>
                 )}
               </div>
               <dl className="mt-3 grid grid-cols-3 gap-2 text-center text-sm">
                 <div>
-                  <dt className="text-muted">Classes</dt>
+                  <dt className="text-muted">{t('dash.classes')}</dt>
                   <dd className="text-xl font-bold">{s.activeYear?.classes ?? 0}</dd>
                 </div>
                 <div>
-                  <dt className="text-muted">Matières</dt>
+                  <dt className="text-muted">{t('dash.subjects')}</dt>
                   <dd className="text-xl font-bold">{s.subjects}</dd>
                 </div>
                 <div>
-                  <dt className="text-muted">Parcours</dt>
+                  <dt className="text-muted">{t('dash.tracks')}</dt>
                   <dd className="text-xl font-bold">{s.tracks}</dd>
                 </div>
               </dl>
@@ -99,6 +108,7 @@ function SchoolCards() {
 
 /** Export JSON, disponible aussi en consultation seule ; le serveur journalise chaque export. */
 function ExportButton() {
+  const { t } = useSchoolText();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
 
@@ -116,7 +126,7 @@ function ExportButton() {
       link.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      setError(e instanceof ApiError ? e : new ApiError(0, 'NETWORK', 'Connexion impossible.'));
+      setError(toApiError(e));
     } finally {
       setLoading(false);
     }
@@ -131,7 +141,7 @@ function ExportButton() {
         icon={<Download className="h-4 w-4" />}
         onClick={() => void download()}
       >
-        Exporter les données
+        {t('dash.export')}
       </Button>
     </div>
   );

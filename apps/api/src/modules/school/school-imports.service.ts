@@ -12,12 +12,17 @@ import {
   SCHOOL_EXPORT_MAX_ROWS,
   SCHOOL_IMPORT_MAX_BYTES,
   SCHOOL_PHONE,
-  SCHOOL_ENROLLMENT_STATUS_LABELS,
-  SCHOOL_STUDENT_STATUS_LABELS,
+  type SchoolExportColumn,
+  type SchoolLocale,
   isValidMatricule,
   normalizeSearch,
   parseSchoolDate,
   parseSchoolSex,
+  schoolDisplayName,
+  schoolExportLabel,
+  schoolLabels,
+  schoolShowsArabic,
+  schoolUiLanguage,
   studentIdentityKey,
   suggestImportMapping,
   type SchoolImportField,
@@ -505,8 +510,8 @@ export class SchoolImportsService {
   // ─── Export : colonnes limitées, jamais les besoins particuliers ni les observations ───
 
   async exportStudents(ctx: SchoolContext, q: ExportQueryDto) {
-    await this.school.assertSchool(ctx, q.schoolId);
-    return this.exportSlot(() => this.buildStudentsExport(ctx, q));
+    const { defaultLocale } = await this.school.assertSchool(ctx, q.schoolId);
+    return this.exportSlot(() => this.buildStudentsExport(ctx, q, defaultLocale));
   }
 
   /** Élèves exportés : établissement demandé, restreint à une classe si elle est précisée. */
@@ -518,7 +523,11 @@ export class SchoolImportsService {
     };
   }
 
-  private async buildStudentsExport(ctx: SchoolContext, q: ExportQueryDto) {
+  /**
+   * Fichier dans la langue de l'établissement : en Français, aucune colonne arabe ; en Arabe,
+   * en-têtes, statuts et libellés en arabe ; en Bilingue, en-têtes dans les deux langues.
+   */
+  private async buildStudentsExport(ctx: SchoolContext, q: ExportQueryDto, locale: SchoolLocale) {
     const where = this.exportedStudents(ctx, q);
     const students = await this.students.snapshot(async (tx) => {
       this.assertExportSize(await tx.schoolStudent.count({ where }));
@@ -542,39 +551,40 @@ export class SchoolImportsService {
             take: 1,
             select: {
               status: true,
-              level: { select: { name: true } },
-              class: { select: { name: true } },
+              level: { select: { name: true, nameAr: true } },
+              class: { select: { name: true, nameAr: true } },
             },
           },
         },
       });
     });
+    const arabic = schoolShowsArabic(locale);
+    const labels = schoolLabels(schoolUiLanguage(locale));
+    const columns: SchoolExportColumn[] = [
+      'matricule',
+      'lastName',
+      'firstName',
+      ...(arabic ? (['lastNameAr', 'firstNameAr'] as const) : []),
+      'birthDate',
+      'level',
+      'class',
+      'enrollment',
+      'status',
+    ];
     const table: TableExport = {
-      headers: [
-        'Matricule',
-        'Nom',
-        'Prénom',
-        'Nom en arabe',
-        'Prénom en arabe',
-        'Date de naissance',
-        'Niveau',
-        'Classe',
-        'Inscription',
-        'Statut',
-      ],
+      headers: columns.map((c) => schoolExportLabel(locale, c)),
       rows: students.map((s) => {
         const e = s.enrollments[0];
         return [
           s.matricule,
           s.lastName,
           s.firstName,
-          s.lastNameAr ?? '',
-          s.firstNameAr ?? '',
+          ...(arabic ? [s.lastNameAr ?? '', s.firstNameAr ?? ''] : []),
           s.birthDate.toISOString().slice(0, 10),
-          e?.level.name ?? '',
-          e?.class?.name ?? '',
-          e ? SCHOOL_ENROLLMENT_STATUS_LABELS[e.status] : '',
-          SCHOOL_STUDENT_STATUS_LABELS[s.status],
+          e ? schoolDisplayName(locale, e.level) : '',
+          e?.class ? schoolDisplayName(locale, e.class) : '',
+          e ? labels.enrollmentStatus[e.status] : '',
+          labels.studentStatus[s.status],
         ];
       }),
     };
@@ -586,11 +596,11 @@ export class SchoolImportsService {
   }
 
   async exportGuardians(ctx: SchoolContext, q: ExportQueryDto) {
-    await this.school.assertSchool(ctx, q.schoolId);
-    return this.exportSlot(() => this.buildGuardiansExport(ctx, q));
+    const { defaultLocale } = await this.school.assertSchool(ctx, q.schoolId);
+    return this.exportSlot(() => this.buildGuardiansExport(ctx, q, defaultLocale));
   }
 
-  private async buildGuardiansExport(ctx: SchoolContext, q: ExportQueryDto) {
+  private async buildGuardiansExport(ctx: SchoolContext, q: ExportQueryDto, locale: SchoolLocale) {
     const where: Prisma.SchoolStudentGuardianWhereInput = {
       organizationId: ctx.organizationId,
       student: this.exportedStudents(ctx, q),
@@ -608,16 +618,26 @@ export class SchoolImportsService {
         },
       });
     });
+    const labels = schoolLabels(schoolUiLanguage(locale));
+    const columns: SchoolExportColumn[] = [
+      'matricule',
+      'lastName',
+      'firstName',
+      'phone',
+      'email',
+      'relation',
+      'primary',
+    ];
     const table: TableExport = {
-      headers: ['Matricule', 'Nom', 'Prénom', 'Téléphone', 'E-mail', 'Lien', 'Principal'],
+      headers: columns.map((c) => schoolExportLabel(locale, c)),
       rows: links.map((l) => [
         l.student.matricule,
         l.guardian.lastName,
         l.guardian.firstName,
         l.guardian.phone,
         l.guardian.email ?? '',
-        l.relation,
-        l.isPrimary ? 'Oui' : 'Non',
+        labels.guardianRelation[l.relation],
+        schoolExportLabel(locale, l.isPrimary ? 'yes' : 'no'),
       ]),
     };
     await this.school.log(ctx, 'school.guardians_exported', 'School', q.schoolId, {

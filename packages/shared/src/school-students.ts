@@ -191,8 +191,102 @@ export interface SchoolCustomField {
 export const SCHOOL_CUSTOM_FIELDS_MAX = 10;
 export const SCHOOL_CUSTOM_VALUE_MAX = 200;
 
+/**
+ * Recherche dans le mot (« sociopolitique » contient « politi »), sauf deux racines trop courantes en
+ * début de mot ordinaire : « tribu » (pas « distribution » ni « tribunal ») et « santé » (pas
+ * « intéressante »).
+ */
 const SENSITIVE_LABEL =
-  /religi|confession|ethni|tribu|caste|sante|medical|maladie|handicap|vih|sida|politi|revenu|salaire|biometr/;
+  /religi|confession|ethni|(?:^|[^a-z])tribu(?!n)|caste|(?:^|[^a-z])sante|medical|maladie|handicap|vih|sida|politi|revenu|salaire|biometr/;
+
+/**
+ * Les mêmes données sensibles écrites en arabe, sur le texte normalisé (ة → ه, أ → ا). Le libellé est
+ * découpé en mots, toute ponctuation servant de frontière (« الدين: », « (الدين) », « الصحة/الدين ») ;
+ * chaque mot, privé de ses préfixes, est comparé à une racine suivie d'une terminaison et d'un pronom
+ * possessif éventuels (« ديانته »). Mots entiers : « مدينة » (ville) contient « دين » sans en être.
+ */
+// Listes passées par la même normalisation que le texte : « ئ » y perd sa hamza (« قبائل » → « قبايل »).
+const normalizedList = (words: string[]) => words.map(normalizeSearch);
+const SENSITIVE_STEM_AR = new RegExp(
+  `^(?:${normalizedList([
+    'دين',
+    'ديان',
+    'مذهب',
+    'مذاهب',
+    'عقيد',
+    'عقائد',
+    'طائف',
+    'عرق',
+    'أعراق',
+    'إثني',
+    'قبيل',
+    'قبائل',
+    'قبلي',
+    'صح',
+    'طب',
+    'مرض',
+    'أمراض',
+    'إعاق',
+    'إيدز',
+    'سياس',
+    'حزب',
+    'أحزاب',
+    'دخل',
+    'راتب',
+    'رواتب',
+    'بصم',
+    'بيومتري',
+  ]).join('|')})(?:ه|ات|ي|يه|يات|ان|ين|ت)?(?:ه|ها|هم|هما|هن|ك|كم|نا|ي)?$`,
+);
+/**
+ * Mots ordinaires qui se décomposent en une racine sensible : « فصحى » (arabe classique, où ف n'est
+ * pas un préfixe). Seuls des mots sans autre lecture possible : « والدين » peut aussi signifier « et la
+ * religion », il reste donc refusé ; « الوالدين » (les parents) passe, l'article excluant cette lecture.
+ * Aucune exception de contexte : un faux positif vaut mieux qu'un libellé sensible accepté.
+ */
+const ORDINARY_WORDS_AR = new Set(normalizedList(['فصحى', 'الفصحى']));
+
+/**
+ * Préfixes retirés, seuls ou combinés : conjonction (و، ف), préposition (ب، ل، ك), article (ال), et la
+ * contraction « لل » (ل + ال). Le mot entier est aussi essayé tel quel (« بصمة » garde son ب).
+ */
+const PREFIXES_AR = /^(?:[وف]?(?:لل|[بلك]?(?:ال)?))/;
+const forms = (word: string) => [word, word.replace(PREFIXES_AR, ''), word.replace(/^ال/, '')];
+
+function hasSensitiveArabicWord(normalized: string): boolean {
+  // Tout ce qui n'est pas une lettre sépare les mots, chiffres compris : « الدين1 » reste « الدين ».
+  return normalized
+    .split(/[^\p{L}]+/u)
+    .filter(Boolean)
+    .some(
+      (word) => !ORDINARY_WORDS_AR.has(word) && forms(word).some((f) => SENSITIVE_STEM_AR.test(f)),
+    );
+}
+
+/** Libellé de champ libre désignant une donnée sensible, en français ou en arabe. */
+export function isSensitiveFieldLabel(text: string): boolean {
+  const normalized = normalizeSearch(text);
+  return SENSITIVE_LABEL.test(normalized) || hasSensitiveArabicWord(normalized);
+}
+
+/**
+ * Clé technique d'un champ, tirée de son libellé. Un libellé sans lettre latine (en arabe, par
+ * exemple) reçoit une clé numérotée : il doit pouvoir être ajouté lui aussi.
+ */
+export function customFieldKey(label: string, existing: readonly SchoolCustomField[]): string {
+  const fromLabel = label
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .replace(/^[^a-z]+/, '')
+    .slice(0, 40);
+  if (fromLabel) return fromLabel;
+  let n = existing.length + 1;
+  while (existing.some((f) => f.key === `champ_${n}`)) n++;
+  return `champ_${n}`;
+}
 
 /**
  * Un champ libre ne doit pas contourner la minimisation : les données sensibles sont refusées, les
@@ -215,7 +309,8 @@ export function validateCustomFields(fields: readonly SchoolCustomField[]): stri
       errors.push(`Libellé invalide pour le champ ${field.key}.`);
       continue;
     }
-    if (SENSITIVE_LABEL.test(normalizeSearch(`${field.key} ${field.label}`))) {
+    // Chaque propriété analysée seule : un mot de l'une ne peut pas changer le sens de l'autre.
+    if ([field.key, field.label, field.labelAr ?? ''].some(isSensitiveFieldLabel)) {
       errors.push(`Donnée sensible refusée dans un champ libre : ${field.label}.`);
     }
   }

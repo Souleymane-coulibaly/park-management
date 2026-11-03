@@ -60,8 +60,34 @@ la couverture, jamais les données scolaires.
 
 - Noms bilingues (`name`, `nameAr`) sur les établissements, parcours, cycles, niveaux, classes, matières
   et périodes, conservés en Unicode.
-- Saisie et affichage de l'arabe de droite à gauche. L'interface elle-même reste en français à ce stade.
 - Matières religieuses créées uniquement si l'établissement le choisit.
+
+### Langue de l'établissement (Sprint 3A)
+
+Chaque établissement choisit sa langue (`School.defaultLocale`). **Le français est la langue par défaut** :
+tout établissement créé sans précision est en Français. L'arabe est un choix de l'établissement.
+
+| Langue            | Interface                 | Champs et contenus arabes            | Exports                      |
+| ----------------- | ------------------------- | ------------------------------------ | ---------------------------- |
+| Français (défaut) | Français                  | Jamais affichés ni demandés          | Aucune colonne arabe         |
+| Arabe             | Arabe, de droite à gauche | Affichés ; libellé arabe prioritaire | En-têtes et valeurs en arabe |
+| Bilingue          | Français                  | Affichés à côté du français          | En-têtes « Nom / اللقب »     |
+
+- La direction (`school.structure.manage`) change la langue depuis « Établissements ». Le changement est
+  journalisé (`school.locale_changed`, ancienne et nouvelle valeur) ; secrétariat et enseignants sont
+  refusés, un autre client ne voit pas l'établissement.
+- Aucune donnée n'est supprimée : en Français, les champs arabes sont masqués et ne sont pas envoyés lors
+  d'une modification, donc jamais effacés. Ils réapparaissent en Arabe ou en Bilingue.
+- Le champ principal (`name`, `lastName`…) reste obligatoire dans toutes les langues ; un établissement
+  en Arabe peut le saisir en arabe. La saisie de l'arabe n'est jamais obligatoire.
+- Le menu général et la page compte d'Ocall Suite restent en français (composants partagés avec Park).
+  Les pages School suivent la langue de l'établissement choisi ; la fiche élève, celle de l'élève.
+- Textes : `packages/shared/src/school-i18n.ts`. Chaque texte français a sa traduction arabe, vérifiée
+  par le compilateur et par un test. Les erreurs de l'API sont traduites par leur code ; un code inconnu
+  et les détails de validation gardent le message français de l'API.
+- Champs complémentaires : un libellé en arabe reçoit une clé numérotée (`champ_1`). Le refus des données
+  sensibles (religion, santé, ethnie…) couvre aussi les libellés arabes, `labelAr` compris.
+- **Les traductions arabes doivent être relues par un arabophone avant toute mise en production.**
 
 ## 5. Règles de notation
 
@@ -235,5 +261,7 @@ décision. Une demande d'activation d'un membre partagé, même à valeur égale
 - Les documents School ne sont pas comptés dans le quota de stockage de l'organisation.
 - Import synchrone, limité à 1 000 lignes par fichier.
 - Pas de PWA School : le Service Worker reste limité à `/app`.
+- Messages de validation détaillés de l'API (champs refusés) et erreurs ligne par ligne de l'import
+  restent en français, y compris pour un établissement en Arabe.
 - Les dates de contrat s'apprécient en UTC.
 - La conformité des données de mineurs doit être validée pays par pays avant toute vraie donnée.

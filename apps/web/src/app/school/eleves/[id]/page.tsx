@@ -4,20 +4,18 @@ import { useParams } from 'next/navigation';
 import { type FormEvent, useState } from 'react';
 import {
   SCHOOL_DOCUMENT_CATEGORIES,
-  SCHOOL_DOCUMENT_CATEGORY_LABELS,
-  SCHOOL_ENROLLMENT_STATUS_LABELS,
   SCHOOL_EXIT_REASONS,
-  SCHOOL_EXIT_REASON_LABELS,
   SCHOOL_GUARDIAN_RELATIONS,
-  SCHOOL_GUARDIAN_RELATION_LABELS,
   SCHOOL_SEXES,
-  SCHOOL_SEX_LABELS,
+  type SchoolTextKey,
   hasSchoolPermission,
+  schoolDisplayName,
   type SchoolDocumentCategory,
   type SchoolEnrollmentStatus,
   type SchoolGuardianRelation,
   type SchoolSex,
 } from '@ocall/shared';
+import { SchoolLanguage, toApiError, useSchoolText } from '@/components/school/school-language';
 import { SchoolPage, type SchoolPageApi } from '@/components/school/school-page';
 import {
   Fact,
@@ -31,10 +29,10 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody } from '@/components/ui/card';
 import { InputField, SelectField } from '@/components/ui/field';
+import { PageHeader } from '@/components/ui/page-header';
 import { SimpleForm } from '@/components/ui/simple-form';
 import { Alert, ApiErrorAlert, ErrorState, LoadingState } from '@/components/ui/states';
-import { ApiError, api, apiUpload } from '@/lib/api';
-import { formatDate } from '@/lib/format';
+import { type ApiError, api, apiUpload } from '@/lib/api';
 import { useApi } from '@/lib/use-api';
 
 interface StudentFull extends StudentRow {
@@ -47,68 +45,86 @@ interface StudentFull extends StudentRow {
 }
 
 const TABS = [
-  { key: 'identity', label: 'Identité', permission: null },
-  { key: 'schooling', label: 'Scolarité', permission: 'school.students.read_full' },
-  { key: 'guardians', label: 'Responsables', permission: 'school.guardians.read' },
-  { key: 'documents', label: 'Documents', permission: 'school.documents.read' },
-  { key: 'history', label: 'Historique', permission: 'school.students.read_full' },
+  { key: 'identity', permission: null },
+  { key: 'schooling', permission: 'school.students.read_full' },
+  { key: 'guardians', permission: 'school.guardians.read' },
+  { key: 'documents', permission: 'school.documents.read' },
+  { key: 'history', permission: 'school.students.read_full' },
 ] as const;
 type TabKey = (typeof TABS)[number]['key'];
-
-const toError = (e: unknown) =>
-  e instanceof ApiError ? e : new ApiError(0, 'NETWORK', 'Connexion impossible.');
 
 export default function FicheElevePage() {
   const { id } = useParams<{ id: string }>();
   return (
-    <SchoolPage title="Fiche élève" needsSchool={false}>
-      {(page) => <Sheet id={id} page={page} />}
-    </SchoolPage>
+    // Sans titre de cadre : l'en-tête est rendu dans la langue de l'établissement de l'élève.
+    <SchoolPage needsSchool={false}>{(page) => <Sheet id={id} page={page} />}</SchoolPage>
   );
 }
 
 function Sheet({ id, page }: { id: string; page: SchoolPageApi }) {
   const student = useApi<StudentFull>(`/school/students/${id}`);
-  const [tab, setTab] = useState<TabKey>('identity');
   if (student.state === 'loading') return <LoadingState />;
   if (student.state === 'error') {
     return <ErrorState error={student.error} onRetry={student.reload} />;
   }
-  const s = student.data;
+  // La fiche suit la langue de l'établissement de l'élève, pas celle de l'établissement choisi.
+  const locale =
+    page.context.schools.find((s) => s.id === student.data.schoolId)?.defaultLocale ?? 'FR';
+  return (
+    <SchoolLanguage locale={locale} className="space-y-4">
+      <SheetContent student={student.data} page={page} reload={student.reload} />
+    </SchoolLanguage>
+  );
+}
+
+function SheetContent({
+  student: s,
+  page,
+  reload,
+}: {
+  student: StudentFull;
+  page: SchoolPageApi;
+  reload: () => void;
+}) {
+  const { t } = useSchoolText();
+  const [tab, setTab] = useState<TabKey>('identity');
   const tabs = TABS.filter(
-    (t) => !t.permission || hasSchoolPermission(page.context.role, t.permission),
+    (tb) => !tb.permission || hasSchoolPermission(page.context.role, tb.permission),
   );
   return (
     <>
+      <PageHeader eyebrow={t('common.eyebrow')} title={t('sheet.title')} />
       <Card>
         <CardBody>
           <p className="text-lg font-semibold" data-testid="student-name">
             <StudentName student={s} />
           </p>
           <p className="mt-1 flex flex-wrap items-center gap-3 text-sm text-muted">
-            <span data-testid="student-matricule">{s.matricule}</span>
+            <span data-testid="student-matricule" dir="ltr">
+              {s.matricule}
+            </span>
             <StudentStatusBadge status={s.status} />
           </p>
         </CardBody>
       </Card>
       <div role="tablist" className="flex gap-1 overflow-x-auto border-b border-line">
-        {tabs.map((t) => (
+        {tabs.map((tb) => (
           <button
-            key={t.key}
+            key={tb.key}
             type="button"
             role="tab"
-            aria-selected={tab === t.key}
-            onClick={() => setTab(t.key)}
+            aria-selected={tab === tb.key}
+            onClick={() => setTab(tb.key)}
             className={`min-h-11 whitespace-nowrap px-3 text-sm font-medium ${
-              tab === t.key ? 'border-b-2 border-forest text-forest' : 'text-muted'
+              tab === tb.key ? 'border-b-2 border-forest text-forest' : 'text-muted'
             }`}
           >
-            {t.label}
+            {t(`sheet.tab.${tb.key}`)}
           </button>
         ))}
       </div>
-      {tab === 'identity' && <Identity student={s} page={page} reload={student.reload} />}
-      {tab === 'schooling' && <Schooling student={s} page={page} reload={student.reload} />}
+      {tab === 'identity' && <Identity student={s} page={page} reload={reload} />}
+      {tab === 'schooling' && <Schooling student={s} page={page} reload={reload} />}
       {tab === 'guardians' && <Guardians student={s} page={page} />}
       {tab === 'documents' && <Documents student={s} page={page} />}
       {tab === 'history' && <History studentId={s.id} />}
@@ -125,6 +141,7 @@ function Identity({
   page: SchoolPageApi;
   reload: () => void;
 }) {
+  const { t, labels, date, fields, showArabic } = useSchoolText();
   const [editing, setEditing] = useState(false);
   const full = s.birthDate !== undefined;
   const canEdit = page.canWrite('school.students.manage');
@@ -133,16 +150,34 @@ function Identity({
       <Card>
         <CardBody>
           <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <Fact label="Nom">{s.lastName}</Fact>
-            <Fact label="Prénom">{s.firstName}</Fact>
+            <Fact label={t('field.lastName')}>{s.lastName}</Fact>
+            <Fact label={t('field.firstName')}>{s.firstName}</Fact>
+            {showArabic && (
+              <>
+                <Fact label={t('field.lastNameAr')}>
+                  {s.lastNameAr && (
+                    <span dir="rtl" lang="ar">
+                      {s.lastNameAr}
+                    </span>
+                  )}
+                </Fact>
+                <Fact label={t('field.firstNameAr')}>
+                  {s.firstNameAr && (
+                    <span dir="rtl" lang="ar">
+                      {s.firstNameAr}
+                    </span>
+                  )}
+                </Fact>
+              </>
+            )}
             {full && (
               <>
-                <Fact label="Date de naissance">{s.birthDate && formatDate(s.birthDate)}</Fact>
-                <Fact label="Lieu de naissance">{s.birthPlace}</Fact>
-                <Fact label="Sexe">{s.sex && SCHOOL_SEX_LABELS[s.sex]}</Fact>
-                <Fact label="Nationalité">{s.nationality}</Fact>
-                <Fact label="Adresse">{s.address}</Fact>
-                <Fact label="Observations administratives">{s.adminNotes}</Fact>
+                <Fact label={t('field.birthDate')}>{s.birthDate && date(s.birthDate)}</Fact>
+                <Fact label={t('field.birthPlace')}>{s.birthPlace}</Fact>
+                <Fact label={t('field.sex')}>{s.sex && labels.sex[s.sex]}</Fact>
+                <Fact label={t('field.nationality')}>{s.nationality}</Fact>
+                <Fact label={t('field.address')}>{s.address}</Fact>
+                <Fact label={t('sheet.adminNotes')}>{s.adminNotes}</Fact>
               </>
             )}
           </dl>
@@ -153,7 +188,7 @@ function Identity({
               size="sm"
               onClick={() => setEditing(!editing)}
             >
-              {editing ? 'Fermer' : 'Modifier'}
+              {editing ? t('common.close') : t('common.edit')}
             </Button>
           )}
         </CardBody>
@@ -167,56 +202,72 @@ function Identity({
               method="PATCH"
               sendEmpty
               path={`/school/students/${s.id}`}
-              submitLabel="Enregistrer"
+              submitLabel={t('common.save')}
               onDone={() => {
                 setEditing(false);
                 reload();
               }}
-              fields={[
-                { name: 'lastName', label: 'Nom', required: true, defaultValue: s.lastName },
-                { name: 'firstName', label: 'Prénom', required: true, defaultValue: s.firstName },
+              // Établissement francophone : les champs arabes ne sont ni affichés ni envoyés, donc
+              // jamais effacés. Les noms arabes déjà saisis restent intacts.
+              fields={fields([
+                {
+                  name: 'lastName',
+                  label: t('field.lastName'),
+                  required: true,
+                  defaultValue: s.lastName,
+                },
+                {
+                  name: 'firstName',
+                  label: t('field.firstName'),
+                  required: true,
+                  defaultValue: s.firstName,
+                },
                 {
                   name: 'lastNameAr',
-                  label: 'Nom en arabe',
+                  label: t('field.lastNameAr'),
                   rtl: true,
                   defaultValue: s.lastNameAr ?? '',
                 },
                 {
                   name: 'firstNameAr',
-                  label: 'Prénom en arabe',
+                  label: t('field.firstNameAr'),
                   rtl: true,
                   defaultValue: s.firstNameAr ?? '',
                 },
                 {
                   name: 'birthDate',
-                  label: 'Date de naissance',
+                  label: t('field.birthDate'),
                   type: 'date',
                   required: true,
                   defaultValue: s.birthDate,
                 },
                 {
                   name: 'birthPlace',
-                  label: 'Lieu de naissance',
+                  label: t('field.birthPlace'),
                   defaultValue: s.birthPlace ?? '',
                 },
                 {
                   name: 'sex',
-                  label: 'Sexe',
+                  label: t('field.sex'),
                   type: 'select',
                   defaultValue: s.sex ?? '',
                   options: [
-                    { value: '', label: 'Non renseigné' },
-                    ...SCHOOL_SEXES.map((v) => ({ value: v, label: SCHOOL_SEX_LABELS[v] })),
+                    { value: '', label: t('field.notSpecified') },
+                    ...SCHOOL_SEXES.map((v) => ({ value: v, label: labels.sex[v] })),
                   ],
                 },
-                { name: 'nationality', label: 'Nationalité', defaultValue: s.nationality ?? '' },
-                { name: 'address', label: 'Adresse', defaultValue: s.address ?? '' },
+                {
+                  name: 'nationality',
+                  label: t('field.nationality'),
+                  defaultValue: s.nationality ?? '',
+                },
+                { name: 'address', label: t('field.address'), defaultValue: s.address ?? '' },
                 {
                   name: 'adminNotes',
-                  label: 'Observations administratives',
+                  label: t('sheet.adminNotes'),
                   defaultValue: s.adminNotes ?? '',
                 },
-              ]}
+              ])}
             />
           </CardBody>
         </Card>
@@ -227,18 +278,16 @@ function Identity({
       {page.canWrite('school.students.matricule_correct') && (
         <Card>
           <CardBody>
-            <h2 className="mb-1 font-semibold">Corriger le matricule</h2>
-            <p className="mb-3 text-sm text-muted">
-              Le matricule reste fixe. Une correction exige un motif et reste dans l’historique.
-            </p>
+            <h2 className="mb-1 font-semibold">{t('sheet.fixMatricule')}</h2>
+            <p className="mb-3 text-sm text-muted">{t('sheet.fixMatriculeHint')}</p>
             <SimpleForm
               testId="matricule-form"
               path={`/school/students/${s.id}/matricule`}
-              submitLabel="Corriger"
+              submitLabel={t('sheet.fix')}
               onDone={reload}
               fields={[
-                { name: 'matricule', label: 'Nouveau matricule', required: true },
-                { name: 'reason', label: 'Motif', required: true },
+                { name: 'matricule', label: t('sheet.newMatricule'), required: true },
+                { name: 'reason', label: t('field.reason'), required: true },
               ]}
             />
           </CardBody>
@@ -250,6 +299,7 @@ function Identity({
 
 /** Rien n'est chargé, ni journalisé, tant que la direction ne demande pas l'affichage. */
 function Sensitive({ studentId, canEdit }: { studentId: string; canEdit: boolean }) {
+  const { t } = useSchoolText();
   const [shown, setShown] = useState<string | null | undefined>(undefined);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<ApiError | null>(null);
@@ -261,7 +311,7 @@ function Sensitive({ studentId, canEdit }: { studentId: string; canEdit: boolean
       setShown(res.specialNeeds);
       setDraft(res.specialNeeds ?? '');
     } catch (e) {
-      setError(toError(e));
+      setError(toApiError(e));
     }
   }
   async function save() {
@@ -270,30 +320,35 @@ function Sensitive({ studentId, canEdit }: { studentId: string; canEdit: boolean
       await api(path, { method: 'PUT', body: { specialNeeds: draft } });
       setShown(draft || null);
     } catch (e) {
-      setError(toError(e));
+      setError(toApiError(e));
     }
   }
   return (
     <Card>
       <CardBody>
-        <h2 className="mb-1 font-semibold">Besoins particuliers</h2>
-        <p className="mb-3 text-sm text-muted">
-          Strictement nécessaires à la prise en charge. Données chiffrées, consultation journalisée.
-        </p>
+        <h2 className="mb-1 font-semibold">{t('sheet.sensitive')}</h2>
+        <p className="mb-3 text-sm text-muted">{t('sheet.sensitiveHint')}</p>
         <ApiErrorAlert error={error} />
         {shown === undefined ? (
           <Button variant="secondary" size="sm" onClick={show}>
-            Afficher
+            {t('sheet.show')}
           </Button>
         ) : canEdit ? (
           <div className="space-y-2">
-            <InputField label="Besoins" value={draft} onChange={(e) => setDraft(e.target.value)} />
+            <InputField
+              label={t('sheet.needs')}
+              dir="auto"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+            />
             <Button size="sm" onClick={save}>
-              Enregistrer
+              {t('common.save')}
             </Button>
           </div>
         ) : (
-          <p className="text-sm">{shown || 'Aucun besoin particulier renseigné.'}</p>
+          <p className="text-sm" dir="auto">
+            {shown || t('sheet.noNeeds')}
+          </p>
         )}
       </CardBody>
     </Card>
@@ -322,6 +377,7 @@ function Schooling({
   page: SchoolPageApi;
   reload: () => void;
 }) {
+  const { t, labels, name, date } = useSchoolText();
   const enrollments = useApi<EnrollmentRow[]>(`/school/students/${student.id}/enrollments`);
   if (enrollments.state === 'loading') return <LoadingState />;
   if (enrollments.state === 'error') {
@@ -337,22 +393,20 @@ function Schooling({
       <Card>
         <ul className="divide-y divide-line/70 text-sm" data-testid="enrollment-list">
           {enrollments.data.length === 0 && (
-            <li className="px-4 py-6 text-center text-muted">
-              Aucune inscription. Utilisez la page Inscriptions.
-            </li>
+            <li className="px-4 py-6 text-center text-muted">{t('sheet.noEnrollment')}</li>
           )}
           {enrollments.data.map((e) => (
             <li key={e.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
               <span className="font-medium">{e.year.label}</span>
-              <span>{e.class?.name ?? e.level.name}</span>
-              {e.track && <span className="text-muted">{e.track.name}</span>}
+              <span>{e.class ? name(e.class) : name(e.level)}</span>
+              {e.track && <span className="text-muted">{name(e.track)}</span>}
               <Badge tone={e.status === 'VALIDATED' ? 'forest' : 'neutral'}>
-                {SCHOOL_ENROLLMENT_STATUS_LABELS[e.status]}
+                {labels.enrollmentStatus[e.status]}
               </Badge>
               {e.exitReason && (
                 <span className="text-muted">
-                  {SCHOOL_EXIT_REASON_LABELS[e.exitReason]}
-                  {e.exitedOn ? `, ${formatDate(e.exitedOn)}` : ''}
+                  {labels.exitReason[e.exitReason]}
+                  {e.exitedOn ? `, ${date(e.exitedOn)}` : ''}
                 </span>
               )}
             </li>
@@ -365,24 +419,24 @@ function Schooling({
       {active && page.canWrite('school.enrollments.validate') && (
         <Card>
           <CardBody>
-            <h2 className="mb-3 font-semibold">Départ, abandon ou transfert hors du groupe</h2>
+            <h2 className="mb-3 font-semibold">{t('sheet.exitTitle')}</h2>
             <SimpleForm
               testId="exit-form"
               path={`/school/enrollments/${active.id}/exit`}
-              submitLabel="Enregistrer la sortie"
+              submitLabel={t('sheet.exitSave')}
               onDone={refresh}
               fields={[
                 {
                   name: 'reason',
-                  label: 'Motif',
+                  label: t('field.reason'),
                   type: 'select',
                   options: SCHOOL_EXIT_REASONS.map((r) => ({
                     value: r,
-                    label: SCHOOL_EXIT_REASON_LABELS[r],
+                    label: labels.exitReason[r],
                   })),
                 },
-                { name: 'exitedOn', label: 'Date', type: 'date', required: true },
-                { name: 'note', label: 'Précision' },
+                { name: 'exitedOn', label: t('field.date'), type: 'date', required: true },
+                { name: 'note', label: t('sheet.precision') },
               ]}
             />
           </CardBody>
@@ -396,28 +450,29 @@ function Schooling({
 }
 
 function ChangeClass({ enrollment, onDone }: { enrollment: EnrollmentRow; onDone: () => void }) {
+  const { t, name } = useSchoolText();
   const classes = useClasses(enrollment.schoolYearId);
   return (
     <Card>
       <CardBody>
-        <h2 className="mb-3 font-semibold">Changer de classe</h2>
+        <h2 className="mb-3 font-semibold">{t('sheet.changeClass')}</h2>
         {classes.length > 0 && (
           <SimpleForm
             key={enrollment.class?.id}
             testId="change-class-form"
             path={`/school/enrollments/${enrollment.id}/class`}
-            submitLabel="Changer de classe"
+            submitLabel={t('sheet.changeClass')}
             onDone={onDone}
             fields={[
               {
                 name: 'classId',
-                label: 'Nouvelle classe',
+                label: t('sheet.newClass'),
                 type: 'select',
                 options: classes
                   .filter((c) => c.id !== enrollment.class?.id)
-                  .map((c) => ({ value: c.id, label: c.name })),
+                  .map((c) => ({ value: c.id, label: name(c) })),
               },
-              { name: 'reason', label: 'Motif' },
+              { name: 'reason', label: t('field.reason') },
             ]}
           />
         )}
@@ -436,8 +491,11 @@ function Transfer({
   page: SchoolPageApi;
   onDone: () => void;
 }) {
+  const { t } = useSchoolText();
   const targets = page.context.schools.filter((s) => s.id !== student.schoolId);
   const [targetSchoolId, setTarget] = useState(targets[0]?.id ?? '');
+  // Destination et ses niveaux nommés selon la langue de la destination, pas celle de l'élève.
+  const targetLocale = targets.find((s) => s.id === targetSchoolId)?.defaultLocale ?? 'FR';
   const years = useApi<{ id: string; label: string; status: string }[]>(
     targetSchoolId ? `/school/years?schoolId=${targetSchoolId}` : null,
   );
@@ -451,18 +509,21 @@ function Transfer({
   return (
     <Card>
       <CardBody>
-        <h2 className="mb-3 font-semibold">Transfert vers un autre établissement du groupe</h2>
+        <h2 className="mb-3 font-semibold">{t('sheet.transferTitle')}</h2>
         <div className="mb-3 max-w-sm">
           <SelectField
-            label="Établissement d’accueil"
+            label={t('sheet.targetSchool')}
             value={targetSchoolId}
             onChange={(e) => setTarget(e.target.value)}
-            options={targets.map((t) => ({ value: t.id, label: t.name }))}
+            options={targets.map((s) => ({
+              value: s.id,
+              label: schoolDisplayName(s.defaultLocale, s),
+            }))}
           />
         </div>
         {openYears.length === 0 || levels.length === 0 ? (
-          <Alert tone="info" title="Structure à préparer">
-            Cet établissement doit avoir une année ouverte et au moins un niveau.
+          <Alert tone="info" title={t('enroll.prepareTitle')}>
+            {t('sheet.targetPrepare')}
           </Alert>
         ) : (
           <SimpleForm
@@ -470,23 +531,26 @@ function Transfer({
             testId="transfer-form"
             path={`/school/students/${student.id}/transfer`}
             extra={{ targetSchoolId }}
-            submitLabel="Transférer l’élève"
+            submitLabel={t('sheet.transfer')}
             onDone={onDone}
             fields={[
               {
                 name: 'targetSchoolYearId',
-                label: 'Année',
+                label: t('field.year'),
                 type: 'select',
                 options: openYears.map((y) => ({ value: y.id, label: y.label })),
               },
               {
                 name: 'targetLevelId',
-                label: 'Niveau',
+                label: t('field.level'),
                 type: 'select',
-                options: levels.map((l) => ({ value: l.id, label: l.name })),
+                options: levels.map((l) => ({
+                  value: l.id,
+                  label: schoolDisplayName(targetLocale, l),
+                })),
               },
-              { name: 'effectiveOn', label: 'Date d’effet', type: 'date', required: true },
-              { name: 'reason', label: 'Motif', required: true },
+              { name: 'effectiveOn', label: t('sheet.effectiveOn'), type: 'date', required: true },
+              { name: 'reason', label: t('field.reason'), required: true },
             ]}
           />
         )}
@@ -511,14 +575,10 @@ interface GuardianLink {
   };
 }
 
-const RIGHTS = [
-  { key: 'isEmergency', label: 'Contact d’urgence' },
-  { key: 'canReceiveSms', label: 'Reçoit les SMS' },
-  { key: 'canViewSchoolInfo', label: 'Consulte la scolarité' },
-  { key: 'canPickUp', label: 'Peut récupérer l’enfant' },
-] as const;
+const RIGHTS = ['isEmergency', 'canReceiveSms', 'canViewSchoolInfo', 'canPickUp'] as const;
 
 function Guardians({ student, page }: { student: StudentFull; page: SchoolPageApi }) {
+  const { t, labels } = useSchoolText();
   const links = useApi<GuardianLink[]>(`/school/students/${student.id}/guardians`);
   const [error, setError] = useState<ApiError | null>(null);
   const canManage = page.canWrite('school.guardians.manage');
@@ -531,7 +591,7 @@ function Guardians({ student, page }: { student: StudentFull; page: SchoolPageAp
       await work();
       links.reload();
     } catch (e) {
-      setError(toError(e));
+      setError(toApiError(e));
     }
   }
   return (
@@ -540,41 +600,41 @@ function Guardians({ student, page }: { student: StudentFull; page: SchoolPageAp
       <Card>
         <ul className="divide-y divide-line/70 text-sm" data-testid="guardian-links">
           {links.data.length === 0 && (
-            <li className="px-4 py-6 text-center text-muted">Aucun responsable rattaché.</li>
+            <li className="px-4 py-6 text-center text-muted">{t('sheet.noGuardian')}</li>
           )}
           {links.data.map((l) => (
             <li key={l.guardian.id} className="space-y-2 px-4 py-3">
               <p className="flex flex-wrap items-center gap-2">
-                <span className="font-medium">
+                <span className="font-medium" dir="auto">
                   {l.guardian.lastName} {l.guardian.firstName}
                 </span>
-                <span className="text-muted">{SCHOOL_GUARDIAN_RELATION_LABELS[l.relation]}</span>
-                {l.isPrimary && <Badge tone="forest">Principal</Badge>}
+                <span className="text-muted">{labels.guardianRelation[l.relation]}</span>
+                {l.isPrimary && <Badge tone="forest">{t('sheet.primary')}</Badge>}
               </p>
               <p className="text-muted">
-                <a href={`tel:${l.guardian.phone}`} className="text-forest">
+                <a href={`tel:${l.guardian.phone}`} className="text-forest" dir="ltr">
                   {l.guardian.phone}
                 </a>
                 {l.guardian.email ? ` · ${l.guardian.email}` : ''}
               </p>
               <div className="flex flex-wrap gap-x-4 gap-y-1">
-                {RIGHTS.map((r) => (
-                  <label key={r.key} className="flex min-h-11 items-center gap-2">
+                {RIGHTS.map((right) => (
+                  <label key={right} className="flex min-h-11 items-center gap-2">
                     <input
                       type="checkbox"
                       className="h-5 w-5 accent-forest"
-                      checked={l[r.key]}
+                      checked={l[right]}
                       disabled={!canManage}
                       onChange={(e) =>
                         run(() =>
                           api(path(l.guardian.id), {
                             method: 'PATCH',
-                            body: { [r.key]: e.target.checked },
+                            body: { [right]: e.target.checked },
                           }),
                         )
                       }
                     />
-                    {r.label}
+                    {t(`sheet.right.${right}`)}
                   </label>
                 ))}
               </div>
@@ -590,7 +650,7 @@ function Guardians({ student, page }: { student: StudentFull; page: SchoolPageAp
                         )
                       }
                     >
-                      Rendre principal
+                      {t('sheet.makePrimary')}
                     </Button>
                   )}
                   <Button
@@ -598,7 +658,7 @@ function Guardians({ student, page }: { student: StudentFull; page: SchoolPageAp
                     size="sm"
                     onClick={() => run(() => api(path(l.guardian.id), { method: 'DELETE' }))}
                   >
-                    Détacher
+                    {t('sheet.detach')}
                   </Button>
                 </div>
               )}
@@ -612,6 +672,7 @@ function Guardians({ student, page }: { student: StudentFull; page: SchoolPageAp
 }
 
 function AttachGuardian({ student, onDone }: { student: StudentFull; onDone: () => void }) {
+  const { t, labels } = useSchoolText();
   const [q, setQ] = useState('');
   const [picked, setPicked] = useState<GuardianLink['guardian'] | null>(null);
   const found = useApi<GuardianLink['guardian'][]>(
@@ -620,18 +681,21 @@ function AttachGuardian({ student, onDone }: { student: StudentFull; onDone: () 
   return (
     <Card>
       <CardBody>
-        <h2 className="mb-3 font-semibold">Rattacher un responsable</h2>
+        <h2 className="mb-3 font-semibold">{t('sheet.attachTitle')}</h2>
         {picked ? (
           <>
             <p className="mb-3 text-sm">
-              {picked.lastName} {picked.firstName}, {picked.phone}
+              <span dir="auto">
+                {picked.lastName} {picked.firstName}
+              </span>
+              , <span dir="ltr">{picked.phone}</span>
             </p>
             <SimpleForm
               key={picked.id}
               testId="link-guardian-form"
               path={`/school/students/${student.id}/guardians`}
               extra={{ guardianId: picked.id }}
-              submitLabel="Rattacher"
+              submitLabel={t('sheet.attach')}
               onDone={() => {
                 setPicked(null);
                 setQ('');
@@ -640,16 +704,16 @@ function AttachGuardian({ student, onDone }: { student: StudentFull; onDone: () 
               fields={[
                 {
                   name: 'relation',
-                  label: 'Lien avec l’élève',
+                  label: t('sheet.relation'),
                   type: 'select',
                   options: SCHOOL_GUARDIAN_RELATIONS.map((r) => ({
                     value: r,
-                    label: SCHOOL_GUARDIAN_RELATION_LABELS[r],
+                    label: labels.guardianRelation[r],
                   })),
                 },
-                ...RIGHTS.map((r) => ({
-                  name: r.key,
-                  label: r.label,
+                ...RIGHTS.map((right) => ({
+                  name: right,
+                  label: t(`sheet.right.${right}`),
                   type: 'checkbox' as const,
                 })),
               ]}
@@ -658,25 +722,27 @@ function AttachGuardian({ student, onDone }: { student: StudentFull; onDone: () 
         ) : (
           <>
             <InputField
-              label="Rechercher par nom ou téléphone"
+              label={t('guardians.search')}
+              dir="auto"
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
             {q.length >= 2 && found.state === 'success' && (
               <ul className="mt-2 divide-y divide-line/70 text-sm" data-testid="guardian-results">
                 {found.data.length === 0 && (
-                  <li className="py-2 text-muted">
-                    Aucun résultat : créez-le dans la page Responsables.
-                  </li>
+                  <li className="py-2 text-muted">{t('sheet.noGuardianResult')}</li>
                 )}
                 {found.data.map((g) => (
                   <li key={g.id}>
                     <button
                       type="button"
-                      className="min-h-11 w-full py-2 text-left hover:bg-ivory"
+                      className="min-h-11 w-full py-2 text-start hover:bg-ivory"
                       onClick={() => setPicked(g)}
                     >
-                      {g.lastName} {g.firstName}, {g.phone}
+                      <span dir="auto">
+                        {g.lastName} {g.firstName}
+                      </span>
+                      , <span dir="ltr">{g.phone}</span>
                     </button>
                   </li>
                 ))}
@@ -698,6 +764,7 @@ interface DocumentRow {
 }
 
 function Documents({ student, page }: { student: StudentFull; page: SchoolPageApi }) {
+  const { t, labels, date } = useSchoolText();
   const documents = useApi<DocumentRow[]>(`/school/students/${student.id}/documents`);
   const [error, setError] = useState<ApiError | null>(null);
   const [category, setCategory] = useState<SchoolDocumentCategory>('BIRTH_CERTIFICATE');
@@ -718,7 +785,7 @@ function Documents({ student, page }: { student: StudentFull; page: SchoolPageAp
       (event.target as HTMLFormElement).reset();
       documents.reload();
     } catch (e) {
-      setError(toError(e));
+      setError(toApiError(e));
     } finally {
       setSending(false);
     }
@@ -730,7 +797,7 @@ function Documents({ student, page }: { student: StudentFull; page: SchoolPageAp
       const { url } = await api<{ url: string }>(`${base}/${id}/link`);
       window.location.assign(url);
     } catch (e) {
-      setError(toError(e));
+      setError(toApiError(e));
     }
   }
   async function remove(id: string) {
@@ -739,7 +806,7 @@ function Documents({ student, page }: { student: StudentFull; page: SchoolPageAp
       await api(`${base}/${id}`, { method: 'DELETE' });
       documents.reload();
     } catch (e) {
-      setError(toError(e));
+      setError(toApiError(e));
     }
   }
   return (
@@ -753,23 +820,23 @@ function Documents({ student, page }: { student: StudentFull; page: SchoolPageAp
         <Card>
           <ul className="divide-y divide-line/70 text-sm" data-testid="document-list">
             {documents.data.length === 0 && (
-              <li className="px-4 py-6 text-center text-muted">Aucune pièce au dossier.</li>
+              <li className="px-4 py-6 text-center text-muted">{t('sheet.noDocument')}</li>
             )}
             {documents.data.map((d) => (
               <li key={d.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
                 <span className="w-full min-w-0 sm:w-auto sm:flex-1">
-                  <span className="block font-medium">
-                    {SCHOOL_DOCUMENT_CATEGORY_LABELS[d.category]}
+                  <span className="block font-medium">{labels.documentCategory[d.category]}</span>
+                  <span className="block break-all text-muted" dir="auto">
+                    {d.displayName}
                   </span>
-                  <span className="block break-all text-muted">{d.displayName}</span>
                 </span>
-                <span className="text-muted">{formatDate(d.createdAt)}</span>
+                <span className="text-muted">{date(d.createdAt)}</span>
                 <Button variant="secondary" size="sm" onClick={() => download(d.id)}>
-                  Télécharger
+                  {t('sheet.download')}
                 </Button>
                 {page.canWrite('school.documents.delete') && (
                   <Button variant="secondary" size="sm" onClick={() => remove(d.id)}>
-                    Supprimer
+                    {t('sheet.delete')}
                   </Button>
                 )}
               </li>
@@ -780,24 +847,24 @@ function Documents({ student, page }: { student: StudentFull; page: SchoolPageAp
       {page.canWrite('school.documents.manage') && (
         <Card>
           <CardBody>
-            <h2 className="mb-1 font-semibold">Ajouter une pièce</h2>
-            <p className="mb-3 text-sm text-muted">JPEG, PNG, WebP ou PDF, 5 Mo au plus.</p>
+            <h2 className="mb-1 font-semibold">{t('sheet.addDocument')}</h2>
+            <p className="mb-3 text-sm text-muted">{t('sheet.documentHint')}</p>
             <form
               onSubmit={upload}
               className="grid items-end gap-3 sm:grid-cols-2"
               data-testid="document-form"
             >
               <SelectField
-                label="Type de pièce"
+                label={t('sheet.documentType')}
                 value={category}
                 onChange={(e) => setCategory(e.target.value as SchoolDocumentCategory)}
                 options={SCHOOL_DOCUMENT_CATEGORIES.map((c) => ({
                   value: c,
-                  label: SCHOOL_DOCUMENT_CATEGORY_LABELS[c],
+                  label: labels.documentCategory[c],
                 }))}
               />
               <label className="block text-sm font-medium">
-                Fichier
+                {t('field.file')}
                 <input
                   type="file"
                   required
@@ -807,7 +874,7 @@ function Documents({ student, page }: { student: StudentFull; page: SchoolPageAp
                 />
               </label>
               <Button type="submit" loading={sending} className="sm:col-span-2 sm:w-fit">
-                Ajouter
+                {t('common.add')}
               </Button>
             </form>
           </CardBody>
@@ -817,24 +884,8 @@ function Documents({ student, page }: { student: StudentFull; page: SchoolPageAp
   );
 }
 
-const EVENT_LABELS: Record<string, string> = {
-  CREATED: 'Dossier créé',
-  UPDATED: 'Dossier modifié',
-  MATRICULE_CORRECTED: 'Matricule corrigé',
-  SENSITIVE_UPDATED: 'Besoins particuliers modifiés',
-  ENROLLMENT_CREATED: 'Inscription créée',
-  ENROLLMENT_STATUS: 'Statut d’inscription modifié',
-  ENROLLMENT_ENDED: 'Inscription terminée',
-  CLASS_CHANGED: 'Changement de classe',
-  TRANSFERRED: 'Transfert dans le groupe',
-  GUARDIAN_LINKED: 'Responsable rattaché',
-  GUARDIAN_UNLINKED: 'Responsable détaché',
-  GUARDIAN_RIGHTS_UPDATED: 'Autorisations d’un responsable modifiées',
-  DOCUMENT_ADDED: 'Pièce ajoutée',
-  DOCUMENT_DELETED: 'Pièce supprimée',
-};
-
 function History({ studentId }: { studentId: string }) {
+  const { t, name, date } = useSchoolText();
   const history = useApi<{
     events: { id: string; type: string; createdAt: string }[];
     assignments: {
@@ -849,21 +900,27 @@ function History({ studentId }: { studentId: string }) {
   if (history.state === 'error') {
     return <ErrorState error={history.error} onRetry={history.reload} />;
   }
+  const eventLabel = (type: string) => {
+    const key = `sheet.event.${type}` as SchoolTextKey;
+    const label = t(key);
+    // Événement ajouté côté serveur sans libellé ici : le code reste lisible plutôt que masqué.
+    return label === key ? type : label;
+  };
   return (
     <>
       <Card>
         <CardBody>
-          <h2 className="mb-2 font-semibold">Affectations</h2>
+          <h2 className="mb-2 font-semibold">{t('sheet.assignments')}</h2>
           <ul className="space-y-1 text-sm" data-testid="assignment-history">
             {history.data.assignments.length === 0 && (
-              <li className="text-muted">Aucune affectation.</li>
+              <li className="text-muted">{t('sheet.noAssignment')}</li>
             )}
             {history.data.assignments.map((a) => (
               <li key={a.id}>
-                <span className="font-medium">{a.class.name}</span>
+                <span className="font-medium">{name(a.class)}</span>
                 {' : '}
-                {formatDate(a.startedAt)}
-                {a.endedAt ? ` au ${formatDate(a.endedAt)}` : ', en cours'}
+                {date(a.startedAt)}
+                {a.endedAt ? t('sheet.until', { date: date(a.endedAt) }) : t('sheet.ongoing')}
                 {a.reason ? ` (${a.reason})` : ''}
               </li>
             ))}
@@ -872,12 +929,12 @@ function History({ studentId }: { studentId: string }) {
       </Card>
       <Card>
         <CardBody>
-          <h2 className="mb-2 font-semibold">Événements du dossier</h2>
+          <h2 className="mb-2 font-semibold">{t('sheet.events')}</h2>
           <ul className="space-y-1 text-sm" data-testid="event-history">
             {history.data.events.map((e) => (
               <li key={e.id} className="flex flex-wrap justify-between gap-x-3">
-                <span>{EVENT_LABELS[e.type] ?? e.type}</span>
-                <span className="text-muted">{formatDate(e.createdAt)}</span>
+                <span>{eventLabel(e.type)}</span>
+                <span className="text-muted">{date(e.createdAt)}</span>
               </li>
             ))}
           </ul>

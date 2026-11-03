@@ -21,7 +21,7 @@ function FieldShell({ label, hint, error, required, children }: FieldShellProps)
       <label htmlFor={id} className="block text-sm font-medium text-charcoal">
         {label}
         {required && (
-          <span className="ml-0.5 text-terracotta-dark" aria-hidden>
+          <span className="ms-0.5 text-terracotta-dark" aria-hidden>
             *
           </span>
         )}

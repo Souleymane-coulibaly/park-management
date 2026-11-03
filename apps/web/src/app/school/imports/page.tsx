@@ -3,22 +3,24 @@
 import { useState } from 'react';
 import {
   SCHOOL_IMPORT_FIELDS,
-  SCHOOL_IMPORT_FIELD_LABELS,
+  schoolImportIssueMessage,
   type SchoolImportField,
   type SchoolImportMapping,
 } from '@ocall/shared';
+import { toApiError, useSchoolText } from '@/components/school/school-language';
 import { SchoolPage, type SchoolPageApi } from '@/components/school/school-page';
 import { useYears } from '@/components/school/school-students';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody } from '@/components/ui/card';
 import { SelectField } from '@/components/ui/field';
 import { Alert, ApiErrorAlert, LoadingState } from '@/components/ui/states';
-import { ApiError, apiUpload } from '@/lib/api';
-import { formatDate } from '@/lib/format';
+import { type ApiError, apiUpload } from '@/lib/api';
 import { useApi } from '@/lib/use-api';
 
 interface Issue {
   line: number;
+  code?: string;
+  field?: SchoolImportField;
   message: string;
 }
 
@@ -53,20 +55,19 @@ interface Job {
   createdAt: string;
 }
 
-const FIELDS = Object.keys(SCHOOL_IMPORT_FIELDS) as SchoolImportField[];
+const ALL_FIELDS = Object.keys(SCHOOL_IMPORT_FIELDS) as SchoolImportField[];
+const ARABIC_FIELDS: readonly SchoolImportField[] = ['lastNameAr', 'firstNameAr'];
 
 export default function ImportsPage() {
   return (
-    <SchoolPage
-      title="Importer des élèves"
-      description="Fichier CSV ou Excel, 1 000 lignes au plus. Rien n’est enregistré avant votre confirmation."
-    >
+    <SchoolPage title="imports.title" description="imports.desc">
       {(page) => <Import key={page.school!.id} page={page} schoolId={page.school!.id} />}
     </SchoolPage>
   );
 }
 
 function Import({ page, schoolId }: { page: SchoolPageApi; schoolId: string }) {
+  const { t, labels, date, join, showArabic, language } = useSchoolText();
   const years = useYears(schoolId);
   const jobs = useApi<Job[]>(`/school/imports?schoolId=${schoolId}`);
   const [schoolYearId, setYear] = useState('');
@@ -76,6 +77,14 @@ function Import({ page, schoolId }: { page: SchoolPageApi; schoolId: string }) {
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState<Job | null>(null);
+  // Établissement francophone : aucune colonne arabe proposée, ni importée.
+  const fields = showArabic ? ALL_FIELDS : ALL_FIELDS.filter((f) => !ARABIC_FIELDS.includes(f));
+  const keepVisible = (map: SchoolImportMapping): SchoolImportMapping =>
+    showArabic
+      ? map
+      : Object.fromEntries(
+          Object.entries(map).filter(([f]) => !ARABIC_FIELDS.includes(f as SchoolImportField)),
+        );
 
   const form = (selected: File, map: SchoolImportMapping | null, skipInvalid = false) => {
     const data = new FormData();
@@ -92,12 +101,17 @@ function Import({ page, schoolId }: { page: SchoolPageApi; schoolId: string }) {
     setError(null);
     setDone(null);
     try {
-      const result = await apiUpload<Preview>('/school/imports/preview', form(selected, map));
+      let result = await apiUpload<Preview>('/school/imports/preview', form(selected, map));
+      const visible = keepVisible(result.mapping);
+      // La correspondance proposée contenait une colonne arabe masquée : analyse sans elle.
+      if (Object.keys(visible).length !== Object.keys(result.mapping).length) {
+        result = await apiUpload<Preview>('/school/imports/preview', form(selected, visible));
+      }
       setPreview(result);
-      setMapping(result.mapping);
+      setMapping(keepVisible(result.mapping));
     } catch (e) {
       setPreview(null);
-      setError(e instanceof ApiError ? e : new ApiError(0, 'NETWORK', 'Connexion impossible.'));
+      setError(toApiError(e));
     } finally {
       setBusy(false);
     }
@@ -117,7 +131,7 @@ function Import({ page, schoolId }: { page: SchoolPageApi; schoolId: string }) {
       setFile(null);
       jobs.reload();
     } catch (e) {
-      setError(e instanceof ApiError ? e : new ApiError(0, 'NETWORK', 'Connexion impossible.'));
+      setError(toApiError(e));
     } finally {
       setBusy(false);
     }
@@ -125,8 +139,8 @@ function Import({ page, schoolId }: { page: SchoolPageApi; schoolId: string }) {
 
   if (!page.canWrite('school.students.import')) {
     return (
-      <Alert tone="info" title="Import indisponible">
-        Votre rôle ou votre contrat ne permet pas d’importer des élèves.
+      <Alert tone="info" title={t('imports.unavailableTitle')}>
+        {t('imports.unavailable')}
       </Alert>
     );
   }
@@ -137,12 +151,12 @@ function Import({ page, schoolId }: { page: SchoolPageApi; schoolId: string }) {
         <CardBody>
           <div className="grid items-end gap-3 sm:grid-cols-2">
             <SelectField
-              label="Année des inscriptions"
-              hint="Facultatif : sans année, seuls les dossiers sont créés."
+              label={t('imports.year')}
+              hint={t('imports.yearHint')}
               value={schoolYearId}
               onChange={(e) => setYear(e.target.value)}
               options={[
-                { value: '', label: 'Aucune' },
+                { value: '', label: t('common.noneFeminine') },
                 ...(years.state === 'success'
                   ? years.data
                       .filter((y) => y.status !== 'CLOSED')
@@ -151,7 +165,7 @@ function Import({ page, schoolId }: { page: SchoolPageApi; schoolId: string }) {
               ]}
             />
             <label className="block text-sm font-medium">
-              Fichier
+              {t('field.file')}
               <input
                 type="file"
                 data-testid="import-file"
@@ -171,12 +185,15 @@ function Import({ page, schoolId }: { page: SchoolPageApi; schoolId: string }) {
       </Card>
 
       <ApiErrorAlert error={error} />
-      {busy && <LoadingState label="Traitement du fichier…" />}
+      {busy && <LoadingState label={t('imports.processing')} />}
       {done && (
         <div data-testid="import-done">
-          <Alert tone="success" title="Import terminé">
-            {done.createdRows} dossier(s) créé(s), {done.duplicateRows} doublon(s) ignoré(s),{' '}
-            {done.errorRows} ligne(s) en erreur.
+          <Alert tone="success" title={t('imports.doneTitle')}>
+            {t('imports.done', {
+              created: done.createdRows,
+              duplicates: done.duplicateRows,
+              errors: done.errorRows,
+            })}
           </Alert>
         </div>
       )}
@@ -185,15 +202,13 @@ function Import({ page, schoolId }: { page: SchoolPageApi; schoolId: string }) {
         <>
           <Card>
             <CardBody>
-              <h2 className="mb-1 font-semibold">Correspondance des colonnes</h2>
-              <p className="mb-3 text-sm text-muted">
-                Nom, Prénom et Date de naissance sont obligatoires.
-              </p>
+              <h2 className="mb-1 font-semibold">{t('imports.mapping')}</h2>
+              <p className="mb-3 text-sm text-muted">{t('imports.required')}</p>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                {FIELDS.map((field) => (
+                {fields.map((field) => (
                   <SelectField
                     key={field}
-                    label={SCHOOL_IMPORT_FIELD_LABELS[field]}
+                    label={labels.importField[field]}
                     value={mapping[field] ?? ''}
                     onChange={(e) => {
                       const next = { ...mapping, [field]: e.target.value };
@@ -201,7 +216,7 @@ function Import({ page, schoolId }: { page: SchoolPageApi; schoolId: string }) {
                       setMapping(next);
                     }}
                     options={[
-                      { value: '', label: 'Ignorer' },
+                      { value: '', label: t('imports.ignore') },
                       ...preview.headers.map((h) => ({ value: h, label: h })),
                     ]}
                   />
@@ -213,39 +228,46 @@ function Import({ page, schoolId }: { page: SchoolPageApi; schoolId: string }) {
                 size="sm"
                 onClick={() => analyze(file, mapping)}
               >
-                Analyser de nouveau
+                {t('imports.reanalyze')}
               </Button>
             </CardBody>
           </Card>
 
           <Card>
             <CardBody>
-              <h2 className="mb-2 font-semibold">Prévisualisation</h2>
+              <h2 className="mb-2 font-semibold">{t('imports.preview')}</h2>
               {preview.missing.length > 0 ? (
                 <div data-testid="import-missing">
-                  <Alert tone="info" title="Colonnes à associer">
-                    {preview.total} ligne(s) lue(s). Choisissez ci-dessus la colonne de :{' '}
-                    {preview.missing.map((f) => SCHOOL_IMPORT_FIELD_LABELS[f]).join(', ')}, puis
-                    analysez de nouveau.
+                  <Alert tone="info" title={t('imports.missingTitle')}>
+                    {t('imports.missing', {
+                      total: preview.total,
+                      fields: join(preview.missing.map((f) => labels.importField[f])),
+                    })}
                   </Alert>
                 </div>
               ) : (
                 <p className="text-sm" data-testid="import-summary">
-                  {preview.total} ligne(s) : {preview.valid} à importer, {preview.duplicates.length}{' '}
-                  doublon(s), {preview.errors.length} en erreur.
+                  {t('imports.summary', {
+                    total: preview.total,
+                    valid: preview.valid,
+                    duplicates: preview.duplicates.length,
+                    errors: preview.errors.length,
+                  })}
                 </p>
               )}
               {preview.sample.length > 0 && (
                 <ul className="mt-3 space-y-1 text-sm">
                   {preview.sample.map((s) => (
                     <li key={s.line}>
-                      {s.lastName} {s.firstName}
-                      {(s.lastNameAr || s.firstNameAr) && (
+                      <span dir="auto">
+                        {s.lastName} {s.firstName}
+                      </span>
+                      {showArabic && (s.lastNameAr || s.firstNameAr) && (
                         <span dir="rtl" lang="ar" className="mx-2 inline-block">
                           {[s.lastNameAr, s.firstNameAr].filter(Boolean).join(' ')}
                         </span>
                       )}
-                      <span className="text-muted"> {formatDate(s.birthDate)}</span>
+                      <span className="text-muted"> {date(s.birthDate)}</span>
                     </li>
                   ))}
                 </ul>
@@ -259,15 +281,16 @@ function Import({ page, schoolId }: { page: SchoolPageApi; schoolId: string }) {
                     .sort((a, b) => a.line - b.line)
                     .map((issue, i) => (
                       <li key={`${issue.line}-${i}`}>
-                        <span className="font-medium">Ligne {issue.line}</span> : {issue.message}
+                        <span className="font-medium">{t('imports.line', { n: issue.line })}</span>{' '}
+                        : {schoolImportIssueMessage(language, issue)}
                       </li>
                     ))}
                 </ul>
               )}
               <Button className="mt-4" disabled={preview.valid === 0 || busy} onClick={commit}>
                 {preview.errors.length > 0
-                  ? `Importer ${preview.valid} ligne(s) et ignorer les erreurs`
-                  : `Importer ${preview.valid} ligne(s)`}
+                  ? t('imports.importSkipping', { n: preview.valid })
+                  : t('imports.import', { n: preview.valid })}
               </Button>
             </CardBody>
           </Card>
@@ -277,15 +300,20 @@ function Import({ page, schoolId }: { page: SchoolPageApi; schoolId: string }) {
       {jobs.state === 'success' && jobs.data.length > 0 && (
         <Card>
           <CardBody>
-            <h2 className="mb-2 font-semibold">Historique des imports</h2>
+            <h2 className="mb-2 font-semibold">{t('imports.history')}</h2>
             <ul className="space-y-1 text-sm" data-testid="import-history">
               {jobs.data.map((j) => (
                 <li key={j.id} className="flex flex-wrap justify-between gap-x-3">
                   <span>
-                    {j.format} : {j.createdRows} créé(s) sur {j.totalRows}, {j.duplicateRows}{' '}
-                    doublon(s), {j.errorRows} erreur(s)
+                    {t('imports.job', {
+                      format: j.format,
+                      created: j.createdRows,
+                      total: j.totalRows,
+                      duplicates: j.duplicateRows,
+                      errors: j.errorRows,
+                    })}
                   </span>
-                  <span className="text-muted">{formatDate(j.createdAt)}</span>
+                  <span className="text-muted">{date(j.createdAt)}</span>
                 </li>
               ))}
             </ul>

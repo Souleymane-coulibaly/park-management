@@ -1,0 +1,43 @@
+# Ocall School — feuille de route
+
+Ordre validé. Aucun sprint ne démarre sans autorisation explicite.
+
+| Étape                         | Contenu                                                                             | État                                                          |
+| ----------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| Sprint 1                      | Socle, contrats Suite, portail, base School distincte                               | Livré                                                         |
+| Sprint 2                      | Élèves, responsables, inscriptions, imports, exports, documents                     | Livré (c9f6589) ; migration Neon `decisions_acces` en attente |
+| Sprint 3A                     | Langues : réglage par établissement, interface arabe RTL, écrans des Sprints 1 et 2 | Livré (audit Codex GO sous réserves)                          |
+| Sprint 3B                     | Enseignants, classes et groupes, matières, affectations                             | En cours                                                      |
+| Sprint pédagogique (après 3B) | Module facultatif « Mémorisation du Coran »                                         | Proposé                                                       |
+
+## Règles linguistiques (toutes les étapes)
+
+- Français par défaut pour tout nouvel établissement ; l'arabe est un choix de l'établissement.
+- Français : aucun champ arabe affiché. Arabe : interface et documents en arabe, de droite à gauche.
+  Bilingue : interface française, contenus pédagogiques, matières, bulletins et documents en deux langues.
+- Changement réservé à la direction, journalisé, sans perte de données.
+- Le menu général d'Ocall Suite reste en français (Ocall Park n'est pas modifié).
+
+## Module « Mémorisation du Coran » (facultatif)
+
+Réservé aux établissements en mode Bilingue ayant activé l'enseignement coranique ; totalement masqué
+(interface et API) pour les établissements en Français.
+
+- Catalogue fixe des 114 sourates : numéro, nom arabe, translittération française, repris d'une source de
+  référence et vérifié.
+- Suivi sourate par sourate, sans suivi verset par verset.
+- Statuts : Non commencée, En cours, Mémorisée, À réviser.
+- Historique conservé de chaque évaluation et révision (date, enseignant, statut, remarque facultative).
+- Progression individuelle et tableau de suivi par classe.
+- Saisie par l'enseignant affecté à la matière Coran de la classe ; consultation par la direction ; lecture
+  seule dans le futur portail parents.
+- Isolation stricte entre établissements, permissions par rôle, respect de la langue de l'établissement.
+
+Dépendances : matière et affectations du Sprint 3B, langue du Sprint 3A.
+
+Points à trancher au cadrage :
+
+1. Établissements configurés en Arabe seul : exclus ou inclus.
+2. Données d'enseignement religieux de mineurs (catégorie sensible, RGPD article 9 et lois équivalentes) :
+   accès restreint, pas d'export par défaut, consultation journalisée, information des familles ; validation
+   juridique conseillée.

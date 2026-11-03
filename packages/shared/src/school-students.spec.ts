@@ -1,9 +1,11 @@
 import {
   buildMatricule,
   canTransitionEnrollment,
+  customFieldKey,
   hasSchoolPermission,
   isDocumentTypeAllowed,
   isLimitedToOwnClasses,
+  isSensitiveFieldLabel,
   isValidMatricule,
   normalizeSearch,
   parseSchoolDate,
@@ -82,6 +84,78 @@ describe('champs complémentaires', () => {
     expect(validateCustomFields([{ key: 'info', label: 'Religion' }])).toHaveLength(1);
     expect(validateCustomFields([{ key: 'info', label: 'État de santé' }])).toHaveLength(1);
     expect(validateCustomFields([{ key: 'ethnie', label: 'Origine' }])).toHaveLength(1);
+  });
+
+  it('refuse aussi une donnée sensible écrite en arabe, libellé arabe compris', () => {
+    for (const label of ['الدين', 'الديانة', 'الحالة الصحية', 'القبيلة', 'الدخل الشهري', 'إعاقة']) {
+      expect(isSensitiveFieldLabel(label)).toBe(true);
+      expect(validateCustomFields([{ key: 'champ_1', label }])).toHaveLength(1);
+    }
+    expect(
+      validateCustomFields([{ key: 'info', label: 'Information', labelAr: 'المذهب' }]),
+    ).toHaveLength(1);
+  });
+
+  it('ne se laisse pas contourner par la ponctuation ni par un pluriel', () => {
+    for (const label of [
+      'الدين:',
+      '(الدين)',
+      'الصحة/الدين',
+      'الدين، الصحة',
+      'الإعاقات',
+      'الأمراض المزمنة',
+      'بصمة الإصبع',
+      'والديانة',
+      'القبائل',
+      'الطائفة',
+      'العقائد',
+      'الانتماء للدين',
+      'وللدين',
+      'ديانته',
+      'صحته',
+      'الصحة/البيانات',
+      // Plus d'exception « validité » : elle permettait de faire passer « الصحة ».
+      'صحة الوثائق',
+      'Orientation sociopolitique',
+      'اللغة والدين',
+      'الصحة1',
+      'الدين١',
+      'الانتماء القبلي',
+    ]) {
+      expect(isSensitiveFieldLabel(label)).toBe(true);
+    }
+    expect(
+      validateCustomFields([{ key: 'info', label: 'Informations', labelAr: '(الدين)' }]),
+    ).toHaveLength(1);
+    // Chaque libellé est analysé seul : « الوثائق » ne neutralise pas « الصحة ».
+    expect(
+      validateCustomFields([{ key: 'info', label: 'الصحة', labelAr: 'الوثائق' }]),
+    ).toHaveLength(1);
+  });
+
+  it("n'invente pas de donnée sensible dans un mot ordinaire", () => {
+    for (const label of [
+      'مدينة الميلاد',
+      'المدرسة السابقة',
+      'مدخل المنزل',
+      'الطبيعة',
+      'هاتف الوالدين',
+      'اللغة الفصحى',
+      'Distribution des fournitures',
+      'Tribunal de naissance',
+      'Contribution volontaire',
+    ]) {
+      expect(isSensitiveFieldLabel(label)).toBe(false);
+    }
+  });
+
+  it('donne une clé valide à un libellé arabe, sans écraser une clé existante', () => {
+    expect(customFieldKey('Ancienne école', [])).toBe('ancienne_ecole');
+    expect(customFieldKey('المدرسة السابقة', [])).toBe('champ_1');
+    expect(customFieldKey('رقم الحافلة', [{ key: 'champ_2', label: 'x' }])).toBe('champ_3');
+    expect(
+      validateCustomFields([{ key: customFieldKey('رقم الحافلة', []), label: 'رقم الحافلة' }]),
+    ).toEqual([]);
   });
 
   it('refuse une clé invalide ou en double', () => {

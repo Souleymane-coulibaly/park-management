@@ -2,11 +2,8 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import {
-  SCHOOL_STUDENT_STATUSES,
-  SCHOOL_STUDENT_STATUS_LABELS,
-  hasSchoolPermission,
-} from '@ocall/shared';
+import { SCHOOL_STUDENT_STATUSES, hasSchoolPermission } from '@ocall/shared';
+import { useSchoolText } from '@/components/school/school-language';
 import { SchoolPage, type SchoolPageApi } from '@/components/school/school-page';
 import {
   Pager,
@@ -28,8 +25,14 @@ interface Dashboard {
   pending: number;
   recent: number;
   bySchool: { id: string; name: string; count: number }[];
-  byLevel: { id: string; name: string; count: number }[];
-  byClass: { id: string; name: string; count: number; capacity: number | null }[];
+  byLevel: { id: string; name: string; nameAr?: string | null; count: number }[];
+  byClass: {
+    id: string;
+    name: string;
+    nameAr?: string | null;
+    count: number;
+    capacity: number | null;
+  }[];
 }
 
 interface Page {
@@ -42,8 +45,8 @@ interface Page {
 export default function ElevesPage() {
   return (
     <SchoolPage
-      title="Élèves"
-      description="Dossiers, effectifs et recherche en français ou en arabe."
+      title="students.title"
+      description={(text) => text.t(text.showArabic ? 'students.descBilingual' : 'students.desc')}
     >
       {(api) => <Students key={api.school!.id} api={api} schoolId={api.school!.id} />}
     </SchoolPage>
@@ -51,6 +54,7 @@ export default function ElevesPage() {
 }
 
 function Students({ api, schoolId }: { api: SchoolPageApi; schoolId: string }) {
+  const { t, labels, name, showArabic } = useSchoolText();
   const canSeeFigures = hasSchoolPermission(api.context.role, 'school.students.read_full');
   const canExport = hasSchoolPermission(api.context.role, 'school.students.export');
   const [q, setQ] = useState('');
@@ -86,28 +90,31 @@ function Students({ api, schoolId }: { api: SchoolPageApi; schoolId: string }) {
         <CardBody>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <InputField
-              label="Rechercher"
-              placeholder="Nom, اسم, matricule"
+              label={t('field.search')}
+              placeholder={t(
+                showArabic ? 'students.searchPlaceholderBilingual' : 'students.searchPlaceholder',
+              )}
+              dir="auto"
               value={q}
               onChange={(e) => setQ(e.target.value)}
             />
             <SelectField
-              label="Statut"
+              label={t('field.status')}
               value={status}
               onChange={(e) => {
                 setStatus(e.target.value);
                 setPage(1);
               }}
               options={[
-                { value: '', label: 'Tous' },
+                { value: '', label: t('common.all') },
                 ...SCHOOL_STUDENT_STATUSES.map((s) => ({
                   value: s,
-                  label: SCHOOL_STUDENT_STATUS_LABELS[s],
+                  label: labels.studentStatus[s],
                 })),
               ]}
             />
             <SelectField
-              label="Année"
+              label={t('field.year')}
               value={schoolYearId}
               onChange={(e) => {
                 setYear(e.target.value);
@@ -115,34 +122,37 @@ function Students({ api, schoolId }: { api: SchoolPageApi; schoolId: string }) {
                 setPage(1);
               }}
               options={[
-                { value: '', label: 'Toutes' },
+                { value: '', label: t('common.allFeminine') },
                 ...(years.state === 'success'
                   ? years.data.map((y) => ({ value: y.id, label: y.label }))
                   : []),
               ]}
             />
             <SelectField
-              label="Niveau"
+              label={t('field.level')}
               value={levelId}
               onChange={(e) => {
                 setLevel(e.target.value);
                 setPage(1);
               }}
               options={[
-                { value: '', label: 'Tous' },
-                ...levels.map((l) => ({ value: l.id, label: l.name })),
+                { value: '', label: t('common.all') },
+                ...levels.map((l) => ({ value: l.id, label: name(l) })),
               ]}
             />
             <SelectField
-              label="Classe"
+              label={t('field.class')}
               value={classId}
               onChange={(e) => {
                 setClass(e.target.value);
                 setPage(1);
               }}
               options={[
-                { value: '', label: schoolYearId ? 'Toutes' : 'Choisissez une année' },
-                ...classes.map((c) => ({ value: c.id, label: c.name })),
+                {
+                  value: '',
+                  label: schoolYearId ? t('common.allFeminine') : t('students.pickYear'),
+                },
+                ...classes.map((c) => ({ value: c.id, label: name(c) })),
               ]}
             />
           </div>
@@ -152,13 +162,13 @@ function Students({ api, schoolId }: { api: SchoolPageApi; schoolId: string }) {
                 className="font-medium text-forest hover:underline"
                 href={`/api/v1/school/exports/students?schoolId=${schoolId}&format=xlsx`}
               >
-                Exporter en Excel
+                {t('common.exportExcel')}
               </a>
               <a
                 className="font-medium text-forest hover:underline"
                 href={`/api/v1/school/exports/students?schoolId=${schoolId}&format=csv`}
               >
-                Exporter en CSV
+                {t('common.exportCsv')}
               </a>
             </p>
           )}
@@ -173,7 +183,7 @@ function Students({ api, schoolId }: { api: SchoolPageApi; schoolId: string }) {
         <Card>
           <ul className="divide-y divide-line/70 text-sm" data-testid="student-list">
             {students.data.items.length === 0 && (
-              <li className="px-4 py-6 text-center text-muted">Aucun élève.</li>
+              <li className="px-4 py-6 text-center text-muted">{t('students.empty')}</li>
             )}
             {students.data.items.map((s) => (
               <li key={s.id} data-testid="student-row">
@@ -184,8 +194,16 @@ function Students({ api, schoolId }: { api: SchoolPageApi; schoolId: string }) {
                   <span className="w-full min-w-0 font-medium sm:w-auto sm:flex-1">
                     <StudentName student={s} />
                   </span>
-                  <span className="text-muted">{s.matricule}</span>
-                  <span>{s.enrollment?.class?.name ?? s.enrollment?.level.name ?? '—'}</span>
+                  <span className="text-muted" dir="ltr">
+                    {s.matricule}
+                  </span>
+                  <span>
+                    {s.enrollment?.class
+                      ? name(s.enrollment.class)
+                      : s.enrollment
+                        ? name(s.enrollment.level)
+                        : '—'}
+                  </span>
                   <StudentStatusBadge status={s.status} />
                 </Link>
               </li>
@@ -195,7 +213,7 @@ function Students({ api, schoolId }: { api: SchoolPageApi; schoolId: string }) {
             total={students.data.total}
             page={page}
             pageSize={students.data.pageSize}
-            label={(n) => `${n} élève${n > 1 ? 's' : ''}`}
+            label={(n) => t('students.count', { n })}
             onPage={setPage}
           />
         </Card>
@@ -205,21 +223,22 @@ function Students({ api, schoolId }: { api: SchoolPageApi; schoolId: string }) {
 }
 
 function Figures({ schoolId }: { schoolId: string }) {
+  const { t } = useSchoolText();
   const dash = useApi<Dashboard>(`/school/students/dashboard?schoolId=${schoolId}`);
   if (dash.state !== 'success') return null;
   const { students, enrolled, pending, recent, byLevel, byClass } = dash.data;
   return (
     <>
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4" data-testid="student-figures">
-        <Tile label="Élèves inscrits" value={enrolled} />
-        <Tile label="En attente" value={pending} />
-        <Tile label="Nouvelles inscriptions (30 jours)" value={recent} />
-        <Tile label="Dossiers" value={students} />
+        <Tile label={t('students.enrolled')} value={enrolled} />
+        <Tile label={t('students.pending')} value={pending} />
+        <Tile label={t('students.recent')} value={recent} />
+        <Tile label={t('students.files')} value={students} />
       </div>
       {(byLevel.length > 0 || byClass.length > 0) && (
         <div className="grid gap-3 md:grid-cols-2">
-          <Breakdown title="Par niveau" rows={byLevel} />
-          <Breakdown title="Par classe" rows={byClass} />
+          <Breakdown title={t('students.byLevel')} rows={byLevel} />
+          <Breakdown title={t('students.byClass')} rows={byClass} />
         </div>
       )}
     </>
@@ -242,8 +261,15 @@ function Breakdown({
   rows,
 }: {
   title: string;
-  rows: { id: string; name: string; count: number; capacity?: number | null }[];
+  rows: {
+    id: string;
+    name: string;
+    nameAr?: string | null;
+    count: number;
+    capacity?: number | null;
+  }[];
 }) {
+  const { name } = useSchoolText();
   return (
     <Card>
       <CardBody>
@@ -251,8 +277,8 @@ function Breakdown({
         <ul className="space-y-1 text-sm">
           {rows.map((r) => (
             <li key={r.id} className="flex justify-between gap-3">
-              <span className="min-w-0 break-words">{r.name}</span>
-              <span className="shrink-0 font-medium">
+              <span className="min-w-0 break-words">{name(r)}</span>
+              <span className="shrink-0 font-medium" dir="ltr">
                 {r.count}
                 {r.capacity ? ` / ${r.capacity}` : ''}
               </span>

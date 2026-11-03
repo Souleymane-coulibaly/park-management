@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { hasSchoolPermission } from '@ocall/shared';
+import { toApiError, useSchoolText } from '@/components/school/school-language';
 import { SchoolPage, type SchoolPageApi } from '@/components/school/school-page';
 import {
   type NamedView,
@@ -16,7 +17,7 @@ import { Card, CardBody } from '@/components/ui/card';
 import { SelectField } from '@/components/ui/field';
 import { SimpleForm } from '@/components/ui/simple-form';
 import { ApiErrorAlert, ErrorState, LoadingState } from '@/components/ui/states';
-import { ApiError, api } from '@/lib/api';
+import { type ApiError, api } from '@/lib/api';
 import { useApi } from '@/lib/use-api';
 
 interface RosterClass extends NamedView {
@@ -28,16 +29,14 @@ interface RosterClass extends NamedView {
 
 export default function EffectifsPage() {
   return (
-    <SchoolPage
-      title="Classes et effectifs"
-      description="Listes de classe, effectifs et enseignants."
-    >
+    <SchoolPage title="rosters.title" description="rosters.desc">
       {(page) => <Rosters key={page.school!.id} page={page} schoolId={page.school!.id} />}
     </SchoolPage>
   );
 }
 
 function Rosters({ page, schoolId }: { page: SchoolPageApi; schoolId: string }) {
+  const { t } = useSchoolText();
   const years = useYears(schoolId);
   const [chosen, setChosen] = useState('');
   const [classId, setClassId] = useState<string | null>(null);
@@ -49,7 +48,7 @@ function Rosters({ page, schoolId }: { page: SchoolPageApi; schoolId: string }) 
     <>
       <div className="max-w-sm">
         <SelectField
-          label="Année scolaire"
+          label={t('field.schoolYear')}
           value={yearId}
           onChange={(e) => {
             setChosen(e.target.value);
@@ -85,6 +84,7 @@ function Classes({
   classId: string | null;
   onSelect: (id: string) => void;
 }) {
+  const { t, name } = useSchoolText();
   const classes = useApi<RosterClass[]>(`/school/rosters?schoolYearId=${yearId}`);
   if (classes.state === 'loading') return <LoadingState />;
   if (classes.state === 'error') {
@@ -96,7 +96,7 @@ function Classes({
       <Card>
         <ul className="divide-y divide-line/70 text-sm" data-testid="class-list">
           {classes.data.length === 0 && (
-            <li className="px-4 py-6 text-center text-muted">Aucune classe.</li>
+            <li className="px-4 py-6 text-center text-muted">{t('rosters.noClass')}</li>
           )}
           {classes.data.map((c) => (
             <li key={c.id}>
@@ -104,13 +104,13 @@ function Classes({
                 type="button"
                 data-testid="class-row"
                 onClick={() => onSelect(c.id)}
-                className={`flex min-h-11 w-full flex-wrap items-center gap-3 px-4 py-3 text-left hover:bg-ivory ${
+                className={`flex min-h-11 w-full flex-wrap items-center gap-3 px-4 py-3 text-start hover:bg-ivory ${
                   c.id === classId ? 'bg-ivory' : ''
                 }`}
               >
-                <span className="min-w-0 flex-1 font-medium">{c.name}</span>
-                <span className="text-muted">{c.level.name}</span>
-                <span className="font-medium">
+                <span className="min-w-0 flex-1 font-medium">{name(c)}</span>
+                <span className="text-muted">{name(c.level)}</span>
+                <span className="font-medium" dir="ltr">
                   {c.enrolled}
                   {c.capacity ? ` / ${c.capacity}` : ''}
                 </span>
@@ -136,6 +136,7 @@ function Roster({
   schoolId: string;
   cls: RosterClass;
 }) {
+  const { t, name } = useSchoolText();
   const roster = useApi<{
     students: (Omit<StudentRow, 'enrollment' | 'schoolId'> & { enrollmentId: string })[];
   }>(`/school/classes/${cls.id}/students`);
@@ -145,27 +146,27 @@ function Roster({
   return (
     <Card>
       <CardBody>
-        <h2 className="font-semibold">Liste de {cls.name}</h2>
+        <h2 className="font-semibold">{t('rosters.listOf', { name: name(cls) })}</h2>
         {canExport && (
           <p className="mt-1 flex flex-wrap gap-4 text-sm">
             <a
               className="font-medium text-forest hover:underline"
               href={`/api/v1/school/exports/students?schoolId=${schoolId}&classId=${cls.id}&format=xlsx`}
             >
-              Exporter en Excel
+              {t('common.exportExcel')}
             </a>
             <a
               className="font-medium text-forest hover:underline"
               href={`/api/v1/school/exports/students?schoolId=${schoolId}&classId=${cls.id}&format=csv`}
             >
-              Exporter en CSV
+              {t('common.exportCsv')}
             </a>
           </p>
         )}
       </CardBody>
       <ul className="divide-y divide-line/70 text-sm" data-testid="roster">
         {roster.data.students.length === 0 && (
-          <li className="px-4 py-6 text-center text-muted">Aucun élève dans cette classe.</li>
+          <li className="px-4 py-6 text-center text-muted">{t('rosters.noStudent')}</li>
         )}
         {roster.data.students.map((s) => (
           <li key={s.id}>
@@ -176,7 +177,9 @@ function Roster({
               <span className="w-full min-w-0 font-medium sm:w-auto sm:flex-1">
                 <StudentName student={s} />
               </span>
-              <span className="text-muted">{s.matricule}</span>
+              <span className="text-muted" dir="ltr">
+                {s.matricule}
+              </span>
               <StudentStatusBadge status={s.status} />
             </Link>
           </li>
@@ -187,6 +190,7 @@ function Roster({
 }
 
 function Teachers({ cls, onChange }: { cls: RosterClass; onChange: () => void }) {
+  const { t, name } = useSchoolText();
   const members =
     useApi<{ id: string; firstName: string; lastName: string; role: string; isActive: boolean }[]>(
       '/school/members',
@@ -196,7 +200,9 @@ function Teachers({ cls, onChange }: { cls: RosterClass; onChange: () => void })
     members.state === 'success'
       ? members.data.filter(
           (m) =>
-            m.role === 'TEACHER' && m.isActive && !cls.teachers?.some((t) => t.member.id === m.id),
+            m.role === 'TEACHER' &&
+            m.isActive &&
+            !cls.teachers?.some((te) => te.member.id === m.id),
         )
       : [];
   async function remove(memberId: string) {
@@ -205,26 +211,24 @@ function Teachers({ cls, onChange }: { cls: RosterClass; onChange: () => void })
       await api(`/school/classes/${cls.id}/teachers/${memberId}`, { method: 'DELETE' });
       onChange();
     } catch (e) {
-      setError(e instanceof ApiError ? e : new ApiError(0, 'NETWORK', 'Connexion impossible.'));
+      setError(toApiError(e));
     }
   }
   return (
     <Card>
       <CardBody>
-        <h2 className="mb-1 font-semibold">Enseignants de {cls.name}</h2>
-        <p className="mb-3 text-sm text-muted">
-          Un enseignant ne voit que les élèves des classes qui lui sont confiées.
-        </p>
+        <h2 className="mb-1 font-semibold">{t('rosters.teachersOf', { name: name(cls) })}</h2>
+        <p className="mb-3 text-sm text-muted">{t('rosters.teacherHint')}</p>
         <ApiErrorAlert error={error} />
         <ul className="mb-3 space-y-2 text-sm" data-testid="class-teachers">
-          {cls.teachers?.length === 0 && <li className="text-muted">Aucun enseignant.</li>}
-          {cls.teachers?.map((t) => (
-            <li key={t.member.id} className="flex flex-wrap items-center justify-between gap-2">
-              <span>
-                {t.member.lastName} {t.member.firstName}
+          {cls.teachers?.length === 0 && <li className="text-muted">{t('rosters.noTeacher')}</li>}
+          {cls.teachers?.map((te) => (
+            <li key={te.member.id} className="flex flex-wrap items-center justify-between gap-2">
+              <span dir="auto">
+                {te.member.lastName} {te.member.firstName}
               </span>
-              <Button variant="secondary" size="sm" onClick={() => remove(t.member.id)}>
-                Retirer
+              <Button variant="secondary" size="sm" onClick={() => remove(te.member.id)}>
+                {t('common.remove')}
               </Button>
             </li>
           ))}
@@ -234,12 +238,12 @@ function Teachers({ cls, onChange }: { cls: RosterClass; onChange: () => void })
             key={available.length}
             testId="class-teacher-form"
             path={`/school/classes/${cls.id}/teachers`}
-            submitLabel="Confier la classe"
+            submitLabel={t('rosters.assign')}
             onDone={onChange}
             fields={[
               {
                 name: 'memberId',
-                label: 'Enseignant',
+                label: t('rosters.teacher'),
                 type: 'select',
                 options: available.map((m) => ({
                   value: m.id,

@@ -10,8 +10,32 @@ import {
   canTransitionSchoolYear,
   isValidDateRange,
   periodsOverlap,
+  type SchoolLocale,
+  schoolShowsArabic,
   validateGradingRules,
 } from '@ocall/shared';
+
+const ARABIC_KEYS = new Set(['nameAr', 'labelAr', 'lastNameAr', 'firstNameAr']);
+
+/**
+ * Copie sans les propriétés arabes, à toute profondeur. Seuls les tableaux et objets simples sont
+ * parcourus : dates et décimaux Prisma restent intacts, pour garder leur sérialisation.
+ */
+function withoutArabic<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(withoutArabic) as T;
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  ) {
+    return value;
+  }
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => !ARABIC_KEYS.has(key))
+      .map(([key, v]) => [key, withoutArabic(v)]),
+  ) as T;
+}
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { SchoolContext } from './school-access';
@@ -151,7 +175,10 @@ export class SchoolService {
       'SCHOOL_NAME_USED',
       'Un établissement porte déjà ce nom.',
     );
-    await this.log(ctx, 'school.created', 'School', school.id, { type: school.type });
+    await this.log(ctx, 'school.created', 'School', school.id, {
+      type: school.type,
+      locale: school.defaultLocale,
+    });
     return school;
   }
 
@@ -159,13 +186,35 @@ export class SchoolService {
     return this.db.school.findMany({ where: this.schoolWhere(ctx), orderBy: { name: 'asc' } });
   }
 
+  /**
+   * Modification d'un établissement. Un changement de langue est une décision tracée dans la même
+   * transaction (ancienne et nouvelle valeur), puis publiée au journal Suite avec reprise : la langue
+   * ne peut pas changer sans sa trace. Aucune donnée n'est touchée : les champs arabes sont masqués.
+   */
   async updateSchool(ctx: SchoolContext, id: string, dto: UpdateSchoolDto) {
     await this.assertSchool(ctx, id);
     const school = await this.unique(
-      () => this.db.school.update({ where: { id }, data: dto }),
+      () =>
+        this.db.$transaction(async (tx) => {
+          // Verrou : deux changements simultanés ne peuvent pas tracer la même valeur de départ.
+          await tx.$queryRaw`SELECT 1 FROM "School" WHERE "id" = ${id}::uuid FOR UPDATE`;
+          const before = await tx.school.findUniqueOrThrow({
+            where: { id },
+            select: { defaultLocale: true },
+          });
+          const updated = await tx.school.update({ where: { id }, data: dto });
+          if (updated.defaultLocale !== before.defaultLocale) {
+            await this.recordDecision(tx, ctx, 'school.locale_changed', 'School', id, {
+              from: before.defaultLocale,
+              to: updated.defaultLocale,
+            });
+          }
+          return updated;
+        }),
       'SCHOOL_NAME_USED',
       'Un établissement porte déjà ce nom.',
     );
+    await this.publishDecisions(ctx.organizationId);
     await this.log(ctx, 'school.updated', 'School', id, { fields: Object.keys(dto) });
     return school;
   }
@@ -616,7 +665,12 @@ export class SchoolService {
       },
     });
     await this.log(ctx, 'school.exported', 'School', null, { schools: schools.length });
-    return { exportedAt: new Date().toISOString(), organizationId: ctx.organizationId, schools };
+    return {
+      exportedAt: new Date().toISOString(),
+      organizationId: ctx.organizationId,
+      // Établissement en Français : ses contenus arabes conservés ne sortent pas dans l'export.
+      schools: schools.map((s) => (schoolShowsArabic(s.defaultLocale) ? s : withoutArabic(s))),
+    };
   }
 
   // ─── Outils ───
@@ -628,15 +682,17 @@ export class SchoolService {
     };
   }
 
-  async assertSchool(ctx: SchoolContext, id: string): Promise<void> {
+  /** Établissement du périmètre de l'utilisateur ; renvoie sa langue (exports, documents). */
+  async assertSchool(ctx: SchoolContext, id: string): Promise<{ defaultLocale: SchoolLocale }> {
     const school = await this.db.school.findFirst({
       where: { ...this.schoolWhere(ctx), id },
-      select: { id: true },
+      select: { id: true, defaultLocale: true },
     });
     // Le filtre ctx.schoolIds n'est pas écrasé : un identifiant hors périmètre reste introuvable.
     if (!school || (ctx.schoolIds && !ctx.schoolIds.includes(id))) {
       throw new NotFoundException(NOT_FOUND);
     }
+    return { defaultLocale: school.defaultLocale };
   }
 
   async findYear(ctx: SchoolContext, id: string) {

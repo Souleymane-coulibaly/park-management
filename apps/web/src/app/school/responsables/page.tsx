@@ -2,8 +2,10 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { SCHOOL_GUARDIAN_RELATION_LABELS, type SchoolGuardianRelation } from '@ocall/shared';
+import type { SchoolGuardianRelation } from '@ocall/shared';
+import { useSchoolText } from '@/components/school/school-language';
 import { SchoolPage, type SchoolPageApi } from '@/components/school/school-page';
+import { StudentName } from '@/components/school/school-students';
 import { Card, CardBody } from '@/components/ui/card';
 import { InputField } from '@/components/ui/field';
 import { SimpleForm } from '@/components/ui/simple-form';
@@ -18,22 +20,30 @@ interface GuardianRow {
   email: string | null;
   links: {
     relation: SchoolGuardianRelation;
-    student: { id: string; matricule: string; lastName: string; firstName: string };
+    student: {
+      id: string;
+      schoolId: string;
+      matricule: string;
+      lastName: string;
+      firstName: string;
+      lastNameAr: string | null;
+      firstNameAr: string | null;
+    };
   }[];
 }
 
 export default function ResponsablesPage() {
   return (
-    <SchoolPage
-      title="Responsables"
-      description="Un responsable peut suivre plusieurs enfants. Les autorisations se règlent enfant par enfant, depuis la fiche élève."
-    >
+    <SchoolPage title="guardians.title" description="guardians.desc">
       {(page) => <Guardians key={page.school!.id} page={page} schoolId={page.school!.id} />}
     </SchoolPage>
   );
 }
 
 function Guardians({ page, schoolId }: { page: SchoolPageApi; schoolId: string }) {
+  const { t, labels } = useSchoolText();
+  // Un responsable peut suivre des enfants de plusieurs établissements : chacun dans sa langue.
+  const locales = new Map(page.context.schools.map((s) => [s.id, s.defaultLocale]));
   const [q, setQ] = useState('');
   const list = useApi<GuardianRow[]>(
     `/school/guardians?schoolId=${schoolId}${q ? `&q=${encodeURIComponent(q)}` : ''}`,
@@ -43,7 +53,7 @@ function Guardians({ page, schoolId }: { page: SchoolPageApi; schoolId: string }
       <Card>
         <CardBody>
           <InputField
-            label="Rechercher par nom ou téléphone"
+            label={t('guardians.search')}
             value={q}
             onChange={(e) => setQ(e.target.value)}
           />
@@ -55,15 +65,15 @@ function Guardians({ page, schoolId }: { page: SchoolPageApi; schoolId: string }
         <Card>
           <ul className="divide-y divide-line/70 text-sm" data-testid="guardian-list">
             {list.data.length === 0 && (
-              <li className="px-4 py-6 text-center text-muted">Aucun responsable.</li>
+              <li className="px-4 py-6 text-center text-muted">{t('guardians.empty')}</li>
             )}
             {list.data.map((g) => (
               <li key={g.id} className="space-y-1 px-4 py-3" data-testid="guardian-row">
-                <p className="font-medium">
+                <p className="font-medium" dir="auto">
                   {g.lastName} {g.firstName}
                 </p>
                 <p className="break-words text-muted">
-                  <a href={`tel:${g.phone}`} className="text-forest">
+                  <a href={`tel:${g.phone}`} className="text-forest" dir="ltr">
                     {g.phone}
                   </a>
                   {g.email ? ` · ${g.email}` : ''}
@@ -76,11 +86,12 @@ function Guardians({ page, schoolId }: { page: SchoolPageApi; schoolId: string }
                           href={`/school/eleves/${l.student.id}`}
                           className="text-forest hover:underline"
                         >
-                          {l.student.lastName} {l.student.firstName}
+                          <StudentName
+                            student={l.student}
+                            locale={locales.get(l.student.schoolId)}
+                          />
                         </Link>{' '}
-                        <span className="text-muted">
-                          ({SCHOOL_GUARDIAN_RELATION_LABELS[l.relation]})
-                        </span>
+                        <span className="text-muted">({labels.guardianRelation[l.relation]})</span>
                       </li>
                     ))}
                   </ul>
@@ -93,19 +104,19 @@ function Guardians({ page, schoolId }: { page: SchoolPageApi; schoolId: string }
       {page.canWrite('school.guardians.manage') && (
         <Card>
           <CardBody>
-            <h2 className="mb-3 font-semibold">Nouveau responsable</h2>
+            <h2 className="mb-3 font-semibold">{t('guardians.new')}</h2>
             <SimpleForm
               testId="guardian-form"
               path="/school/guardians"
               extra={{ schoolId }}
-              submitLabel="Créer le responsable"
+              submitLabel={t('guardians.create')}
               onDone={list.reload}
               fields={[
-                { name: 'lastName', label: 'Nom', required: true },
-                { name: 'firstName', label: 'Prénom', required: true },
-                { name: 'phone', label: 'Téléphone', required: true },
-                { name: 'email', label: 'E-mail (facultatif)', type: 'email' },
-                { name: 'address', label: 'Adresse (facultative)' },
+                { name: 'lastName', label: t('field.lastName'), required: true },
+                { name: 'firstName', label: t('field.firstName'), required: true },
+                { name: 'phone', label: t('field.phone'), required: true },
+                { name: 'email', label: t('guardians.emailOptional'), type: 'email' },
+                { name: 'address', label: t('guardians.addressOptional') },
               ]}
             />
           </CardBody>

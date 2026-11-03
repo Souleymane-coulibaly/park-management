@@ -1314,6 +1314,11 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
 
     it('exporte en CSV et XLSX avec l’arabe intact et les colonnes limitées', async () => {
       const s = await structure(ownerA, `Export ${++counter}`);
+      // Colonnes arabes exportées seulement pour un établissement Arabe ou Bilingue (Sprint 3A).
+      await ownerA
+        .patch(`/api/v1/school/schools/${s.schoolId}`)
+        .send({ defaultLocale: 'BILINGUAL' })
+        .expect(200);
       const created = await student(ownerA, s.schoolId, {
         lastNameAr: AR_LAST,
         firstNameAr: AR_FIRST,

@@ -94,7 +94,15 @@ export class SchoolGuardiansService {
             select: {
               relation: true,
               student: {
-                select: { id: true, matricule: true, lastName: true, firstName: true },
+                select: {
+                  id: true,
+                  schoolId: true,
+                  matricule: true,
+                  lastName: true,
+                  firstName: true,
+                  lastNameAr: true,
+                  firstNameAr: true,
+                },
               },
             },
           },

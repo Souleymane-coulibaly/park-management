@@ -1,6 +1,7 @@
 'use client';
 
-import { SCHOOL_LOCALES, SCHOOL_LOCALE_LABELS, type SchoolLocale } from '@ocall/shared';
+import { SCHOOL_LOCALES, type SchoolLocale } from '@ocall/shared';
+import { useSchoolText } from '@/components/school/school-language';
 import { BiName, SchoolPage } from '@/components/school/school-page';
 import { Card, CardBody } from '@/components/ui/card';
 import { SimpleForm } from '@/components/ui/simple-form';
@@ -31,10 +32,7 @@ interface YearLite {
 
 export default function StructurePage() {
   return (
-    <SchoolPage
-      title="Cycles et classes"
-      description="Parcours pédagogiques, cycles, niveaux et classes."
-    >
+    <SchoolPage title="structure.title" description="structure.desc">
       {({ school, canWrite }) => (
         <Structure
           key={school!.id}
@@ -47,6 +45,7 @@ export default function StructurePage() {
 }
 
 function Structure({ schoolId, canManage }: { schoolId: string; canManage: boolean }) {
+  const { t, labels, name, fields, join } = useSchoolText();
   const tracks = useApi<TrackView[]>(`/school/tracks?schoolId=${schoolId}`);
   const cycles = useApi<CycleView[]>(`/school/cycles?schoolId=${schoolId}`);
   const years = useApi<YearLite[]>(`/school/years?schoolId=${schoolId}`);
@@ -69,14 +68,14 @@ function Structure({ schoolId, canManage }: { schoolId: string; canManage: boole
     <div className="grid gap-4 lg:grid-cols-2">
       <Card>
         <CardBody>
-          <h2 className="mb-2 font-semibold">Parcours pédagogiques</h2>
+          <h2 className="mb-2 font-semibold">{t('structure.tracks')}</h2>
           <ul className="mb-4 divide-y divide-line/70 text-sm" data-testid="track-list">
-            {tracks.data.map((t) => (
-              <li key={t.id} className="flex items-center gap-3 py-2">
+            {tracks.data.map((tr) => (
+              <li key={tr.id} className="flex items-center gap-3 py-2">
                 <span className="flex-1 font-medium">
-                  <BiName name={t.name} nameAr={t.nameAr} />
+                  <BiName name={tr.name} nameAr={tr.nameAr} />
                 </span>
-                <span className="text-muted">{SCHOOL_LOCALE_LABELS[t.locale]}</span>
+                <span className="text-muted">{labels.locale[tr.locale]}</span>
               </li>
             ))}
           </ul>
@@ -85,21 +84,18 @@ function Structure({ schoolId, canManage }: { schoolId: string; canManage: boole
               testId="track-form"
               path="/school/tracks"
               extra={{ schoolId }}
-              submitLabel="Ajouter le parcours"
+              submitLabel={t('structure.addTrack')}
               onDone={tracks.reload}
-              fields={[
-                { name: 'name', label: 'Nom', required: true },
-                { name: 'nameAr', label: 'Nom en arabe', rtl: true },
+              fields={fields([
+                { name: 'name', label: t('field.name'), required: true },
+                { name: 'nameAr', label: t('field.nameAr'), rtl: true },
                 {
                   name: 'locale',
-                  label: 'Langue',
+                  label: t('structure.language'),
                   type: 'select',
-                  options: SCHOOL_LOCALES.map((l) => ({
-                    value: l,
-                    label: SCHOOL_LOCALE_LABELS[l],
-                  })),
+                  options: SCHOOL_LOCALES.map((l) => ({ value: l, label: labels.locale[l] })),
                 },
-              ]}
+              ])}
             />
           )}
         </CardBody>
@@ -107,7 +103,7 @@ function Structure({ schoolId, canManage }: { schoolId: string; canManage: boole
 
       <Card>
         <CardBody>
-          <h2 className="mb-2 font-semibold">Cycles et niveaux</h2>
+          <h2 className="mb-2 font-semibold">{t('structure.cycles')}</h2>
           <ul className="mb-4 space-y-3 text-sm" data-testid="cycle-list">
             {cycles.data.map((c) => (
               <li key={c.id} className="rounded-xl border border-line/70 p-3">
@@ -115,18 +111,18 @@ function Structure({ schoolId, canManage }: { schoolId: string; canManage: boole
                   <BiName name={c.name} nameAr={c.nameAr} />
                 </p>
                 <p className="mb-2 text-muted">
-                  {c.levels.map((l) => l.name).join(', ') || 'Aucun niveau'}
+                  {join(c.levels.map(name)) || t('structure.noLevel')}
                 </p>
                 {canManage && (
                   <SimpleForm
                     path="/school/levels"
                     extra={{ cycleId: c.id }}
-                    submitLabel="Ajouter le niveau"
+                    submitLabel={t('structure.addLevel')}
                     onDone={cycles.reload}
-                    fields={[
-                      { name: 'name', label: 'Niveau', required: true },
-                      { name: 'nameAr', label: 'Niveau en arabe', rtl: true },
-                    ]}
+                    fields={fields([
+                      { name: 'name', label: t('field.level'), required: true },
+                      { name: 'nameAr', label: t('structure.levelAr'), rtl: true },
+                    ])}
                   />
                 )}
               </li>
@@ -137,12 +133,12 @@ function Structure({ schoolId, canManage }: { schoolId: string; canManage: boole
               testId="cycle-form"
               path="/school/cycles"
               extra={{ schoolId }}
-              submitLabel="Ajouter le cycle"
+              submitLabel={t('structure.addCycle')}
               onDone={cycles.reload}
-              fields={[
-                { name: 'name', label: 'Cycle', required: true },
-                { name: 'nameAr', label: 'Cycle en arabe', rtl: true },
-              ]}
+              fields={fields([
+                { name: 'name', label: t('structure.cycle'), required: true },
+                { name: 'nameAr', label: t('structure.cycleAr'), rtl: true },
+              ])}
             />
           )}
         </CardBody>
@@ -152,11 +148,11 @@ function Structure({ schoolId, canManage }: { schoolId: string; canManage: boole
         <Card>
           <CardBody>
             <h2 className="mb-2 font-semibold">
-              Classes {activeYear ? `· année ${activeYear.label}` : ''}
+              {activeYear
+                ? t('structure.classesYear', { label: activeYear.label })
+                : t('structure.classes')}
             </h2>
-            {!activeYear && (
-              <Alert tone="info">Ouvrez d’abord une année scolaire pour créer des classes.</Alert>
-            )}
+            {!activeYear && <Alert tone="info">{t('structure.openYearFirst')}</Alert>}
             {activeYear && classes.state === 'error' && (
               <ErrorState error={classes.error} onRetry={classes.reload} />
             )}
@@ -168,8 +164,8 @@ function Structure({ schoolId, canManage }: { schoolId: string; canManage: boole
                       <BiName name={c.name} nameAr={c.nameAr} />
                     </span>
                     <span className="text-muted">
-                      {c.level.name}
-                      {c.track ? ` · ${c.track.name}` : ''}
+                      {name(c.level)}
+                      {c.track ? ` · ${name(c.track)}` : ''}
                     </span>
                   </li>
                 ))}
@@ -180,28 +176,28 @@ function Structure({ schoolId, canManage }: { schoolId: string; canManage: boole
                 testId="class-form"
                 path="/school/classes"
                 extra={{ schoolYearId: activeYear.id }}
-                submitLabel="Ajouter la classe"
+                submitLabel={t('structure.addClass')}
                 onDone={classes.reload}
-                fields={[
-                  { name: 'name', label: 'Classe', required: true },
-                  { name: 'nameAr', label: 'Classe en arabe', rtl: true },
+                fields={fields([
+                  { name: 'name', label: t('field.class'), required: true },
+                  { name: 'nameAr', label: t('structure.classAr'), rtl: true },
                   {
                     name: 'levelId',
-                    label: 'Niveau',
+                    label: t('field.level'),
                     type: 'select',
-                    options: levels.map((l) => ({ value: l.id, label: l.name })),
+                    options: levels.map((l) => ({ value: l.id, label: name(l) })),
                   },
                   {
                     name: 'trackId',
-                    label: 'Parcours',
+                    label: t('field.track'),
                     type: 'select',
                     options: [
-                      { value: '', label: 'Aucun' },
-                      ...tracks.data.map((t) => ({ value: t.id, label: t.name })),
+                      { value: '', label: t('common.none') },
+                      ...tracks.data.map((tr) => ({ value: tr.id, label: name(tr) })),
                     ],
                   },
-                  { name: 'capacity', label: 'Capacité', type: 'number' },
-                ]}
+                  { name: 'capacity', label: t('field.capacity'), type: 'number' },
+                ])}
               />
             )}
           </CardBody>

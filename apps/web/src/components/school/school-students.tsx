@@ -1,11 +1,17 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import type { SchoolEnrollmentStatus, SchoolStudentStatus, SchoolYearStatus } from '@ocall/shared';
-import { SCHOOL_STUDENT_STATUS_LABELS } from '@ocall/shared';
+import type {
+  SchoolEnrollmentStatus,
+  SchoolLocale,
+  SchoolStudentStatus,
+  SchoolYearStatus,
+} from '@ocall/shared';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useApi } from '@/lib/use-api';
+import { useSchoolText } from './school-language';
+import { BiName } from './school-page';
 
 /** Pied de liste paginée : total, puis pages précédente et suivante. */
 export function Pager({
@@ -21,6 +27,7 @@ export function Pager({
   label: (total: number) => string;
   onPage: (page: number) => void;
 }) {
+  const { t } = useSchoolText();
   return (
     <div className="flex items-center justify-between gap-3 border-t border-line/70 px-4 py-3 text-sm">
       <span className="text-muted" data-testid="pager-total">
@@ -28,7 +35,7 @@ export function Pager({
       </span>
       <span className="flex gap-2">
         <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => onPage(page - 1)}>
-          Précédent
+          {t('common.previous')}
         </Button>
         <Button
           variant="secondary"
@@ -36,7 +43,7 @@ export function Pager({
           disabled={page * pageSize >= total}
           onClick={() => onPage(page + 1)}
         >
-          Suivant
+          {t('common.next')}
         </Button>
       </span>
     </div>
@@ -75,42 +82,37 @@ export interface YearOption {
 
 export interface LevelOption extends NamedView {
   cycleName: string;
+  cycleNameAr: string | null;
 }
 
 export interface ClassOption extends NamedView {
   level: NamedView;
 }
 
-/** Nom complet en français, et en arabe de droite à gauche quand il existe. */
+/** Nom complet de l'élève, restitué selon la même règle de langue que tout autre nom (BiName). */
 export function StudentName({
   student,
+  locale,
 }: {
   student: Pick<StudentRow, 'lastName' | 'firstName' | 'lastNameAr' | 'firstNameAr'>;
+  /** Langue de l'établissement de l'élève, pour une liste qui en réunit plusieurs. */
+  locale?: SchoolLocale;
 }) {
   const arabic = [student.lastNameAr, student.firstNameAr].filter(Boolean).join(' ');
   return (
-    <>
-      <span>
-        {student.lastName} {student.firstName}
-      </span>
-      {arabic && (
-        <span
-          dir="rtl"
-          lang="ar"
-          data-testid="arabic-name"
-          className="mx-2 inline-block text-charcoal-soft"
-        >
-          {arabic}
-        </span>
-      )}
-    </>
+    <BiName
+      name={`${student.lastName} ${student.firstName}`}
+      nameAr={arabic || null}
+      locale={locale}
+    />
   );
 }
 
 export function StudentStatusBadge({ status }: { status: SchoolStudentStatus }) {
+  const { labels } = useSchoolText();
   return (
     <Badge tone={status === 'ENROLLED' ? 'forest' : 'neutral'}>
-      {SCHOOL_STUDENT_STATUS_LABELS[status]}
+      {labels.studentStatus[status]}
     </Badge>
   );
 }
@@ -122,12 +124,14 @@ export function useYears(schoolId: string) {
 
 /** Niveaux d'un établissement, tous cycles confondus. */
 export function useLevels(schoolId: string) {
-  const cycles = useApi<{ name: string; levels: NamedView[] }[]>(
+  const cycles = useApi<{ name: string; nameAr: string | null; levels: NamedView[] }[]>(
     `/school/cycles?schoolId=${schoolId}`,
   );
   const levels: LevelOption[] =
     cycles.state === 'success'
-      ? cycles.data.flatMap((c) => c.levels.map((l) => ({ ...l, cycleName: c.name })))
+      ? cycles.data.flatMap((c) =>
+          c.levels.map((l) => ({ ...l, cycleName: c.name, cycleNameAr: c.nameAr })),
+        )
       : [];
   return levels;
 }
