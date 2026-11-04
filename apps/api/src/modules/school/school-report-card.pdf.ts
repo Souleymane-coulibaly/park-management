@@ -1,7 +1,17 @@
-import { join } from 'node:path';
-import PDFDocument from 'pdfkit';
 import type { SchoolLocale } from '@ocall/shared';
-import { hasArabic, visualOrderRtl, visualRuns, words, wrapWords } from './school-rtl-text';
+import {
+  type Align,
+  BAND,
+  CONTENT,
+  LINE,
+  MUTED,
+  PAGE,
+  PdfContent,
+  type TextOptions,
+  Writer,
+  renderPdf,
+} from './school-pdf';
+import { hasArabic } from './school-rtl-text';
 
 /**
  * Bulletin scolaire PDF (Sprint 4), première version. Rendu sans navigateur, à la demande, jamais stocké.
@@ -9,14 +19,6 @@ import { hasArabic, visualOrderRtl, visualRuns, words, wrapWords } from './schoo
  * pour un libellé sans traduction. Bilingue : libellés et contenus dans les deux langues. Aucun champ
  * arabe n'est exigé.
  */
-
-const FONTS_DIR = join(__dirname, '..', '..', '..', 'assets', 'fonts');
-const FONT_FILES = {
-  sans: 'NotoSans-Regular.ttf',
-  sansBold: 'NotoSans-Bold.ttf',
-  naskh: 'NotoNaskhArabic-Regular.ttf',
-  naskhBold: 'NotoNaskhArabic-Bold.ttf',
-} as const;
 
 export interface ReportCardSubjectLine {
   name: string;
@@ -113,146 +115,6 @@ const LABELS = {
 } as const;
 type LabelKey = keyof (typeof LABELS)['fr'];
 
-const PAGE = { width: 595.28, height: 841.89, margin: 40 };
-const CONTENT = PAGE.width - 2 * PAGE.margin;
-const INK = '#1f2a24';
-const MUTED = '#5b665f';
-const LINE = '#c9d1cb';
-const BAND = '#eef3ef';
-
-type Align = 'left' | 'right' | 'center';
-interface TextOptions {
-  size?: number;
-  bold?: boolean;
-  align?: Align;
-  color?: string;
-  /** Garde l'alignement demandé même pour une ligne arabe (bloc d'identité). */
-  keepAlign?: boolean;
-}
-
-/** Texte positionné ; l'arabe passe par la mise en ordre droite-à-gauche, le reste par pdfkit. */
-class Writer {
-  constructor(private readonly doc: PDFKit.PDFDocument) {}
-
-  /** Hauteur occupée par un texte dans une largeur, sans le dessiner. */
-  height(text: string, width: number, opts: TextOptions = {}): number {
-    return this.write(text, 0, 0, width, opts, false);
-  }
-
-  text(text: string, x: number, y: number, width: number, opts: TextOptions = {}): number {
-    return this.write(text, x, y, width, opts, true);
-  }
-
-  private write(
-    text: string,
-    x: number,
-    y: number,
-    width: number,
-    opts: TextOptions,
-    draw: boolean,
-  ): number {
-    const size = opts.size ?? 9;
-    if (!text) return 0;
-    if (!hasArabic(text)) {
-      this.doc.font(opts.bold ? 'sansBold' : 'sans').fontSize(size);
-      const h = this.doc.heightOfString(text, { width, lineGap: 1 });
-      if (draw) {
-        this.doc
-          .fillColor(opts.color ?? INK)
-          .text(text, x, y, { width, align: opts.align ?? 'left', lineGap: 1 });
-      }
-      return h;
-    }
-    const lineHeight = size * 1.75;
-    const space = this.measureRun({ kind: 'neutral', text: ' ' }, size, opts.bold);
-    const lines = wrapWords(words(text), (w) => this.measureWord(w, size, opts.bold), space, width);
-    if (draw) {
-      lines.forEach((line, index) => {
-        const placed = visualOrderRtl(line);
-        const pieces = placed.map((p) => visualRuns(p.word, p.rtl));
-        const total =
-          pieces.reduce(
-            (sum, runs) => sum + runs.reduce((s, r) => s + this.measureRun(r, size, opts.bold), 0),
-            0,
-          ) +
-          space * (pieces.length - 1);
-        const align = opts.align ?? 'right';
-        let cursor =
-          align === 'left' ? x : align === 'center' ? x + (width - total) / 2 : x + width - total;
-        const top = y + index * lineHeight;
-        pieces.forEach((runs) => {
-          for (const run of runs) {
-            this.useFont(run.kind, size, opts.bold);
-            this.doc
-              .fillColor(opts.color ?? INK)
-              .text(run.text, cursor, top + (run.kind === 'arabic' ? 0 : size * 0.3), {
-                lineBreak: false,
-              });
-            cursor += this.measureRun(run, size, opts.bold);
-          }
-          cursor += space;
-        });
-      });
-    }
-    return lines.length * lineHeight;
-  }
-
-  private useFont(kind: string, size: number, bold?: boolean) {
-    const arabic = kind === 'arabic';
-    this.doc
-      .font(arabic ? (bold ? 'naskhBold' : 'naskh') : bold ? 'sansBold' : 'sans')
-      .fontSize(size);
-  }
-
-  private measureRun(run: { kind: string; text: string }, size: number, bold?: boolean) {
-    this.useFont(run.kind, size, bold);
-    return this.doc.widthOfString(run.text);
-  }
-
-  private measureWord(word: string, size: number, bold?: boolean) {
-    return visualRuns(word, true).reduce((s, r) => s + this.measureRun(r, size, bold), 0);
-  }
-}
-
-/** Libellés et contenus selon la langue de l'établissement. */
-class Content {
-  readonly rtl: boolean;
-  readonly bilingual: boolean;
-
-  constructor(private readonly locale: SchoolLocale) {
-    this.rtl = locale === 'AR';
-    this.bilingual = locale === 'BILINGUAL';
-  }
-
-  /** Libellé : une ou deux lignes. */
-  label(key: LabelKey): string[] {
-    if (this.rtl) return [LABELS.ar[key]];
-    return this.bilingual ? [LABELS.fr[key], LABELS.ar[key]] : [LABELS.fr[key]];
-  }
-
-  /** Contenu : français seul, arabe (repli français) ou les deux. */
-  pick(fr: string | null, ar: string | null): string[] {
-    const french = fr?.trim() || null;
-    const arabic = ar?.trim() || null;
-    if (this.locale === 'FR') return french ? [french] : [];
-    if (this.rtl) return arabic ? [arabic] : french ? [french] : [];
-    return [french, arabic].filter((v): v is string => Boolean(v));
-  }
-
-  number(value: number | null, decimals: number): string {
-    if (value === null) return '–';
-    return value.toLocaleString('fr-FR', {
-      minimumFractionDigits: decimals,
-      maximumFractionDigits: decimals,
-    });
-  }
-
-  date(iso: string): string {
-    const [y, m, d] = iso.slice(0, 10).split('-');
-    return `${d}/${m}/${y}`;
-  }
-}
-
 interface Column {
   key: 'subject' | 'coefficient' | 'average' | 'classAverage' | 'appreciation';
   width: number;
@@ -269,30 +131,14 @@ const COLUMNS: Column[] = [
 
 /** Un ou plusieurs bulletins dans un même document, une page (ou plus) par élève. */
 export function renderReportCards(views: readonly ReportCardView[]): Promise<Buffer> {
-  const doc = new PDFDocument({
-    size: 'A4',
-    margin: PAGE.margin,
-    autoFirstPage: false,
-    info: { Title: 'Bulletin scolaire', Creator: 'Ocall School', Producer: 'Ocall School' },
+  return renderPdf('Bulletin scolaire', (doc) => {
+    for (const view of views) new ReportCard(doc, view).render();
   });
-  doc.registerFont('sans', join(FONTS_DIR, FONT_FILES.sans));
-  doc.registerFont('sansBold', join(FONTS_DIR, FONT_FILES.sansBold));
-  doc.registerFont('naskh', join(FONTS_DIR, FONT_FILES.naskh));
-  doc.registerFont('naskhBold', join(FONTS_DIR, FONT_FILES.naskhBold));
-  const chunks: Buffer[] = [];
-  doc.on('data', (chunk: Buffer) => chunks.push(chunk));
-  const done = new Promise<Buffer>((resolve, reject) => {
-    doc.on('end', () => resolve(Buffer.concat(chunks)));
-    doc.on('error', reject);
-  });
-  for (const view of views) new ReportCard(doc, view).render();
-  doc.end();
-  return done;
 }
 
 class ReportCard {
   private readonly w: Writer;
-  private readonly c: Content;
+  private readonly c: PdfContent<LabelKey>;
   private y = PAGE.margin;
   private page = 0;
 
@@ -301,7 +147,7 @@ class ReportCard {
     private readonly v: ReportCardView,
   ) {
     this.w = new Writer(doc);
-    this.c = new Content(v.locale);
+    this.c = new PdfContent(v.locale, LABELS);
   }
 
   render() {

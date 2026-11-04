@@ -472,7 +472,142 @@ fin d'une affectation retire ces droits à la requête suivante.
 `/school/coran/eleves/[id]` (114 sourates, saisie, historique). Le réglage des absences est ajouté à
 `/school/notation`. Tous suivent la langue de l'établissement ; le menu général Ocall Suite est inchangé.
 
-## 11. Limites actuelles
+## 11. Sprint 5 : gestion financière, frais et encaissements
+
+### Audit de l'existant
+
+Aucun modèle financier dans Ocall School. Ceux d'Ocall Park (ventes, paiements, factures) vivent dans la
+base Suite et ne sont pas réutilisés : aucune dépendance fonctionnelle à Park. Réutilisé : compteur
+atomique `SchoolNumberCounter` (numéros de reçus), journal des décisions, moteur PDF du Sprint 4 (mis en
+commun dans `school-pdf.ts`, sans duplication), exports CSV / XLSX du Sprint 2 (créneaux, plafond).
+
+### Modèles et migration
+
+Migration additive `20261108000000_finances_frais_encaissements` : huit énumérations, neuf tables
+(`SchoolFinanceSettings`, `SchoolFee`, `SchoolFeeInstallment`, `SchoolFeeEvent`, `SchoolCharge`,
+`SchoolChargeAdjustment`, `SchoolBenefit`, `SchoolPayment`, `SchoolPaymentAllocation`), aucune table
+existante modifiée. Contraintes écrites à la main : montants entiers bornés, devise sur trois lettres,
+réduction entre zéro et le montant, **jamais de trop-perçu** (payé ≤ dû), contrepassation liée à son
+encaissement, et un index partiel qui interdit d'encaisser deux fois la même référence de transaction
+(par établissement et par moyen) tant que l'encaissement reste confirmé. Migration additive
+`20261108010000_recu_identite_figee` : colonne `SchoolPayment.receiptSnapshot` (identité du reçu figée),
+obligatoire pour tout encaissement (CHECK). Vérifiées par `prisma migrate diff` (différence vide).
+
+### Règles (`packages/shared/src/school-finance.ts`)
+
+- **Montants exacts** : entiers en unités mineures de la devise de l'établissement (XOF par défaut ;
+  décimales selon ISO 4217), jamais de nombre à virgule. Saisie convertie sans arrondi ; partage exact
+  d'un total en échéances (la somme vaut toujours le total). Montant unitaire et total dû par élève et
+  par année bornés à 1 000 000 000 unités mineures (`AMOUNT_TOO_LARGE`, `TOTAL_TOO_LARGE`) : soldes,
+  contraintes SQL et reçus restent dans la plage des entiers.
+- **Frais** : inscription, réinscription, scolarité, cantine, transport, examen, divers ; par
+  établissement et année, éventuellement un niveau ou une classe ; montant, devise, date d'application,
+  obligatoire ou facultatif, activation, **historique** de chaque modification (avant, après, auteur,
+  échéancier saisi et échéances calculées compris). Un frais ne se facture qu'à partir de sa date
+  d'application (`FEE_NOT_YET_EFFECTIVE` avant).
+- **Non-rétroactivité** : chaque échéance copie libellé, date et montant à sa génération ; un nouveau
+  montant ne vaut que pour les échéances générées ensuite. L'échéancier d'un frais déjà facturé garde
+  son type et son nombre d'échéances.
+- **Échéanciers** : annuel, mensuel, trimestriel, personnalisé (somme contrôlée). Génération par élève
+  (inscription validée dans le périmètre du frais) ; **jamais deux fois** (unicité élève, frais, rang) ;
+  frais facultatif pour les seuls élèves désignés. Élèves verrouillés en exclusif, dans l'ordre de leurs
+  identifiants et dans l'établissement du frais, éligibilité relue sous ces verrous : un transfert ou un
+  changement de classe simultané n'est jamais facturé sur l'ancienne situation, deux générations se
+  suivent élève par élève (cumul jamais dépassé, aucune attente croisée).
+- **Statuts** : à venir, partiellement payé, payé, en retard (date limite dépassée et un reste), selon la
+  date du jour dans le fuseau de l'établissement. Ajustements signés, motivés, tracés ; jamais sous le
+  montant déjà payé. Ajustement d'une échéance et retrait d'un avantage : droit sur l'établissement de
+  l'écriture, possibles après un transfert de l'élève.
+- **Avantages** : réduction fixe (par échéance), en pourcentage, bourse partielle, exonération totale,
+  réduction familiale ; limités à un frais, une catégorie ou tous. Justifiés, accordés par la direction,
+  tracés (décision publiée) ; recalculés sur les échéances de l'année ; refusés s'ils créaient un
+  trop-perçu. Ils apparaissent distinctement des encaissements.
+
+### Encaissements, reçus et annulations
+
+- **Caisse** : espèces, virement, mobile money **déclaré** (jamais présenté comme vérifié par
+  l'opérateur, mention sur le reçu) ; paiement partiel ou couvrant plusieurs échéances (affectation
+  explicite, ou de la plus ancienne à la plus récente). Référence obligatoire hors espèces.
+- **Anti-doublon** : clé d'idempotence par formulaire (une soumission répétée renvoie le même
+  encaissement ; la même clé avec une autre demande, comparée par empreinte complète, répond
+  `IDEMPOTENCY_MISMATCH`), référence unique par moyen (index de la base), alerte sur un encaissement semblable de
+  moins de deux minutes, à confirmer explicitement.
+- **Atomicité** : encaissement, affectations et soldes dans une transaction, sous le verrou exclusif de
+  l'élève (deux caisses simultanées pour un même élève se suivent) puis de ses échéances ; numéro de
+  reçu par compteur atomique (`PRÉFIXE-AAAA-000001`). Droit de caisse relu sous le verrou de
+  l'établissement : une autorisation du secrétariat retirée pendant l'attente n'est jamais utilisée.
+  Chaque encaissement écrit sa décision (`school.payment_recorded`) dans sa transaction, publiée au
+  journal Suite avec reprise.
+- **Reçu PDF** à la demande (garde, permission, aucune adresse directe, `no-store`, journalisé) :
+  établissement, numéro, date, élève, classe et année, frais réglés, montant, moyen, référence, solde
+  restant figé à l'encaissement, mention de vérification. Français, Arabe (RTL) ou Bilingue. Un reçu
+  réédité reste identique au reçu remis : établissement, coordonnées, langue, fuseau, identité de l'élève
+  et année sont figés à l'encaissement ; seul le statut d'annulation est courant. Pagination explicite :
+  numéro du reçu, en-tête du tableau, filigrane et pied de page répétés ; total et mentions jamais
+  coupés ; chaque texte tient sur une ligne logique (retours à la ligne aplatis) et un mot plus large
+  que sa colonne est découpé (aussi pour l'arabe, bulletins compris) ; la largeur réservée à chaque mot
+  est celle de son dessin, ponctuation détachée comprise.
+- **Annulation** : réservée à la direction, motivée ; contrepassation (écriture négative sur les mêmes
+  échéances), encaissement initial conservé au statut annulé avec son reçu. Jamais de suppression ni de
+  modification directe ; correction par une nouvelle opération (la référence redevient utilisable).
+  Le droit suit l'établissement de l'encaissement : il reste annulable après un transfert de l'élève.
+
+### Tableau de bord, impayés, exports
+
+Attendu (dû après réductions et ajustements), encaissé, solde, réductions, échéances en retard, élèves en
+impayé, encaissements par mois et par moyen (nets des contrepassations), répartition par niveau et classe
+; filtres année, classe, type de frais, période. Impayés triés par retard. Exports CSV et XLSX (impayés,
+encaissements) : permission, créneaux et plafond partagés avec les exports élèves, journalisation, en-têtes
+dans la langue de l'établissement. Les filtres classe et type de frais s'appliquent aussi à l'export des
+encaissements : un encaissement est retenu s'il touche une échéance du type filtré, pour un élève inscrit
+dans la classe filtrée, et il est exporté pour son montant total. Attendu, encaissé et solde décrivent la
+situation de l'année à ce jour (attendu = encaissé + solde) ; avec un filtre de dates, un indicateur
+distinct « encaissé sur la période » (affectations datées, contrepassations comprises, aussi par classe)
+s'y ajoute, avec une note explicative. Historique des encaissements et reçus paginé par 100 dans un ordre
+total (date, création, identifiant) ; les reçus sont filtrés par la base avant la pagination. Les lignes
+d'un reçu suivent un ordre stable (date limite, rang). Les jours filtrés (historique, tableau de bord,
+export) et les mois des encaissements s'entendent dans le fuseau de l'établissement, comme les dates des
+reçus ; un jour commence à son premier instant local, même quand un changement d'heure supprime minuit.
+L'historique est recréé après une annulation : aucune page chargée auparavant ne s'y mêle. En caisse, un
+montant d'affectation renseigné mais invalide bloque l'encaissement. Dans les exports, les montants sont des nombres (signés pour les contrepassations), jamais du
+texte. Les impayés sont agrégés par la base
+(une ligne par élève) et l'export borné avant construction ; limiteur dédié aux exports (30 par
+10 minutes et par IP). Écrans des réductions et des impayés :
+aucun montant ni aucune saisie avant le chargement de la devise réelle de l'établissement.
+
+### Droits
+
+| Permission                                                           | Rôles                                                            |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `school.finance.read` (situation, échéances, paiements, reçus)       | Direction, comptabilité, secrétariat                             |
+| `school.finance.settings` (réglages, frais, échéanciers, génération) | Direction                                                        |
+| `school.finance.collect` (encaissement)                              | Direction, comptabilité ; secrétariat si la direction l'autorise |
+| `school.finance.benefits` (avantages, ajustements)                   | Direction                                                        |
+| `school.finance.cancel` (annulation, contrepassation)                | Direction                                                        |
+| `school.finance.reports` (tableau de bord, impayés, exports)         | Direction, comptabilité                                          |
+
+Enseignants et surveillance : aucun accès financier. Parents : vue en lecture seule préparée
+(`guardianChargeView`, sans agent ni motif interne) ; aucune route parent ouverte.
+
+### API (`/api/v1/school/finance`)
+
+`GET|PUT settings` ; `GET|POST fees`, `GET|PATCH fees/:id`, `GET fees/:id/history`,
+`POST fees/:id/generate` ; `GET students/:id` ; `POST charges/:id/adjust` ; `GET|POST benefits`,
+`POST benefits/:id/revoke` ; `GET|POST payments` (liste : `{ items, nextCursor }`, paramètres
+`cursor` et `receipts`), `GET payments/:id`, `POST payments/:id/cancel`,
+`GET payments/:id/receipt` ; `GET dashboard`, `GET unpaid`, `GET export` ; `GET leavers` (élèves
+sortis qui doivent encore une échéance de l'année dans l'établissement, recherche `q` par nom ou
+matricule, 50 au plus avec `truncated` invitant à affiner ; proposés à la caisse et à la situation).
+
+### Écrans
+
+`/school/finances` (tableau de bord), `/school/finances/parametres`, `/school/finances/frais`,
+`/school/finances/echeanciers`, `/school/finances/eleves`, `/school/finances/caisse`,
+`/school/finances/paiements`, `/school/finances/recus`, `/school/finances/impayes`,
+`/school/finances/reductions`. Ordinateur et tablette ; langue de l'établissement ; menu Ocall Park
+inchangé.
+
+## 12. Limites actuelles
 
 - Un employé Park existant ne peut pas encore recevoir de rôle School : il faut un compte dédié.
 - Pas d'emploi du temps ni de volume horaire contrôlé : l'horaire par niveau est indicatif.
@@ -506,3 +641,16 @@ fin d'une affectation retire ces droits à la requête suivante.
   verset, d’analyse audio ni d’évaluation automatique (hors périmètre du Sprint 4).
 - Le lien de menu « Mémorisation du Coran » reste visible (menu School statique) ; hors module actif, la page
   répond « introuvable » aux rôles autres que la direction.
+- Finances : pas d’intégration Wave, Orange Money ni paiement en ligne (hors périmètre) ; un mobile money
+  reste déclaré. Pas de comptabilité générale ni de clôture de caisse journalière. Une seule devise par
+  établissement, verrouillée dès qu’un frais ou une réduction fixe existe (même retirée). Pas d’avoir ni
+  de trop-perçu : un excédent n’est jamais encaissé.
+- La caisse n’est proposée qu’à qui peut encaisser (comptabilité, direction, secrétariat autorisé) ; un
+  élève sorti sans transfert y reste accessible tant qu’il a des échéances dans l’établissement.
+- Un élève transféré dans un autre établissement ne peut plus être encaissé par l’ancien (arriérés) ; ses
+  encaissements passés y restent consultables et annulables.
+- Pas de versions tarifaires : un frais porte un seul montant à la fois ; un tarif dont la date
+  d’application est future ne se génère qu’à partir de cette date (créer un frais distinct pour un
+  changement programmé).
+- La réduction fixe s’applique à chaque échéance concernée ; un taux s’arrondit à l’unité inférieure.
+- Les montants d’export sont en unités mineures de la devise.

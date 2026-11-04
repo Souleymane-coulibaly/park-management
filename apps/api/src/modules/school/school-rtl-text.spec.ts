@@ -9,6 +9,16 @@ import {
 
 const order = (text: string) => visualOrderRtl(words(text)).map((p) => p.word);
 
+describe('wrapWords : mot plus large que la ligne', () => {
+  it('découpé en fragments qui tiennent chacun dans la largeur', () => {
+    const word = `ع${'W'.repeat(79)}`;
+    const lines = wrapWords([word], (w) => w.length, 1, 10);
+    expect(lines.every((line) => line.every((w) => w.length <= 10))).toBe(true);
+    expect(lines.flat().join('')).toBe(word);
+    expect(wrapWords(['court', 'mot'], (w) => w.length, 1, 10)).toEqual([['court', 'mot']]);
+  });
+});
+
 describe('Ocall School — ordre visuel du texte arabe (bulletins PDF)', () => {
   it('détecte l’arabe', () => {
     expect(hasArabic('الرياضيات')).toBe(true);
@@ -65,8 +75,13 @@ describe('Ocall School — ordre visuel du texte arabe (bulletins PDF)', () => {
       ['aaa', 'bb'],
       ['cccc', 'd'],
     ]);
+    // Mot plus large que la ligne : découpé, jamais en débordement.
     expect(wrapWords(['beaucoup-trop-long'], (w) => w.length, 1, 4)).toEqual([
-      ['beaucoup-trop-long'],
+      ['beau'],
+      ['coup'],
+      ['-tro'],
+      ['p-lo'],
+      ['ng'],
     ]);
     expect(wrapWords([], (w) => w.length, 1, 4)).toEqual([]);
   });

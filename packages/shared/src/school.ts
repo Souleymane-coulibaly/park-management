@@ -123,6 +123,18 @@ export const SchoolPermission = {
   QURAN_READ: 'school.quran.read',
   /** Enregistrer une évaluation de mémorisation : l'enseignant affecté à la matière Coran. */
   QURAN_MANAGE: 'school.quran.manage',
+  /** Situation financière des élèves, échéances, encaissements et reçus (Sprint 5). */
+  FINANCE_READ: 'school.finance.read',
+  /** Réglages financiers, catalogue des frais, échéanciers et génération des échéances. */
+  FINANCE_SETTINGS: 'school.finance.settings',
+  /** Enregistrer un encaissement en caisse. Le secrétariat seulement si la direction l'autorise. */
+  FINANCE_COLLECT: 'school.finance.collect',
+  /** Accorder ou retirer une réduction, une bourse ou une exonération ; ajuster une échéance. */
+  FINANCE_BENEFITS: 'school.finance.benefits',
+  /** Annuler un encaissement confirmé (contrepassation motivée). */
+  FINANCE_CANCEL: 'school.finance.cancel',
+  /** Tableau de bord financier, impayés et exports. */
+  FINANCE_REPORTS: 'school.finance.reports',
 } as const;
 export type SchoolPermission = (typeof SchoolPermission)[keyof typeof SchoolPermission];
 
@@ -158,6 +170,12 @@ const DIRECTION: readonly SchoolPermission[] = [
   SP.REPORT_CARDS,
   SP.QURAN_SETTINGS,
   SP.QURAN_READ,
+  SP.FINANCE_READ,
+  SP.FINANCE_SETTINGS,
+  SP.FINANCE_COLLECT,
+  SP.FINANCE_BENEFITS,
+  SP.FINANCE_CANCEL,
+  SP.FINANCE_REPORTS,
 ];
 
 /**
@@ -165,6 +183,8 @@ const DIRECTION: readonly SchoolPermission[] = [
  * comptable n'ont que la liste restreinte, et l'enseignant seulement pour ses classes. Notes : la
  * direction gère et valide, le secrétariat consulte et édite les bulletins, l'enseignant saisit pour ses
  * affectations. Mémorisation : l'enseignant de la matière Coran saisit, la direction consulte.
+ * Finances : la direction configure, accorde, annule et suit ; la comptabilité encaisse et suit ; le
+ * secrétariat consulte, et encaisse seulement si la direction l'a autorisé ; l'enseignant n'y a pas accès.
  */
 export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermission[]> = {
   GROUP_DIRECTOR: [...DIRECTION, SP.SCHOOLS_MANAGE],
@@ -185,6 +205,7 @@ export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermissi
     SP.TEACHING_READ,
     SP.ASSESSMENT_READ,
     SP.REPORT_CARDS,
+    SP.FINANCE_READ,
   ],
   TEACHER: [
     SP.STRUCTURE_READ,
@@ -195,7 +216,13 @@ export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermissi
     SP.QURAN_MANAGE,
   ],
   SUPERVISOR: [SP.STRUCTURE_READ, SP.STUDENTS_READ, SP.TEACHING_READ],
-  ACCOUNTANT: [SP.STRUCTURE_READ, SP.STUDENTS_READ],
+  ACCOUNTANT: [
+    SP.STRUCTURE_READ,
+    SP.STUDENTS_READ,
+    SP.FINANCE_READ,
+    SP.FINANCE_COLLECT,
+    SP.FINANCE_REPORTS,
+  ],
 };
 
 export function hasSchoolPermission(role: SchoolRole, permission: SchoolPermission): boolean {

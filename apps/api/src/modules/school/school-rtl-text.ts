@@ -117,7 +117,7 @@ export interface PlacedWord {
  * Détache la ponctuation de début et de fin d'un mot latin (« 20. », « (15 ») : elle suit ensuite le sens
  * de son voisinage, comme dans l'algorithme Unicode (un point final va en fin de phrase arabe).
  */
-function detachPunctuation(word: string): string[] {
+export function detachPunctuation(word: string): string[] {
   if (wordDirection(word) !== 'ltr') return [word];
   const match = EDGE_PUNCTUATION.exec(word);
   if (!match) return [word];
@@ -153,7 +153,10 @@ export function visualOrderRtl(line: readonly string[]): PlacedWord[] {
     );
 }
 
-/** Coupure gloutonne en lignes, dans l'ordre logique ; un mot trop long occupe seul sa ligne. */
+/**
+ * Coupure gloutonne en lignes, dans l'ordre logique. Un mot plus large que la ligne est découpé en
+ * fragments qui tiennent chacun dans la largeur : rien ne déborde de sa colonne.
+ */
 export function wrapWords(
   words: readonly string[],
   measure: (word: string) => number,
@@ -163,7 +166,7 @@ export function wrapWords(
   const lines: string[][] = [];
   let line: string[] = [];
   let used = 0;
-  for (const word of words) {
+  for (const word of words.flatMap((w) => splitWide(w, measure, width))) {
     const w = measure(word);
     const needed = line.length === 0 ? w : used + spaceWidth + w;
     if (line.length > 0 && needed > width) {
@@ -177,6 +180,23 @@ export function wrapWords(
   }
   if (line.length > 0) lines.push(line);
   return lines;
+}
+
+/** Fragments d'un mot, chacun au plus de la largeur donnée (au moins un caractère par fragment). */
+function splitWide(word: string, measure: (word: string) => number, width: number): string[] {
+  if (measure(word) <= width) return [word];
+  const pieces: string[] = [];
+  let current = '';
+  for (const char of Array.from(word)) {
+    if (current && measure(current + char) > width) {
+      pieces.push(current);
+      current = char;
+    } else {
+      current += char;
+    }
+  }
+  if (current) pieces.push(current);
+  return pieces;
 }
 
 /** Mots d'un texte, espaces multiples et retours à la ligne compris. */

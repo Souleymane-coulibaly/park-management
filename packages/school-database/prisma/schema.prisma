@@ -125,6 +125,57 @@ enum SchoolGradeStatus {
   EXEMPT
 }
 
+enum SchoolFeeCategory {
+  REGISTRATION
+  REENROLLMENT
+  TUITION
+  CANTEEN
+  TRANSPORT
+  EXAM
+  OTHER
+}
+
+enum SchoolPlanKind {
+  ANNUAL
+  MONTHLY
+  QUARTERLY
+  CUSTOM
+}
+
+enum SchoolBenefitKind {
+  FIXED
+  PERCENT
+  SCHOLARSHIP
+  EXEMPTION
+  FAMILY
+}
+
+enum SchoolBenefitStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum SchoolPaymentMethod {
+  CASH
+  BANK_TRANSFER
+  MOBILE_MONEY
+}
+
+enum SchoolPaymentKind {
+  PAYMENT
+  REVERSAL
+}
+
+enum SchoolPaymentStatus {
+  CONFIRMED
+  CANCELLED
+}
+
+enum SchoolPaymentVerification {
+  NOT_APPLICABLE
+  DECLARED_UNVERIFIED
+}
+
 enum SchoolQuranStatus {
   NOT_STARTED
   IN_PROGRESS
@@ -175,6 +226,7 @@ model School {
   settings    SchoolStudentSettings?
   importJobs  SchoolImportJob[]
   quran       SchoolQuranSettings?
+  finance     SchoolFinanceSettings?
 
   @@unique([organizationId, id])
   @@unique([organizationId, name])
@@ -251,6 +303,10 @@ model SchoolYear {
   classes     SchoolClass[]
   enrollments SchoolEnrollment[]
   evaluations SchoolEvaluation[]
+  fees        SchoolFee[]
+  charges     SchoolCharge[]
+  benefits    SchoolBenefit[]
+  payments    SchoolPayment[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, schoolId, id])
@@ -330,6 +386,7 @@ model Level {
   classes     SchoolClass[]
   enrollments SchoolEnrollment[]
   subjects    SubjectLevel[]
+  fees        SchoolFee[]
 
   @@unique([organizationId, id])
   @@unique([cycleId, name])
@@ -360,6 +417,7 @@ model SchoolClass {
   validations  SchoolResultValidation[]
   appreciation SchoolAppreciation[]
   comments     SchoolReportComment[]
+  fees         SchoolFee[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, schoolYearId, id])
@@ -501,6 +559,9 @@ model SchoolStudent {
   comments     SchoolReportComment[]
   quran        SchoolQuranProgress[]
   quranEvents  SchoolQuranEvaluation[]
+  charges      SchoolCharge[]
+  benefits     SchoolBenefit[]
+  payments     SchoolPayment[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, matriculeScope, matricule])
@@ -956,4 +1017,233 @@ model SchoolQuranEvaluation {
 
   @@unique([studentId, surah, sequence])
   @@index([organizationId, studentId, surah, evaluatedOn])
+}
+
+// ─── Sprint 5 : gestion financière ───
+// Montants : entiers en unités mineures de la devise de l'établissement (jamais de nombre à virgule).
+
+/// Réglages financiers d'un établissement ; sans ligne, les valeurs par défaut s'appliquent.
+model SchoolFinanceSettings {
+  schoolId            String   @id @db.Uuid
+  organizationId      String   @db.Uuid
+  currency            String   @default("XOF") @db.Char(3)
+  receiptPrefix       String   @default("REC")
+  /// Le secrétariat peut encaisser : opération explicitement autorisée par la direction.
+  secretaryCanCollect Boolean  @default(false)
+  updatedByUserId     String   @db.Uuid
+  updatedAt           DateTime @updatedAt
+
+  school School @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, schoolId])
+}
+
+/// Tarif d'un établissement pour une année, éventuellement limité à un niveau ou à une classe. Un
+/// changement de montant ne vaut que pour les échéances générées ensuite : chaque échéance garde sa copie.
+model SchoolFee {
+  id              String            @id @default(uuid()) @db.Uuid
+  organizationId  String            @db.Uuid
+  schoolId        String            @db.Uuid
+  schoolYearId    String            @db.Uuid
+  levelId         String?           @db.Uuid
+  classId         String?           @db.Uuid
+  category        SchoolFeeCategory
+  name            String
+  nameAr          String?
+  amount          Int
+  currency        String            @db.Char(3)
+  effectiveFrom   DateTime          @db.Date
+  mandatory       Boolean           @default(true)
+  isActive        Boolean           @default(true)
+  planKind        SchoolPlanKind
+  plan            Json
+  createdByUserId String            @db.Uuid
+  updatedByUserId String?           @db.Uuid
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  year         SchoolYear             @relation(fields: [organizationId, schoolId, schoolYearId], references: [organizationId, schoolId, id], onDelete: Restrict)
+  level        Level?                 @relation(fields: [organizationId, levelId], references: [organizationId, id], onDelete: Restrict)
+  class        SchoolClass?           @relation(fields: [organizationId, schoolYearId, classId], references: [organizationId, schoolYearId, id], onDelete: Restrict)
+  installments SchoolFeeInstallment[]
+  events       SchoolFeeEvent[]
+  charges      SchoolCharge[]
+  benefits     SchoolBenefit[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, schoolId, id])
+  @@index([organizationId, schoolId, schoolYearId])
+}
+
+/// Échéancier courant d'un frais : montants exacts dont la somme vaut le montant du frais.
+model SchoolFeeInstallment {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  feeId          String   @db.Uuid
+  position       Int
+  dueOn          DateTime @db.Date
+  amount         Int
+
+  fee SchoolFee @relation(fields: [organizationId, feeId], references: [organizationId, id], onDelete: Cascade)
+
+  @@unique([feeId, position])
+  @@index([organizationId, feeId])
+}
+
+/// Historique d'un tarif, en ajout seul : valeurs avant et après, auteur.
+model SchoolFeeEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  feeId          String   @db.Uuid
+  action         String
+  before         Json?
+  after          Json?
+  actorUserId    String   @db.Uuid
+  createdAt      DateTime @default(now())
+
+  fee SchoolFee @relation(fields: [organizationId, feeId], references: [organizationId, id], onDelete: Restrict)
+
+  @@index([organizationId, feeId, createdAt])
+}
+
+/// Échéance d'un élève : copie du libellé, de la date et du montant au moment de la génération. Unique
+/// par élève, frais et rang : une seconde génération ne crée jamais de doublon. Dû = montant - réduction
+/// + ajustements ; jamais de trop-perçu (contraintes CHECK de la migration).
+model SchoolCharge {
+  id              String            @id @default(uuid()) @db.Uuid
+  organizationId  String            @db.Uuid
+  schoolId        String            @db.Uuid
+  schoolYearId    String            @db.Uuid
+  studentId       String            @db.Uuid
+  feeId           String            @db.Uuid
+  position        Int
+  category        SchoolFeeCategory
+  label           String
+  labelAr         String?
+  dueOn           DateTime          @db.Date
+  amount          Int
+  discount        Int               @default(0)
+  adjustment      Int               @default(0)
+  paid            Int               @default(0)
+  currency        String            @db.Char(3)
+  createdByUserId String            @db.Uuid
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  year        SchoolYear                @relation(fields: [organizationId, schoolId, schoolYearId], references: [organizationId, schoolId, id], onDelete: Restrict)
+  student     SchoolStudent             @relation(fields: [organizationId, studentId], references: [organizationId, id], onDelete: Restrict)
+  fee         SchoolFee                 @relation(fields: [organizationId, schoolId, feeId], references: [organizationId, schoolId, id], onDelete: Restrict)
+  adjustments SchoolChargeAdjustment[]
+  allocations SchoolPaymentAllocation[]
+
+  @@unique([studentId, feeId, position])
+  @@unique([organizationId, id])
+  @@index([organizationId, schoolId, schoolYearId, dueOn])
+  @@index([organizationId, studentId])
+}
+
+/// Ajustement justifié d'une échéance (signé), en ajout seul.
+model SchoolChargeAdjustment {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  chargeId       String   @db.Uuid
+  amount         Int
+  reason         String
+  actorUserId    String   @db.Uuid
+  createdAt      DateTime @default(now())
+
+  charge SchoolCharge @relation(fields: [organizationId, chargeId], references: [organizationId, id], onDelete: Restrict)
+
+  @@index([organizationId, chargeId])
+}
+
+/// Réduction, bourse ou exonération accordée à un élève pour une année, éventuellement limitée à une
+/// catégorie ou à un frais. Justifiée, autorisée, journalisée ; un retrait garde la ligne.
+model SchoolBenefit {
+  id               String              @id @default(uuid()) @db.Uuid
+  organizationId   String              @db.Uuid
+  schoolId         String              @db.Uuid
+  schoolYearId     String              @db.Uuid
+  studentId        String              @db.Uuid
+  kind             SchoolBenefitKind
+  value            Int
+  category         SchoolFeeCategory?
+  feeId            String?             @db.Uuid
+  reason           String
+  status           SchoolBenefitStatus @default(ACTIVE)
+  approvedByUserId String              @db.Uuid
+  createdAt        DateTime            @default(now())
+  revokedAt        DateTime?
+  revokedByUserId  String?             @db.Uuid
+  revokeReason     String?
+
+  year    SchoolYear    @relation(fields: [organizationId, schoolId, schoolYearId], references: [organizationId, schoolId, id], onDelete: Restrict)
+  student SchoolStudent @relation(fields: [organizationId, studentId], references: [organizationId, id], onDelete: Restrict)
+  fee     SchoolFee?    @relation(fields: [organizationId, schoolId, feeId], references: [organizationId, schoolId, id], onDelete: Restrict)
+
+  @@index([organizationId, studentId, schoolYearId])
+}
+
+/// Encaissement ou contrepassation, jamais supprimé ni modifié une fois confirmé. Une contrepassation
+/// (kind REVERSAL) annule un encaissement, qui reste consultable avec son reçu au statut annulé.
+model SchoolPayment {
+  id                 String                    @id @default(uuid()) @db.Uuid
+  organizationId     String                    @db.Uuid
+  schoolId           String                    @db.Uuid
+  schoolYearId       String                    @db.Uuid
+  studentId          String                    @db.Uuid
+  kind               SchoolPaymentKind         @default(PAYMENT)
+  amount             Int
+  currency           String                    @db.Char(3)
+  method             SchoolPaymentMethod
+  reference          String?
+  verification       SchoolPaymentVerification
+  paidAt             DateTime
+  receivedByUserId   String                    @db.Uuid
+  /// Clé fournie par l'écran à chaque formulaire : une soumission répétée ne crée qu'un encaissement.
+  idempotencyKey     String?
+  /// Empreinte de la demande complète (élève, année, montant, moyen, référence, affectations, date,
+  /// remarque) : une clé réutilisée pour une autre opération est refusée.
+  requestFingerprint String?
+  receiptNumber      String?
+  /// Solde de l'élève pour l'année juste après l'encaissement, et classe à cette date : figés pour le reçu.
+  balanceAfter       Int?
+  classLabel         String?
+  /// Identité du reçu figée à l'encaissement (établissement, coordonnées, langue, fuseau, élève, année) :
+  /// un reçu réédité reste identique à celui remis, quels que soient les changements ultérieurs.
+  receiptSnapshot    Json?
+  status             SchoolPaymentStatus       @default(CONFIRMED)
+  note               String?
+  cancelledAt        DateTime?
+  cancelledByUserId  String?                   @db.Uuid
+  cancelReason       String?
+  reversalOfId       String?                   @unique @db.Uuid
+  createdAt          DateTime                  @default(now())
+
+  year        SchoolYear                @relation(fields: [organizationId, schoolId, schoolYearId], references: [organizationId, schoolId, id], onDelete: Restrict)
+  student     SchoolStudent             @relation(fields: [organizationId, studentId], references: [organizationId, id], onDelete: Restrict)
+  reversalOf  SchoolPayment?            @relation("Reversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversal    SchoolPayment?            @relation("Reversal")
+  allocations SchoolPaymentAllocation[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, idempotencyKey])
+  @@unique([schoolId, receiptNumber])
+  @@index([organizationId, schoolId, paidAt])
+  @@index([organizationId, studentId])
+}
+
+/// Part d'un encaissement affectée à une échéance (négative pour une contrepassation).
+model SchoolPaymentAllocation {
+  id             String @id @default(uuid()) @db.Uuid
+  organizationId String @db.Uuid
+  paymentId      String @db.Uuid
+  chargeId       String @db.Uuid
+  amount         Int
+
+  payment SchoolPayment @relation(fields: [organizationId, paymentId], references: [organizationId, id], onDelete: Restrict)
+  charge  SchoolCharge  @relation(fields: [organizationId, chargeId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([paymentId, chargeId])
+  @@index([organizationId, chargeId])
 }

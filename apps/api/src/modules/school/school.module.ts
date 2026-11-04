@@ -6,9 +6,12 @@ import { SchoolAssessmentController, SchoolQuranController } from './school-asse
 import { SchoolAssessmentService } from './school-assessment.service';
 import { SchoolDocumentsService } from './school-documents.service';
 import { SchoolEnrollmentsService } from './school-enrollments.service';
+import { SchoolFinanceController } from './school-finance.controller';
+import { SchoolFinanceService } from './school-finance.service';
 import { SchoolGuardiansService } from './school-guardians.service';
 import { SchoolImportsService } from './school-imports.service';
 import { SchoolMembersService } from './school-members.service';
+import { SchoolPaymentsService } from './school-payments.service';
 import { SchoolPrismaService } from './school-prisma.service';
 import { SchoolQuranService } from './school-quran.service';
 import { SchoolReportCardsService } from './school-report-cards.service';
@@ -33,6 +36,7 @@ import { SchoolService } from './school.service';
     SchoolTeachingController,
     SchoolAssessmentController,
     SchoolQuranController,
+    SchoolFinanceController,
   ],
   providers: [
     SchoolPrismaService,
@@ -48,6 +52,8 @@ import { SchoolService } from './school.service';
     SchoolAssessmentService,
     SchoolReportCardsService,
     SchoolQuranService,
+    SchoolFinanceService,
+    SchoolPaymentsService,
   ],
 })
 export class SchoolModule {}

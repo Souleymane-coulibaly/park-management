@@ -207,14 +207,18 @@ export function safeCsvCell(value: string): string {
   return /[";,\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
+/** Tableau exporté ; une cellule numérique (montant) reste un nombre dans le tableur. */
 export interface TableExport {
   headers: string[];
-  rows: string[][];
+  rows: (string | number)[][];
 }
 
 /** CSV UTF-8 avec BOM et « ; » : Excel français l'ouvre directement, arabe compris. */
 export function toCsv(table: TableExport): Buffer {
-  const lines = [table.headers, ...table.rows].map((r) => r.map(safeCsvCell).join(';'));
+  // Les nombres viennent du serveur : écrits tels quels (signe compris), jamais neutralisés.
+  const lines = [table.headers, ...table.rows].map((r) =>
+    r.map((c) => (typeof c === 'number' ? String(c) : safeCsvCell(c))).join(';'),
+  );
   return Buffer.from(`\uFEFF${lines.join('\r\n')}\r\n`, 'utf8');
 }
 
