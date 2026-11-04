@@ -20,3 +20,4 @@ export * from './suite-contracts';
 export * from './school';
 export * from './school-students';
 export * from './school-i18n';
+export * from './school-teaching';

@@ -105,6 +105,10 @@ export const SchoolPermission = {
   DOCUMENTS_READ: 'school.documents.read',
   DOCUMENTS_MANAGE: 'school.documents.manage',
   DOCUMENTS_DELETE: 'school.documents.delete',
+  /** Équipe pédagogique : enseignants, affectations, historique (Sprint 3B). */
+  TEACHING_READ: 'school.teaching.read',
+  /** Affecter, remplacer ou terminer une affectation d'enseignement. */
+  TEACHING_MANAGE: 'school.teaching.manage',
 } as const;
 export type SchoolPermission = (typeof SchoolPermission)[keyof typeof SchoolPermission];
 
@@ -132,6 +136,8 @@ const DIRECTION: readonly SchoolPermission[] = [
   SP.DOCUMENTS_READ,
   SP.DOCUMENTS_MANAGE,
   SP.DOCUMENTS_DELETE,
+  SP.TEACHING_READ,
+  SP.TEACHING_MANAGE,
 ];
 
 /**
@@ -154,9 +160,10 @@ export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermissi
     SP.GUARDIANS_MANAGE,
     SP.DOCUMENTS_READ,
     SP.DOCUMENTS_MANAGE,
+    SP.TEACHING_READ,
   ],
   TEACHER: [SP.STRUCTURE_READ, SP.STUDENTS_READ],
-  SUPERVISOR: [SP.STRUCTURE_READ, SP.STUDENTS_READ],
+  SUPERVISOR: [SP.STRUCTURE_READ, SP.STUDENTS_READ, SP.TEACHING_READ],
   ACCOUNTANT: [SP.STRUCTURE_READ, SP.STUDENTS_READ],
 };
 

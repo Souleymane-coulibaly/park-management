@@ -134,9 +134,14 @@ export class SchoolMembersService {
 
   async update(ctx: SchoolContext, id: string, dto: UpdateMemberDto) {
     if (dto.role) this.assertCanAssign(ctx, dto.role);
+    // Refus avant tout verrou : un identifiant étranger ne doit jamais faire attendre la requête.
+    await this.findManageable(this.db, ctx, id);
     const { target, role } = await this.db.$transaction(async (tx) => {
       // Rôle et affectations relus sous verrou : ce sont eux qui fondent le droit de gérer ce membre.
-      await tx.$queryRaw`SELECT id FROM "SchoolMember" WHERE id = ${id}::uuid FOR UPDATE`;
+      // Sorti du périmètre depuis le contrôle : rien n'est verrouillé, la relecture n'aurait plus de garantie.
+      if (!(await this.school.lockMemberInScope(tx, ctx, id))) {
+        throw new NotFoundException(NOT_FOUND);
+      }
       const target = await this.findManageable(tx, ctx, id);
       if (target.userId === ctx.userId) {
         throw new ForbiddenException({
@@ -161,7 +166,12 @@ export class SchoolMembersService {
       }
       await tx.schoolMember.update({
         where: { id },
-        data: { role: dto.role, isActive: dto.isActive },
+        data: {
+          role: dto.role,
+          isActive: dto.isActive,
+          firstNameAr: dto.firstNameAr,
+          lastNameAr: dto.lastNameAr,
+        },
       });
       if (dto.schoolIds) {
         // Seules les affectations du périmètre de l'utilisateur changent.
@@ -176,11 +186,13 @@ export class SchoolMembersService {
           })),
         });
       }
+      const endedTeaching = await this.endTeaching(tx, ctx, target, role, dto);
       await this.school.recordDecision(tx, ctx, 'school.member_updated', 'SchoolMember', id, {
         fields: Object.keys(dto),
         role,
         ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
         ...(dto.schoolIds ? { schoolIds: dto.schoolIds } : {}),
+        ...(endedTeaching ? { endedTeaching } : {}),
       });
       return { target, role };
     });
@@ -188,6 +200,52 @@ export class SchoolMembersService {
     // Après la validation School : droits restreints et fermeture valent avant toute réouverture de Suite.
     if (dto.isActive !== undefined) await this.syncAccount(ctx, id, target.userId);
     return { id, role, isActive: dto.isActive ?? target.isActive };
+  }
+
+  /**
+   * Un enseignant désactivé, qui change de rôle ou quitte un établissement n'y enseigne plus : ses
+   * affectations actives s'y terminent et ses accès aux classes y sont retirés, dans la transaction de la
+   * modification (le membre est déjà verrouillé). Une réactivation ou un retour ne rétablit rien d'office.
+   * Renvoie le nombre d'affectations terminées.
+   */
+  private async endTeaching(
+    tx: SchoolPrisma.TransactionClient,
+    ctx: SchoolContext,
+    target: { id: string; role: SchoolRole; assignments: { schoolId: string }[] },
+    role: SchoolRole,
+    dto: UpdateMemberDto,
+  ): Promise<number> {
+    const previous = target.assignments.map((a) => a.schoolId);
+    let schools: string[] = [];
+    let reason = '';
+    if (dto.isActive === false) {
+      schools = previous;
+      reason = 'Compte désactivé';
+    } else if (target.role === 'TEACHER' && role !== 'TEACHER') {
+      schools = previous;
+      reason = 'Changement de rôle';
+    } else if (dto.schoolIds) {
+      const kept = new Set(dto.schoolIds);
+      schools = previous.filter(
+        (schoolId) => !kept.has(schoolId) && (!ctx.schoolIds || ctx.schoolIds.includes(schoolId)),
+      );
+      reason = 'Retrait de l’établissement';
+    }
+    if (schools.length === 0) return 0;
+    const inSchools = { class: { year: { schoolId: { in: schools } } } };
+    const { count } = await tx.schoolTeachingAssignment.updateMany({
+      where: {
+        organizationId: ctx.organizationId,
+        memberId: target.id,
+        endedAt: null,
+        ...inSchools,
+      },
+      data: { endedAt: new Date(), endedByUserId: ctx.userId, endReason: reason },
+    });
+    await tx.schoolClassTeacher.deleteMany({
+      where: { organizationId: ctx.organizationId, memberId: target.id, ...inSchools },
+    });
+    return count;
   }
 
   /**

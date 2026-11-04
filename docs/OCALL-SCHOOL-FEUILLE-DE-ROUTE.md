@@ -2,13 +2,13 @@
 
 Ordre validé. Aucun sprint ne démarre sans autorisation explicite.
 
-| Étape                         | Contenu                                                                             | État                                                          |
-| ----------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| Sprint 1                      | Socle, contrats Suite, portail, base School distincte                               | Livré                                                         |
-| Sprint 2                      | Élèves, responsables, inscriptions, imports, exports, documents                     | Livré (c9f6589) ; migration Neon `decisions_acces` en attente |
-| Sprint 3A                     | Langues : réglage par établissement, interface arabe RTL, écrans des Sprints 1 et 2 | Livré (audit Codex GO sous réserves)                          |
-| Sprint 3B                     | Enseignants, classes et groupes, matières, affectations                             | En cours                                                      |
-| Sprint pédagogique (après 3B) | Module facultatif « Mémorisation du Coran »                                         | Proposé                                                       |
+| Étape     | Contenu                                                                             | État                                                                         |
+| --------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Sprint 1  | Socle, contrats Suite, portail, base School distincte                               | Livré                                                                        |
+| Sprint 2  | Élèves, responsables, inscriptions, imports, exports, documents                     | Livré (c9f6589) ; migration Neon `decisions_acces` en attente                |
+| Sprint 3A | Langues : réglage par établissement, interface arabe RTL, écrans des Sprints 1 et 2 | Livré (audit Codex GO sous réserves)                                         |
+| Sprint 3B | Enseignants, classes et groupes, matières, affectations                             | Terminé (audit Codex GO sous réserves) ; commit et migration Neon en attente |
+| Sprint 4  | Évaluations, notes, bulletins, module facultatif « Mémorisation du Coran »          | Cahier des charges reçu ; en attente des prérequis                           |
 
 ## Règles linguistiques (toutes les étapes)
 

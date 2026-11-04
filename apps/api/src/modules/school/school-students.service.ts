@@ -13,7 +13,6 @@ import {
   SCHOOL_CUSTOM_VALUE_MAX,
   buildMatricule,
   hasSchoolPermission,
-  isLimitedToOwnClasses,
   isValidMatricule,
   normalizeSearch,
   studentIdentityKey,
@@ -663,10 +662,18 @@ export class SchoolStudentsService {
 
   /**
    * Sérialise les écritures sur un dossier et relit son établissement sous verrou : l'autorisation lue
-   * avant ne vaut plus si un transfert concurrent l'a déplacé hors du périmètre de l'utilisateur.
+   * avant ne vaut plus si un transfert concurrent l'a déplacé hors du périmètre de l'utilisateur. Le verrou
+   * est borné dans la requête même : un dossier étranger n'est jamais verrouillé ni attendu.
    */
   async lockInScope(tx: Tx, ctx: SchoolContext, id: string) {
-    await tx.$queryRaw`SELECT id FROM "SchoolStudent" WHERE id = ${id}::uuid FOR UPDATE`;
+    const scope = ctx.schoolIds
+      ? Prisma.sql`AND "schoolId" = ANY(${ctx.schoolIds}::uuid[])`
+      : Prisma.empty;
+    const locked = await tx.$queryRaw<{ id: string }[]>`
+      SELECT id FROM "SchoolStudent"
+      WHERE id = ${id}::uuid AND "organizationId" = ${ctx.organizationId}::uuid ${scope}
+      FOR UPDATE`;
+    if (!locked.length) throw new NotFoundException(NOT_FOUND);
     const student = await tx.schoolStudent.findFirst({
       where: { id, organizationId: ctx.organizationId },
     });
@@ -681,17 +688,7 @@ export class SchoolStudentsService {
     ctx: SchoolContext,
     db: Tx | SchoolPrismaService = this.db,
   ): Promise<string[] | null> {
-    if (!isLimitedToOwnClasses(ctx.role)) return null;
-    if (!ctx.memberId) return [];
-    const rows = await db.schoolClassTeacher.findMany({
-      where: {
-        organizationId: ctx.organizationId,
-        memberId: ctx.memberId,
-        class: { year: { status: { not: 'CLOSED' } } },
-      },
-      select: { classId: true },
-    });
-    return rows.map((r) => r.classId);
+    return this.school.ownClasses(ctx, db);
   }
 
   ownClassesFilter(classIds: string[] | null): Prisma.SchoolStudentWhereInput {

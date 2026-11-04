@@ -167,6 +167,9 @@ model SchoolMember {
   userId         String     @db.Uuid
   firstName      String
   lastName       String
+  /// Noms en arabe, facultatifs (Sprint 3B) : affichés seulement en Arabe ou en Bilingue.
+  firstNameAr    String?
+  lastNameAr     String?
   loginId        String
   role           SchoolRole
   isActive       Boolean    @default(true)
@@ -175,6 +178,8 @@ model SchoolMember {
 
   assignments SchoolMemberAssignment[]
   classes     SchoolClassTeacher[]
+  subjects    SchoolTeacherSubject[]
+  teaching    SchoolTeachingAssignment[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, userId])
@@ -296,6 +301,7 @@ model Level {
   cycle       Cycle              @relation(fields: [organizationId, cycleId], references: [organizationId, id], onDelete: Restrict)
   classes     SchoolClass[]
   enrollments SchoolEnrollment[]
+  subjects    SubjectLevel[]
 
   @@unique([organizationId, id])
   @@unique([cycleId, name])
@@ -310,14 +316,18 @@ model SchoolClass {
   name           String
   nameAr         String?
   capacity       Int?
+  /// Classe archivée (Sprint 3B) : jamais supprimée, plus proposée pour de nouvelles affectations.
+  isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
 
-  year        SchoolYear              @relation(fields: [organizationId, schoolYearId], references: [organizationId, id], onDelete: Restrict)
-  level       Level                   @relation(fields: [organizationId, levelId], references: [organizationId, id], onDelete: Restrict)
-  track       PedagogicalTrack?       @relation(fields: [organizationId, trackId], references: [organizationId, id], onDelete: Restrict)
+  year        SchoolYear                 @relation(fields: [organizationId, schoolYearId], references: [organizationId, id], onDelete: Restrict)
+  level       Level                      @relation(fields: [organizationId, levelId], references: [organizationId, id], onDelete: Restrict)
+  track       PedagogicalTrack?          @relation(fields: [organizationId, trackId], references: [organizationId, id], onDelete: Restrict)
   enrollments SchoolEnrollment[]
   assignments SchoolClassAssignment[]
   teachers    SchoolClassTeacher[]
+  groups      SchoolClassGroup[]
+  teaching    SchoolTeachingAssignment[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, schoolYearId, id])
@@ -336,13 +346,38 @@ model Subject {
   nameAr             String?
   isReligious        Boolean  @default(false)
   defaultCoefficient Decimal  @default(1) @db.Decimal(5, 2)
+  /// Matière désactivée (Sprint 3B) : conservée pour l'historique, plus proposée aux affectations.
+  isActive           Boolean  @default(true)
+  /// Origine dans le catalogue commun Ocall ; vide pour une matière propre à l'établissement.
+  catalogKey         String?
   createdAt          DateTime @default(now())
 
-  school School            @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
-  track  PedagogicalTrack? @relation(fields: [organizationId, trackId], references: [organizationId, id], onDelete: Restrict)
+  school   School                     @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+  track    PedagogicalTrack?          @relation(fields: [organizationId, trackId], references: [organizationId, id], onDelete: Restrict)
+  levels   SubjectLevel[]
+  teachers SchoolTeacherSubject[]
+  teaching SchoolTeachingAssignment[]
 
+  @@unique([organizationId, id])
   @@unique([schoolId, name])
+  // Une matière du catalogue n'est activée qu'une fois par établissement.
+  @@unique([schoolId, catalogKey])
   @@index([organizationId, trackId])
+}
+
+/// Matière enseignée à un niveau (Sprint 3B), avec coefficient et horaire propres à ce niveau.
+model SubjectLevel {
+  organizationId String   @db.Uuid
+  subjectId      String   @db.Uuid
+  levelId        String   @db.Uuid
+  coefficient    Decimal? @db.Decimal(5, 2)
+  weeklyHours    Decimal? @db.Decimal(4, 1)
+
+  subject Subject @relation(fields: [organizationId, subjectId], references: [organizationId, id], onDelete: Cascade)
+  level   Level   @relation(fields: [organizationId, levelId], references: [organizationId, id], onDelete: Restrict)
+
+  @@id([subjectId, levelId])
+  @@index([organizationId, levelId])
 }
 
 /// Règles de calcul, en ajout seul : une modification crée une version, jamais une réécriture.
@@ -416,12 +451,13 @@ model SchoolStudent {
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
 
-  school      School                  @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+  school      School                    @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
   guardians   SchoolStudentGuardian[]
   enrollments SchoolEnrollment[]
   documents   SchoolStudentDocument[]
   events      SchoolStudentEvent[]
   assignments SchoolClassAssignment[]
+  groups      SchoolClassGroupStudent[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, matriculeScope, matricule])
@@ -540,6 +576,80 @@ model SchoolClassTeacher {
 
   @@id([classId, memberId])
   @@index([organizationId, memberId])
+}
+
+/// Groupe à l'intérieur d'une classe (Sprint 3B) : groupe de langue, demi-classe…
+model SchoolClassGroup {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  classId        String   @db.Uuid
+  name           String
+  nameAr         String?
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  class    SchoolClass                @relation(fields: [organizationId, classId], references: [organizationId, id], onDelete: Restrict)
+  students SchoolClassGroupStudent[]
+  teaching SchoolTeachingAssignment[]
+
+  @@unique([organizationId, id])
+  // Clé composée : une affectation ne peut viser qu'un groupe de sa propre classe.
+  @@unique([organizationId, classId, id])
+  @@unique([classId, name])
+}
+
+/// Élève d'un groupe ; il doit être inscrit (inscription validée) dans la classe du groupe.
+model SchoolClassGroupStudent {
+  organizationId String   @db.Uuid
+  groupId        String   @db.Uuid
+  studentId      String   @db.Uuid
+  addedAt        DateTime @default(now())
+
+  group   SchoolClassGroup @relation(fields: [organizationId, groupId], references: [organizationId, id], onDelete: Cascade)
+  student SchoolStudent    @relation(fields: [organizationId, studentId], references: [organizationId, id], onDelete: Restrict)
+
+  @@id([groupId, studentId])
+  @@index([organizationId, studentId])
+}
+
+/// Matière que l'enseignant peut enseigner (Sprint 3B) : filtre et alerte, jamais un refus.
+model SchoolTeacherSubject {
+  organizationId String @db.Uuid
+  memberId       String @db.Uuid
+  subjectId      String @db.Uuid
+
+  member  SchoolMember @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Cascade)
+  subject Subject      @relation(fields: [organizationId, subjectId], references: [organizationId, id], onDelete: Cascade)
+
+  @@id([memberId, subjectId])
+  @@index([organizationId, subjectId])
+}
+
+/// Affectation d'enseignement (Sprint 3B) : enseignant, classe, groupe éventuel, matière. Terminée, elle
+/// reste dans l'historique. Un seul enseignant actif par classe, groupe et matière, un seul professeur
+/// principal actif par classe (index partiels de la migration). Le lien d'accès SchoolClassTeacher vit
+/// tant qu'il reste au moins une affectation active de l'enseignant dans la classe.
+model SchoolTeachingAssignment {
+  id              String    @id @default(uuid()) @db.Uuid
+  organizationId  String    @db.Uuid
+  classId         String    @db.Uuid
+  groupId         String?   @db.Uuid
+  memberId        String    @db.Uuid
+  subjectId       String    @db.Uuid
+  isHomeroom      Boolean   @default(false)
+  startedAt       DateTime  @default(now())
+  endedAt         DateTime?
+  endReason       String?
+  createdByUserId String    @db.Uuid
+  endedByUserId   String?   @db.Uuid
+
+  class   SchoolClass       @relation(fields: [organizationId, classId], references: [organizationId, id], onDelete: Restrict)
+  group   SchoolClassGroup? @relation(fields: [organizationId, classId, groupId], references: [organizationId, classId, id], onDelete: Restrict)
+  member  SchoolMember      @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Restrict)
+  subject Subject           @relation(fields: [organizationId, subjectId], references: [organizationId, id], onDelete: Restrict)
+
+  @@index([organizationId, classId, endedAt])
+  @@index([organizationId, memberId, endedAt])
 }
 
 /// Pièce du dossier. Le fichier reste dans le stockage privé, servi par lien temporaire uniquement.

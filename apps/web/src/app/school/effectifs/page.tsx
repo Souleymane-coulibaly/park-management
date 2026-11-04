@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useState } from 'react';
 import { hasSchoolPermission } from '@ocall/shared';
-import { toApiError, useSchoolText } from '@/components/school/school-language';
+import { useSchoolText } from '@/components/school/school-language';
 import { SchoolPage, type SchoolPageApi } from '@/components/school/school-page';
 import {
   type NamedView,
@@ -12,12 +12,9 @@ import {
   StudentStatusBadge,
   useYears,
 } from '@/components/school/school-students';
-import { Button } from '@/components/ui/button';
 import { Card, CardBody } from '@/components/ui/card';
 import { SelectField } from '@/components/ui/field';
-import { SimpleForm } from '@/components/ui/simple-form';
-import { ApiErrorAlert, ErrorState, LoadingState } from '@/components/ui/states';
-import { type ApiError, api } from '@/lib/api';
+import { ErrorState, LoadingState } from '@/components/ui/states';
 import { useApi } from '@/lib/use-api';
 
 interface RosterClass extends NamedView {
@@ -120,8 +117,18 @@ function Classes({
         </ul>
       </Card>
       {selected && <Roster key={selected.id} page={page} schoolId={schoolId} cls={selected} />}
-      {selected && page.canWrite('school.structure.manage') && (
-        <Teachers cls={selected} onChange={classes.reload} />
+      {selected && (
+        <Card>
+          <CardBody>
+            <Link
+              href={`/school/classes/${selected.id}`}
+              className="font-medium text-forest hover:underline"
+              data-testid="class-sheet-link"
+            >
+              {t('class.team')} · {name(selected)}
+            </Link>
+          </CardBody>
+        </Card>
       )}
     </>
   );
@@ -185,75 +192,6 @@ function Roster({
           </li>
         ))}
       </ul>
-    </Card>
-  );
-}
-
-function Teachers({ cls, onChange }: { cls: RosterClass; onChange: () => void }) {
-  const { t, name } = useSchoolText();
-  const members =
-    useApi<{ id: string; firstName: string; lastName: string; role: string; isActive: boolean }[]>(
-      '/school/members',
-    );
-  const [error, setError] = useState<ApiError | null>(null);
-  const available =
-    members.state === 'success'
-      ? members.data.filter(
-          (m) =>
-            m.role === 'TEACHER' &&
-            m.isActive &&
-            !cls.teachers?.some((te) => te.member.id === m.id),
-        )
-      : [];
-  async function remove(memberId: string) {
-    setError(null);
-    try {
-      await api(`/school/classes/${cls.id}/teachers/${memberId}`, { method: 'DELETE' });
-      onChange();
-    } catch (e) {
-      setError(toApiError(e));
-    }
-  }
-  return (
-    <Card>
-      <CardBody>
-        <h2 className="mb-1 font-semibold">{t('rosters.teachersOf', { name: name(cls) })}</h2>
-        <p className="mb-3 text-sm text-muted">{t('rosters.teacherHint')}</p>
-        <ApiErrorAlert error={error} />
-        <ul className="mb-3 space-y-2 text-sm" data-testid="class-teachers">
-          {cls.teachers?.length === 0 && <li className="text-muted">{t('rosters.noTeacher')}</li>}
-          {cls.teachers?.map((te) => (
-            <li key={te.member.id} className="flex flex-wrap items-center justify-between gap-2">
-              <span dir="auto">
-                {te.member.lastName} {te.member.firstName}
-              </span>
-              <Button variant="secondary" size="sm" onClick={() => remove(te.member.id)}>
-                {t('common.remove')}
-              </Button>
-            </li>
-          ))}
-        </ul>
-        {available.length > 0 && (
-          <SimpleForm
-            key={available.length}
-            testId="class-teacher-form"
-            path={`/school/classes/${cls.id}/teachers`}
-            submitLabel={t('rosters.assign')}
-            onDone={onChange}
-            fields={[
-              {
-                name: 'memberId',
-                label: t('rosters.teacher'),
-                type: 'select',
-                options: available.map((m) => ({
-                  value: m.id,
-                  label: `${m.lastName} ${m.firstName}`,
-                })),
-              },
-            ]}
-          />
-        )}
-      </CardBody>
     </Card>
   );
 }

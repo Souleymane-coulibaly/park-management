@@ -535,6 +535,7 @@ export class SchoolEnrollmentsService {
           name: true,
           nameAr: true,
           capacity: true,
+          isActive: true,
           level: { select: { id: true, name: true, nameAr: true } },
           track: { select: { id: true, name: true, nameAr: true } },
           _count: { select: { enrollments: { where: { status: 'VALIDATED' } } } },
@@ -600,52 +601,21 @@ export class SchoolEnrollmentsService {
     };
   }
 
-  /** L'enseignant doit être affecté à l'établissement de la classe. */
-  async addTeacher(ctx: SchoolContext, classId: string, memberId: string) {
+  /**
+   * Ancienne façon de confier une classe, sans matière. Depuis le Sprint 3B, l'accès d'un enseignant suit
+   * ses affectations d'enseignement, seule source : ce chemin ne crée plus d'accès, il oriente vers elles.
+   */
+  async addTeacher(ctx: SchoolContext, classId: string) {
     const cls = await this.db.schoolClass.findFirst({
       where: { id: classId, organizationId: ctx.organizationId },
-      select: { id: true, year: { select: { schoolId: true } } },
+      select: { year: { select: { schoolId: true } } },
     });
     if (!cls) throw new NotFoundException(NOT_FOUND);
     await this.school.assertSchool(ctx, cls.year.schoolId);
-    const member = await this.db.schoolMember.findFirst({
-      where: {
-        id: memberId,
-        organizationId: ctx.organizationId,
-        role: 'TEACHER',
-        isActive: true,
-        assignments: { some: { schoolId: cls.year.schoolId } },
-      },
-      select: { id: true },
+    throw new ConflictException({
+      code: 'TEACHING_ASSIGNMENT_REQUIRED',
+      message: 'Confiez la classe par une affectation d’enseignement (matière), depuis sa fiche.',
     });
-    if (!member) {
-      throw new BadRequestException({
-        code: 'TEACHER_NOT_IN_SCHOOL',
-        message: 'Ce compte n’est pas un enseignant de cet établissement.',
-      });
-    }
-    await this.school.unique(
-      () =>
-        this.db.$transaction(async (tx) => {
-          await tx.schoolClassTeacher.create({
-            data: { organizationId: ctx.organizationId, classId, memberId },
-          });
-          await this.school.recordDecision(
-            tx,
-            ctx,
-            'school.class_teacher_added',
-            'SchoolClass',
-            classId,
-            {
-              memberId,
-            },
-          );
-        }),
-      'TEACHER_ALREADY_ASSIGNED',
-      'Cette classe est déjà confiée à cet enseignant.',
-    );
-    await this.school.publishDecisions(ctx.organizationId);
-    return { classId, memberId };
   }
 
   async removeTeacher(ctx: SchoolContext, classId: string, memberId: string) {
@@ -656,6 +626,13 @@ export class SchoolEnrollmentsService {
     if (!cls) throw new NotFoundException(NOT_FOUND);
     await this.school.assertSchool(ctx, cls.year.schoolId);
     await this.db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "SchoolClass" WHERE id = ${classId}::uuid FOR UPDATE`;
+      // Plus d'accès, plus d'enseignement : ses affectations actives dans la classe se terminent aussi.
+      // Ordre commun à tous les chemins (affectations, puis liens d'accès) : pas d'interblocage croisé.
+      const ended = await tx.schoolTeachingAssignment.updateMany({
+        where: { organizationId: ctx.organizationId, classId, memberId, endedAt: null },
+        data: { endedAt: new Date(), endedByUserId: ctx.userId, endReason: 'Retrait de la classe' },
+      });
       await tx.schoolClassTeacher.deleteMany({
         where: { organizationId: ctx.organizationId, classId, memberId },
       });
@@ -667,6 +644,7 @@ export class SchoolEnrollmentsService {
         classId,
         {
           memberId,
+          endedAssignments: ended.count,
         },
       );
     });
@@ -827,10 +805,22 @@ export class SchoolEnrollmentsService {
     });
   }
 
-  private closeAssignment(tx: Tx, ctx: SchoolContext, studentId: string, schoolYearId: string) {
-    return tx.schoolClassAssignment.updateMany({
+  /**
+   * L'élève quitte sa classe (changement, annulation, sortie, transfert) : son affectation se termine et il
+   * quitte les groupes des classes de l'année, qui ne doivent contenir que des élèves inscrits.
+   */
+  private async closeAssignment(
+    tx: Tx,
+    ctx: SchoolContext,
+    studentId: string,
+    schoolYearId: string,
+  ) {
+    await tx.schoolClassAssignment.updateMany({
       where: { organizationId: ctx.organizationId, studentId, schoolYearId, endedAt: null },
       data: { endedAt: new Date() },
+    });
+    await tx.schoolClassGroupStudent.deleteMany({
+      where: { organizationId: ctx.organizationId, studentId, group: { class: { schoolYearId } } },
     });
   }
 

@@ -10,6 +10,8 @@ import { SchoolMembersService } from './school-members.service';
 import { SchoolPrismaService } from './school-prisma.service';
 import { SchoolFilesController, SchoolStudentsController } from './school-students.controller';
 import { SchoolStudentsService } from './school-students.service';
+import { SchoolTeachingController } from './school-teaching.controller';
+import { SchoolTeachingService } from './school-teaching.service';
 import { SchoolController, SchoolPlatformController } from './school.controllers';
 import { SchoolService } from './school.service';
 
@@ -24,6 +26,7 @@ import { SchoolService } from './school.service';
     SchoolPlatformController,
     SchoolStudentsController,
     SchoolFilesController,
+    SchoolTeachingController,
   ],
   providers: [
     SchoolPrismaService,
@@ -35,6 +38,7 @@ import { SchoolService } from './school.service';
     SchoolGuardiansService,
     SchoolDocumentsService,
     SchoolImportsService,
+    SchoolTeachingService,
   ],
 })
 export class SchoolModule {}

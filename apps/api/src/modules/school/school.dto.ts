@@ -32,9 +32,10 @@ import {
   type SchoolType,
 } from '@ocall/shared';
 
-const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
+export const trim = ({ value }: { value: unknown }) =>
+  typeof value === 'string' ? value.trim() : value;
 /** Champ facultatif : une chaîne vide vaut « non renseigné ». */
-const trimOrNull = ({ value }: { value: unknown }) =>
+export const trimOrNull = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() || null : value;
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -285,6 +286,20 @@ export class UpdateMemberDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @ApiPropertyOptional({ description: 'Prénom en arabe, facultatif (Sprint 3B).' })
+  @IsOptional()
+  @Transform(trimOrNull)
+  @IsString()
+  @MaxLength(80)
+  firstNameAr?: string | null;
+
+  @ApiPropertyOptional({ description: 'Nom en arabe, facultatif (Sprint 3B).' })
+  @IsOptional()
+  @Transform(trimOrNull)
+  @IsString()
+  @MaxLength(80)
+  lastNameAr?: string | null;
 }
 
 export class CreateGradingPolicyDto {

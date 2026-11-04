@@ -8,6 +8,7 @@ import {
 import { Prisma } from '@ocall/school-database';
 import {
   canTransitionSchoolYear,
+  isLimitedToOwnClasses,
   isValidDateRange,
   periodsOverlap,
   type SchoolLocale,
@@ -260,6 +261,7 @@ export class SchoolService {
         message: 'Ce changement de statut n’est pas autorisé.',
       });
     }
+    let revokedAccess = 0;
     const updated = await this.db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "School" WHERE id = ${year.schoolId}::uuid FOR UPDATE`;
       if (dto.status === 'ACTIVE') {
@@ -288,6 +290,17 @@ export class SchoolService {
           where: { organizationId: ctx.organizationId, schoolYearId: id, endedAt: null },
           data: { endedAt: new Date() },
         });
+        // Les affectations d'enseignement de l'année se terminent avec elle (Sprint 3B), et avec elles
+        // les accès des enseignants à ses classes.
+        await tx.schoolTeachingAssignment.updateMany({
+          where: { organizationId: ctx.organizationId, class: { schoolYearId: id }, endedAt: null },
+          data: { endedAt: new Date(), endedByUserId: ctx.userId, endReason: 'Clôture de l’année' },
+        });
+        revokedAccess = (
+          await tx.schoolClassTeacher.deleteMany({
+            where: { organizationId: ctx.organizationId, class: { schoolYearId: id } },
+          })
+        ).count;
         await tx.schoolStudent.updateMany({
           where: {
             organizationId: ctx.organizationId,
@@ -301,6 +314,7 @@ export class SchoolService {
       await this.recordDecision(tx, ctx, 'school.year_status_changed', 'SchoolYear', id, {
         from: year.status,
         to: dto.status,
+        ...(dto.status === 'CLOSED' ? { revokedAccess } : {}),
       });
       return tx.schoolYear.findUniqueOrThrow({ where: { id } });
     });
@@ -382,6 +396,24 @@ export class SchoolService {
     for (const id of [...new Set(schoolIds)].sort()) {
       await tx.$queryRaw`SELECT id FROM "School" WHERE id = ${id}::uuid FOR SHARE`;
     }
+  }
+
+  /**
+   * Verrou exclusif d'un membre, borné dans la requête même à l'organisation et au périmètre de
+   * l'utilisateur : un membre étranger n'est jamais verrouillé ni attendu. Faux si rien n'a été verrouillé
+   * (membre sorti du périmètre depuis la prévalidation) : l'appelant refuse alors sans relire.
+   */
+  async lockMemberInScope(tx: Prisma.TransactionClient, ctx: SchoolContext, id: string) {
+    const scope = ctx.schoolIds
+      ? Prisma.sql`AND EXISTS (
+          SELECT 1 FROM "SchoolMemberAssignment" a
+          WHERE a."memberId" = m.id AND a."schoolId" = ANY(${ctx.schoolIds}::uuid[]))`
+      : Prisma.empty;
+    const locked = await tx.$queryRaw<{ id: string }[]>`
+      SELECT m.id FROM "SchoolMember" m
+      WHERE m.id = ${id}::uuid AND m."organizationId" = ${ctx.organizationId}::uuid ${scope}
+      FOR UPDATE OF m`;
+    return locked.length > 0;
   }
 
   private async assertYearStillOpen(tx: Prisma.TransactionClient, id: string) {
@@ -526,14 +558,26 @@ export class SchoolService {
 
   async listClasses(ctx: SchoolContext, schoolYearId: string) {
     await this.findYear(ctx, schoolYearId);
-    return this.db.schoolClass.findMany({
-      where: { organizationId: ctx.organizationId, schoolYearId },
-      orderBy: { name: 'asc' },
-      include: {
-        level: { select: { id: true, name: true, nameAr: true } },
-        track: { select: { id: true, name: true, nameAr: true } },
+    // Un enseignant ne découvre que ses classes, comme partout ailleurs : ses droits et les classes sont
+    // lus dans un même instantané, jamais un état postérieur au retrait de son accès.
+    return this.db.$transaction(
+      async (tx) => {
+        const own = await this.ownClasses(ctx, tx);
+        return tx.schoolClass.findMany({
+          where: {
+            organizationId: ctx.organizationId,
+            schoolYearId,
+            ...(own ? { id: { in: own } } : {}),
+          },
+          orderBy: { name: 'asc' },
+          include: {
+            level: { select: { id: true, name: true, nameAr: true } },
+            track: { select: { id: true, name: true, nameAr: true } },
+          },
+        });
       },
-    });
+      { isolationLevel: 'RepeatableRead' },
+    );
   }
 
   /** L'année, le niveau et le parcours d'une classe doivent appartenir au même établissement. */
@@ -574,8 +618,18 @@ export class SchoolService {
     await this.assertSchool(ctx, schoolId);
     return this.db.subject.findMany({
       where: { organizationId: ctx.organizationId, schoolId },
-      orderBy: { name: 'asc' },
-      include: { track: { select: { id: true, name: true, nameAr: true } } },
+      orderBy: [{ isActive: 'desc' }, { name: 'asc' }],
+      include: {
+        track: { select: { id: true, name: true, nameAr: true } },
+        levels: {
+          select: {
+            levelId: true,
+            coefficient: true,
+            weeklyHours: true,
+            level: { select: { id: true, name: true, nameAr: true } },
+          },
+        },
+      },
     });
   }
 
@@ -674,6 +728,27 @@ export class SchoolService {
   }
 
   // ─── Outils ───
+
+  /**
+   * Classes confiées à un enseignant (lien SchoolClassTeacher, années non clôturées) : seule source de sa
+   * lecture des classes et des élèves. null pour les rôles qui ne sont pas limités à leurs classes.
+   */
+  async ownClasses(
+    ctx: SchoolContext,
+    db: Prisma.TransactionClient | SchoolPrismaService = this.db,
+  ): Promise<string[] | null> {
+    if (!isLimitedToOwnClasses(ctx.role)) return null;
+    if (!ctx.memberId) return [];
+    const rows = await db.schoolClassTeacher.findMany({
+      where: {
+        organizationId: ctx.organizationId,
+        memberId: ctx.memberId,
+        class: { year: { status: { not: 'CLOSED' } } },
+      },
+      select: { classId: true },
+    });
+    return rows.map((r) => r.classId);
+  }
 
   schoolWhere(ctx: SchoolContext): Prisma.SchoolWhereInput {
     return {

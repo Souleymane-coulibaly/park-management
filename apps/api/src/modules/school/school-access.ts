@@ -98,10 +98,7 @@ export class SchoolAccessGuard implements CanActivate {
 
     const member =
       auth.membership.role === 'PRODUCT_USER'
-        ? await this.db.schoolMember.findFirst({
-            where: { organizationId, userId: auth.user.id, isActive: true },
-            select: { id: true, role: true, assignments: { select: { schoolId: true } } },
-          })
+        ? await this.member(organizationId, auth.user.id)
         : null;
     if (auth.membership.role !== 'OWNER' && !member) throw this.denied();
     const role: SchoolRole = member?.role ?? 'GROUP_DIRECTOR';
@@ -126,6 +123,24 @@ export class SchoolAccessGuard implements CanActivate {
       schoolIds: resolveSchoolIds(assigned, entitlement.coveredSchoolIds),
     };
     return true;
+  }
+
+  /**
+   * Rôle, activation et établissements lus par une seule instruction SQL : une modification concurrente
+   * ne peut pas associer l'ancien rôle au nouveau périmètre, combinaison qui n'a jamais été accordée.
+   */
+  private async member(organizationId: string, userId: string) {
+    const [row] = await this.db.$queryRaw<{ id: string; role: SchoolRole; schoolIds: string[] }[]>`
+      SELECT m.id, m.role::text AS role,
+        coalesce(array_agg(a."schoolId"::text) FILTER (WHERE a."schoolId" IS NOT NULL), '{}') AS "schoolIds"
+      FROM "SchoolMember" m
+      LEFT JOIN "SchoolMemberAssignment" a ON a."memberId" = m.id
+      WHERE m."organizationId" = ${organizationId}::uuid AND m."userId" = ${userId}::uuid AND m."isActive"
+      GROUP BY m.id
+      LIMIT 1`;
+    return row
+      ? { id: row.id, role: row.role, assignments: row.schoolIds.map((schoolId) => ({ schoolId })) }
+      : null;
   }
 
   private denied() {

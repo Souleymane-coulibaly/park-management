@@ -181,6 +181,25 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       .post('/api/v1/school/guardians')
       .send({ schoolId, lastName, firstName: 'Moussa', phone: '+223 70 00 00 01' });
 
+  /**
+   * Confie la classe à un enseignant par une affectation d'enseignement : depuis le Sprint 3B, c'est la
+   * seule façon d'ouvrir son accès aux élèves.
+   */
+  async function teach(owner: Agent, s: Structure, memberId: string, classId = s.classId) {
+    const subject = await owner
+      .post('/api/v1/school/subjects/catalog/francais/activate')
+      .send({ schoolId: s.schoolId })
+      .expect(201);
+    await owner
+      .put(`/api/v1/school/subjects/${subject.body.id}/levels`)
+      .send({ levels: [{ levelId: s.levelId }] })
+      .expect(200);
+    return owner
+      .post('/api/v1/school/teaching-assignments')
+      .send({ classId, subjectId: subject.body.id, memberId })
+      .expect(201);
+  }
+
   /** Dossier avec un responsable et une inscription validée dans la classe de référence. */
   async function enrolled(owner: Agent, s: Structure, classId = s.classId) {
     const created = await student(owner, s.schoolId).expect(201);
@@ -239,6 +258,9 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
     await db.schoolNumberCounter.deleteMany({ where });
     await db.schoolStudentSettings.deleteMany({ where });
     await db.schoolClassTeacher.deleteMany({ where });
+    await db.schoolTeachingAssignment.deleteMany({ where });
+    await db.subjectLevel.deleteMany({ where });
+    await db.subject.deleteMany({ where });
     await db.schoolClass.deleteMany({ where });
     await db.level.deleteMany({ where });
     await db.cycle.deleteMany({ where });
@@ -722,10 +744,7 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
           submit: true,
         })
         .expect(201);
-      await ownerA
-        .post(`/api/v1/school/classes/${s.classId}/teachers`)
-        .send({ memberId: prof.id })
-        .expect(201);
+      await teach(ownerA, s, prof.id);
       await prof.agent.get(`/api/v1/school/students/${id}`).expect(200);
       await ownerA
         .post(`/api/v1/school/years/${s.yearId}/status`)
@@ -1000,10 +1019,7 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
     it('enseignant : seulement ses classes, et la liste restreinte', async () => {
       const inClass = await enrolled(ownerA, a1);
       const notInClass = await enrolled(ownerA, a1, a1.otherClassId);
-      await ownerA
-        .post(`/api/v1/school/classes/${a1.classId}/teachers`)
-        .send({ memberId: teacherId })
-        .expect(201);
+      await teach(ownerA, a1, teacherId);
       const seen = await teacher.get(`/api/v1/school/students/${inClass.id}`).expect(200);
       expect(seen.body).not.toHaveProperty('birthDate');
       expect(seen.body).not.toHaveProperty('address');
@@ -1651,19 +1667,20 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       const s = await structure(ownerA, `Trace ${++counter}`);
       const prof = await member(ownerA, 'TEACHER', [s.schoolId]);
       const url = `/api/v1/school/classes/${s.classId}/teachers`;
-      const spy = failJournal('school.class_teacher_added');
+      // Depuis le Sprint 3B, l'accès s'ouvre par une affectation d'enseignement.
+      const spy = failJournal('school.teaching_assigned');
       try {
-        await ownerA.post(url).send({ memberId: prof.id }).expect(201);
+        await teach(ownerA, s, prof.id);
       } finally {
         spy.mockRestore();
       }
       expect(
         await db.schoolAccessDecision.count({
-          where: { targetId: s.classId, action: 'school.class_teacher_added', publishedAt: null },
+          where: { targetId: s.classId, action: 'school.teaching_assigned', publishedAt: null },
         }),
       ).toBe(1);
       await ownerA.delete(`${url}/${prof.id}`).expect(204);
-      expect(await logged('school.class_teacher_added', s.classId)).toHaveLength(1);
+      expect(await logged('school.teaching_assigned', s.classId)).toHaveLength(1);
       expect(await logged('school.class_teacher_removed', s.classId)).toHaveLength(1);
     });
 
@@ -2122,7 +2139,8 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       const director = await member(ownerA, 'SCHOOL_DIRECTOR', [local.schoolId]);
       const m = await member(ownerA, 'TEACHER', [local.schoolId]);
       const url = `/api/v1/school/members/${m.id}`;
-      const pause = pauseAfter(members(), 'findManageable');
+      // Pause sur la relecture sous verrou, pas sur la prévalidation faite hors transaction.
+      const pause = pauseAfter(members(), 'findManageable', (client) => client !== db);
       const promote = started(director.agent.patch(url).send({ role: 'SECRETARY' }));
       await pause.at;
       const extend = started(ownerA.patch(url).send({ schoolIds: [local.schoolId, a2.schoolId] }));
@@ -2131,6 +2149,31 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       expect((await promote).status).toBe(200);
       expect((await extend).status).toBe(200);
       pause.restore();
+    });
+
+    it('N8 : un membre sorti du périmètre après le contrôle est refusé sans relecture non verrouillée', async () => {
+      const local = await structure(ownerA, `Mem ${++counter}`);
+      const director = await member(ownerA, 'SCHOOL_DIRECTOR', [local.schoolId]);
+      const m = await member(ownerA, 'TEACHER', [local.schoolId]);
+      const url = `/api/v1/school/members/${m.id}`;
+      // Pause sur la prévalidation : le membre quitte alors le périmètre du directeur.
+      const pause = pauseAfter(members(), 'findManageable', (client) => client === db);
+      const rename = started(director.agent.patch(url).send({ lastNameAr: 'كيتا' }));
+      await pause.at;
+      await ownerA
+        .patch(url)
+        .send({ schoolIds: [a2.schoolId] })
+        .expect(200);
+      const spy = (members() as unknown as { findManageable: jest.Mock }).findManageable;
+      const rereads = () => spy.mock.calls.filter(([client]) => client !== db).length;
+      const before = rereads();
+      pause.release();
+      expect((await rename).status).toBe(404);
+      // Le verrou n'a rien saisi : la relecture sous transaction n'a jamais eu lieu.
+      expect(rereads()).toBe(before);
+      pause.restore();
+      const after = await db.schoolMember.findUniqueOrThrow({ where: { id: m.id } });
+      expect(after.lastNameAr).toBeNull();
     });
 
     it('la clôture attend une période en cours', async () => {
@@ -2359,7 +2402,7 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
         const s = await structure(ownerA, `Prof2 ${++counter}`);
         const prof = await member(ownerA, 'TEACHER', [s.schoolId]);
         const teachers = `/api/v1/school/classes/${s.classId}/teachers`;
-        await ownerA.post(teachers).send({ memberId: prof.id }).expect(201);
+        await teach(ownerA, s, prof.id);
         const { id } = await enrolled(ownerA, s);
         return { s, prof, id, teachers };
       }
@@ -2735,10 +2778,7 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
     it('S2-16 : un enseignant ne lit plus un élève sorti de sa classe après le contrôle', async () => {
       const s = await structure(ownerA, `Prof ${++counter}`);
       const prof = await member(ownerA, 'TEACHER', [s.schoolId]);
-      await ownerA
-        .post(`/api/v1/school/classes/${s.classId}/teachers`)
-        .send({ memberId: prof.id })
-        .expect(201);
+      await teach(ownerA, s, prof.id);
       const { id, enrollmentId } = await enrolled(ownerA, s);
       await prof.agent.get(`/api/v1/school/students/${id}`).expect(200);
       const students = app.get(SchoolStudentsService);
@@ -2764,7 +2804,7 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       const s = await structure(ownerA, `Retrait ${++counter}`);
       const prof = await member(ownerA, 'TEACHER', [s.schoolId]);
       const classTeachers = `/api/v1/school/classes/${s.classId}/teachers`;
-      await ownerA.post(classTeachers).send({ memberId: prof.id }).expect(201);
+      await teach(ownerA, s, prof.id);
       const { id } = await enrolled(ownerA, s);
       await prof.agent.get(`/api/v1/school/students/${id}`).expect(200);
       const students = app.get(SchoolStudentsService);

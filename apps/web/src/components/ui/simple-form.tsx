@@ -65,7 +65,8 @@ export function SimpleForm<T>({
     for (const f of visible) {
       const value = values[f.name];
       if (value === undefined || (value === '' && !sendEmpty)) continue;
-      body[f.name] = f.type === 'number' ? Number(value) : value;
+      // Un nombre vidé en modification efface la valeur (null), il ne devient pas zéro.
+      body[f.name] = f.type === 'number' ? (value === '' ? null : Number(value)) : value;
     }
     try {
       const result = await api<T>(path, { method, body });

@@ -279,9 +279,10 @@ export class SchoolStudentsController {
   addTeacher(
     @CurrentSchool() ctx: SchoolContext,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: ClassTeacherDto,
+    // Corps toujours validé : un appel mal formé reste refusé comme tel.
+    @Body() _dto: ClassTeacherDto,
   ) {
-    return this.enrollments.addTeacher(ctx, id, dto.memberId);
+    return this.enrollments.addTeacher(ctx, id);
   }
 
   @RequireSchoolPermission('school.structure.manage')

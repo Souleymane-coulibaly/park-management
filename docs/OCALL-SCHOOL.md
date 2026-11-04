@@ -250,9 +250,82 @@ chemin. Une panne de School avant sa validation ne change rien. L'administrateur
 décision. Une demande d'activation d'un membre partagé, même à valeur égale, est réservée à qui couvre tous ses
 établissements. Reste à livrer au Sprint 3 : reprise automatique, sans intervention de l'administrateur.
 
-## 9. Limites actuelles
+## 9. Sprint 3B : équipe pédagogique
+
+### Modèles et migration
+
+Migration additive `20261106000000_enseignants_classes_matieres` (colonnes avec valeur par défaut, nouvelles
+tables, index) : `Subject.isActive` et `catalogKey`, `SubjectLevel`, `SchoolClass.isActive`,
+`SchoolClassGroup` et `SchoolClassGroupStudent`, `SchoolMember.firstNameAr` et `lastNameAr`,
+`SchoolTeacherSubject`, `SchoolTeachingAssignment`. Deux index partiels écrits à la main : un seul enseignant
+actif par classe, groupe (ou classe entière) et matière ; un seul professeur principal actif par classe.
+Vérifiée par `prisma migrate diff` (différence vide) sur une base jetable. Elle n'est appliquée sur aucune base
+Neon sans accord.
+
+### Règles
+
+- **Matières** : catalogue commun Ocall (`packages/shared/src/school-teaching.ts`). L'établissement active les
+  matières qu'il enseigne et en reçoit sa propre copie, qu'il renomme, désactive et associe à ses niveaux
+  (coefficient et horaire par niveau) sans toucher aux autres écoles. Rien n'est activé d'office, les
+  matières religieuses comprises. Les matières propres à l'établissement restent possibles.
+- **Classes** : modification et archivage (jamais de suppression) ; la capacité ne descend pas sous
+  l'effectif inscrit. **Groupes** dans une classe ; leurs élèves sont inscrits (inscription validée) dans la
+  classe.
+- **Enseignants** : comptes `SchoolMember` de rôle `TEACHER` (aucun doublon de personne), noms arabes
+  facultatifs, matières enseignables (filtre et alerte « hors spécialité », jamais un refus).
+- **Affectations** : enseignant, classe, groupe éventuel, matière, professeur principal éventuel. Contrôles :
+  classe active, année ouverte, groupe de la classe, matière active de l'établissement et enseignée au niveau
+  de la classe, enseignant actif affecté à l'établissement. Un remplacement termine l'affectation et confie la
+  même place au remplaçant dans une seule transaction ; tout reste dans l'historique. La clôture de l'année
+  termine ses affectations.
+- **Accès de l'enseignant** : le lien `SchoolClassTeacher` (base de sa lecture des élèves, inchangée depuis le
+  Sprint 2) est créé avec la première affectation dans la classe et retiré avec la dernière : l'accès s'arrête
+  à la requête suivante. Chaque affectation et chaque fin sont des décisions tracées dans la transaction
+  (`school.teaching_assigned`, `school.teaching_ended`), publiées au journal Suite. L'ancienne route de retrait
+  d'un enseignant termine aussi ses affectations dans la classe.
+- **Verrous** : établissement (partagé, contre la clôture), classe, puis membre (partagé, contre une
+  désactivation simultanée). Les index partiels tranchent deux affectations simultanées sur la même place.
+  Le remplacement verrouille l'ancien et le nouvel enseignant, triés, avant toute écriture. Le remplacement
+  des niveaux d'une matière verrouille la matière.
+
+### Isolation des verrous et des lectures (durcissement Codex, passes 1 à 11)
+
+- **Aucun verrou hors périmètre** : chaque `FOR UPDATE` / `FOR SHARE` sur un identifiant fourni par le client
+  est borné dans la requête même à l'organisation et au périmètre de l'utilisateur (membres :
+  `SchoolService.lockMemberInScope` ; élèves : `SchoolStudentsService.lockInScope` ; responsables : règle de
+  visibilité `visibleSql`, enfants liés compris, y compris pour la réutilisation à l'import ; enseignants et
+  élèves d'un groupe). Une ligne étrangère n'est jamais verrouillée ni attendue ; un verrou vide (ligne sortie
+  du périmètre depuis le contrôle) donne 404 sans relecture. Ce durcissement couvre aussi du code des Sprints
+  1 et 2 (modification de membre, d'élève et de responsable, import), à la demande de la direction.
+- **Contrôle et restitution dans un même instantané** (`RepeatableRead`) : fiche enseignant, affectations
+  d'un enseignant, « Mes classes », liste des classes d'un enseignant, fiche de classe, groupes.
+- **Garde d'accès** : rôle, activation et établissements d'un membre sont lus par une seule instruction SQL,
+  jamais un ancien rôle associé à un nouveau périmètre.
+- **Preuves** : tests de concurrence sur PostgreSQL réel (une autre connexion tient le verrou : réponse en
+  moins de 5 s ; pauses imposées entre contrôle et restitution) et 28 mutations, toutes détectées. Les tests
+  de concurrence sont ignorés sous PGlite (connexion unique).
+
+### Droits
+
+| Permission                                                                      | Rôles                                |
+| ------------------------------------------------------------------------------- | ------------------------------------ |
+| `school.teaching.read` (équipe, affectations, historique)                       | Direction, secrétariat, surveillance |
+| `school.teaching.manage` (affecter, remplacer, terminer, matières enseignables) | Direction                            |
+| `school.structure.manage` (matières, niveaux, classes, groupes)                 | Direction                            |
+
+L'enseignant voit « Mes classes » (`GET teaching/mine`) et la fiche de ses seules classes.
+
+### Écrans
+
+`/school/enseignants` et sa fiche, `/school/classes` (fiches de classe) et sa fiche (groupes, équipe
+pédagogique, historique), `/school/matieres` (catalogue, niveaux, activation), `/school/mes-classes`. Tous
+suivent la langue de l'établissement (Sprint 3A) ; une fiche de classe suit celle de la classe.
+
+## 10. Limites actuelles
 
 - Un employé Park existant ne peut pas encore recevoir de rôle School : il faut un compte dédié.
+- Pas d'emploi du temps ni de volume horaire contrôlé : l'horaire par niveau est indicatif.
+- L'enseignant d'un groupe voit la liste restreinte de toute la classe (choix validé au cadrage).
 - Pas de logo, de notes, de bulletins ni de SMS. Modèles de documents personnalisés non livrés.
 - Portail parents non livré : seul le contrôle des enfants autorisés est préparé.
 - Aucun antivirus : un contrôle du type réel et du contenu actif des PDF, et un téléchargement en pièce
@@ -265,3 +338,8 @@ décision. Une demande d'activation d'un membre partagé, même à valeur égale
   restent en français, y compris pour un établissement en Arabe.
 - Les dates de contrat s'apprécient en UTC.
 - La conformité des données de mineurs doit être validée pays par pays avant toute vraie donnée.
+- Réserves P3 de cohérence (audit Codex 3B, non bloquantes) : la liste d'une classe (roster), la liste des
+  inscriptions, l'historique et le tableau de bord des élèves et la langue des exports peuvent mêler deux
+  états proches lors d'une modification simultanée, sans exposer de données hors périmètre.
+- « Mes classes » et la garde d'accès n'ont pas de test d'entrelacement dédié : leur fenêtre (requêtes
+  internes de Prisma) est supprimée par construction (instantané, instruction unique).

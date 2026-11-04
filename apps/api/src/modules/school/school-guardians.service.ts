@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import type { Prisma } from '@ocall/school-database';
+import { Prisma } from '@ocall/school-database';
 import { normalizeSearch } from '@ocall/shared';
 import type { SchoolContext } from './school-access';
 import { SchoolPrismaService } from './school-prisma.service';
@@ -62,6 +62,17 @@ export class SchoolGuardiansService {
           }
         : {}),
     };
+  }
+
+  /** La règle de `scope` en SQL, pour borner un verrou sur `"SchoolGuardian" g` à ce qui est visible. */
+  private visibleSql(ctx: SchoolContext): Prisma.Sql {
+    if (!ctx.schoolIds) return Prisma.empty;
+    return Prisma.sql`AND (
+      (g."schoolId" = ANY(${ctx.schoolIds}::uuid[])
+        AND NOT EXISTS (SELECT 1 FROM "SchoolStudentGuardian" l WHERE l."guardianId" = g.id))
+      OR EXISTS (
+        SELECT 1 FROM "SchoolStudentGuardian" l JOIN "SchoolStudent" s ON s.id = l."studentId"
+        WHERE l."guardianId" = g.id AND s."schoolId" = ANY(${ctx.schoolIds}::uuid[])))`;
   }
 
   async list(ctx: SchoolContext, q: GuardiansQueryDto) {
@@ -148,11 +159,12 @@ export class SchoolGuardiansService {
     schoolId: string,
     wanted: { lastName: string; firstName: string; phone: string },
   ) {
+    // Seuls les responsables visibles sont verrouillés : un responsable sorti du périmètre n'est pas attendu.
     await tx.$queryRaw`
-      SELECT id FROM "SchoolGuardian"
-      WHERE "organizationId" = ${ctx.organizationId}::uuid AND "schoolId" = ${schoolId}::uuid
-        AND phone = ${wanted.phone}
-      ORDER BY id FOR UPDATE`;
+      SELECT g.id FROM "SchoolGuardian" g
+      WHERE g."organizationId" = ${ctx.organizationId}::uuid AND g."schoolId" = ${schoolId}::uuid
+        AND g.phone = ${wanted.phone} ${this.visibleSql(ctx)}
+      ORDER BY g.id FOR UPDATE OF g`;
     const rows = await tx.schoolGuardian.findMany({
       where: { ...this.scope(ctx), schoolId, phone: wanted.phone },
       select: { id: true, lastName: true, firstName: true },
@@ -165,11 +177,17 @@ export class SchoolGuardiansService {
   }
 
   /**
-   * Verrouille le responsable et revérifie l'accès : le transfert d'un enfant verrouille aussi ses
-   * responsables, l'accès ne peut donc pas changer entre ce contrôle et l'écriture.
+   * Verrouille le responsable et revérifie l'accès sous verrou. Le transfert d'un enfant verrouille ses
+   * responsables ; le retrait d'un lien (`unlink`) ne verrouille que l'élève : la visibilité peut donc
+   * changer juste après ce contrôle, qui ne garantit que l'état lu sous verrou. Le verrou traduit la règle de visibilité
+   * de `scope` dans la requête même : un responsable étranger n'est jamais verrouillé.
    */
   private async lockInScope(tx: Tx, ctx: SchoolContext, id: string) {
-    await tx.$queryRaw`SELECT id FROM "SchoolGuardian" WHERE id = ${id}::uuid FOR UPDATE`;
+    const locked = await tx.$queryRaw<{ id: string }[]>`
+      SELECT g.id FROM "SchoolGuardian" g
+      WHERE g.id = ${id}::uuid AND g."organizationId" = ${ctx.organizationId}::uuid ${this.visibleSql(ctx)}
+      FOR UPDATE OF g`;
+    if (!locked.length) throw new NotFoundException(NOT_FOUND);
     const guardian = await tx.schoolGuardian.findFirst({
       where: { ...this.scope(ctx), id },
       select: VIEW,
