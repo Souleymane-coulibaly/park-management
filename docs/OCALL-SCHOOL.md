@@ -1,4 +1,4 @@
-# Ocall School : Sprint 1
+# Ocall School
 
 Ocall School est un produit d'Ocall Suite, vendu **uniquement sur contrat B2B** : aucun tarif public,
 aucune offre à prix fixe. Ce sprint livre le socle : contrats, portail, structure pédagogique et rôles.
@@ -93,7 +93,8 @@ tout établissement créé sans précision est en Français. L'arabe est un choi
 
 `GradingPolicyVersion` : barème, moyenne de passage, décimales, règle des ex æquo, affichage des rangs.
 Ajout seul : chaque modification crée une version, pour que les futurs bulletins restent reproductibles.
-**Les moteurs de calcul ne sont pas livrés à ce sprint** : ces règles sont enregistrées, pas appliquées.
+Le moteur de calcul est livré au Sprint 4 (section 10) ; la règle facultative `absences` (écartées ou zéro)
+s’ajoute au JSON des versions, sans migration.
 
 ## 6. Déploiement
 
@@ -321,12 +322,162 @@ L'enseignant voit « Mes classes » (`GET teaching/mine`) et la fiche de ses seu
 pédagogique, historique), `/school/matieres` (catalogue, niveaux, activation), `/school/mes-classes`. Tous
 suivent la langue de l'établissement (Sprint 3A) ; une fiche de classe suit celle de la classe.
 
-## 10. Limites actuelles
+## 10. Sprint 4 : évaluations, notes, bulletins, mémorisation du Coran
+
+### Audit de l'existant
+
+Réutilisé tel quel : `AcademicPeriod` (création au Sprint 1 ; modification et suppression ajoutées),
+`GradingPolicyVersion` (barème, décimales, moyenne de passage, ex æquo, classement, versions en ajout seul ;
+réglage facultatif `absences` ajouté au JSON, sans migration), coefficients de `Subject` et `SubjectLevel`,
+affectations 3B (droits des enseignants), inscriptions validées (élèves d'une classe), journal des décisions.
+Rien n'existait pour les évaluations, les notes, les moyennes, les bulletins ni la mémorisation.
+
+### Modèles et migration
+
+Migration additive `20261107000000_evaluations_notes_bulletins_coran` : trois énumérations, huit tables,
+deux index uniques composés sur des tables existantes (`AcademicPeriod`, `Subject`), toujours satisfaits.
+`SchoolEvaluation`, `SchoolGrade`, `SchoolGradeEvent` (journal en ajout seul), `SchoolAppreciation`,
+`SchoolReportComment`, `SchoolResultValidation`, `SchoolQuranSettings`, `SchoolQuranProgress`,
+`SchoolQuranEvaluation`. Clés étrangères composées : PostgreSQL refuse une période d'une autre année, une
+matière d'un autre établissement, un groupe d'une autre classe. Contraintes écrites à la main : une note porte
+une valeur si et seulement si elle est « notée » (absence et dispense ne sont jamais un zéro), barème et
+coefficient positifs, sourate de 1 à 114, une seule validation active par classe et période (index partiel).
+Vérifiée par `prisma migrate diff` (différence vide) sur une base jetable. Non appliquée sur Neon.
+
+### Règles de calcul (`packages/shared/src/school-assessment.ts`)
+
+Moteur pur, partagé, testé à l'unité ; la version de règles appliquée est la plus récente entrée en vigueur à
+la fin de la période.
+
+- Moyenne de matière : notes ramenées au barème de l'établissement, pondérées par le coefficient de chaque
+  évaluation. Dispense et note non saisie écartées ; absence écartée (par défaut) ou comptée zéro selon la
+  règle `absences`. Une évaluation de groupe ne concerne que ses élèves.
+- Moyenne générale : moyennes de matière **arrondies** (celles du bulletin, pour qu'une famille puisse la
+  recalculer), pondérées par le coefficient de la matière au niveau (à défaut, celui de la matière) ; une
+  matière de coefficient 0 n'y entre pas.
+- Classement (si activé) : sur la moyenne arrondie, sans les matières exclues du classement ; ex æquo
+  `SHARED` (1, 1, 3) ou `DENSE` (1, 1, 2) ; un élève sans moyenne n'est pas classé.
+- Arrondi au plus proche, la moitié vers le haut, sans l'erreur binaire (1,005 → 1,01).
+
+### Notes, validation et verrouillage
+
+- Saisie individuelle ou en tableau (`PUT evaluations/:id/grades`) : seules les lignes réellement modifiées
+  sont écrites, chacune avec sa trace (avant, après, auteur, motif facultatif) dans la même transaction.
+  Une évaluation qui a reçu une note, même effacée depuis, ne se supprime plus ; un barème ne descend pas sous
+  une note saisie ; une période ne se raccourcit pas en laissant des évaluations dehors.
+- Validation par la direction : résultats calculés sous verrou, figés avec leurs règles dans la validation
+  (une nouvelle version des règles ne les change plus), décision tracée et publiée au journal Suite. Notes,
+  évaluations et appréciations des enseignants sont alors refusées (409 `RESULTS_VALIDATED`) ; l'appréciation
+  générale de la direction reste possible. Réouverture motivée : la validation reste dans l'historique, le
+  motif ne sort pas dans le journal.
+- Verrous, dans cet ordre : établissement (partagé, contre la clôture d'année), verrou consultatif de la
+  classe et de la période (sérialise toute écriture de résultats avec la validation), affectations de
+  l'enseignant (partagé : une fin d'affectation attend la saisie en cours), puis la ligne visée, bornée à
+  l'organisation. Lectures : contrôle et restitution dans un même instantané.
+
+### Durcissement (audit Codex du Sprint 4)
+
+- Ordre des verrous de toute écriture de résultats, aligné sur celui du module : établissement (partagé),
+  élèves visés (partagé, bornés à l’établissement de la classe ; étranger = 404), classe (partagé), année
+  (`FOR KEY SHARE`), verrou consultatif, affectations (partagé), période (partagé), ligne visée. Un transfert,
+  une sortie, un changement de classe ou de groupe et une fin d’affectation attendent la saisie en cours ;
+  aucune clé étrangère ne peut former de cycle. Une période se modifie sous verrou exclusif.
+- Vue de l’enseignant recalculée sur ses seules affectations : élèves, évaluations couvertes (une
+  affectation de groupe ne couvre que les évaluations du groupe), agrégats et appréciations.
+- Bulletins validés : élèves, effectif et rang figés par la validation, même après un changement de classe.
+- Mémorisation : élève et établissement relus dans l’instantané des données restituées ; numéro d’ordre
+  attribué sous verrou de l’élève pour départager deux évaluations du même jour.
+- Arrondi exact (mantisse et exposant séparés puis décalage décimal, jamais `NaN`), DTO de création strict,
+  404 pour toute ressource étrangère (historique d’une note, validations, saisies).
+- Passe 2 : historique d’une note contrôlé dans l’instantané (périmètre, inscription et groupe actuel de
+  l’élève) ; vue de l’enseignant d’une feuille validée calculée avec les règles et coefficients figés ;
+  appréciation générale possible pour un élève figé ; élèves autorisés par matière dans le formulaire des
+  appréciations ; vue coranique de classe limitée aux élèves encore rattachés à l’établissement ; classes de
+  l’élève verrouillées en partage avant une évaluation coranique (un changement de groupe attend).
+- Passe 3 : la validation verrouille en partage les élèves de la classe avant de calculer (une sortie en cours
+  attend : l’état figé est celui d’avant ou d’après) ; règles de classement entièrement validées avant
+  enregistrement (booléen, liste d’identifiants de matières de l’établissement) et lues avec tolérance ;
+  brouillons d’appréciations des autres matières conservés après un enregistrement.
+- Passe 4 : un élève entré dans la classe pendant la prise des verrous fait recommencer la validation (trois
+  essais, puis 409 `RESULTS_BUSY`), sans jamais verrouiller un élève après la classe ; identifiants de
+  matières exclues normalisés en minuscules ; saisies faites pendant un envoi conservées (notes,
+  appréciations, commentaires).
+- Passe 5 : clé du verrou consultatif construite sur les identifiants en minuscules (un UUID écrit en
+  majuscules ne contourne plus la sérialisation) ; une traduction arabe masquée (établissement en Français)
+  n’est ni écrasée ni supprimée par une modification du texte français.
+- Passe 6 : la validation fige aussi les groupes de chaque élève ; la vue de l’enseignant d’une feuille
+  validée se recalcule sur ces élèves et groupes figés (un retrait de groupe ultérieur ne change rien).
+- Preuves : 32 tests d’intégration sur PostgreSQL réel (attente d’un transfert, deux validations
+  simultanées, note et validation simultanées, évaluation coranique pendant un changement de groupe, verrou
+  étranger jamais attendu, validation pendant une sortie d’élève) et 16 mutations, toutes détectées. La
+  reprise d’une validation sur changement d’effectif n’a pas de test d’entrelacement déterministe.
+
+### Bulletins PDF
+
+Générés à la demande par l'API (`pdfkit`, sans navigateur), derrière la garde et la permission
+`school.report_cards`, jamais stockés : aucune adresse directe n'existe ; réponse `Cache-Control: no-store`,
+pièce jointe, chaque édition journalisée. Un élève ou toute la classe (une page par élève). Contenu :
+établissement, élève, classe et année, matières, coefficients, moyennes de l'élève et de la classe, moyenne
+générale, rang si activé, appréciations des enseignants et de la direction, date d'édition ; « Provisoire »
+avant validation. Français, Arabe (mise en page de droite à gauche, le français en repli d'un libellé sans
+traduction) et Bilingue (une langue par ligne). Aucun champ arabe exigé. Polices embarquées
+(`apps/api/assets/fonts`, Noto Sans et Noto Naskh Arabic, licence OFL jointe) ; ordre visuel du texte arabe
+par `school-rtl-text.ts` (version réduite de l'algorithme bidirectionnel Unicode, testée).
+
+### Mémorisation du Coran (module facultatif)
+
+- Actif seulement pour un établissement en **Bilingue** dont la direction l'a activé, avec la matière dont les
+  enseignants saisissent la mémorisation. Ailleurs, toutes les routes de données répondent 404 ; désactiver ou
+  changer de langue masque le module sans rien supprimer.
+- Catalogue de référence des 114 sourates (numéro, nom arabe, translittération, nombre de versets), généré
+  depuis les métadonnées Tanzil (CC BY 3.0) et vérifié par les tests (6 236 versets).
+- Suivi par élève et par sourate : Non commencée, En cours, Mémorisée, À réviser ; dates de mémorisation et
+  de dernière révision recalculées depuis tout l'historique, quel que soit l'ordre de saisie. Historique en
+  ajout seul (une erreur se corrige par une nouvelle évaluation).
+- Saisie par l'enseignant affecté à la matière Coran de la classe (ou du groupe) de l'élève ; consultation
+  par la direction ; chaque consultation et chaque évaluation journalisées ; aucun export. Données séparées
+  des notes : elles n'entrent dans aucune moyenne.
+- Lecture seule préparée pour le futur portail parents : `quranSurahStates` (statuts et dates, sans remarque
+  ni évaluateur). Aucune route parent n'est ouverte.
+
+### Droits
+
+| Permission                                                                 | Rôles                                                 |
+| -------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `school.assessment.read` (évaluations, notes, moyennes)                    | Direction, secrétariat, enseignant (ses affectations) |
+| `school.assessment.manage` (évaluations, notes, appréciations)             | Direction, enseignant (ses affectations)              |
+| `school.results.validate` (validation, réouverture, appréciation générale) | Direction                                             |
+| `school.report_cards` (moyennes générales, classements, bulletins PDF)     | Direction, secrétariat                                |
+| `school.quran.settings` (activation du module)                             | Direction                                             |
+| `school.quran.read` (progression)                                          | Direction, enseignant (matière Coran)                 |
+| `school.quran.manage` (évaluation de mémorisation)                         | Enseignant (matière Coran)                            |
+
+L'enseignant ne voit que les matières de ses affectations, sans moyenne générale ni rang. Une évaluation de
+toute la classe exige une affectation à toute la classe ; un enseignant de groupe n'évalue que son groupe. La
+fin d'une affectation retire ces droits à la requête suivante.
+
+### API (`/api/v1/school`)
+
+`GET periods`, `PATCH|DELETE periods/:id` ; `GET|POST evaluations`, `GET|PATCH|DELETE evaluations/:id`,
+`PUT evaluations/:id/grades`, `GET evaluations/:id/grades/:studentId/history` ; `GET results`,
+`PUT results/appreciations`, `GET|PUT results/comments`, `GET results/validations`, `POST results/validate`,
+`POST results/unlock` ; `GET report-cards`, `GET report-cards/pdf` ; `GET|PUT quran/settings`,
+`GET quran/surahs`, `GET quran/classes/:id`, `GET quran/students/:id`, `POST quran/students/:id/evaluations`.
+
+### Écrans
+
+`/school/periodes`, `/school/evaluations`, `/school/evaluations/[id]` (saisie en tableau, journal),
+`/school/resultats` (moyennes, validation, appréciations), `/school/classements`, `/school/bulletins`
+(appréciation de la direction, PDF), `/school/coran` (activation, progression de la classe),
+`/school/coran/eleves/[id]` (114 sourates, saisie, historique). Le réglage des absences est ajouté à
+`/school/notation`. Tous suivent la langue de l'établissement ; le menu général Ocall Suite est inchangé.
+
+## 11. Limites actuelles
 
 - Un employé Park existant ne peut pas encore recevoir de rôle School : il faut un compte dédié.
 - Pas d'emploi du temps ni de volume horaire contrôlé : l'horaire par niveau est indicatif.
 - L'enseignant d'un groupe voit la liste restreinte de toute la classe (choix validé au cadrage).
-- Pas de logo, de notes, de bulletins ni de SMS. Modèles de documents personnalisés non livrés.
+- Pas de logo ni de SMS. Modèles de documents personnalisés non livrés : le bulletin a une mise en page unique.
 - Portail parents non livré : seul le contrôle des enfants autorisés est préparé.
 - Aucun antivirus : un contrôle du type réel et du contenu actif des PDF, et un téléchargement en pièce
   jointe uniquement. Un PDF à flux compressé peut masquer du contenu actif.
@@ -343,3 +494,15 @@ suivent la langue de l'établissement (Sprint 3A) ; une fiche de classe suit cel
   états proches lors d'une modification simultanée, sans exposer de données hors périmètre.
 - « Mes classes » et la garde d'accès n'ont pas de test d'entrelacement dédié : leur fenêtre (requêtes
   internes de Prisma) est supprimée par construction (instantané, instruction unique).
+- Bulletins : générés à la demande, jamais archivés ; un bulletin réédité après une correction des noms
+  reflète les noms actuels (les résultats, eux, restent figés par la validation). Pas de moyenne annuelle ni
+  de récapitulatif sur plusieurs périodes. Édition de toute une classe synchrone.
+- Un élève sorti de la classe après la validation n’apparaît plus dans ses bulletins (liste des élèves =
+  inscriptions validées dans la classe).
+- Ordre du texte arabe dans les PDF : version réduite de l’algorithme bidirectionnel, suffisante pour des
+  noms, libellés et appréciations ; un texte qui mêle longuement arabe et latin peut être mal ordonné.
+- Mémorisation du Coran : données d’enseignement religieux de mineurs (RGPD article 9 et lois équivalentes) ;
+  validation juridique et information des familles requises avant toute vraie donnée. Pas de suivi verset par
+  verset, d’analyse audio ni d’évaluation automatique (hors périmètre du Sprint 4).
+- Le lien de menu « Mémorisation du Coran » reste visible (menu School statique) ; hors module actif, la page
+  répond « introuvable » aux rôles autres que la direction.

@@ -2,12 +2,16 @@ import { Module } from '@nestjs/common';
 import { OrganizationsModule } from '../organizations/organizations.module';
 import { SuiteContractsModule } from '../suite-contracts/suite-contracts.module';
 import { SchoolAccessGuard } from './school-access';
+import { SchoolAssessmentController, SchoolQuranController } from './school-assessment.controller';
+import { SchoolAssessmentService } from './school-assessment.service';
 import { SchoolDocumentsService } from './school-documents.service';
 import { SchoolEnrollmentsService } from './school-enrollments.service';
 import { SchoolGuardiansService } from './school-guardians.service';
 import { SchoolImportsService } from './school-imports.service';
 import { SchoolMembersService } from './school-members.service';
 import { SchoolPrismaService } from './school-prisma.service';
+import { SchoolQuranService } from './school-quran.service';
+import { SchoolReportCardsService } from './school-report-cards.service';
 import { SchoolFilesController, SchoolStudentsController } from './school-students.controller';
 import { SchoolStudentsService } from './school-students.service';
 import { SchoolTeachingController } from './school-teaching.controller';
@@ -27,6 +31,8 @@ import { SchoolService } from './school.service';
     SchoolStudentsController,
     SchoolFilesController,
     SchoolTeachingController,
+    SchoolAssessmentController,
+    SchoolQuranController,
   ],
   providers: [
     SchoolPrismaService,
@@ -39,6 +45,9 @@ import { SchoolService } from './school.service';
     SchoolDocumentsService,
     SchoolImportsService,
     SchoolTeachingService,
+    SchoolAssessmentService,
+    SchoolReportCardsService,
+    SchoolQuranService,
   ],
 })
 export class SchoolModule {}

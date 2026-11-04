@@ -677,6 +677,24 @@ export class SchoolService {
         details: errors,
       });
     }
+    // Matières exclues du classement : toutes de cet établissement (Sprint 4).
+    // Identifiants enregistrés en minuscules : le moteur les compare à ceux que restitue PostgreSQL.
+    const excluded = [
+      ...new Set((dto.rules.ranking.excludedSubjectIds ?? []).map((id) => id.toLowerCase())),
+    ];
+    dto.rules.ranking.excludedSubjectIds = excluded;
+    if (excluded.length > 0) {
+      const known = await this.db.subject.count({
+        where: { organizationId: ctx.organizationId, schoolId: dto.schoolId, id: { in: excluded } },
+      });
+      if (known !== excluded.length) {
+        throw new BadRequestException({
+          code: 'INVALID_GRADING_RULES',
+          message: 'Règles de notation invalides.',
+          details: ['Une matière exclue du classement n’appartient pas à cet établissement.'],
+        });
+      }
+    }
     const policy = await this.db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "School" WHERE id = ${dto.schoolId}::uuid FOR UPDATE`;
       const last = await tx.gradingPolicyVersion.aggregate({

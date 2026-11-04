@@ -109,6 +109,20 @@ export const SchoolPermission = {
   TEACHING_READ: 'school.teaching.read',
   /** Affecter, remplacer ou terminer une affectation d'enseignement. */
   TEACHING_MANAGE: 'school.teaching.manage',
+  /** Évaluations, notes et moyennes (Sprint 4) ; l'enseignant, seulement pour ses affectations. */
+  ASSESSMENT_READ: 'school.assessment.read',
+  /** Créer des évaluations, saisir les notes et les appréciations ; l'enseignant, ses affectations. */
+  ASSESSMENT_MANAGE: 'school.assessment.manage',
+  /** Valider ou rouvrir les résultats d'une classe, rédiger l'appréciation générale. */
+  RESULTS_VALIDATE: 'school.results.validate',
+  /** Moyennes générales, classements et bulletins PDF de toute la classe. */
+  REPORT_CARDS: 'school.report_cards',
+  /** Activer ou désactiver le module « Mémorisation du Coran ». */
+  QURAN_SETTINGS: 'school.quran.settings',
+  /** Consulter la mémorisation ; l'enseignant, seulement pour la matière Coran de ses classes. */
+  QURAN_READ: 'school.quran.read',
+  /** Enregistrer une évaluation de mémorisation : l'enseignant affecté à la matière Coran. */
+  QURAN_MANAGE: 'school.quran.manage',
 } as const;
 export type SchoolPermission = (typeof SchoolPermission)[keyof typeof SchoolPermission];
 
@@ -138,11 +152,19 @@ const DIRECTION: readonly SchoolPermission[] = [
   SP.DOCUMENTS_DELETE,
   SP.TEACHING_READ,
   SP.TEACHING_MANAGE,
+  SP.ASSESSMENT_READ,
+  SP.ASSESSMENT_MANAGE,
+  SP.RESULTS_VALIDATE,
+  SP.REPORT_CARDS,
+  SP.QURAN_SETTINGS,
+  SP.QURAN_READ,
 ];
 
 /**
  * Matrice appliquée par l'API. Le secrétariat prépare, la direction valide ; enseignant, surveillant et
- * comptable n'ont que la liste restreinte, et l'enseignant seulement pour ses classes.
+ * comptable n'ont que la liste restreinte, et l'enseignant seulement pour ses classes. Notes : la
+ * direction gère et valide, le secrétariat consulte et édite les bulletins, l'enseignant saisit pour ses
+ * affectations. Mémorisation : l'enseignant de la matière Coran saisit, la direction consulte.
  */
 export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermission[]> = {
   GROUP_DIRECTOR: [...DIRECTION, SP.SCHOOLS_MANAGE],
@@ -161,8 +183,17 @@ export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermissi
     SP.DOCUMENTS_READ,
     SP.DOCUMENTS_MANAGE,
     SP.TEACHING_READ,
+    SP.ASSESSMENT_READ,
+    SP.REPORT_CARDS,
   ],
-  TEACHER: [SP.STRUCTURE_READ, SP.STUDENTS_READ],
+  TEACHER: [
+    SP.STRUCTURE_READ,
+    SP.STUDENTS_READ,
+    SP.ASSESSMENT_READ,
+    SP.ASSESSMENT_MANAGE,
+    SP.QURAN_READ,
+    SP.QURAN_MANAGE,
+  ],
   SUPERVISOR: [SP.STRUCTURE_READ, SP.STUDENTS_READ, SP.TEACHING_READ],
   ACCOUNTANT: [SP.STRUCTURE_READ, SP.STUDENTS_READ],
 };
@@ -193,9 +224,13 @@ export function assignableSchoolRoles(actor: SchoolRole): readonly SchoolRole[] 
 export const SCHOOL_TIE_RULES = ['SHARED', 'DENSE'] as const;
 export type SchoolTieRule = (typeof SCHOOL_TIE_RULES)[number];
 
+/** Absence non justifiée : écartée du calcul (par défaut) ou comptée zéro. Une dispense est toujours écartée. */
+export const SCHOOL_ABSENCE_RULES = ['EXCLUDED', 'ZERO'] as const;
+export type SchoolAbsenceRule = (typeof SCHOOL_ABSENCE_RULES)[number];
+
 /**
- * Règles de calcul d'un établissement. Chaque modification crée une nouvelle version : un bulletin déjà
- * publié garde les règles avec lesquelles il a été calculé. Les moteurs arrivent aux sprints suivants.
+ * Règles de calcul d'un établissement. Chaque modification crée une nouvelle version : des résultats
+ * validés gardent les règles avec lesquelles ils ont été calculés. Moteur : `computeClassResults`.
  */
 export interface SchoolGradingRules {
   /** Note maximale, ex. 20. */
@@ -210,6 +245,8 @@ export interface SchoolGradingRules {
     ties: SchoolTieRule;
     excludedSubjectIds: string[];
   };
+  /** Absent des versions antérieures au Sprint 4 : « EXCLUDED » s'applique alors. */
+  absences?: SchoolAbsenceRule;
 }
 
 export const DEFAULT_SCHOOL_GRADING_RULES: SchoolGradingRules = {
@@ -217,7 +254,10 @@ export const DEFAULT_SCHOOL_GRADING_RULES: SchoolGradingRules = {
   passMark: 10,
   decimals: 2,
   ranking: { enabled: true, ties: 'SHARED', excludedSubjectIds: [] },
+  absences: 'EXCLUDED',
 };
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Messages d'erreur des règles ; vide si elles sont valides. */
 export function validateGradingRules(rules: SchoolGradingRules): string[] {
@@ -233,6 +273,21 @@ export function validateGradingRules(rules: SchoolGradingRules): string[] {
   }
   if (!SCHOOL_TIE_RULES.includes(rules.ranking?.ties)) {
     errors.push('La règle des ex æquo est invalide.');
+  }
+  if (typeof rules.ranking?.enabled !== 'boolean') {
+    errors.push('L’activation du classement doit être un booléen.');
+  }
+  const excluded: unknown = rules.ranking?.excludedSubjectIds;
+  if (
+    excluded !== undefined &&
+    (!Array.isArray(excluded) ||
+      excluded.length > 200 ||
+      excluded.some((id) => typeof id !== 'string' || !UUID.test(id)))
+  ) {
+    errors.push('Les matières exclues du classement doivent être une liste d’identifiants.');
+  }
+  if (rules.absences !== undefined && !SCHOOL_ABSENCE_RULES.includes(rules.absences)) {
+    errors.push('La règle des absences est invalide.');
   }
   return errors;
 }

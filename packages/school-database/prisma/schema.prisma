@@ -112,6 +112,26 @@ enum SchoolPeriodKind {
   CUSTOM
 }
 
+enum SchoolEvaluationKind {
+  HOMEWORK
+  QUIZ
+  COMPOSITION
+  EXAM
+}
+
+enum SchoolGradeStatus {
+  SCORED
+  ABSENT
+  EXEMPT
+}
+
+enum SchoolQuranStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  MEMORIZED
+  TO_REVIEW
+}
+
 /// Groupe scolaire : un par client contractant, y compris pour une école seule.
 model SchoolGroup {
   id             String   @id @default(uuid()) @db.Uuid
@@ -154,6 +174,7 @@ model School {
   enrollments SchoolEnrollment[]
   settings    SchoolStudentSettings?
   importJobs  SchoolImportJob[]
+  quran       SchoolQuranSettings?
 
   @@unique([organizationId, id])
   @@unique([organizationId, name])
@@ -229,6 +250,7 @@ model SchoolYear {
   periods     AcademicPeriod[]
   classes     SchoolClass[]
   enrollments SchoolEnrollment[]
+  evaluations SchoolEvaluation[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, schoolId, id])
@@ -248,9 +270,15 @@ model AcademicPeriod {
   endsOn         DateTime         @db.Date
   createdAt      DateTime         @default(now())
 
-  year SchoolYear @relation(fields: [organizationId, schoolYearId], references: [organizationId, id], onDelete: Restrict)
+  year         SchoolYear               @relation(fields: [organizationId, schoolYearId], references: [organizationId, id], onDelete: Restrict)
+  evaluations  SchoolEvaluation[]
+  validations  SchoolResultValidation[]
+  appreciation SchoolAppreciation[]
+  comments     SchoolReportComment[]
 
   @@unique([schoolYearId, position])
+  // Clé composée (Sprint 4) : une évaluation ne peut viser qu'une période de l'année de sa classe.
+  @@unique([organizationId, schoolYearId, id])
   @@index([organizationId, schoolYearId])
 }
 
@@ -320,14 +348,18 @@ model SchoolClass {
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
 
-  year        SchoolYear                 @relation(fields: [organizationId, schoolYearId], references: [organizationId, id], onDelete: Restrict)
-  level       Level                      @relation(fields: [organizationId, levelId], references: [organizationId, id], onDelete: Restrict)
-  track       PedagogicalTrack?          @relation(fields: [organizationId, trackId], references: [organizationId, id], onDelete: Restrict)
-  enrollments SchoolEnrollment[]
-  assignments SchoolClassAssignment[]
-  teachers    SchoolClassTeacher[]
-  groups      SchoolClassGroup[]
-  teaching    SchoolTeachingAssignment[]
+  year         SchoolYear                 @relation(fields: [organizationId, schoolYearId], references: [organizationId, id], onDelete: Restrict)
+  level        Level                      @relation(fields: [organizationId, levelId], references: [organizationId, id], onDelete: Restrict)
+  track        PedagogicalTrack?          @relation(fields: [organizationId, trackId], references: [organizationId, id], onDelete: Restrict)
+  enrollments  SchoolEnrollment[]
+  assignments  SchoolClassAssignment[]
+  teachers     SchoolClassTeacher[]
+  groups       SchoolClassGroup[]
+  teaching     SchoolTeachingAssignment[]
+  evaluations  SchoolEvaluation[]
+  validations  SchoolResultValidation[]
+  appreciation SchoolAppreciation[]
+  comments     SchoolReportComment[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, schoolYearId, id])
@@ -352,13 +384,18 @@ model Subject {
   catalogKey         String?
   createdAt          DateTime @default(now())
 
-  school   School                     @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
-  track    PedagogicalTrack?          @relation(fields: [organizationId, trackId], references: [organizationId, id], onDelete: Restrict)
-  levels   SubjectLevel[]
-  teachers SchoolTeacherSubject[]
-  teaching SchoolTeachingAssignment[]
+  school       School                     @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+  track        PedagogicalTrack?          @relation(fields: [organizationId, trackId], references: [organizationId, id], onDelete: Restrict)
+  levels       SubjectLevel[]
+  teachers     SchoolTeacherSubject[]
+  teaching     SchoolTeachingAssignment[]
+  evaluations  SchoolEvaluation[]
+  appreciation SchoolAppreciation[]
+  quranOf      SchoolQuranSettings[]
 
   @@unique([organizationId, id])
+  // Clé composée (Sprint 4) : évaluation et matière Coran toujours du même établissement.
+  @@unique([organizationId, schoolId, id])
   @@unique([schoolId, name])
   // Une matière du catalogue n'est activée qu'une fois par établissement.
   @@unique([schoolId, catalogKey])
@@ -451,13 +488,19 @@ model SchoolStudent {
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
 
-  school      School                    @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
-  guardians   SchoolStudentGuardian[]
-  enrollments SchoolEnrollment[]
-  documents   SchoolStudentDocument[]
-  events      SchoolStudentEvent[]
-  assignments SchoolClassAssignment[]
-  groups      SchoolClassGroupStudent[]
+  school       School                    @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+  guardians    SchoolStudentGuardian[]
+  enrollments  SchoolEnrollment[]
+  documents    SchoolStudentDocument[]
+  events       SchoolStudentEvent[]
+  assignments  SchoolClassAssignment[]
+  groups       SchoolClassGroupStudent[]
+  grades       SchoolGrade[]
+  gradeEvents  SchoolGradeEvent[]
+  appreciation SchoolAppreciation[]
+  comments     SchoolReportComment[]
+  quran        SchoolQuranProgress[]
+  quranEvents  SchoolQuranEvaluation[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, matriculeScope, matricule])
@@ -588,9 +631,10 @@ model SchoolClassGroup {
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
 
-  class    SchoolClass                @relation(fields: [organizationId, classId], references: [organizationId, id], onDelete: Restrict)
-  students SchoolClassGroupStudent[]
-  teaching SchoolTeachingAssignment[]
+  class       SchoolClass                @relation(fields: [organizationId, classId], references: [organizationId, id], onDelete: Restrict)
+  students    SchoolClassGroupStudent[]
+  teaching    SchoolTeachingAssignment[]
+  evaluations SchoolEvaluation[]
 
   @@unique([organizationId, id])
   // Clé composée : une affectation ne peut viser qu'un groupe de sa propre classe.
@@ -706,4 +750,210 @@ model SchoolImportJob {
   school School @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
 
   @@index([organizationId, schoolId, createdAt])
+}
+
+// ─── Sprint 4 : évaluations, notes, résultats, bulletins ───
+
+/// Évaluation d'une matière pour une classe, ou pour un groupe de cette classe, sur une période. Les clés
+/// composées font refuser par PostgreSQL une période d'une autre année, une matière d'un autre
+/// établissement ou un groupe d'une autre classe.
+model SchoolEvaluation {
+  id              String               @id @default(uuid()) @db.Uuid
+  organizationId  String               @db.Uuid
+  schoolId        String               @db.Uuid
+  schoolYearId    String               @db.Uuid
+  classId         String               @db.Uuid
+  groupId         String?              @db.Uuid
+  subjectId       String               @db.Uuid
+  periodId        String               @db.Uuid
+  kind            SchoolEvaluationKind
+  title           String
+  titleAr         String?
+  heldOn          DateTime             @db.Date
+  maxScore        Decimal              @db.Decimal(6, 2)
+  coefficient     Decimal              @default(1) @db.Decimal(5, 2)
+  createdByUserId String               @db.Uuid
+  updatedByUserId String?              @db.Uuid
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+
+  year    SchoolYear         @relation(fields: [organizationId, schoolId, schoolYearId], references: [organizationId, schoolId, id], onDelete: Restrict)
+  class   SchoolClass        @relation(fields: [organizationId, schoolYearId, classId], references: [organizationId, schoolYearId, id], onDelete: Restrict)
+  group   SchoolClassGroup?  @relation(fields: [organizationId, classId, groupId], references: [organizationId, classId, id], onDelete: Restrict)
+  subject Subject            @relation(fields: [organizationId, schoolId, subjectId], references: [organizationId, schoolId, id], onDelete: Restrict)
+  period  AcademicPeriod     @relation(fields: [organizationId, schoolYearId, periodId], references: [organizationId, schoolYearId, id], onDelete: Restrict)
+  grades  SchoolGrade[]
+  events  SchoolGradeEvent[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, classId, periodId])
+  @@index([organizationId, periodId])
+}
+
+/// Saisie d'un élève : une note (statut SCORED), une absence ou une dispense, jamais un zéro implicite
+/// (contrainte CHECK de la migration). Toute écriture laisse une trace dans SchoolGradeEvent.
+model SchoolGrade {
+  id              String            @id @default(uuid()) @db.Uuid
+  organizationId  String            @db.Uuid
+  evaluationId    String            @db.Uuid
+  studentId       String            @db.Uuid
+  status          SchoolGradeStatus
+  score           Decimal?          @db.Decimal(6, 2)
+  comment         String?
+  createdByUserId String            @db.Uuid
+  updatedByUserId String            @db.Uuid
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  evaluation SchoolEvaluation @relation(fields: [organizationId, evaluationId], references: [organizationId, id], onDelete: Restrict)
+  student    SchoolStudent    @relation(fields: [organizationId, studentId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([evaluationId, studentId])
+  @@index([organizationId, studentId])
+}
+
+/// Journal des notes, en ajout seul : valeur avant et après, auteur, motif facultatif. Survit à
+/// l'effacement de la saisie.
+model SchoolGradeEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  evaluationId   String   @db.Uuid
+  studentId      String   @db.Uuid
+  action         String
+  before         Json?
+  after          Json?
+  reason         String?
+  actorUserId    String   @db.Uuid
+  createdAt      DateTime @default(now())
+
+  evaluation SchoolEvaluation @relation(fields: [organizationId, evaluationId], references: [organizationId, id], onDelete: Restrict)
+  student    SchoolStudent    @relation(fields: [organizationId, studentId], references: [organizationId, id], onDelete: Restrict)
+
+  @@index([organizationId, evaluationId, studentId, createdAt])
+}
+
+/// Appréciation d'un enseignant pour un élève, une matière, une classe et une période.
+model SchoolAppreciation {
+  organizationId String   @db.Uuid
+  schoolId       String   @db.Uuid
+  schoolYearId   String   @db.Uuid
+  periodId       String   @db.Uuid
+  classId        String   @db.Uuid
+  subjectId      String   @db.Uuid
+  studentId      String   @db.Uuid
+  text           String
+  textAr         String?
+  authorUserId   String   @db.Uuid
+  updatedAt      DateTime @updatedAt
+
+  period  AcademicPeriod @relation(fields: [organizationId, schoolYearId, periodId], references: [organizationId, schoolYearId, id], onDelete: Restrict)
+  class   SchoolClass    @relation(fields: [organizationId, schoolYearId, classId], references: [organizationId, schoolYearId, id], onDelete: Restrict)
+  subject Subject        @relation(fields: [organizationId, schoolId, subjectId], references: [organizationId, schoolId, id], onDelete: Restrict)
+  student SchoolStudent  @relation(fields: [organizationId, studentId], references: [organizationId, id], onDelete: Restrict)
+
+  @@id([periodId, classId, subjectId, studentId])
+  @@index([organizationId, classId, periodId])
+}
+
+/// Appréciation générale de la direction sur le bulletin d'un élève.
+model SchoolReportComment {
+  organizationId String   @db.Uuid
+  schoolYearId   String   @db.Uuid
+  periodId       String   @db.Uuid
+  classId        String   @db.Uuid
+  studentId      String   @db.Uuid
+  text           String
+  textAr         String?
+  authorUserId   String   @db.Uuid
+  updatedAt      DateTime @updatedAt
+
+  period  AcademicPeriod @relation(fields: [organizationId, schoolYearId, periodId], references: [organizationId, schoolYearId, id], onDelete: Restrict)
+  class   SchoolClass    @relation(fields: [organizationId, schoolYearId, classId], references: [organizationId, schoolYearId, id], onDelete: Restrict)
+  student SchoolStudent  @relation(fields: [organizationId, studentId], references: [organizationId, id], onDelete: Restrict)
+
+  @@id([periodId, classId, studentId])
+  @@index([organizationId, classId, periodId])
+}
+
+/// Validation des résultats d'une classe pour une période par la direction : notes, évaluations et
+/// appréciations des enseignants sont alors verrouillées. `results` fige les résultats calculés avec la
+/// version de règles appliquée ; une réouverture (motif obligatoire) garde la ligne dans l'historique.
+/// Une seule validation active par classe et période (index partiel de la migration).
+model SchoolResultValidation {
+  id                String    @id @default(uuid()) @db.Uuid
+  organizationId    String    @db.Uuid
+  schoolYearId      String    @db.Uuid
+  classId           String    @db.Uuid
+  periodId          String    @db.Uuid
+  policyVersion     Int?
+  results           Json
+  validatedByUserId String    @db.Uuid
+  validatedAt       DateTime  @default(now())
+  unlockedAt        DateTime?
+  unlockedByUserId  String?   @db.Uuid
+  unlockReason      String?
+
+  class  SchoolClass    @relation(fields: [organizationId, schoolYearId, classId], references: [organizationId, schoolYearId, id], onDelete: Restrict)
+  period AcademicPeriod @relation(fields: [organizationId, schoolYearId, periodId], references: [organizationId, schoolYearId, id], onDelete: Restrict)
+
+  @@index([organizationId, classId, periodId])
+}
+
+// ─── Sprint 4 : module facultatif « Mémorisation du Coran » ───
+
+/// Activation par la direction ; effective seulement si l'établissement est en Bilingue. Désactiver ou
+/// changer de langue masque le module sans rien supprimer.
+model SchoolQuranSettings {
+  schoolId        String   @id @db.Uuid
+  organizationId  String   @db.Uuid
+  enabled         Boolean  @default(false)
+  /// Matière dont les enseignants affectés saisissent la mémorisation de leurs élèves.
+  subjectId       String?  @db.Uuid
+  updatedByUserId String   @db.Uuid
+  updatedAt       DateTime @updatedAt
+
+  school  School   @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+  subject Subject? @relation(fields: [organizationId, schoolId, subjectId], references: [organizationId, schoolId, id], onDelete: Restrict)
+
+  @@unique([organizationId, schoolId])
+}
+
+/// État courant d'une sourate pour un élève, recalculé depuis l'historique à chaque évaluation. Sans
+/// ligne, la sourate est « Non commencée ». Numéro de 1 à 114 (contrainte CHECK de la migration).
+model SchoolQuranProgress {
+  organizationId  String            @db.Uuid
+  studentId       String            @db.Uuid
+  surah           Int
+  status          SchoolQuranStatus
+  memorizedOn     DateTime?         @db.Date
+  lastReviewedOn  DateTime?         @db.Date
+  updatedByUserId String            @db.Uuid
+  updatedAt       DateTime          @updatedAt
+
+  student SchoolStudent @relation(fields: [organizationId, studentId], references: [organizationId, id], onDelete: Restrict)
+
+  @@id([studentId, surah])
+  @@index([organizationId, studentId])
+}
+
+/// Historique des évaluations de mémorisation, en ajout seul : une erreur se corrige par une nouvelle
+/// évaluation, jamais par une réécriture.
+model SchoolQuranEvaluation {
+  id              String            @id @default(uuid()) @db.Uuid
+  organizationId  String            @db.Uuid
+  studentId       String            @db.Uuid
+  surah           Int
+  status          SchoolQuranStatus
+  evaluatedOn     DateTime          @db.Date
+  remark          String?
+  /// Ordre d'enregistrement pour l'élève et la sourate, attribué sous le verrou de l'élève : départage
+  /// deux évaluations du même jour sans dépendre de l'horloge de transaction.
+  sequence        Int
+  evaluatorUserId String            @db.Uuid
+  createdAt       DateTime          @default(now())
+
+  student SchoolStudent @relation(fields: [organizationId, studentId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([studentId, surah, sequence])
+  @@index([organizationId, studentId, surah, evaluatedOn])
 }

@@ -1,6 +1,10 @@
 'use client';
 
-import { DEFAULT_SCHOOL_GRADING_RULES, type SchoolGradingRules } from '@ocall/shared';
+import {
+  DEFAULT_SCHOOL_GRADING_RULES,
+  type SchoolAbsenceRule,
+  type SchoolGradingRules,
+} from '@ocall/shared';
 import { useState } from 'react';
 import { toApiError, useSchoolText } from '@/components/school/school-language';
 import { SchoolPage } from '@/components/school/school-page';
@@ -41,6 +45,7 @@ function Policies({ schoolId, canManage }: { schoolId: string; canManage: boolea
   const [decimals, setDecimals] = useState(String(DEFAULT_SCHOOL_GRADING_RULES.decimals));
   const [effectiveFrom, setEffectiveFrom] = useState('');
   const [ranking, setRanking] = useState('SHARED');
+  const [absences, setAbsences] = useState<SchoolAbsenceRule>('EXCLUDED');
   const [error, setError] = useState<ApiError | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -62,6 +67,7 @@ function Policies({ schoolId, canManage }: { schoolId: string; canManage: boolea
               ties: ranking === 'DENSE' ? 'DENSE' : 'SHARED',
               excludedSubjectIds: [],
             },
+            absences,
           },
         },
       });
@@ -144,6 +150,15 @@ function Policies({ schoolId, canManage }: { schoolId: string; canManage: boolea
                     { value: 'SHARED', label: t('grading.shared') },
                     { value: 'DENSE', label: t('grading.dense') },
                     { value: 'DISABLED', label: t('grading.disabled') },
+                  ]}
+                />
+                <SelectField
+                  label={t('grading.absences')}
+                  value={absences}
+                  onChange={(e) => setAbsences(e.target.value as SchoolAbsenceRule)}
+                  options={[
+                    { value: 'EXCLUDED', label: t('grading.absencesExcluded') },
+                    { value: 'ZERO', label: t('grading.absencesZero') },
                   ]}
                 />
               </div>
