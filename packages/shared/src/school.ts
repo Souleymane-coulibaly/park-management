@@ -151,6 +151,16 @@ export const SchoolPermission = {
   ANNOUNCEMENTS_CLASS: 'school.announcements.class',
   /** Réglages et historique des SMS de l'établissement. */
   SMS_MANAGE: 'school.sms.manage',
+  /** Emplois du temps, salles, calendrier et examens publiés (Sprint 7) ; l'enseignant, ses classes. */
+  PLANNING_READ: 'school.planning.read',
+  /** Préparer les emplois du temps (brouillons, créneaux), salles, indisponibilités, annulations. */
+  PLANNING_MANAGE: 'school.planning.manage',
+  /** Publier un emploi du temps (le rendre visible et applicable). */
+  PLANNING_PUBLISH: 'school.planning.publish',
+  /** Événements du calendrier scolaire (vacances, fériés, réunions, sorties…). */
+  CALENDAR_MANAGE: 'school.calendar.manage',
+  /** Programmer et publier les examens (date, heure, durée, salle, surveillant). */
+  EXAMS_MANAGE: 'school.exams.manage',
 } as const;
 export type SchoolPermission = (typeof SchoolPermission)[keyof typeof SchoolPermission];
 
@@ -200,6 +210,11 @@ const DIRECTION: readonly SchoolPermission[] = [
   SP.ANNOUNCEMENTS_MANAGE,
   SP.ANNOUNCEMENTS_CLASS,
   SP.SMS_MANAGE,
+  SP.PLANNING_READ,
+  SP.PLANNING_MANAGE,
+  SP.PLANNING_PUBLISH,
+  SP.CALENDAR_MANAGE,
+  SP.EXAMS_MANAGE,
 ];
 
 /**
@@ -212,6 +227,8 @@ const DIRECTION: readonly SchoolPermission[] = [
  * Portail parents, présences, communication (Sprint 6) : la direction gère tout et publie les résultats ;
  * le secrétariat invite les responsables, gère absences, justificatifs et annonces ; le surveillant fait
  * l'appel et examine les justificatifs ; l'enseignant fait l'appel et publie des annonces pour ses classes.
+ * Planning (Sprint 7) : le secrétariat prépare emplois du temps, salles, calendrier et examens, la direction
+ * publie les emplois du temps ; tout le personnel consulte, l'enseignant seulement ses classes.
  */
 export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermission[]> = {
   GROUP_DIRECTOR: [...DIRECTION, SP.SCHOOLS_MANAGE],
@@ -239,6 +256,10 @@ export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermissi
     SP.ATTENDANCE_JUSTIFY,
     SP.ANNOUNCEMENTS_MANAGE,
     SP.ANNOUNCEMENTS_CLASS,
+    SP.PLANNING_READ,
+    SP.PLANNING_MANAGE,
+    SP.CALENDAR_MANAGE,
+    SP.EXAMS_MANAGE,
   ],
   TEACHER: [
     SP.STRUCTURE_READ,
@@ -250,6 +271,7 @@ export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermissi
     SP.ATTENDANCE_READ,
     SP.ATTENDANCE_TAKE,
     SP.ANNOUNCEMENTS_CLASS,
+    SP.PLANNING_READ,
   ],
   SUPERVISOR: [
     SP.STRUCTURE_READ,
@@ -258,6 +280,7 @@ export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermissi
     SP.ATTENDANCE_READ,
     SP.ATTENDANCE_TAKE,
     SP.ATTENDANCE_JUSTIFY,
+    SP.PLANNING_READ,
   ],
   ACCOUNTANT: [
     SP.STRUCTURE_READ,
@@ -265,6 +288,7 @@ export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermissi
     SP.FINANCE_READ,
     SP.FINANCE_COLLECT,
     SP.FINANCE_REPORTS,
+    SP.PLANNING_READ,
   ],
 };
 

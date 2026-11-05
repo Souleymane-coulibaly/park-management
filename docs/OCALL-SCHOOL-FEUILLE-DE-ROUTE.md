@@ -10,7 +10,8 @@ Ordre validé. Aucun sprint ne démarre sans autorisation explicite.
 | Sprint 3B | Enseignants, classes et groupes, matières, affectations                             | Livré (1d03903, audit Codex GO sous réserves) ; migration Neon en attente |
 | Sprint 4  | Évaluations, notes, bulletins, module facultatif « Mémorisation du Coran »          | Livré (720f5c3, audit Codex GO sous réserves)                             |
 | Sprint 5  | Gestion financière : frais, échéanciers, encaissements, reçus, impayés              | Livré (ca13fc8, audit Codex GO, passe 9)                                  |
-| Sprint 6  | Portail parents, présences, communication, notifications, SMS (simulés)             | Développé sur `claude/school-sprint-6` ; Codex GO sous réserves (passe 5) |
+| Sprint 6  | Portail parents, présences, communication, notifications, SMS (simulés)             | Livré (692e4c4, audit Codex GO sous réserves, passe 5)                    |
+| Sprint 7  | Emplois du temps, salles, calendrier scolaire, examens                              | Livré sur `claude/school-sprint-7` (Codex passe 8 : GO SOUS RÉSERVES)     |
 
 ## Règles linguistiques (toutes les étapes)
 

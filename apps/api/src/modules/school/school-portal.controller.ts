@@ -36,6 +36,7 @@ import {
   PortalAnnouncementsQueryDto,
   PortalYearQueryDto,
 } from './school-portal.dto';
+import { PeriodQueryDto, WeekQueryDto } from './school-planning.dto';
 import { SchoolPortalService } from './school-portal.service';
 
 /**
@@ -176,6 +177,22 @@ export class SchoolPortalController {
   @Get('children/:id/quran')
   quran(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
     return this.portal.quran(auth.user.id, id);
+  }
+
+  /** Emploi du temps publié de la semaine, examens publiés et fermetures (Sprint 7). */
+  @Get('children/:id/planning')
+  planning(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() q: WeekQueryDto,
+  ) {
+    return this.portal.planning(auth.user.id, id, q.date);
+  }
+
+  /** Événements publiés visibles des familles pour les enfants autorisés (Sprint 7). */
+  @Get('calendar')
+  calendar(@CurrentAuth() auth: AuthContext, @Query() q: PeriodQueryDto) {
+    return this.portal.calendar(auth.user.id, q.from, q.to);
   }
 
   @Get('announcements')

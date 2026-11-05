@@ -771,6 +771,17 @@ export class SchoolService {
   }
 
   /**
+   * Verrou du planning d'une organisation (Sprint 7), pris en premier par toute écriture qui peut créer un
+   * conflit : créneaux, publication, indisponibilités, examens, fermetures. Par organisation, car un
+   * enseignant peut enseigner dans plusieurs établissements du groupe : deux écritures incompatibles se
+   * suivent, la seconde voit la première.
+   */
+  async lockPlanning(tx: Prisma.TransactionClient, organizationId: string): Promise<void> {
+    const key = `school-planning:${organizationId.toLowerCase()}`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
+  }
+
+  /**
    * Vrai si toutes ces classes sont encore confiées à l'enseignant (année non clôturée), lu dans la
    * transaction qui écrit. Les liens sont verrouillés en partage jusqu'au commit : la fin d'une
    * affectation, qui les supprime, attend l'écriture, et une fin déjà validée les a retirés. Toujours vrai

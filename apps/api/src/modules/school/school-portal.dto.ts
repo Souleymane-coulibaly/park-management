@@ -32,11 +32,11 @@ import {
 } from '@ocall/shared';
 import { trim, trimOrNull } from './school.dto';
 
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
+export const DAY = /^\d{4}-\d{2}-\d{2}$/;
 /** Identifiants comparés en minuscules partout : un même UUID n'a qu'une écriture. */
-const lowerUuid = ({ value }: { value: unknown }) =>
+export const lowerUuid = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.toLowerCase() : value;
-const lowerUuids = ({ value }: { value: unknown }) =>
+export const lowerUuids = ({ value }: { value: unknown }) =>
   Array.isArray(value) ? value.map((v) => (typeof v === 'string' ? v.toLowerCase() : v)) : value;
 const upper = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim().toUpperCase() : value;

@@ -1,6 +1,6 @@
 'use client';
 
-import { Bell, Home, LogOut, Megaphone, User, Users } from 'lucide-react';
+import { Bell, CalendarDays, Home, LogOut, Megaphone, User, Users } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { type ReactNode, createContext, useContext, useEffect } from 'react';
@@ -91,6 +91,7 @@ function Chrome({ me, children }: { me: Me; children: ReactNode }) {
     { href: '/parents', label: t('par.nav.home'), icon: Home, exact: true },
     { href: '/parents/enfants', label: t('par.nav.children'), icon: Users },
     { href: '/parents/annonces', label: t('par.nav.announcements'), icon: Megaphone },
+    { href: '/parents/calendrier', label: t('par.nav.calendar'), icon: CalendarDays },
     { href: '/parents/notifications', label: t('par.nav.notifications'), icon: Bell },
     { href: '/parents/profil', label: t('par.nav.profile'), icon: User },
   ];
@@ -169,6 +170,7 @@ export function ChildHeader({ child }: { child: PortalChild }) {
   const pathname = usePathname();
   const base = `/parents/enfants/${child.id}`;
   const tabs = [
+    { href: `${base}/planning`, label: t('par.child.planning') },
     { href: `${base}/presences`, label: t('par.child.attendance') },
     { href: `${base}/resultats`, label: t('par.child.results') },
     { href: `${base}/bulletins`, label: t('par.child.reportCards') },

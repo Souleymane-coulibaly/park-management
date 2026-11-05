@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import type { SchoolNotificationKind } from '@ocall/shared';
+import { SCHOOL_TEXT_FR, type SchoolNotificationKind, type SchoolTextKey } from '@ocall/shared';
 import { usePortal } from '@/components/parents/parent-shell';
 import { toApiError, useSchoolText } from '@/components/school/school-language';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,17 @@ interface NotificationPage {
   }[];
   unread: number;
   nextCursor: string | null;
+}
+
+/**
+ * Texte d'une notification : variante du changement (examen déplacé ou annulé, cours rétabli…) quand elle
+ * existe, sinon le texte du type.
+ */
+function notificationKey(kind: SchoolNotificationKind, change: string | undefined): SchoolTextKey {
+  const variant = `par.notif.${kind}_${change}`;
+  return change && Object.hasOwn(SCHOOL_TEXT_FR, variant)
+    ? (variant as SchoolTextKey)
+    : (`par.notif.${kind}` as SchoolTextKey);
 }
 
 /** Centre de notifications : non lues, lecture, historique, lien vers la page concernée. */
@@ -97,7 +108,7 @@ export default function ParentNotificationsPage() {
                   <div>
                     <p>
                       {who ? `${who} · ` : ''}
-                      {t(`par.notif.${n.kind}`, params)}
+                      {t(notificationKey(n.kind, n.params.change), params)}
                     </p>
                     <p className="text-xs text-muted">{date(n.createdAt)}</p>
                   </div>

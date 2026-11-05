@@ -743,14 +743,144 @@ bulletins, situation financière, mémorisation du Coran, annonces, notification
 `/connexion`. Établissement : `/school/portail-parents`, `/school/presences`, `/school/presences/justificatifs`,
 `/school/communication` (annonces, SMS), `/school/publications`.
 
-## 13. Limites actuelles
+## 13. Sprint 7 : emplois du temps, salles, calendrier scolaire et examens
+
+### Audit de l'existant
+
+Réutilisé : années et périodes (`SchoolYear`, `AcademicPeriod`), classes et groupes, matières et horaire
+indicatif par niveau, affectations d'enseignement du Sprint 3B (seule source « enseignant × classe ×
+matière »), évaluations du Sprint 4 (seule source des notes), fuseau et langue de l'établissement, portail
+parents et centre de notifications du Sprint 6, journal des décisions. Absents au départ : salles, emplois
+du temps, calendrier d'événements, horaires d'examens, indisponibilités. Aucun compte élève : les élèves
+consultent par le portail parents. Le centre de notifications reste celui des familles.
+
+### Choix validés
+
+1. **Semaine type versionnée** : une version par classe et par période de validité, brouillon puis
+   publication ; annulation ponctuelle d'un cours par exception datée.
+2. **Examens** : programmation dans une table liée à l'évaluation du Sprint 4 (aucun second système de notes).
+3. **Indisponibilités** : fermetures du calendrier (vacances, fériés, journées pédagogiques) et
+   indisponibilités hebdomadaires de chaque enseignant.
+4. **Notifications** : familles par le centre existant ; enseignants par le fil des changements publiés.
+
+### Emplois du temps
+
+- Version : classe, validité dans l'année (année non clôturée), libellé, copie d'une version de la classe
+  (semaine type) ; un seul brouillon par classe (index partiel). Suppression d'un brouillon seulement.
+- Créneau : jour ISO (lundi à dimanche, chaque établissement choisit ses jours), début et fin (fin après le
+  début, minuit accepté), cours (matière, enseignant, groupe et salle facultatifs) ou pause (récréation,
+  déjeuner), contrainte SQL comprise. L'enseignant d'un cours doit avoir une affectation active pour la
+  matière dans la classe (ou le groupe).
+- **Conflits refusés** à la création, à la modification et à la publication : chevauchement dans la classe
+  (deux groupes différents peuvent avoir cours en même temps), même enseignant dans une autre classe (y
+  compris d'un autre établissement du groupe), même salle, indisponibilité de l'enseignant, affectation
+  terminée. Chaque refus détaille les créneaux en cause (jour, heures, classe) en français ou en arabe.
+- Vérification sans publier, puis **publication par la direction** (`school.planning.publish`) : tout est
+  revérifié sous verrou ; les versions publiées de la classe qui la recouvrent sont raccourcies (ou
+  archivées si elles commencent après elle) ; une version qui la dépasserait par la fin est refusée.
+- Une version publiée reste modifiable (créneau ajouté, modifié, supprimé) avec les mêmes contrôles ; les
+  familles sont notifiées. Archivage d'une version publiée. Historique en ajout seul (création, créneaux,
+  publication, raccourcissement, archivage, annulations).
+- **Concurrence** : toute écriture du planning (créneaux, publication, indisponibilités, examens,
+  événements) prend un verrou consultatif par organisation : deux écritures incompatibles se suivent, la
+  seconde voit la première.
+
+### Vues
+
+Semaine (lundi à dimanche, navigation) d'une classe, d'un enseignant (planning personnel, examens
+surveillés, fil des changements publiés des 30 derniers jours) et d'une salle (occupation). Chaque jour :
+la version publiée valable ce jour-là, cours annulés (motif), jours de fermeture applicables à la classe,
+examens publiés.
+
+### Salles
+
+Nom (unique dans l'établissement), nom arabe, capacité, activation ; jamais supprimées. Facultatives : un
+établissement peut n'en gérer aucune.
+
+### Calendrier scolaire
+
+Année et périodes affichées depuis le Sprint 3A ; événements propres à chaque établissement (aucun
+calendrier national supposé) : vacances, jours fériés, journées pédagogiques, sessions d'examens, réunions
+parents-enseignants, sorties, événements de l'établissement. Titre (et arabe), période, horaires
+facultatifs, public (établissement, classes, groupes), visibilité (personnel, ou personnel et familles),
+brouillon, publication, annulation. Un événement important visible des familles les notifie. Les fermetures
+publiées suspendent les cours ces jours-là et refusent un examen. Vue mensuelle (grille sur grand écran,
+liste sur mobile).
+
+### Examens
+
+Programmation d'une évaluation du Sprint 4 : date (dans l'année, hors fermeture de la classe), heure, durée
+(5 minutes à 8 heures), salle et surveillant facultatifs ; conflits refusés avec un autre examen de la même
+classe (groupes distincts exceptés), de la même salle ou du même surveillant. Publiée, elle apparaît dans
+les semaines et notifie les familles ; un changement d'horaire publié et une annulation les notifient
+aussi. Les notes restent saisies dans l'évaluation.
+
+### Portail parents
+
+Emploi du temps de l'enfant (sa classe, ses groupes seulement, cours annulés, jours sans cours, examens
+publiés) et calendrier des familles (événements publiés visibles des familles visant l'établissement, la
+classe ou un groupe de l'enfant). Notifications : emploi du temps publié ou modifié, cours annulé, examen
+publié, déplacé ou annulé, événement important ; une par fait et par enfant.
+
+### Droits
+
+| Permission                | Rôles                                                                   |
+| ------------------------- | ----------------------------------------------------------------------- |
+| `school.planning.read`    | Tout le personnel ; l'enseignant, ses classes et son planning           |
+| `school.planning.manage`  | Direction, secrétariat (brouillons, créneaux, salles, indisponibilités) |
+| `school.planning.publish` | Direction                                                               |
+| `school.calendar.manage`  | Direction, secrétariat                                                  |
+| `school.exams.manage`     | Direction, secrétariat                                                  |
+
+### Modèles et migration
+
+Migration additive `20261110000000_planning_emplois_du_temps_calendrier` : 9 tables (`SchoolRoom`,
+`SchoolTimetable`, `SchoolTimetableSlot`, `SchoolTimetableEvent`, `SchoolLessonException`,
+`SchoolTeacherUnavailability`, `SchoolCalendarEvent`, `SchoolCalendarEventTarget`, `SchoolExamSchedule`),
+6 énumérations, 4 nouveaux types de notification. Contraintes écrites à la main : validité ordonnée, un
+brouillon par classe, heures des créneaux et des indisponibilités, cours complet ou pause sans ressource,
+capacité positive, période et horaires des événements, une cible par ligne, horaires et durée des examens.
+Différence avec le schéma vérifiée vide. Index par établissement, classe, enseignant, salle et période.
+
+### API
+
+Personnel : `GET|POST rooms`, `PATCH rooms/:id`, `GET rooms/:id/week` ; `GET|POST timetables`,
+`GET|PATCH|DELETE timetables/:id`, `POST timetables/:id/slots`, `PUT|DELETE timetables/:id/slots/:slotId`,
+`POST timetables/:id/check|publish|archive`, `POST timetable-slots/:id/cancellations`,
+`DELETE timetable-slots/:id/cancellations/:date` ; `GET planning/class-week`, `GET planning/teacher-week` ;
+`GET|POST teacher-unavailability`, `DELETE teacher-unavailability/:id` ; `GET calendar`,
+`GET|PUT calendar/events/:id`, `POST calendar/events`, `POST calendar/events/:id/publish|cancel` ;
+`GET|POST exams`, `PUT exams/:id`, `POST exams/:id/publish|cancel`. Parents :
+`GET portal/children/:id/planning`, `GET portal/calendar`.
+
+### Écrans
+
+Personnel : `/school/emplois-du-temps` (semaine publiée, versions, créneaux, conflits, publication,
+historique, annulation d'un cours, indisponibilités), `/school/mon-planning`, `/school/calendrier`,
+`/school/examens`, `/school/salles`. Parents : `/parents/enfants/[id]/planning`, `/parents/calendrier`.
+Français et arabe (RTL), un seul jeu de composants.
+
+## 14. Limites actuelles
 
 - Réserves P3 de l'audit du Sprint 6 (non bloquantes) : reprise de l'écran d'appel quand la réponse du
   premier lot se perd, liste des justificatifs limitée à 200 sans pagination, saisie modifiée pendant l'envoi
   des lots non envoyée.
 - Appel : pas d'effectif reconstitué à une date passée ; une saisie rétroactive utilise l'effectif actuel.
 - Un employé Park existant ne peut pas encore recevoir de rôle School : il faut un compte dédié.
-- Pas d'emploi du temps ni de volume horaire contrôlé : l'horaire par niveau est indicatif.
+- L'horaire hebdomadaire par niveau reste indicatif : l'emploi du temps ne contrôle pas le volume horaire.
+- Planning : pas de remplacement ponctuel d'un enseignant ni de déplacement d'un cours à une date (seule
+  l'annulation datée existe) ; pas de génération automatique d'emploi du temps ; un brouillon d'une autre
+  classe n'est comparé qu'à sa publication.
+- Écrans : une fin de créneau ou d'indisponibilité à minuit (`24:00`, acceptée par l'API) n'est pas
+  saisissable dans les champs horaires du navigateur (réserve P3 de l'audit du Sprint 7).
+- Archivage manuel d'une version publiée encore applicable, sans remplacement : ses cours disparaissent des
+  vues sans notification aux familles ni fait dans le fil des enseignants (réserve P3 de l'audit du
+  Sprint 7 ; le remplacement par une nouvelle version publiée, lui, est notifié).
+- Fil des enseignants : un enseignant dont tous les cours disparaissent d'une classe lors du remplacement
+  par une nouvelle version publiée n'y voit pas ce remplacement (son planning, lui, est à jour ; les
+  familles sont notifiées) — réserve P3 de l'audit du Sprint 7.
+- Examens : le surveillant n'est pas comparé à ses propres cours. La programmation fixe la date de
+  l'évaluation (dans sa période, tant que les résultats ne sont pas validés).
 - L'enseignant d'un groupe voit la liste restreinte de toute la classe (choix validé au cadrage).
 - Pas de logo. Modèles de documents personnalisés non livrés : le bulletin a une mise en page unique.
 - SMS : seul le fournisseur simulé est livré (aucun envoi réel) ; un fournisseur réel s'ajoute par un

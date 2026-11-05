@@ -304,6 +304,24 @@ export class SchoolAssessmentService {
       const period = await this.lockPeriod(tx, ctx, scope, evaluation.periodId);
       await this.lockEvaluation(tx, ctx, id);
       if (dto.heldOn) this.assertInPeriod(dto.heldOn, period);
+      // Examen programmé (Sprint 7) : sa programmation fixe la date, modifiée depuis elle seulement.
+      if (dto.heldOn) {
+        const schedule = await tx.schoolExamSchedule.findUnique({
+          where: { evaluationId: id },
+          select: { date: true, status: true },
+        });
+        if (
+          schedule &&
+          schedule.status !== 'CANCELLED' &&
+          schedule.date.toISOString().slice(0, 10) !== dto.heldOn
+        ) {
+          throw new ConflictException({
+            code: 'EVALUATION_SCHEDULED',
+            message:
+              'Cet examen est programmé : modifiez sa date depuis la programmation des examens.',
+          });
+        }
+      }
       if (dto.maxScore !== undefined) {
         const above = await tx.schoolGrade.count({
           where: { evaluationId: id, score: { gt: dto.maxScore } },
@@ -339,6 +357,8 @@ export class SchoolAssessmentService {
   async deleteEvaluation(ctx: SchoolContext, id: string) {
     const { scope, evaluation } = await this.findEvaluation(ctx, id);
     await this.db.$transaction(async (tx) => {
+      // Sprint 7 : verrou du planning en premier, comme la programmation des examens (même ordre).
+      await this.school.lockPlanning(tx, ctx.organizationId);
       await this.openForWriting(tx, ctx, scope, evaluation.periodId);
       await this.assertTeaches(tx, ctx, scope.id, evaluation.subjectId, evaluation.groupId);
       await this.lockEvaluation(tx, ctx, id);
@@ -349,6 +369,19 @@ export class SchoolAssessmentService {
           message: 'Cette évaluation a déjà reçu des notes : elle ne peut plus être supprimée.',
         });
       }
+      // Programmation de l'examen (Sprint 7) : publiée, elle reste dans l'historique et bloque la
+      // suppression ; en brouillon ou annulée, elle disparaît avec l'évaluation.
+      const schedule = await tx.schoolExamSchedule.findUnique({
+        where: { evaluationId: id },
+        select: { id: true, status: true },
+      });
+      if (schedule?.status === 'PUBLISHED') {
+        throw new ConflictException({
+          code: 'EVALUATION_EXAM_PUBLISHED',
+          message: 'Cet examen est publié aux familles : annulez d’abord sa programmation.',
+        });
+      }
+      if (schedule) await tx.schoolExamSchedule.delete({ where: { id: schedule.id } });
       await tx.schoolEvaluation.delete({ where: { id } });
     });
     await this.school.log(ctx, 'school.evaluation_deleted', 'SchoolEvaluation', id, {});

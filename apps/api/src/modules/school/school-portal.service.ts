@@ -14,6 +14,7 @@ import { AuditService } from '../../common/audit/audit.service';
 import { SchoolAnnouncementsService } from './school-announcements.service';
 import { SchoolAssessmentService } from './school-assessment.service';
 import { SchoolAttendanceService } from './school-attendance.service';
+import { SchoolCalendarService } from './school-calendar.service';
 import { type PortalScope, SchoolNotificationsService } from './school-notifications.service';
 import { SchoolPaymentsService } from './school-payments.service';
 import { type PortalChild, SchoolPortalAccountsService } from './school-portal-accounts.service';
@@ -22,6 +23,7 @@ import { SchoolPrismaService } from './school-prisma.service';
 import { SchoolPublicationsService } from './school-publications.service';
 import { renderReportCards } from './school-report-card.pdf';
 import { SchoolReportCardsService, today } from './school-report-cards.service';
+import { SchoolTimetablesService } from './school-timetables.service';
 
 const NOT_FOUND = { code: 'SCHOOL_RESOURCE_NOT_FOUND', message: 'Élément introuvable.' };
 const day = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
@@ -45,6 +47,8 @@ export class SchoolPortalService {
     private readonly announcements: SchoolAnnouncementsService,
     private readonly notifications: SchoolNotificationsService,
     private readonly audit: AuditService,
+    private readonly timetables: SchoolTimetablesService,
+    private readonly calendarEvents: SchoolCalendarService,
   ) {}
 
   /** Enfants autorisés, avec la disponibilité du module coranique de leur établissement. */
@@ -381,6 +385,59 @@ export class SchoolPortalService {
         remark: remarkShared ? remark : null,
       })),
     };
+  }
+
+  /**
+   * Semaine de l'enfant (Sprint 7) : emploi du temps publié de sa classe, cours de ses groupes seulement,
+   * annulations, fermetures et examens publiés. Sans classe cette année : semaine vide.
+   */
+  async planning(userId: string, studentId: string, date: string) {
+    const child = await this.accounts.child(userId, studentId);
+    if (!child.class) return { weekStart: null, days: [] };
+    return this.timetables.childWeek(
+      {
+        organizationId: child.organizationId,
+        schoolId: child.schoolId,
+        classId: child.class.id,
+        groupIds: await this.groupsOf(child),
+      },
+      date,
+    );
+  }
+
+  /** Calendrier des familles (Sprint 7) : événements publiés visant l'établissement, la classe ou un groupe. */
+  async calendar(userId: string, from: string, to: string) {
+    const children = await this.accounts.children(userId);
+    const byOrganization = new Map<string, PortalChild[]>();
+    for (const c of children) {
+      byOrganization.set(c.organizationId, [...(byOrganization.get(c.organizationId) ?? []), c]);
+    }
+    const events = [];
+    for (const [organizationId, kids] of byOrganization) {
+      const targets = await Promise.all(
+        kids.map(async (c) => ({
+          schoolId: c.schoolId,
+          classId: c.class?.id ?? null,
+          groupIds: await this.groupsOf(c),
+        })),
+      );
+      events.push(...(await this.calendarEvents.forFamilies(organizationId, targets, from, to)));
+    }
+    return events.sort((a, b) => a.startsOn.localeCompare(b.startsOn));
+  }
+
+  /** Groupes de l'enfant dans sa classe actuelle. */
+  private async groupsOf(child: PortalChild): Promise<string[]> {
+    if (!child.class) return [];
+    const rows = await this.db.schoolClassGroupStudent.findMany({
+      where: {
+        organizationId: child.organizationId,
+        studentId: child.id,
+        group: { classId: child.class.id, isActive: true },
+      },
+      select: { groupId: true },
+    });
+    return rows.map((r) => r.groupId);
   }
 
   /** Annonces visibles, 50 par page : les plus anciennes restent accessibles par les pages suivantes. */

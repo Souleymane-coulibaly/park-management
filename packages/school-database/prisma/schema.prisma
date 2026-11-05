@@ -221,6 +221,10 @@ enum SchoolNotificationKind {
   REPORT_CARD
   CHARGE_DUE
   CHARGE_OVERDUE
+  TIMETABLE
+  LESSON_CANCELLED
+  EXAM
+  EVENT
 }
 
 enum SchoolSmsStatus {
@@ -277,6 +281,8 @@ model School {
   finance       SchoolFinanceSettings?
   announcements SchoolAnnouncement[]
   sms           SchoolSmsSettings?
+  rooms         SchoolRoom[]
+  events        SchoolCalendarEvent[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, name])
@@ -299,10 +305,13 @@ model SchoolMember {
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 
-  assignments SchoolMemberAssignment[]
-  classes     SchoolClassTeacher[]
-  subjects    SchoolTeacherSubject[]
-  teaching    SchoolTeachingAssignment[]
+  assignments    SchoolMemberAssignment[]
+  classes        SchoolClassTeacher[]
+  subjects       SchoolTeacherSubject[]
+  teaching       SchoolTeachingAssignment[]
+  slots          SchoolTimetableSlot[]
+  unavailability SchoolTeacherUnavailability[]
+  supervisions   SchoolExamSchedule[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, userId])
@@ -471,6 +480,7 @@ model SchoolClass {
   fees         SchoolFee[]
   attendance   SchoolAttendanceSession[]
   publications SchoolResultPublication[]
+  timetables   SchoolTimetable[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, schoolYearId, id])
@@ -503,6 +513,7 @@ model Subject {
   evaluations  SchoolEvaluation[]
   appreciation SchoolAppreciation[]
   quranOf      SchoolQuranSettings[]
+  slots        SchoolTimetableSlot[]
 
   @@unique([organizationId, id])
   // Clé composée (Sprint 4) : évaluation et matière Coran toujours du même établissement.
@@ -895,13 +906,14 @@ model SchoolEvaluation {
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
 
-  year    SchoolYear         @relation(fields: [organizationId, schoolId, schoolYearId], references: [organizationId, schoolId, id], onDelete: Restrict)
-  class   SchoolClass        @relation(fields: [organizationId, schoolYearId, classId], references: [organizationId, schoolYearId, id], onDelete: Restrict)
-  group   SchoolClassGroup?  @relation(fields: [organizationId, classId, groupId], references: [organizationId, classId, id], onDelete: Restrict)
-  subject Subject            @relation(fields: [organizationId, schoolId, subjectId], references: [organizationId, schoolId, id], onDelete: Restrict)
-  period  AcademicPeriod     @relation(fields: [organizationId, schoolYearId, periodId], references: [organizationId, schoolYearId, id], onDelete: Restrict)
-  grades  SchoolGrade[]
-  events  SchoolGradeEvent[]
+  year     SchoolYear          @relation(fields: [organizationId, schoolId, schoolYearId], references: [organizationId, schoolId, id], onDelete: Restrict)
+  class    SchoolClass         @relation(fields: [organizationId, schoolYearId, classId], references: [organizationId, schoolYearId, id], onDelete: Restrict)
+  group    SchoolClassGroup?   @relation(fields: [organizationId, classId, groupId], references: [organizationId, classId, id], onDelete: Restrict)
+  subject  Subject             @relation(fields: [organizationId, schoolId, subjectId], references: [organizationId, schoolId, id], onDelete: Restrict)
+  period   AcademicPeriod      @relation(fields: [organizationId, schoolYearId, periodId], references: [organizationId, schoolYearId, id], onDelete: Restrict)
+  grades   SchoolGrade[]
+  events   SchoolGradeEvent[]
+  schedule SchoolExamSchedule?
 
   @@unique([organizationId, id])
   @@index([organizationId, classId, periodId])
@@ -1564,4 +1576,249 @@ model SchoolSmsMessage {
   @@unique([organizationId, dedupeKey])
   @@index([status, nextAttemptAt])
   @@index([organizationId, schoolId, createdAt])
+}
+
+// ─── Sprint 7 : emplois du temps, salles, calendrier scolaire, examens ───
+
+enum SchoolTimetableStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum SchoolSlotKind {
+  LESSON
+  BREAK
+}
+
+enum SchoolEventCategory {
+  HOLIDAY
+  PUBLIC_HOLIDAY
+  PEDAGOGICAL_DAY
+  EXAM_SESSION
+  PARENT_MEETING
+  FIELD_TRIP
+  SCHOOL_EVENT
+}
+
+enum SchoolEventAudience {
+  SCHOOL
+  CLASSES
+  GROUPS
+}
+
+enum SchoolEventVisibility {
+  STAFF
+  FAMILIES
+}
+
+enum SchoolPlanningStatus {
+  DRAFT
+  PUBLISHED
+  CANCELLED
+}
+
+/// Salle d'un établissement. Facultative : un établissement peut ne gérer aucune salle.
+model SchoolRoom {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  schoolId       String   @db.Uuid
+  name           String
+  nameAr         String?
+  capacity       Int?
+  /// Salle désactivée : conservée pour l'historique, plus proposée aux créneaux et aux examens.
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  school School                @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+  slots  SchoolTimetableSlot[]
+  exams  SchoolExamSchedule[]
+
+  @@unique([organizationId, id])
+  @@unique([schoolId, name])
+}
+
+/// Version de l'emploi du temps d'une classe : semaine type valable sur une période de l'année. Un seul
+/// brouillon par classe (index partiel) ; une version publiée remplace la fin des précédentes.
+model SchoolTimetable {
+  id                String                @id @default(uuid()) @db.Uuid
+  organizationId    String                @db.Uuid
+  schoolId          String                @db.Uuid
+  schoolYearId      String                @db.Uuid
+  classId           String                @db.Uuid
+  label             String?
+  status            SchoolTimetableStatus @default(DRAFT)
+  validFrom         DateTime              @db.Date
+  validTo           DateTime              @db.Date
+  /// Version copiée (duplication d'une semaine type).
+  sourceId          String?               @db.Uuid
+  publishedAt       DateTime?
+  publishedByUserId String?               @db.Uuid
+  archivedAt        DateTime?
+  createdByUserId   String                @db.Uuid
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  class  SchoolClass            @relation(fields: [organizationId, schoolYearId, classId], references: [organizationId, schoolYearId, id], onDelete: Restrict)
+  slots  SchoolTimetableSlot[]
+  events SchoolTimetableEvent[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, classId, status])
+  @@index([organizationId, schoolId, status, validFrom])
+}
+
+/// Créneau d'une semaine type : cours (matière, enseignant, groupe et salle facultatifs) ou pause.
+model SchoolTimetableSlot {
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @db.Uuid
+  timetableId    String         @db.Uuid
+  /// Jour ISO : 1 = lundi … 7 = dimanche.
+  weekday        Int
+  /// Minutes depuis minuit, fin exclue.
+  startMinute    Int
+  endMinute      Int
+  kind           SchoolSlotKind
+  subjectId      String?        @db.Uuid
+  memberId       String?        @db.Uuid
+  groupId        String?        @db.Uuid
+  roomId         String?        @db.Uuid
+  label          String?
+  labelAr        String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  timetable  SchoolTimetable         @relation(fields: [organizationId, timetableId], references: [organizationId, id], onDelete: Cascade)
+  subject    Subject?                @relation(fields: [organizationId, subjectId], references: [organizationId, id], onDelete: Restrict)
+  member     SchoolMember?           @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Restrict)
+  room       SchoolRoom?             @relation(fields: [organizationId, roomId], references: [organizationId, id], onDelete: Restrict)
+  exceptions SchoolLessonException[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, timetableId])
+  @@index([organizationId, memberId, weekday])
+  @@index([organizationId, roomId, weekday])
+}
+
+/// Historique d'une version, en ajout seul : création, créneaux, publication, annulations.
+model SchoolTimetableEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  timetableId    String   @db.Uuid
+  action         String
+  details        Json     @default("{}")
+  actorUserId    String   @db.Uuid
+  createdAt      DateTime @default(now())
+
+  timetable SchoolTimetable @relation(fields: [organizationId, timetableId], references: [organizationId, id], onDelete: Cascade)
+
+  @@index([organizationId, timetableId, createdAt])
+}
+
+/// Cours annulé à une date précise (une occurrence d'un créneau publié).
+model SchoolLessonException {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  slotId          String   @db.Uuid
+  date            DateTime @db.Date
+  reason          String
+  createdByUserId String   @db.Uuid
+  createdAt       DateTime @default(now())
+
+  slot SchoolTimetableSlot @relation(fields: [organizationId, slotId], references: [organizationId, id], onDelete: Cascade)
+
+  @@unique([slotId, date])
+  @@index([organizationId, date])
+}
+
+/// Indisponibilité hebdomadaire d'un enseignant dans un établissement : aucun cours n'y est programmé.
+model SchoolTeacherUnavailability {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  schoolId        String   @db.Uuid
+  memberId        String   @db.Uuid
+  weekday         Int
+  startMinute     Int
+  endMinute       Int
+  reason          String?
+  createdByUserId String   @db.Uuid
+  createdAt       DateTime @default(now())
+
+  member SchoolMember @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Restrict)
+
+  @@index([organizationId, schoolId, memberId])
+}
+
+/// Événement du calendrier scolaire. Vacances, jours fériés et journées pédagogiques suspendent les cours.
+model SchoolCalendarEvent {
+  id              String                @id @default(uuid()) @db.Uuid
+  organizationId  String                @db.Uuid
+  schoolId        String                @db.Uuid
+  category        SchoolEventCategory
+  title           String
+  titleAr         String?
+  description     String?
+  descriptionAr   String?
+  startsOn        DateTime              @db.Date
+  endsOn          DateTime              @db.Date
+  startMinute     Int?
+  endMinute       Int?
+  audience        SchoolEventAudience   @default(SCHOOL)
+  visibility      SchoolEventVisibility @default(FAMILIES)
+  status          SchoolPlanningStatus  @default(DRAFT)
+  /// Événement important : les familles concernées sont notifiées à la publication.
+  important       Boolean               @default(false)
+  publishedAt     DateTime?
+  createdByUserId String                @db.Uuid
+  updatedByUserId String?               @db.Uuid
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  school  School                      @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+  targets SchoolCalendarEventTarget[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, schoolId, startsOn])
+}
+
+/// Classe ou groupe visé par un événement (une seule cible par ligne).
+model SchoolCalendarEventTarget {
+  id             String  @id @default(uuid()) @db.Uuid
+  organizationId String  @db.Uuid
+  eventId        String  @db.Uuid
+  classId        String? @db.Uuid
+  groupId        String? @db.Uuid
+
+  event SchoolCalendarEvent @relation(fields: [organizationId, eventId], references: [organizationId, id], onDelete: Cascade)
+
+  @@index([organizationId, eventId])
+  @@index([organizationId, classId])
+}
+
+/// Programmation d'un examen : date, heure, durée, salle et surveillant d'une évaluation du Sprint 4. Les
+/// notes restent dans l'évaluation ; aucun second système de notation.
+model SchoolExamSchedule {
+  id                 String               @id @default(uuid()) @db.Uuid
+  organizationId     String               @db.Uuid
+  schoolId           String               @db.Uuid
+  evaluationId       String               @unique @db.Uuid
+  date               DateTime             @db.Date
+  startMinute        Int
+  durationMinutes    Int
+  roomId             String?              @db.Uuid
+  supervisorMemberId String?              @db.Uuid
+  status             SchoolPlanningStatus @default(DRAFT)
+  publishedAt        DateTime?
+  createdByUserId    String               @db.Uuid
+  updatedByUserId    String?              @db.Uuid
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+
+  evaluation SchoolEvaluation @relation(fields: [organizationId, evaluationId], references: [organizationId, id], onDelete: Restrict)
+  room       SchoolRoom?      @relation(fields: [organizationId, roomId], references: [organizationId, id], onDelete: Restrict)
+  supervisor SchoolMember?    @relation(fields: [organizationId, supervisorMemberId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, evaluationId])
+  @@index([organizationId, schoolId, date])
 }

@@ -159,6 +159,28 @@ export class SchoolNotificationsService implements OnModuleInit, OnModuleDestroy
   }
 
   /** Notifications d'une annonce, pour les comptes déjà résolus par le service des annonces. */
+  /**
+   * Élèves que le portail montre dans une classe : inscription validée dans la classe pour l'année en
+   * cours ; pour un groupe, membres d'un groupe actif. Les destinataires d'un fait de planning ne sont
+   * jamais ceux d'une inscription future ou d'un groupe que le portail n'affiche pas.
+   */
+  async portalStudents(
+    db: Db,
+    organizationId: string,
+    classId: string,
+    groupId: string | null,
+  ): Promise<string[]> {
+    const rows = await db.schoolStudent.findMany({
+      where: {
+        organizationId,
+        enrollments: { some: { classId, status: 'VALIDATED', year: { status: 'ACTIVE' } } },
+        ...(groupId ? { groups: { some: { groupId, group: { isActive: true } } } } : {}),
+      },
+      select: { id: true },
+    });
+    return rows.map((r) => r.id);
+  }
+
   async notifyUsers(
     db: Db,
     rows: {

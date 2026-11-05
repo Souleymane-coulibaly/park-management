@@ -25,3 +25,4 @@ export * from './school-assessment';
 export * from './school-quran';
 export * from './school-finance';
 export * from './school-portal';
+export * from './school-planning';

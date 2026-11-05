@@ -93,6 +93,11 @@ export const SCHOOL_NOTIFICATION_KINDS = [
   'REPORT_CARD',
   'CHARGE_DUE',
   'CHARGE_OVERDUE',
+  // Sprint 7 : emploi du temps publié ou modifié, cours annulé, examen programmé ou déplacé, événement.
+  'TIMETABLE',
+  'LESSON_CANCELLED',
+  'EXAM',
+  'EVENT',
 ] as const;
 export type SchoolNotificationKind = (typeof SCHOOL_NOTIFICATION_KINDS)[number];
 
@@ -113,6 +118,12 @@ export function portalNotificationHref(
     case 'CHARGE_DUE':
     case 'CHARGE_OVERDUE':
       return `${child}/finances`;
+    case 'TIMETABLE':
+    case 'LESSON_CANCELLED':
+    case 'EXAM':
+      return `${child}/planning`;
+    case 'EVENT':
+      return '/parents/calendrier';
   }
 }
 

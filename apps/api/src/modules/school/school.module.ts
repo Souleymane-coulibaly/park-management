@@ -6,6 +6,7 @@ import { SchoolAnnouncementsService } from './school-announcements.service';
 import { SchoolAssessmentController, SchoolQuranController } from './school-assessment.controller';
 import { SchoolAssessmentService } from './school-assessment.service';
 import { SchoolAttendanceService } from './school-attendance.service';
+import { SchoolCalendarService } from './school-calendar.service';
 import {
   SchoolAttendanceController,
   SchoolCommunicationController,
@@ -13,6 +14,7 @@ import {
 } from './school-communication.controller';
 import { SchoolDocumentsService } from './school-documents.service';
 import { SchoolEnrollmentsService } from './school-enrollments.service';
+import { SchoolExamsService } from './school-exams.service';
 import { SchoolFinanceController } from './school-finance.controller';
 import { SchoolFinanceService } from './school-finance.service';
 import { SchoolGuardiansService } from './school-guardians.service';
@@ -20,6 +22,7 @@ import { SchoolImportsService } from './school-imports.service';
 import { SchoolMembersService } from './school-members.service';
 import { SchoolNotificationsService } from './school-notifications.service';
 import { SchoolPaymentsService } from './school-payments.service';
+import { SchoolCalendarController, SchoolPlanningController } from './school-planning.controller';
 import { SchoolPortalAccountsService } from './school-portal-accounts.service';
 import {
   SchoolPortalActivationController,
@@ -31,12 +34,14 @@ import { SchoolPrismaService } from './school-prisma.service';
 import { SchoolPublicationsService } from './school-publications.service';
 import { SchoolQuranService } from './school-quran.service';
 import { SchoolReportCardsService } from './school-report-cards.service';
+import { SchoolRoomsService } from './school-rooms.service';
 import { SCHOOL_SMS_PROVIDER, SimulatedSmsProvider } from './school-sms.provider';
 import { SchoolSmsService } from './school-sms.service';
 import { SchoolFilesController, SchoolStudentsController } from './school-students.controller';
 import { SchoolStudentsService } from './school-students.service';
 import { SchoolTeachingController } from './school-teaching.controller';
 import { SchoolTeachingService } from './school-teaching.service';
+import { SchoolTimetablesService } from './school-timetables.service';
 import { SchoolController, SchoolPlatformController } from './school.controllers';
 import { SchoolService } from './school.service';
 
@@ -60,6 +65,8 @@ import { SchoolService } from './school.service';
     SchoolCommunicationController,
     SchoolPortalActivationController,
     SchoolPortalController,
+    SchoolPlanningController,
+    SchoolCalendarController,
   ],
   providers: [
     SchoolPrismaService,
@@ -88,6 +95,11 @@ import { SchoolService } from './school.service';
     SchoolAnnouncementsService,
     SchoolPublicationsService,
     SchoolPortalService,
+    // Sprint 7 : salles, emplois du temps, calendrier scolaire, examens.
+    SchoolRoomsService,
+    SchoolCalendarService,
+    SchoolExamsService,
+    SchoolTimetablesService,
   ],
 })
 export class SchoolModule {}
