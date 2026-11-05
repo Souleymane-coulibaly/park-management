@@ -24,6 +24,7 @@ export interface SchoolSummary {
   type: SchoolType;
   defaultLocale: SchoolLocale;
   isActive: boolean;
+  timezone: string;
 }
 
 export interface SchoolContextView {

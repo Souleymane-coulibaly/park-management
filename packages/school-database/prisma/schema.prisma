@@ -183,6 +183,54 @@ enum SchoolQuranStatus {
   TO_REVIEW
 }
 
+enum SchoolPortalAccountStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum SchoolAttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+
+enum SchoolJustificationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+}
+
+enum SchoolAnnouncementAudience {
+  SCHOOL
+  CLASS
+  STUDENTS
+  GUARDIANS
+}
+
+enum SchoolAnnouncementStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum SchoolNotificationKind {
+  ANNOUNCEMENT
+  ABSENCE
+  LATE
+  REPORT_CARD
+  CHARGE_DUE
+  CHARGE_OVERDUE
+}
+
+enum SchoolSmsStatus {
+  PENDING
+  SENT
+  FAILED
+  /// Destinataire devenu inéligible avant l'envoi (lien retiré, SMS refusés, numéro changé).
+  CANCELLED
+}
+
 /// Groupe scolaire : un par client contractant, y compris pour une école seule.
 model SchoolGroup {
   id             String   @id @default(uuid()) @db.Uuid
@@ -213,20 +261,22 @@ model School {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  group       SchoolGroup              @relation(fields: [organizationId, groupId], references: [organizationId, id], onDelete: Restrict)
-  assignments SchoolMemberAssignment[]
-  years       SchoolYear[]
-  tracks      PedagogicalTrack[]
-  cycles      Cycle[]
-  subjects    Subject[]
-  policies    GradingPolicyVersion[]
-  students    SchoolStudent[]
-  guardians   SchoolGuardian[]
-  enrollments SchoolEnrollment[]
-  settings    SchoolStudentSettings?
-  importJobs  SchoolImportJob[]
-  quran       SchoolQuranSettings?
-  finance     SchoolFinanceSettings?
+  group         SchoolGroup              @relation(fields: [organizationId, groupId], references: [organizationId, id], onDelete: Restrict)
+  assignments   SchoolMemberAssignment[]
+  years         SchoolYear[]
+  tracks        PedagogicalTrack[]
+  cycles        Cycle[]
+  subjects      Subject[]
+  policies      GradingPolicyVersion[]
+  students      SchoolStudent[]
+  guardians     SchoolGuardian[]
+  enrollments   SchoolEnrollment[]
+  settings      SchoolStudentSettings?
+  importJobs    SchoolImportJob[]
+  quran         SchoolQuranSettings?
+  finance       SchoolFinanceSettings?
+  announcements SchoolAnnouncement[]
+  sms           SchoolSmsSettings?
 
   @@unique([organizationId, id])
   @@unique([organizationId, name])
@@ -326,11 +376,12 @@ model AcademicPeriod {
   endsOn         DateTime         @db.Date
   createdAt      DateTime         @default(now())
 
-  year         SchoolYear               @relation(fields: [organizationId, schoolYearId], references: [organizationId, id], onDelete: Restrict)
+  year         SchoolYear                @relation(fields: [organizationId, schoolYearId], references: [organizationId, id], onDelete: Restrict)
   evaluations  SchoolEvaluation[]
   validations  SchoolResultValidation[]
   appreciation SchoolAppreciation[]
   comments     SchoolReportComment[]
+  publications SchoolResultPublication[]
 
   @@unique([schoolYearId, position])
   // Clé composée (Sprint 4) : une évaluation ne peut viser qu'une période de l'année de sa classe.
@@ -418,6 +469,8 @@ model SchoolClass {
   appreciation SchoolAppreciation[]
   comments     SchoolReportComment[]
   fees         SchoolFee[]
+  attendance   SchoolAttendanceSession[]
+  publications SchoolResultPublication[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, schoolYearId, id])
@@ -546,22 +599,24 @@ model SchoolStudent {
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
 
-  school       School                    @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
-  guardians    SchoolStudentGuardian[]
-  enrollments  SchoolEnrollment[]
-  documents    SchoolStudentDocument[]
-  events       SchoolStudentEvent[]
-  assignments  SchoolClassAssignment[]
-  groups       SchoolClassGroupStudent[]
-  grades       SchoolGrade[]
-  gradeEvents  SchoolGradeEvent[]
-  appreciation SchoolAppreciation[]
-  comments     SchoolReportComment[]
-  quran        SchoolQuranProgress[]
-  quranEvents  SchoolQuranEvaluation[]
-  charges      SchoolCharge[]
-  benefits     SchoolBenefit[]
-  payments     SchoolPayment[]
+  school         School                       @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+  guardians      SchoolStudentGuardian[]
+  enrollments    SchoolEnrollment[]
+  documents      SchoolStudentDocument[]
+  events         SchoolStudentEvent[]
+  assignments    SchoolClassAssignment[]
+  groups         SchoolClassGroupStudent[]
+  grades         SchoolGrade[]
+  gradeEvents    SchoolGradeEvent[]
+  appreciation   SchoolAppreciation[]
+  comments       SchoolReportComment[]
+  quran          SchoolQuranProgress[]
+  quranEvents    SchoolQuranEvaluation[]
+  charges        SchoolCharge[]
+  benefits       SchoolBenefit[]
+  payments       SchoolPayment[]
+  attendance     SchoolAttendanceRecord[]
+  justifications SchoolAbsenceJustification[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, matriculeScope, matricule])
@@ -570,7 +625,7 @@ model SchoolStudent {
   @@index([organizationId, identityKey])
 }
 
-/// Responsable légal. L'e-mail reste facultatif ; `portalUserId` prépare le futur portail parents.
+/// Responsable légal. L'e-mail reste facultatif ; `portalUserId` : compte du portail parents (Sprint 6).
 model SchoolGuardian {
   id             String   @id @default(uuid()) @db.Uuid
   organizationId String   @db.Uuid
@@ -585,12 +640,14 @@ model SchoolGuardian {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  school School                  @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
-  links  SchoolStudentGuardian[]
+  school      School                     @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+  links       SchoolStudentGuardian[]
+  invitations SchoolGuardianInvitation[]
 
   @@unique([organizationId, id])
   @@index([organizationId, schoolId])
   @@index([organizationId, phone])
+  @@index([portalUserId])
 }
 
 /// Un élève a plusieurs responsables, un responsable plusieurs enfants ; chaque droit est propre au lien.
@@ -1007,6 +1064,9 @@ model SchoolQuranEvaluation {
   status          SchoolQuranStatus
   evaluatedOn     DateTime          @db.Date
   remark          String?
+  /// Observation autorisée pour les familles (Sprint 6) : sans cette autorisation, le portail parents ne
+  /// montre que la date, la sourate et le statut.
+  remarkShared    Boolean           @default(false)
   /// Ordre d'enregistrement pour l'élève et la sourate, attribué sous le verrou de l'élève : départage
   /// deux évaluations du même jour sans dépendre de l'horloge de transaction.
   sequence        Int
@@ -1246,4 +1306,262 @@ model SchoolPaymentAllocation {
 
   @@unique([paymentId, chargeId])
   @@index([organizationId, chargeId])
+}
+
+// ─── Sprint 6 : portail parents, présences, communication et notifications ───
+
+/// Accès d'un compte Suite (sans adhésion) au portail parents d'une organisation. Révoqué : la session
+/// n'est plus acceptée à la requête suivante. Les enfants visibles viennent des liens responsables.
+model SchoolPortalAccount {
+  id              String                    @id @default(uuid()) @db.Uuid
+  organizationId  String                    @db.Uuid
+  userId          String                    @db.Uuid
+  status          SchoolPortalAccountStatus @default(ACTIVE)
+  activatedAt     DateTime                  @default(now())
+  revokedAt       DateTime?
+  revokedByUserId String?                   @db.Uuid
+  revokeReason    String?
+
+  @@unique([organizationId, userId])
+  @@index([userId, status])
+}
+
+/// Invitation remise par l'établissement : jeton haché, usage unique, expiration, révocable.
+model SchoolGuardianInvitation {
+  id              String    @id @default(uuid()) @db.Uuid
+  organizationId  String    @db.Uuid
+  schoolId        String    @db.Uuid
+  guardianId      String    @db.Uuid
+  tokenHash       String    @unique
+  expiresAt       DateTime
+  usedAt          DateTime?
+  revokedAt       DateTime?
+  createdByUserId String    @db.Uuid
+  createdAt       DateTime  @default(now())
+
+  guardian SchoolGuardian @relation(fields: [organizationId, guardianId], references: [organizationId, id], onDelete: Restrict)
+
+  @@index([organizationId, guardianId])
+}
+
+/// Appel d'une classe pour un jour et une séance : jamais deux appels pour la même séance.
+model SchoolAttendanceSession {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  schoolId       String   @db.Uuid
+  schoolYearId   String   @db.Uuid
+  classId        String   @db.Uuid
+  date           DateTime @db.Date
+  slot           String
+  takenByUserId  String   @db.Uuid
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  class   SchoolClass              @relation(fields: [organizationId, schoolYearId, classId], references: [organizationId, schoolYearId, id], onDelete: Restrict)
+  records SchoolAttendanceRecord[]
+
+  @@unique([organizationId, id])
+  @@unique([classId, date, slot])
+  @@index([organizationId, schoolId, date])
+}
+
+model SchoolAttendanceRecord {
+  id              String                 @id @default(uuid()) @db.Uuid
+  organizationId  String                 @db.Uuid
+  sessionId       String                 @db.Uuid
+  studentId       String                 @db.Uuid
+  status          SchoolAttendanceStatus
+  minutesLate     Int?
+  note            String?
+  updatedByUserId String                 @db.Uuid
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  session SchoolAttendanceSession @relation(fields: [organizationId, sessionId], references: [organizationId, id], onDelete: Restrict)
+  student SchoolStudent           @relation(fields: [organizationId, studentId], references: [organizationId, id], onDelete: Restrict)
+  events  SchoolAttendanceEvent[]
+
+  @@unique([organizationId, id])
+  @@unique([sessionId, studentId])
+  @@index([organizationId, studentId])
+}
+
+/// Historique en ajout seul : chaque saisie et chaque correction (motif obligatoire pour une correction),
+/// avec les valeurs avant et après de tous les champs corrigibles (statut, minutes de retard, note).
+model SchoolAttendanceEvent {
+  id              String                  @id @default(uuid()) @db.Uuid
+  organizationId  String                  @db.Uuid
+  recordId        String                  @db.Uuid
+  fromStatus      SchoolAttendanceStatus?
+  toStatus        SchoolAttendanceStatus
+  fromMinutesLate Int?
+  toMinutesLate   Int?
+  fromNote        String?
+  toNote          String?
+  reason          String?
+  actorUserId     String                  @db.Uuid
+  createdAt       DateTime                @default(now())
+
+  record SchoolAttendanceRecord @relation(fields: [organizationId, recordId], references: [organizationId, id], onDelete: Restrict)
+
+  @@index([organizationId, recordId])
+}
+
+/// Motif d'absence transmis par un responsable (soumis à validation) ou saisi par l'établissement.
+model SchoolAbsenceJustification {
+  id                String                    @id @default(uuid()) @db.Uuid
+  organizationId    String                    @db.Uuid
+  schoolId          String                    @db.Uuid
+  studentId         String                    @db.Uuid
+  fromDate          DateTime                  @db.Date
+  toDate            DateTime                  @db.Date
+  reason            String
+  byGuardian        Boolean
+  submittedByUserId String                    @db.Uuid
+  status            SchoolJustificationStatus @default(PENDING)
+  reviewedByUserId  String?                   @db.Uuid
+  reviewedAt        DateTime?
+  reviewNote        String?
+  createdAt         DateTime                  @default(now())
+
+  student SchoolStudent @relation(fields: [organizationId, studentId], references: [organizationId, id], onDelete: Restrict)
+
+  @@index([organizationId, schoolId, status])
+  @@index([organizationId, studentId])
+}
+
+/// Résultats validés d'une classe publiés aux familles pour une période ; liés à une validation précise,
+/// ils disparaissent du portail si les résultats sont rouverts ou la publication retirée.
+model SchoolResultPublication {
+  id                String    @id @default(uuid()) @db.Uuid
+  organizationId    String    @db.Uuid
+  schoolId          String    @db.Uuid
+  schoolYearId      String    @db.Uuid
+  classId           String    @db.Uuid
+  periodId          String    @db.Uuid
+  validationId      String    @db.Uuid
+  publishedByUserId String    @db.Uuid
+  publishedAt       DateTime  @default(now())
+  withdrawnAt       DateTime?
+  withdrawnByUserId String?   @db.Uuid
+
+  class  SchoolClass    @relation(fields: [organizationId, schoolYearId, classId], references: [organizationId, schoolYearId, id], onDelete: Restrict)
+  period AcademicPeriod @relation(fields: [organizationId, schoolYearId, periodId], references: [organizationId, schoolYearId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@index([organizationId, classId, periodId])
+}
+
+model SchoolAnnouncement {
+  id                String                     @id @default(uuid()) @db.Uuid
+  organizationId    String                     @db.Uuid
+  schoolId          String                     @db.Uuid
+  title             String
+  body              String
+  titleAr           String?
+  bodyAr            String?
+  audience          SchoolAnnouncementAudience
+  status            SchoolAnnouncementStatus   @default(DRAFT)
+  expiresOn         DateTime?                  @db.Date
+  createdByUserId   String                     @db.Uuid
+  publishedByUserId String?                    @db.Uuid
+  publishedAt       DateTime?
+  archivedAt        DateTime?
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+
+  school  School                     @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+  targets SchoolAnnouncementTarget[]
+  events  SchoolAnnouncementEvent[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, schoolId, status])
+}
+
+/// Destinataire d'une annonce ciblée : une classe, un élève ou un responsable (selon le public).
+model SchoolAnnouncementTarget {
+  id             String  @id @default(uuid()) @db.Uuid
+  organizationId String  @db.Uuid
+  announcementId String  @db.Uuid
+  classId        String? @db.Uuid
+  studentId      String? @db.Uuid
+  guardianId     String? @db.Uuid
+
+  announcement SchoolAnnouncement @relation(fields: [organizationId, announcementId], references: [organizationId, id], onDelete: Restrict)
+
+  @@index([organizationId, announcementId])
+  @@index([organizationId, classId])
+  @@index([organizationId, studentId])
+  @@index([organizationId, guardianId])
+}
+
+/// Historique des publications : création, modification, publication, archivage.
+model SchoolAnnouncementEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  announcementId String   @db.Uuid
+  action         String
+  actorUserId    String   @db.Uuid
+  createdAt      DateTime @default(now())
+
+  announcement SchoolAnnouncement @relation(fields: [organizationId, announcementId], references: [organizationId, id], onDelete: Restrict)
+
+  @@index([organizationId, announcementId])
+}
+
+/// Notification interne d'un compte du portail ; `dedupeKey` empêche tout doublon pour un même fait.
+model SchoolNotification {
+  id             String                 @id @default(uuid()) @db.Uuid
+  organizationId String                 @db.Uuid
+  schoolId       String                 @db.Uuid
+  userId         String                 @db.Uuid
+  studentId      String?                @db.Uuid
+  kind           SchoolNotificationKind
+  resourceId     String?                @db.Uuid
+  params         Json                   @default("{}")
+  dedupeKey      String
+  readAt         DateTime?
+  createdAt      DateTime               @default(now())
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, readAt, createdAt])
+  @@index([organizationId, schoolId])
+}
+
+/// SMS activés ou non par l'établissement (désactivés par défaut).
+model SchoolSmsSettings {
+  schoolId        String   @id @db.Uuid
+  organizationId  String   @db.Uuid
+  enabled         Boolean  @default(false)
+  updatedByUserId String?  @db.Uuid
+  updatedAt       DateTime @updatedAt
+
+  school School @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, schoolId])
+}
+
+/// File d'envoi et historique des SMS : tentatives bornées, prochaine tentative, dernière erreur.
+model SchoolSmsMessage {
+  id                String          @id @default(uuid()) @db.Uuid
+  organizationId    String          @db.Uuid
+  schoolId          String          @db.Uuid
+  /// Responsable et élève concernés : éligibilité revérifiée juste avant l'envoi.
+  guardianId        String?         @db.Uuid
+  studentId         String?         @db.Uuid
+  phone             String
+  body              String
+  kind              String
+  dedupeKey         String
+  status            SchoolSmsStatus @default(PENDING)
+  attempts          Int             @default(0)
+  nextAttemptAt     DateTime        @default(now())
+  lastError         String?
+  providerMessageId String?
+  createdAt         DateTime        @default(now())
+  sentAt            DateTime?
+
+  @@unique([organizationId, dedupeKey])
+  @@index([status, nextAttemptAt])
+  @@index([organizationId, schoolId, createdAt])
 }

@@ -39,6 +39,7 @@ import {
   StudentFinanceQueryDto,
   UpdateFeeDto,
 } from './school-finance.dto';
+import { download } from './school-download';
 import { SchoolFinanceService } from './school-finance.service';
 import { SchoolPaymentsService } from './school-payments.service';
 import { SchoolQueryDto } from './school.dto';
@@ -48,17 +49,6 @@ const SETTINGS = 'school.finance.settings';
 const BENEFITS = 'school.finance.benefits';
 const CANCEL = 'school.finance.cancel';
 const REPORTS = 'school.finance.reports';
-
-/** Fichier remis au navigateur, jamais mis en cache : aucune adresse directe n'existe. */
-function download(res: Response, body: Buffer, mimeType: string, fileName: string) {
-  res.set({
-    'Content-Type': mimeType,
-    'Content-Disposition': `attachment; filename="${fileName}"`,
-    'Cache-Control': 'private, no-store',
-    'X-Content-Type-Options': 'nosniff',
-  });
-  return new StreamableFile(body);
-}
 
 /**
  * Gestion financière (Sprint 5). Permission vérifiée par route ; l'encaissement contrôle en plus, côté

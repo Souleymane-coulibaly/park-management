@@ -1,10 +1,17 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { SchoolContext } from './school-access';
 import type { ClassPeriodQueryDto, ReportCardQueryDto } from './school-assessment.dto';
-import { SchoolAssessmentService } from './school-assessment.service';
+import {
+  type ClassPeriodResults,
+  type ClassScope,
+  SchoolAssessmentService,
+} from './school-assessment.service';
+import type { Prisma } from '@ocall/school-database';
 import { type ReportCardView, renderReportCards } from './school-report-card.pdf';
 import { SchoolStudentsService } from './school-students.service';
 import { SchoolService } from './school.service';
+
+type Tx = Prisma.TransactionClient;
 
 const NOT_FOUND = { code: 'SCHOOL_RESOURCE_NOT_FOUND', message: 'Élément introuvable.' };
 
@@ -69,87 +76,7 @@ export class SchoolReportCardsService {
       const full = await this.assessment.compute(tx, ctx, scope, q.periodId);
       const roster = q.studentId ? full.roster.filter((s) => s.id === q.studentId) : full.roster;
       if (q.studentId && roster.length === 0) throw new NotFoundException(NOT_FOUND);
-      const school = await tx.school.findUniqueOrThrow({
-        where: { id: scope.schoolId },
-        select: {
-          name: true,
-          nameAr: true,
-          address: true,
-          phone: true,
-          email: true,
-          timezone: true,
-          defaultLocale: true,
-        },
-      });
-      const year = await tx.schoolYear.findUniqueOrThrow({
-        where: { id: scope.schoolYearId },
-        select: { label: true },
-      });
-      const appreciations = await tx.schoolAppreciation.findMany({
-        where: { organizationId: ctx.organizationId, classId: scope.id, periodId: q.periodId },
-        select: { subjectId: true, studentId: true, text: true, textAr: true },
-      });
-      const comments = await tx.schoolReportComment.findMany({
-        where: { organizationId: ctx.organizationId, classId: scope.id, periodId: q.periodId },
-        select: { studentId: true, text: true, textAr: true },
-      });
-      const appreciation = new Map(appreciations.map((a) => [`${a.subjectId}:${a.studentId}`, a]));
-      const comment = new Map(comments.map((c) => [c.studentId, c]));
-      const results = new Map(full.results.students.map((r) => [r.studentId, r]));
-      const classAverages = new Map(
-        full.results.subjects.map((s) => [s.subjectId, s.classAverage]),
-      );
-      const ranked = full.results.students.filter((s) => s.rank !== null).length;
-      const issuedOn = today(school.timezone);
-      return roster.map((student): ReportCardView => {
-        const r = results.get(student.id);
-        const subjectResults = new Map((r?.subjects ?? []).map((s) => [s.subjectId, s]));
-        return {
-          locale: school.defaultLocale,
-          school: {
-            name: school.name,
-            nameAr: school.nameAr,
-            address: school.address,
-            phone: school.phone,
-            email: school.email,
-          },
-          yearLabel: year.label,
-          period: { label: full.period.label, labelAr: full.period.labelAr },
-          student: {
-            lastName: student.lastName,
-            firstName: student.firstName,
-            lastNameAr: student.lastNameAr,
-            firstNameAr: student.firstNameAr,
-            matricule: student.matricule,
-            birthDate: student.birthDate.toISOString().slice(0, 10),
-          },
-          class: { name: scope.name, nameAr: scope.nameAr, size: full.roster.length },
-          scale: full.rules.scale,
-          decimals: full.rules.decimals,
-          subjects: full.subjects.map((s) => {
-            const a = appreciation.get(`${s.id}:${student.id}`);
-            return {
-              name: s.name,
-              nameAr: s.nameAr,
-              coefficient: s.coefficient,
-              average: subjectResults.get(s.id)?.average ?? null,
-              classAverage: classAverages.get(s.id) ?? null,
-              appreciation: a?.text || null,
-              appreciationAr: a?.textAr ?? null,
-            };
-          }),
-          generalAverage: r?.generalAverage ?? null,
-          classAverage: full.results.classAverage,
-          rankingEnabled: full.results.rankingEnabled,
-          rank: r?.rank ?? null,
-          tied: r?.tied ?? false,
-          rankedCount: ranked,
-          directionComment: comment.get(student.id)?.text || null,
-          directionCommentAr: comment.get(student.id)?.textAr ?? null,
-          issuedOn,
-          provisional: !full.validation,
-        };
-      });
+      return this.views(tx, ctx.organizationId, scope, q.periodId, full, roster);
     });
     const file = await renderReportCards(views);
     await this.school.log(ctx, 'school.report_cards_generated', 'SchoolClass', scope.id, {
@@ -161,6 +88,99 @@ export class SchoolReportCardsService {
       ? `bulletin-${views[0]?.student.matricule ?? 'eleve'}`
       : 'bulletins-classe';
     return { file, filename: `${base.replace(/[^A-Za-z0-9_-]/g, '_')}.pdf` };
+  }
+
+  /**
+   * Contenu des bulletins d'élèves d'une classe pour une période, à partir de résultats déjà calculés
+   * (figés s'ils sont validés). Partagé par l'édition du personnel et le portail parents (Sprint 6).
+   */
+  async views(
+    tx: Tx,
+    organizationId: string,
+    scope: ClassScope,
+    periodId: string,
+    full: ClassPeriodResults,
+    roster: ClassPeriodResults['roster'],
+  ): Promise<ReportCardView[]> {
+    const school = await tx.school.findUniqueOrThrow({
+      where: { id: scope.schoolId },
+      select: {
+        name: true,
+        nameAr: true,
+        address: true,
+        phone: true,
+        email: true,
+        timezone: true,
+        defaultLocale: true,
+      },
+    });
+    const year = await tx.schoolYear.findUniqueOrThrow({
+      where: { id: scope.schoolYearId },
+      select: { label: true },
+    });
+    const appreciations = await tx.schoolAppreciation.findMany({
+      where: { organizationId: organizationId, classId: scope.id, periodId: periodId },
+      select: { subjectId: true, studentId: true, text: true, textAr: true },
+    });
+    const comments = await tx.schoolReportComment.findMany({
+      where: { organizationId: organizationId, classId: scope.id, periodId: periodId },
+      select: { studentId: true, text: true, textAr: true },
+    });
+    const appreciation = new Map(appreciations.map((a) => [`${a.subjectId}:${a.studentId}`, a]));
+    const comment = new Map(comments.map((c) => [c.studentId, c]));
+    const results = new Map(full.results.students.map((r) => [r.studentId, r]));
+    const classAverages = new Map(full.results.subjects.map((s) => [s.subjectId, s.classAverage]));
+    const ranked = full.results.students.filter((s) => s.rank !== null).length;
+    const issuedOn = today(school.timezone);
+    return roster.map((student): ReportCardView => {
+      const r = results.get(student.id);
+      const subjectResults = new Map((r?.subjects ?? []).map((s) => [s.subjectId, s]));
+      return {
+        locale: school.defaultLocale,
+        school: {
+          name: school.name,
+          nameAr: school.nameAr,
+          address: school.address,
+          phone: school.phone,
+          email: school.email,
+        },
+        yearLabel: year.label,
+        period: { label: full.period.label, labelAr: full.period.labelAr },
+        student: {
+          lastName: student.lastName,
+          firstName: student.firstName,
+          lastNameAr: student.lastNameAr,
+          firstNameAr: student.firstNameAr,
+          matricule: student.matricule,
+          birthDate: student.birthDate.toISOString().slice(0, 10),
+        },
+        class: { name: scope.name, nameAr: scope.nameAr, size: full.roster.length },
+        scale: full.rules.scale,
+        decimals: full.rules.decimals,
+        subjects: full.subjects.map((s) => {
+          const a = appreciation.get(`${s.id}:${student.id}`);
+          return {
+            name: s.name,
+            nameAr: s.nameAr,
+            coefficient: s.coefficient,
+            average: subjectResults.get(s.id)?.average ?? null,
+            classAverage: classAverages.get(s.id) ?? null,
+            appreciation: a?.text || null,
+            appreciationAr: a?.textAr ?? null,
+          };
+        }),
+        generalAverage: r?.generalAverage ?? null,
+        classAverage: full.results.classAverage,
+        rankingEnabled: full.results.rankingEnabled,
+        rank: r?.rank ?? null,
+        tied: r?.tied ?? false,
+        rankedCount: ranked,
+        directionComment: comment.get(student.id)?.text || null,
+        directionCommentAr: comment.get(student.id)?.textAr ?? null,
+        issuedOn,
+        provisional: !full.validation,
+      };
+    });
   }
 }
 

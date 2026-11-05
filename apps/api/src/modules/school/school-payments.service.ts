@@ -326,6 +326,16 @@ export class SchoolPaymentsService {
   async receipt(ctx: SchoolContext, id: string): Promise<{ file: Buffer; filename: string }> {
     const found = await this.findPayment(ctx, id);
     if (found.kind !== 'PAYMENT' || !found.receiptNumber) throw new NotFoundException(NOT_FOUND);
+    const receipt = await this.receiptFile(id);
+    await this.school.log(ctx, 'school.receipt_generated', 'SchoolPayment', id, {});
+    return receipt;
+  }
+
+  /**
+   * PDF du reçu d'un encaissement, sans contrôle d'accès : l'appelant a vérifié le droit (garde du
+   * personnel, ou lien parent-enfant du portail parents).
+   */
+  async receiptFile(id: string): Promise<{ file: Buffer; filename: string }> {
     // Une seule lecture : identité figée à l'encaissement, lignes figées, statut d'annulation courant.
     const p = await this.db.schoolPayment.findUniqueOrThrow({
       where: { id },
@@ -357,7 +367,6 @@ export class SchoolPaymentsService {
       cancelled: p.status === 'CANCELLED' ? { at: p.cancelledAt!.toISOString() } : null,
     };
     const file = await renderReceipt(view);
-    await this.school.log(ctx, 'school.receipt_generated', 'SchoolPayment', id, {});
     return { file, filename: `recu-${view.receiptNumber.replace(/[^A-Za-z0-9_-]/g, '_')}.pdf` };
   }
 

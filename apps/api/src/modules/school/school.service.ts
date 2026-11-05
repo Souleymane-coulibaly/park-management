@@ -82,6 +82,8 @@ export class SchoolService {
         type: true,
         defaultLocale: true,
         isActive: true,
+        // Fuseau : la date du jour d'un écran (appel des élèves) est celle de l'établissement.
+        timezone: true,
       },
     });
     return {
@@ -766,6 +768,30 @@ export class SchoolService {
       select: { classId: true },
     });
     return rows.map((r) => r.classId);
+  }
+
+  /**
+   * Vrai si toutes ces classes sont encore confiées à l'enseignant (année non clôturée), lu dans la
+   * transaction qui écrit. Les liens sont verrouillés en partage jusqu'au commit : la fin d'une
+   * affectation, qui les supprime, attend l'écriture, et une fin déjà validée les a retirés. Toujours vrai
+   * pour les rôles qui ne sont pas limités à leurs classes.
+   */
+  async holdsClasses(
+    tx: Prisma.TransactionClient,
+    ctx: SchoolContext,
+    classIds: string[],
+  ): Promise<boolean> {
+    if (!isLimitedToOwnClasses(ctx.role)) return true;
+    const ids = [...new Set(classIds)];
+    if (!ctx.memberId || ids.length === 0) return false;
+    const own = await tx.$queryRaw<{ classId: string }[]>`
+      SELECT ct."classId" FROM "SchoolClassTeacher" ct
+      JOIN "SchoolClass" c ON c.id = ct."classId"
+      JOIN "SchoolYear" y ON y.id = c."schoolYearId"
+      WHERE ct."organizationId" = ${ctx.organizationId}::uuid AND ct."memberId" = ${ctx.memberId}::uuid
+        AND ct."classId" = ANY(${ids}::uuid[]) AND y.status <> 'CLOSED'
+      FOR SHARE OF ct`;
+    return new Set(own.map((r) => r.classId)).size === ids.length;
   }
 
   schoolWhere(ctx: SchoolContext): Prisma.SchoolWhereInput {

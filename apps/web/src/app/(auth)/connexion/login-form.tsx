@@ -13,6 +13,8 @@ import type { Me } from '@/lib/types';
 /** Destination après connexion : changement de mot de passe imposé, espace Super Admin ou espace client. */
 export function destinationFor(me: Me, requested: string | null): string {
   if (me.user.mustChangePassword) return '/changer-mot-de-passe';
+  // Responsable d'élève : portail parents d'Ocall School, quel que soit le lien demandé.
+  if (me.accountKind === 'guardian') return '/parents';
   if (me.accountKind !== 'member') {
     // Comptes internes Ocall et partenaires : second facteur avant leur espace.
     if (me.mfa.required && !me.mfa.verified) return '/double-authentification';

@@ -226,6 +226,7 @@ export class SchoolQuranService {
           status: true,
           evaluatedOn: true,
           remark: true,
+          remarkShared: true,
           evaluatorUserId: true,
           createdAt: true,
         },
@@ -303,6 +304,8 @@ export class SchoolQuranService {
           status: dto.status,
           evaluatedOn: new Date(`${dto.evaluatedOn}T00:00:00.000Z`),
           remark: dto.remark ?? null,
+          // Une observation n'est partagée avec la famille que si elle existe et que l'enseignant l'autorise.
+          remarkShared: Boolean(dto.remark) && (dto.remarkShared ?? false),
           sequence: (last._max.sequence ?? 0) + 1,
           evaluatorUserId: ctx.userId,
         },

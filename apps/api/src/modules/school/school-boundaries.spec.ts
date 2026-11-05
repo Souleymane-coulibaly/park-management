@@ -49,7 +49,43 @@ describe('configuration School', () => {
       enabled: false,
       databaseUrl: null,
       dataKey: null,
+      portalBaseUrl: null,
+      sms: { provider: 'simulated', apiKey: null, sender: null },
     });
+  });
+
+  const enabled = {
+    SCHOOL_ENABLED: 'true',
+    DATABASE_URL: core,
+    SCHOOL_DATABASE_URL: 'postgresql://u:p@ep-school.neon.tech/school',
+  };
+
+  it('SMS : fournisseur simulé par défaut, clé lue dans l’environnement, fournisseur inconnu refusé', () => {
+    const config = loadSchoolConfig({
+      ...enabled,
+      SCHOOL_SMS_API_KEY: 'cle-de-test',
+    } as NodeJS.ProcessEnv);
+    expect(config.sms).toEqual({ provider: 'simulated', apiKey: 'cle-de-test', sender: null });
+    expect(() =>
+      loadSchoolConfig({ ...enabled, SCHOOL_SMS_PROVIDER: 'inconnu' } as NodeJS.ProcessEnv),
+    ).toThrow(/SCHOOL_SMS_PROVIDER/);
+  });
+
+  it('adresse du portail parents : origine seule, https exigé en production', () => {
+    expect(
+      loadSchoolConfig({
+        ...enabled,
+        SCHOOL_PORTAL_BASE_URL: 'https://ecole.example.com/chemin',
+      } as NodeJS.ProcessEnv).portalBaseUrl,
+    ).toBe('https://ecole.example.com');
+    expect(() =>
+      loadSchoolConfig({
+        ...enabled,
+        NODE_ENV: 'production',
+        SCHOOL_DATA_ENCRYPTION_KEY: Buffer.alloc(32, 1).toString('base64'),
+        SCHOOL_PORTAL_BASE_URL: 'http://ecole.example.com',
+      } as NodeJS.ProcessEnv),
+    ).toThrow(/https/);
   });
 
   it('activé sans URL : démarrage refusé', () => {

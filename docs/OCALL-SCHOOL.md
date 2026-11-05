@@ -607,19 +607,164 @@ matricule, 50 au plus avec `truncated` invitant à affiner ; proposés à la cai
 `/school/finances/reductions`. Ordinateur et tablette ; langue de l'établissement ; menu Ocall Park
 inchangé.
 
-## 12. Limites actuelles
+## 12. Sprint 6 : portail parents, présences, communication et notifications
 
+### Audit de l'existant
+
+Réutilisé : authentification Suite (connexion, sessions, réinitialisation du mot de passe), liens
+responsables du Sprint 2 (`canViewSchoolInfo`, `canReceiveSms`, `portalUserId` déjà prévu), résultats figés
+des validations du Sprint 4 et moteur des bulletins PDF, situation financière et reçus du Sprint 5
+(`guardianChargeView`, `receiptSnapshot`), vue des 114 sourates (`quranSurahStates`), journal des décisions,
+Service Worker de la PWA. Absents au départ : compte parent (la connexion n'acceptait que membres, comptes
+internes et partenaires), présences, annonces, notifications, SMS, notion de « publié aux familles ».
+
+### Comptes parents
+
+- **Compte Suite sans adhésion**, déclaré au cœur de l'authentification par un registre de portails
+  (`PortalAccounts`) : le module School s'y inscrit au démarrage, le cœur ne dépend d'aucun module métier.
+  Aucune migration de la base Suite (Ocall Park). `/auth/me` renvoie `accountKind: 'guardian'` ; la connexion
+  mène à `/parents` ; aucune route du personnel n'est ouverte à ce compte, et inversement.
+- **Invitation** par l'établissement (`school.portal.manage`) : jeton haché, usage unique, 7 jours, révocable ;
+  une nouvelle invitation révoque la précédente (opérations sérialisées sur la fiche responsable, même ordre
+  de verrouillage que l'activation et les révocations). Le lien n'est affiché qu'une fois au personnel et peut partir
+  par SMS (adresse publique `SCHOOL_PORTAL_BASE_URL`). Refusée si le responsable n'est autorisé à suivre aucun
+  enfant (`NO_AUTHORIZED_CHILD`).
+- **Activation** publique (`/parents/activation`, limitée en débit) : vérification sans consommation, puis
+  consommation sous verrou ; création du compte (identifiant de l'organisation) ou, pour un compte existant,
+  nouveau mot de passe et sessions fermées. Échec de la partie School : le compte Suite créé est désactivé.
+  L'activation est journalisée dans la transaction School puis publiée au journal Suite (reprise en cas
+  d'échec) : une erreur de journalisation ne désactive jamais un compte activé.
+- **Enfants visibles** : uniquement les liens que l'établissement a autorisés (`canViewSchoolInfo`), élève du
+  même établissement que la fiche, hors transfert, organisation non suspendue dans Ocall Suite, contrat
+  School encore actif et couvrant l'établissement (lecture seule : aucune soumission). Un parent ne rattache jamais seul un élève. Plusieurs enfants par compte, plusieurs comptes par
+  enfant.
+- **Révocation** : retrait du rattachement (lien du Sprint 2) ou de l'accès (`portalUserId` retiré ; le compte
+  de l'organisation est révoqué quand il ne suit plus aucune fiche). Effet à la requête suivante : la session
+  relit le compte à chaque requête.
+
+### Présences
+
+- Appel par classe, date et séance (`JOURNEE` par défaut, code court sinon) ; **jamais deux appels pour une
+  même séance** (unicité en base, création sous verrou). Date ni future (fuseau de l'établissement) ni hors de
+  l'année ; année clôturée refusée.
+- Enregistrement collectif ou individuel ; **correction motivée** obligatoire pour un relevé existant
+  (`CORRECTION_REASON_REQUIRED`) ; historique en ajout seul (saisie et corrections, auteur, motif, valeurs
+  avant et après du statut, des minutes de retard et de la note). L'écran d'appel renvoie les notes existantes
+  et envoie une grande classe par lots de 200. Un élève relevé puis sorti de la classe reste affiché et
+  corrigeable ; une nouvelle saisie exige l'effectif actuel (pas d'effectif reconstitué à une date passée).
+- L'enseignant ne fait l'appel et ne consulte que **ses classes** (affectation revérifiée et tenue sous verrou
+  pendant l'enregistrement) ; l'historique d'un élève ne lui montre que les relevés de ses classes, sans les
+  justificatifs. Surveillant, secrétariat et direction dans leur périmètre (l'historique d'un élève transféré
+  exclut les relevés et justificatifs des établissements hors périmètre). Statistiques par élève et par
+  classe (un retard compte comme une présence), suivi des retards ; statistiques individuelles agrégées sur
+  toute la période, la liste affichée étant limitée ; les statistiques de classe incluent les élèves sortis (`truncated`, signalé aux parents).
+- **Justificatifs** : motif transmis par le parent (en attente) ou saisi par l'établissement (accepté) ; un mois
+  au plus, au plus un mois à l'avance. Accepté, il justifie les absences relevées sur sa période et celles
+  saisies ensuite, **dans son établissement seulement** (après un transfert, jamais celles du nouvel
+  établissement) ; l'appel et l'acceptation prennent un même verrou par élève (ordre trié), sans fenêtre.
+
+### Résultats, bulletins, finances et Coran pour les parents
+
+- **Publication aux familles** (`school.results.publish`, direction) des résultats validés d'une classe pour une
+  période, liée à cette validation : rouverts, ils disparaissent du portail jusqu'à une nouvelle validation et
+  publication. Les parents voient moyennes, notes des évaluations de la période publiée, rang si
+  l'établissement l'affiche, et le bulletin PDF de leur enfant seulement (jamais un brouillon ni des notes non
+  validées). Publication, validation et notes sont lues dans un même instantané.
+- **Finances** en lecture seule : échéances (sans motif interne), paiements, reçus PDF, soldes ; aucun paiement
+  en ligne ni encaissement.
+- **Coran** : seulement si le module est actif pour l'établissement (sinon introuvable) ; progression, 114
+  sourates, évaluations, et observations des enseignants **uniquement celles qu'ils ont autorisées**
+  (`remarkShared`, nouvelle case à la saisie).
+
+### Annonces, notifications et SMS
+
+- **Annonces** : brouillon, publication, archivage, expiration facultative, historique. Publics : tout
+  l'établissement, des classes, des élèves, des responsables choisis ; l'enseignant (`school.announcements.class`)
+  ne publie que pour ses classes, revérifiées à la publication. Contenu, public et cibles relus sous le
+  verrou du brouillon au moment de publier. Les parents ne voient que ce qui vise leurs enfants (50 par page).
+- **Notifications internes** : nouvelle annonce, absence, retard, bulletin publié, nouvelle échéance, échéance
+  impayée (contrôle horaire, parcours par curseur, échéance relue sous verrou, notification et SMS d'une échéance écrits ensemble).
+  Destinataires : responsables et élèves de l'établissement du fait seulement. Les notifications de nouvelles échéances sont écrites dans
+  la transaction de génération. Une seule notification par fait et par compte (clé du fait unique) ; non
+  lues, lecture, tout marquer lu, pagination, lien vers la page concernée ; limitées aux enfants autorisés aujourd'hui (une notification d'annonce reste
+  consultable tant que l'annonce vise encore l'un d'eux).
+- **SMS** : désactivés par défaut, activés par la direction. File d'attente en base, envoi hors transaction,
+  tentatives bornées (5, aussi en base) à délai croissant ; bail expiré après la dernière tentative : échec
+  définitif, jamais une tentative de plus ; destinataire relu avant l'envoi (lien retiré, SMS refusés ou désactivés, numéro changé : message annulé) ; échec définitif conservé, historique aux numéros masqués (filtre par statut, pagination). Textes
+  courts sans note, montant ni motif (prénom et date au plus). Fournisseur par adaptateur
+  (`SCHOOL_SMS_PROVIDER`, clé `SCHOOL_SMS_API_KEY` lue dans l'environnement, jamais dans le code) : seul le
+  fournisseur **simulé** est livré, aucun SMS réel n'est envoyé.
+
+### Modèles et migration
+
+Migration additive `20261109000000_portail_parents_presences_communication` : 13 tables (`SchoolPortalAccount`,
+`SchoolGuardianInvitation`, `SchoolAttendanceSession`, `SchoolAttendanceRecord`, `SchoolAttendanceEvent`,
+`SchoolAbsenceJustification`, `SchoolResultPublication`, `SchoolAnnouncement`, `SchoolAnnouncementTarget`,
+`SchoolAnnouncementEvent`, `SchoolNotification`, `SchoolSmsSettings`, `SchoolSmsMessage`) et la colonne
+`SchoolQuranEvaluation.remarkShared`. Contraintes écrites à la main : format de séance, retard réservé au
+statut « en retard », période de justificatif, une seule publication active par classe et période, une cible
+par destinataire, tentatives SMS bornées. Vérifiée par `prisma migrate diff` (différence vide).
+
+### Droits
+
+| Permission                                          | Rôles                                                          |
+| --------------------------------------------------- | -------------------------------------------------------------- |
+| `school.portal.manage` (invitations, accès)         | Direction, secrétariat                                         |
+| `school.results.publish`                            | Direction                                                      |
+| `school.attendance.read` / `school.attendance.take` | Direction, secrétariat, surveillant ; enseignant (ses classes) |
+| `school.attendance.justify`                         | Direction, secrétariat, surveillant                            |
+| `school.announcements.manage`                       | Direction, secrétariat                                         |
+| `school.announcements.class`                        | Direction, secrétariat ; enseignant (ses classes)              |
+| `school.sms.manage`                                 | Direction                                                      |
+
+Parents : consultation des enfants autorisés, motif d'absence, annonces et notifications, sur leurs seules
+routes (`/api/v1/school/portal`).
+
+### API
+
+Établissement : `GET guardians/:id/portal`, `POST guardians/:id/portal/invitations`,
+`POST guardians/:id/portal/invitations/:id/revoke`, `POST guardians/:id/portal/revoke` ;
+`GET|PUT attendance/sheet`, `GET attendance/records/:id/history`, `GET attendance/students/:id`,
+`GET attendance/stats`, `GET|POST attendance/justifications`, `POST attendance/justifications/:id/review` ;
+`GET|POST results/publications`, `POST results/publications/:id/withdraw` ; `GET|POST announcements`,
+`GET|PUT announcements/:id`, `POST announcements/:id/publish|archive` ; `GET|PUT sms/settings`,
+`GET sms/messages`. Public : `POST portal/activation/check`, `POST portal/activation`. Parents :
+`GET portal/dashboard`, `GET portal/children`, `GET portal/children/:id/attendance`,
+`POST portal/children/:id/justifications`, `GET portal/children/:id/results`,
+`GET portal/children/:id/report-cards/:publicationId`, `GET portal/children/:id/finance`,
+`GET portal/children/:id/payments/:id/receipt`, `GET portal/children/:id/quran`, `GET portal/announcements`,
+`GET portal/notifications`, `POST portal/notifications/:id/read`, `POST portal/notifications/read-all`.
+
+### Écrans
+
+Parents (`/parents`, PWA installable, manifeste propre, langue de l'établissement de l'enfant, arabe de
+droite à gauche) : activation, tableau de bord, mes enfants, présences et absences (motif), résultats,
+bulletins, situation financière, mémorisation du Coran, annonces, notifications, profil ; connexion par
+`/connexion`. Établissement : `/school/portail-parents`, `/school/presences`, `/school/presences/justificatifs`,
+`/school/communication` (annonces, SMS), `/school/publications`.
+
+## 13. Limites actuelles
+
+- Réserves P3 de l'audit du Sprint 6 (non bloquantes) : reprise de l'écran d'appel quand la réponse du
+  premier lot se perd, liste des justificatifs limitée à 200 sans pagination, saisie modifiée pendant l'envoi
+  des lots non envoyée.
+- Appel : pas d'effectif reconstitué à une date passée ; une saisie rétroactive utilise l'effectif actuel.
 - Un employé Park existant ne peut pas encore recevoir de rôle School : il faut un compte dédié.
 - Pas d'emploi du temps ni de volume horaire contrôlé : l'horaire par niveau est indicatif.
 - L'enseignant d'un groupe voit la liste restreinte de toute la classe (choix validé au cadrage).
-- Pas de logo ni de SMS. Modèles de documents personnalisés non livrés : le bulletin a une mise en page unique.
-- Portail parents non livré : seul le contrôle des enfants autorisés est préparé.
+- Pas de logo. Modèles de documents personnalisés non livrés : le bulletin a une mise en page unique.
+- SMS : seul le fournisseur simulé est livré (aucun envoi réel) ; un fournisseur réel s'ajoute par un
+  adaptateur. Pas de réinitialisation du mot de passe par SMS : un parent sans e-mail reçoit une nouvelle
+  invitation de l'établissement.
+- Un membre du personnel qui est aussi parent utilise un compte distinct pour le portail.
+- Le module coranique reste disponible aux seuls établissements en Bilingue (règle du Sprint 4), pour le
+  personnel comme pour les parents.
 - Aucun antivirus : un contrôle du type réel et du contenu actif des PDF, et un téléchargement en pièce
   jointe uniquement. Un PDF à flux compressé peut masquer du contenu actif.
 - Pas de purge automatique des documents : les durées légales de conservation restent à fixer par pays.
 - Les documents School ne sont pas comptés dans le quota de stockage de l'organisation.
 - Import synchrone, limité à 1 000 lignes par fichier.
-- Pas de PWA School : le Service Worker reste limité à `/app`.
+- PWA : espace client (`/app`) et portail parents (`/parents`) ; les écrans School du personnel n’en sont pas.
 - Messages de validation détaillés de l'API (champs refusés) et erreurs ligne par ligne de l'import
   restent en français, y compris pour un établissement en Arabe.
 - Les dates de contrat s'apprécient en UTC.

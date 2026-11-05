@@ -31,6 +31,7 @@ import type {
   GenerateChargesDto,
   UpdateFeeDto,
 } from './school-finance.dto';
+import { SchoolNotificationsService } from './school-notifications.service';
 import { SchoolPrismaService } from './school-prisma.service';
 import { today } from './school-report-cards.service';
 import { SchoolStudentsService } from './school-students.service';
@@ -69,6 +70,7 @@ export class SchoolFinanceService {
     private readonly db: SchoolPrismaService,
     private readonly school: SchoolService,
     private readonly students: SchoolStudentsService,
+    private readonly notifications: SchoolNotificationsService,
   ) {}
 
   // ─── Réglages ───
@@ -420,14 +422,36 @@ export class SchoolFinanceService {
           };
         }),
       );
+      // Élèves déjà pourvus de chaque rang : seuls les autres reçoivent une échéance nouvelle.
+      const existing = await tx.schoolCharge.groupBy({
+        by: ['studentId'],
+        where: { feeId: row.id, studentId: { in: targets } },
+        _count: { _all: true },
+      });
+      const complete = new Set(
+        existing.filter((e) => e._count._all >= row.installments.length).map((e) => e.studentId),
+      );
       const { count } = await tx.schoolCharge.createMany({ data, skipDuplicates: true });
+      // Nouvelles échéances (portail parents, Sprint 6) : notifications et SMS écrits avec elles, dans
+      // la même transaction ; une par élève et par frais (clé du fait).
+      if (count > 0) {
+        await this.notifications.notifyStudents(tx, {
+          organizationId: ctx.organizationId,
+          schoolId: row.schoolId,
+          kind: 'CHARGE_DUE',
+          resourceId: row.id,
+          studentIds: targets.filter((s) => !complete.has(s)),
+          params: { fee: row.name },
+          dedupe: (studentId) => `charge-due:${row.id}:${studentId}`,
+        });
+      }
       return { created: count, students: targets.length };
     });
     await this.school.log(ctx, 'school.charges_generated', 'SchoolFee', id, {
       created: result.created,
       students: result.students,
     });
-    return result;
+    return { created: result.created, students: result.students };
   }
 
   // ─── Situation d'un élève ───

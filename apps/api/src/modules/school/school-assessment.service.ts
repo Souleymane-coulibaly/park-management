@@ -642,43 +642,61 @@ export class SchoolAssessmentService {
       select: { id: true, label: true, labelAr: true, endsOn: true },
     });
     const validation = await this.activeValidation(db, scope.id, periodId);
-    if (validation) {
-      const frozen = validation.results as unknown as FrozenResults;
-      const names = await db.subject.findMany({
-        where: { id: { in: frozen.subjects.map((s) => s.id) } },
-        select: { id: true, name: true, nameAr: true },
-      });
-      const byId = new Map(names.map((s) => [s.id, s]));
-      // Élèves figés par la validation, quelles que soient les inscriptions actuelles : un élève parti
-      // depuis garde son bulletin, et l'effectif comme le rang restent ceux de la validation.
-      const frozenIds = frozen.results.students.map((s) => s.studentId);
-      const students = await db.schoolStudent.findMany({
-        where: { organizationId: ctx.organizationId, id: { in: frozenIds } },
-        orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }, { id: 'asc' }],
-        select: ROSTER_SELECT,
-      });
-      const roster = students.map((s) => ({ ...s, groupIds: [] }));
-      return {
-        scope,
-        period,
-        rules: frozen.rules,
-        policyVersion: validation.policyVersion,
-        subjects: frozen.subjects.map((s) => ({
-          id: s.id,
-          name: byId.get(s.id)?.name ?? '',
-          nameAr: byId.get(s.id)?.nameAr ?? null,
-          coefficient: s.coefficient,
-        })),
-        roster,
-        results: frozen.results,
-        validation: {
-          id: validation.id,
-          validatedAt: validation.validatedAt,
-          validatedByUserId: validation.validatedByUserId,
-        },
-      };
-    }
+    if (validation) return this.frozenResults(db, ctx.organizationId, scope, period, validation);
     return this.computeLive(db, ctx, scope, period);
+  }
+
+  /**
+   * Résultats figés d'une validation : règles, matières, élèves et moyennes tels que validés. Ne dépend
+   * d'aucun rôle : le portail parents (Sprint 6) les relit pour une publication active.
+   */
+  async frozenResults(
+    db: Db,
+    organizationId: string,
+    scope: ClassScope,
+    period: ClassPeriodResults['period'],
+    validation: {
+      id: string;
+      results: Prisma.JsonValue;
+      policyVersion: number | null;
+      validatedAt: Date;
+      validatedByUserId: string;
+    },
+  ): Promise<ClassPeriodResults> {
+    const frozen = validation.results as unknown as FrozenResults;
+    const names = await db.subject.findMany({
+      where: { id: { in: frozen.subjects.map((s) => s.id) } },
+      select: { id: true, name: true, nameAr: true },
+    });
+    const byId = new Map(names.map((s) => [s.id, s]));
+    // Élèves figés par la validation, quelles que soient les inscriptions actuelles : un élève parti
+    // depuis garde son bulletin, et l'effectif comme le rang restent ceux de la validation.
+    const frozenIds = frozen.results.students.map((s) => s.studentId);
+    const students = await db.schoolStudent.findMany({
+      where: { organizationId, id: { in: frozenIds } },
+      orderBy: [{ lastName: 'asc' }, { firstName: 'asc' }, { id: 'asc' }],
+      select: ROSTER_SELECT,
+    });
+    const roster = students.map((s) => ({ ...s, groupIds: [] }));
+    return {
+      scope,
+      period,
+      rules: frozen.rules,
+      policyVersion: validation.policyVersion,
+      subjects: frozen.subjects.map((s) => ({
+        id: s.id,
+        name: byId.get(s.id)?.name ?? '',
+        nameAr: byId.get(s.id)?.nameAr ?? null,
+        coefficient: s.coefficient,
+      })),
+      roster,
+      results: frozen.results,
+      validation: {
+        id: validation.id,
+        validatedAt: validation.validatedAt,
+        validatedByUserId: validation.validatedByUserId,
+      },
+    };
   }
 
   /**
@@ -1316,7 +1334,8 @@ export class SchoolAssessmentService {
    * Verrou consultatif de la classe et de la période, pris après le contrôle de périmètre : il sérialise
    * notes, évaluations, appréciations, validation et réouverture d'une même feuille de résultats.
    */
-  private async lockResults(tx: Tx, classId: string, periodId: string) {
+  /** Verrou des résultats d'une classe pour une période : validation, réouverture, publication. */
+  async lockResults(tx: Tx, classId: string, periodId: string) {
     // Identifiants en minuscules : un même UUID écrit autrement par le client donne le même verrou.
     const key = `school-results:${classId.toLowerCase()}:${periodId.toLowerCase()}`;
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;

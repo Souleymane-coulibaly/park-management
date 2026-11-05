@@ -179,6 +179,8 @@ function Evaluate({ studentId, onSaved }: { studentId: string; onSaved: () => vo
   const [status, setStatus] = useState<QuranStatus>('IN_PROGRESS');
   const [evaluatedOn, setEvaluatedOn] = useState(today);
   const [remark, setRemark] = useState('');
+  // Observation visible des familles sur le portail parents seulement si l'enseignant l'autorise.
+  const [remarkShared, setRemarkShared] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -188,9 +190,16 @@ function Evaluate({ studentId, onSaved }: { studentId: string; onSaved: () => vo
     try {
       await api(`/school/quran/students/${studentId}/evaluations`, {
         method: 'POST',
-        body: { surah: Number(surah), status, evaluatedOn, remark: remark || null },
+        body: {
+          surah: Number(surah),
+          status,
+          evaluatedOn,
+          remark: remark || null,
+          remarkShared: Boolean(remark) && remarkShared,
+        },
       });
       setRemark('');
+      setRemarkShared(false);
       onSaved();
     } catch (e) {
       setError(toApiError(e));
@@ -241,6 +250,16 @@ function Evaluate({ studentId, onSaved }: { studentId: string; onSaved: () => vo
               onChange={(e) => setRemark(e.target.value)}
             />
           </div>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={remarkShared}
+              disabled={!remark.trim()}
+              onChange={(e) => setRemarkShared(e.target.checked)}
+              data-testid="remark-shared"
+            />
+            {t('quran.remarkShared')}
+          </label>
           <Button loading={loading} disabled={!evaluatedOn} onClick={() => void save()}>
             {t('quranStudent.save')}
           </Button>

@@ -319,4 +319,9 @@ export class QuranEvaluationDto {
   @IsString()
   @MaxLength(300)
   remark?: string | null;
+
+  @ApiPropertyOptional({ description: 'Observation visible des familles sur le portail parents.' })
+  @IsOptional()
+  @IsBoolean()
+  remarkShared?: boolean;
 }

@@ -135,6 +135,22 @@ export const SchoolPermission = {
   FINANCE_CANCEL: 'school.finance.cancel',
   /** Tableau de bord financier, impayés et exports. */
   FINANCE_REPORTS: 'school.finance.reports',
+  /** Portail parents (Sprint 6) : inviter un responsable, révoquer son accès. */
+  PORTAL_MANAGE: 'school.portal.manage',
+  /** Publier aux familles (ou retirer) les résultats validés d'une classe pour une période. */
+  RESULTS_PUBLISH: 'school.results.publish',
+  /** Consulter les présences ; l'enseignant, seulement pour ses classes. */
+  ATTENDANCE_READ: 'school.attendance.read',
+  /** Faire l'appel et le corriger (motif obligatoire) ; l'enseignant, seulement pour ses classes. */
+  ATTENDANCE_TAKE: 'school.attendance.take',
+  /** Enregistrer et examiner les justificatifs d'absence. */
+  ATTENDANCE_JUSTIFY: 'school.attendance.justify',
+  /** Annonces à tout l'établissement, une classe, des élèves ou des responsables choisis. */
+  ANNOUNCEMENTS_MANAGE: 'school.announcements.manage',
+  /** Annonces aux familles ; sans ANNOUNCEMENTS_MANAGE, limitées aux classes de l'enseignant. */
+  ANNOUNCEMENTS_CLASS: 'school.announcements.class',
+  /** Réglages et historique des SMS de l'établissement. */
+  SMS_MANAGE: 'school.sms.manage',
 } as const;
 export type SchoolPermission = (typeof SchoolPermission)[keyof typeof SchoolPermission];
 
@@ -176,6 +192,14 @@ const DIRECTION: readonly SchoolPermission[] = [
   SP.FINANCE_BENEFITS,
   SP.FINANCE_CANCEL,
   SP.FINANCE_REPORTS,
+  SP.PORTAL_MANAGE,
+  SP.RESULTS_PUBLISH,
+  SP.ATTENDANCE_READ,
+  SP.ATTENDANCE_TAKE,
+  SP.ATTENDANCE_JUSTIFY,
+  SP.ANNOUNCEMENTS_MANAGE,
+  SP.ANNOUNCEMENTS_CLASS,
+  SP.SMS_MANAGE,
 ];
 
 /**
@@ -185,6 +209,9 @@ const DIRECTION: readonly SchoolPermission[] = [
  * affectations. Mémorisation : l'enseignant de la matière Coran saisit, la direction consulte.
  * Finances : la direction configure, accorde, annule et suit ; la comptabilité encaisse et suit ; le
  * secrétariat consulte, et encaisse seulement si la direction l'a autorisé ; l'enseignant n'y a pas accès.
+ * Portail parents, présences, communication (Sprint 6) : la direction gère tout et publie les résultats ;
+ * le secrétariat invite les responsables, gère absences, justificatifs et annonces ; le surveillant fait
+ * l'appel et examine les justificatifs ; l'enseignant fait l'appel et publie des annonces pour ses classes.
  */
 export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermission[]> = {
   GROUP_DIRECTOR: [...DIRECTION, SP.SCHOOLS_MANAGE],
@@ -206,6 +233,12 @@ export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermissi
     SP.ASSESSMENT_READ,
     SP.REPORT_CARDS,
     SP.FINANCE_READ,
+    SP.PORTAL_MANAGE,
+    SP.ATTENDANCE_READ,
+    SP.ATTENDANCE_TAKE,
+    SP.ATTENDANCE_JUSTIFY,
+    SP.ANNOUNCEMENTS_MANAGE,
+    SP.ANNOUNCEMENTS_CLASS,
   ],
   TEACHER: [
     SP.STRUCTURE_READ,
@@ -214,8 +247,18 @@ export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermissi
     SP.ASSESSMENT_MANAGE,
     SP.QURAN_READ,
     SP.QURAN_MANAGE,
+    SP.ATTENDANCE_READ,
+    SP.ATTENDANCE_TAKE,
+    SP.ANNOUNCEMENTS_CLASS,
   ],
-  SUPERVISOR: [SP.STRUCTURE_READ, SP.STUDENTS_READ, SP.TEACHING_READ],
+  SUPERVISOR: [
+    SP.STRUCTURE_READ,
+    SP.STUDENTS_READ,
+    SP.TEACHING_READ,
+    SP.ATTENDANCE_READ,
+    SP.ATTENDANCE_TAKE,
+    SP.ATTENDANCE_JUSTIFY,
+  ],
   ACCOUNTANT: [
     SP.STRUCTURE_READ,
     SP.STUDENTS_READ,

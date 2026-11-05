@@ -28,6 +28,11 @@ export interface AuthContext {
     companyName: string;
     status: 'PENDING_VERIFICATION' | 'ACTIVE';
   } | null;
+  /**
+   * Portail externe (Sprint 6 : portail parents d'Ocall School) : compte sans adhésion, déclaré actif par
+   * le module concerné ; ses droits sont vérifiés par les routes de ce portail.
+   */
+  portal: 'guardian' | null;
   /** Absent pour un compte interne Ocall, qui n'est membre d'aucune organisation. */
   membership: {
     id: string;

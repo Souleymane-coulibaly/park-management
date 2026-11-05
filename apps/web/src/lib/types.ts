@@ -55,7 +55,8 @@ export interface Me {
   /** Second facteur : requis (rôle interne sensible), enrôlé, validé pour la session. */
   mfa: { required: boolean; enrolled: boolean; verified: boolean };
   /** Sprint 12B : membre d'une organisation, compte interne Ocall ou partenaire commercial. */
-  accountKind: 'member' | 'internal' | 'partner';
+  /** Responsable d'élève : portail parents d'Ocall School (Sprint 6). */
+  accountKind: 'member' | 'internal' | 'partner' | 'guardian';
   partner: {
     id: string;
     code: string;
