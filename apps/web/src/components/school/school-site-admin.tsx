@@ -37,6 +37,7 @@ interface SiteView {
   theme: string;
   primaryColor: string;
   draft: SchoolSiteContent;
+  draftRevision: string;
   publishedAt: string | null;
   status: 'DRAFT' | 'PUBLISHED' | 'UNPUBLISHED';
   publicUrl: string;
@@ -534,6 +535,8 @@ function ContentTab({
 }) {
   const { t } = useSchoolText();
   const [c, setC] = useState<SchoolSiteContent>(site.draft);
+  // Révision du brouillon chargé : un conflit (modification ailleurs) est refusé, jamais écrasé.
+  const [revision, setRevision] = useState(site.draftRevision);
   const [error, setError] = useState<ApiError | null>(null);
   const [saved, setSaved] = useState(false);
   const editable = can(rights, 'school.site.manage');
@@ -574,7 +577,11 @@ function ContentTab({
       }
       setHighlightError(false);
       const content = { ...c, home: { ...c.home, highlights } };
-      await api(`/school/sites/${site.id}/draft`, { method: 'PUT', body: { content } });
+      const saved = await api<SiteView>(`/school/sites/${site.id}/draft`, {
+        method: 'PUT',
+        body: { content, revision },
+      });
+      setRevision(saved.draftRevision);
       setC(content);
       setSaved(true);
       reload();
@@ -753,7 +760,11 @@ function MediaTab({
   const protective = can(rights, 'school.site.manage', true);
   // Brouillon local : un choix (logo, couverture, galerie) s'affiche aussitôt, annulé si l'API refuse.
   const [draft, setDraft] = useState<SchoolSiteContent>(site.draft);
-  useEffect(() => setDraft(site.draft), [site.draft]);
+  const [revision, setRevision] = useState(site.draftRevision);
+  useEffect(() => {
+    setDraft(site.draft);
+    setRevision(site.draftRevision);
+  }, [site.draft, site.draftRevision]);
 
   async function upload(e: FormEvent) {
     e.preventDefault();
@@ -785,7 +796,11 @@ function MediaTab({
     const previous = draft;
     setDraft(next);
     try {
-      await api(`/school/sites/${site.id}/draft`, { method: 'PUT', body: { content: next } });
+      const saved = await api<SiteView>(`/school/sites/${site.id}/draft`, {
+        method: 'PUT',
+        body: { content: next, revision },
+      });
+      setRevision(saved.draftRevision);
       reload();
     } catch (err) {
       setDraft(previous);

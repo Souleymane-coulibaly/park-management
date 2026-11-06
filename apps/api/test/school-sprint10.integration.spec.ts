@@ -136,6 +136,15 @@ suite('Ocall School — Sprint 10, sites vitrines (intégration)', () => {
   };
 
   const publicSite = (s = slug) => pub().get(`/api/v1/public/school-sites/${s}`);
+  /** Sauvegarde du brouillon sur sa révision courante (lue d'abord, puis la requête). */
+  const putDraft = async (who: Agent, content: unknown) => {
+    const revision = await revisionOf(who);
+    return who.put(`/api/v1/school/sites/${siteId}/draft`).send({ content, revision });
+  };
+  const NO_REVISION = '0'.repeat(64);
+  const revisionOf = async (who: Agent) =>
+    (await who.get(`/api/v1/school/sites?schoolId=${schoolA}`).expect(200)).body
+      .draftRevision as string;
 
   beforeAll(async () => {
     ({ app, prisma } = await createTestApp());
@@ -219,7 +228,7 @@ suite('Ocall School — Sprint 10, sites vitrines (intégration)', () => {
         await who.get(`/api/v1/school/sites/${siteId}/preview`).expect(404);
         await who
           .put(`/api/v1/school/sites/${siteId}/draft`)
-          .send({ content: emptySchoolSiteContent() })
+          .send({ content: emptySchoolSiteContent(), revision: NO_REVISION })
           .expect(404);
         await who.get(`/api/v1/school/sites/${siteId}/media`).expect(404);
         await who.post(`/api/v1/school/sites/${siteId}/publish`).expect(404);
@@ -295,22 +304,31 @@ suite('Ocall School — Sprint 10, sites vitrines (intégration)', () => {
       content.practical.phone = '+221 33 000 00 00';
       content.media.logoId = logoId;
       content.media.gallery = [{ mediaId: childPhotoId, caption: { fr: 'Kermesse', ar: 'الحفل' } }];
+      const before = await revisionOf(secretary.agent);
       await secretary.agent
         .put(`/api/v1/school/sites/${siteId}/draft`)
-        .send({ content })
+        .send({ content, revision: before })
         .expect(200);
+      // Révision périmée (brouillon modifié depuis) : conflit, rien n'est écrasé.
+      const stale = await secretary.agent
+        .put(`/api/v1/school/sites/${siteId}/draft`)
+        .send({ content: emptySchoolSiteContent(), revision: before })
+        .expect(409);
+      expect(stale.body.code).toBe('SITE_DRAFT_CONFLICT');
+      const kept = await secretary.agent
+        .get(`/api/v1/school/sites?schoolId=${schoolA}`)
+        .expect(200);
+      expect(kept.body.draft.home.tagline.fr).toBe('Apprendre ensemble');
       const foreign = emptySchoolSiteContent();
       foreign.media.logoId = '00000000-0000-4000-8000-000000000000';
-      const res = await secretary.agent
-        .put(`/api/v1/school/sites/${siteId}/draft`)
-        .send({ content: foreign })
-        .expect(400);
+      const res = await putDraft(secretary.agent, foreign);
+      expect(res.status).toBe(400);
       expect(res.body.code).toBe('SITE_MEDIA_UNKNOWN');
       const html = emptySchoolSiteContent() as unknown as Record<string, unknown>;
       html.grades = [];
       await secretary.agent
         .put(`/api/v1/school/sites/${siteId}/draft`)
-        .send({ content: html })
+        .send({ content: html, revision: NO_REVISION })
         .expect(400);
     });
 
@@ -509,7 +527,7 @@ suite('Ocall School — Sprint 10, sites vitrines (intégration)', () => {
       const content = current.body.draft;
       const gallery = content.media.gallery;
       content.media.gallery = [...gallery, { mediaId: cover.body.id, caption: { fr: '', ar: '' } }];
-      await ownerA.put(`/api/v1/school/sites/${siteId}/draft`).send({ content }).expect(200);
+      expect((await putDraft(ownerA, content)).status).toBe(200);
       const refused = await ownerA.post(`/api/v1/school/sites/${siteId}/publish`).expect(400);
       expect(refused.body.code).toBe('SITE_IMAGE_ALT_REQUIRED');
       // Une légende suffit à décrire la photo.
@@ -517,10 +535,10 @@ suite('Ocall School — Sprint 10, sites vitrines (intégration)', () => {
         ...gallery,
         { mediaId: cover.body.id, caption: { fr: 'Façade de l’école', ar: '' } },
       ];
-      await ownerA.put(`/api/v1/school/sites/${siteId}/draft`).send({ content }).expect(200);
+      expect((await putDraft(ownerA, content)).status).toBe(200);
       await ownerA.post(`/api/v1/school/sites/${siteId}/publish`).expect(200);
       content.media.gallery = gallery;
-      await ownerA.put(`/api/v1/school/sites/${siteId}/draft`).send({ content }).expect(200);
+      expect((await putDraft(ownerA, content)).status).toBe(200);
       await ownerA.post(`/api/v1/school/sites/${siteId}/publish`).expect(200);
     });
 
@@ -592,7 +610,7 @@ suite('Ocall School — Sprint 10, sites vitrines (intégration)', () => {
       await ownerA.post(`/api/v1/school/sites/${siteId}/publish`).expect(403);
       await ownerA
         .put(`/api/v1/school/sites/${siteId}/draft`)
-        .send({ content: emptySchoolSiteContent() })
+        .send({ content: emptySchoolSiteContent(), revision: NO_REVISION })
         .expect(403);
       const logo = (await ownerA.get(`/api/v1/school/sites/${siteId}/media`).expect(200)).body.find(
         (m: { kind: string }) => m.kind === 'LOGO',

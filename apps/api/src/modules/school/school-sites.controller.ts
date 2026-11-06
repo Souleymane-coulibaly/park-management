@@ -139,7 +139,7 @@ export class SchoolSitesController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: SiteDraftDto,
   ) {
-    return this.sites.saveDraft(ctx, id, dto.content);
+    return this.sites.saveDraft(ctx, id, dto.content, dto.revision);
   }
 
   @RequireSchoolPermission(SP.SITE_MANAGE)

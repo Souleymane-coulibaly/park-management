@@ -82,6 +82,10 @@ export class SiteSettingsDto {
 export class SiteDraftDto {
   @IsObject()
   content!: Record<string, unknown>;
+
+  /** Révision du brouillon sur laquelle s'appuie cette sauvegarde (conflit 409 si elle a changé). */
+  @Matches(/^[0-9a-f]{64}$/)
+  revision!: string;
 }
 
 export class SiteLinkDto {

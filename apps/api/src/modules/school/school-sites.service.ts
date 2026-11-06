@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
@@ -51,6 +52,14 @@ import {
 import { SchoolService } from './school.service';
 
 type Tx = Prisma.TransactionClient;
+
+/**
+ * Révision d'un brouillon : empreinte de son contenu enregistré. Toute sauvegarde indique la révision
+ * sur laquelle elle s'appuie ; un brouillon modifié entre-temps (autre onglet, autre utilisateur,
+ * retrait d'image) est refusé au lieu d'être écrasé.
+ */
+export const draftRevision = (draft: unknown) =>
+  createHash('sha256').update(JSON.stringify(draft)).digest('hex');
 type Db = SchoolPrismaService | Tx;
 
 const NOT_FOUND = { code: 'SCHOOL_SITE_NOT_FOUND', message: 'Site introuvable.' };
@@ -177,6 +186,7 @@ export class SchoolSitesService {
       theme: site.theme,
       primaryColor: site.primaryColor,
       draft: site.draft as unknown as SchoolSiteContent,
+      draftRevision: draftRevision(site.draft),
       publishedAt: site.publishedAt?.toISOString() ?? null,
       status: site.isOnline ? 'PUBLISHED' : site.publishedAt ? 'UNPUBLISHED' : 'DRAFT',
       publicUrl: schoolSiteCanonicalUrl(this.sitesConfig, site.slug),
@@ -332,7 +342,7 @@ export class SchoolSitesService {
     return this.view(updated, await this.availability(site.organizationId, site.schoolId));
   }
 
-  async saveDraft(ctx: SchoolContext, siteId: string, input: unknown) {
+  async saveDraft(ctx: SchoolContext, siteId: string, input: unknown, revision: string) {
     const site = await this.findSite(ctx, siteId);
     const result = validateSchoolSiteContent(input);
     if ('errors' in result) {
@@ -346,6 +356,14 @@ export class SchoolSitesService {
     // validée avant lui (référence à une image retirée).
     const updated = await this.db.$transaction(async (tx) => {
       await this.lockSite(tx, site.id);
+      const fresh = await this.findSite(ctx, siteId, tx);
+      if (draftRevision(fresh.draft) !== revision) {
+        throw new ConflictException({
+          code: 'SITE_DRAFT_CONFLICT',
+          message:
+            'Le brouillon a été modifié entre-temps (autre onglet ou autre utilisateur) : rechargez-le avant d’enregistrer.',
+        });
+      }
       await this.assertMediaOfSite(site, schoolSiteMediaIds(result.content), tx);
       return tx.schoolSite.update({
         where: { id: site.id },
@@ -1145,7 +1163,8 @@ export class SchoolSitesService {
     const news = await this.newsFor(site, true);
     return {
       state: 'PUBLISHED',
-      site: site.published as unknown as SchoolSitePublished,
+      // Adresse courante (une adresse changée sans republication n'est pas celle de la version figée).
+      site: { ...(site.published as unknown as SchoolSitePublished), slug: site.slug },
       links: links.links,
       whatsapp: links.whatsapp,
       news: news.map(({ status: _status, ...n }) => n),
