@@ -369,6 +369,8 @@ function SettingsTab({
     theme: site.theme,
     primaryColor: site.primaryColor,
   });
+  // Instantané des réglages à l'ouverture du formulaire, mis à jour après chaque sauvegarde.
+  const [base, setBase] = useState(form);
   const [error, setError] = useState<ApiError | null>(null);
   const [saved, setSaved] = useState(false);
   const editable = can(rights, 'school.site.manage');
@@ -391,15 +393,18 @@ function SettingsTab({
     try {
       // Seuls les champs modifiés depuis l'ouverture : un réglage changé entre-temps par un autre
       // utilisateur (langues, couleur) n'est pas écrasé par une valeur restée affichée.
+      // Comparaison avec l'instantané pris à l'ouverture (puis à chaque sauvegarde), jamais avec
+      // les données rechargées : seuls les champs que CET utilisateur a modifiés sont envoyés.
       const changed: Partial<typeof form> = {};
-      if (form.languages.join() !== site.languages.join()) changed.languages = form.languages;
-      if (form.defaultLanguage !== site.defaultLanguage)
+      if (form.languages.join() !== base.languages.join()) changed.languages = form.languages;
+      if (form.defaultLanguage !== base.defaultLanguage)
         changed.defaultLanguage = form.defaultLanguage;
-      if (form.theme !== site.theme) changed.theme = form.theme;
-      if (form.primaryColor.toUpperCase() !== site.primaryColor.toUpperCase()) {
+      if (form.theme !== base.theme) changed.theme = form.theme;
+      if (form.primaryColor.toUpperCase() !== base.primaryColor.toUpperCase()) {
         changed.primaryColor = form.primaryColor;
       }
       await api(`/school/sites/${site.id}/settings`, { method: 'PATCH', body: changed });
+      setBase(form);
       setSaved(true);
       reload();
     } catch (err) {
@@ -565,7 +570,8 @@ function ContentTab({
   const highlights = (l: SchoolSiteLanguage) => c.home.highlights.map((h) => h[l]).join('\n');
   const setHighlights = (l: SchoolSiteLanguage, raw: string) => {
     const lines = raw.split('\n').slice(0, 6);
-    const count = Math.max(lines.length, ...c.home.highlights.map(() => 0));
+    // Longueur existante conservée : les points forts de l'autre langue ne sont jamais perdus.
+    const count = Math.max(lines.length, c.home.highlights.length);
     const next: SchoolSiteText[] = Array.from({ length: count }, (_, i) => ({
       fr: l === 'fr' ? (lines[i] ?? '') : (c.home.highlights[i]?.fr ?? ''),
       ar: l === 'ar' ? (lines[i] ?? '') : (c.home.highlights[i]?.ar ?? ''),
@@ -1197,7 +1203,14 @@ function LinksTab({ site, rights }: { site: SiteView; rights: SiteRights }) {
     url: '',
     label: '',
   });
-  const [editing, setEditing] = useState<{ id: string; url: string; label: string } | null>(null);
+  // Édition d'un lien : valeurs saisies et instantané pris à l'ouverture (comparaison stable).
+  const [editing, setEditing] = useState<{
+    id: string;
+    url: string;
+    label: string;
+    baseUrl: string;
+    baseLabel: string;
+  } | null>(null);
   const editable = can(rights, 'school.site.manage');
   const loaded = links.state === 'success' ? links.data : null;
 
@@ -1249,8 +1262,10 @@ function LinksTab({ site, rights }: { site: SiteView; rights: SiteRights }) {
                           // Seuls les champs modifiés : une correction concurrente de l'autre champ
                           // n'est pas annulée.
                           body: {
-                            ...(editing.url !== l.url ? { url: editing.url } : {}),
-                            ...(editing.label !== l.label ? { label: editing.label } : {}),
+                            ...(editing.url !== editing.baseUrl ? { url: editing.url } : {}),
+                            ...(editing.label !== editing.baseLabel
+                              ? { label: editing.label }
+                              : {}),
                           },
                         });
                         setEditing(null);
@@ -1329,7 +1344,15 @@ function LinksTab({ site, rights }: { site: SiteView; rights: SiteRights }) {
                           <Button
                             size="sm"
                             variant="ghost"
-                            onClick={() => setEditing({ id: l.id, url: l.url, label: l.label })}
+                            onClick={() =>
+                              setEditing({
+                                id: l.id,
+                                url: l.url,
+                                label: l.label,
+                                baseUrl: l.url,
+                                baseLabel: l.label,
+                              })
+                            }
                           >
                             {t('site.l.edit')}
                           </Button>
