@@ -35,9 +35,8 @@ contrat). Un autre client, ou un directeur d'un autre établissement du même cl
   `school/sites/*`, lecture publique `public/school-sites/*` et `public/school-media/:key`.
 - **Réutilisé de Park, sans modification de son comportement** : stockage des fichiers
   (`StorageProvider`, local ou S3/R2), lecture du type réel des images (`inspectImage`), règles
-  d'adresse et noms réservés, contrôle de contraste, route de régénération du cache (étendue avec des
-  étiquettes `school-site:<slug>` distinctes de celles des sites Park), limitation de débit des routes
-  publiques.
+  d'adresse et noms réservés, contrôle de contraste, limitation de débit des routes publiques. Les pages
+  publiques School sont lues **sans cache** : la régénération des pages Park n'est pas utilisée.
 - **Web** : pages publiques `app/s/[slug]/[[...path]]`, administration `app/school/site`. Le middleware
   envoie les hôtes `*.<SCHOOL_SITES_BASE_DOMAIN>` vers `/s/<slug>/…` uniquement ; les routes privées,
   l'API privée et les sites Park y sont introuvables.
@@ -73,12 +72,13 @@ contrat). Un autre client, ou un directeur d'un autre établissement du même cl
    vérifie pas ces autorisations.
 3. **Retrait immédiat** (bouton « Retirer », permis même avec un contrat en lecture seule) : l'image est
    retirée du brouillon, de la version publiée (sans republication) et des actualités, ses fichiers
-   sont supprimés du stockage, les pages publiques sont régénérées. La ligne est conservée sans fichier
-   (qui, quand, motif).
-4. **Purge des caches** : l'API répond 404 dès le retrait ; les pages Next.js sont régénérées
-   (étiquette `school-site:<slug>`). Les images ne passent pas par l'optimiseur d'images de Next.js
-   (pas de copie en cache qui survivrait au retrait). Le seul cache restant est celui du navigateur ou
-   d'un CDN, limité à **5 minutes** (`Cache-Control: public, max-age=300`).
+   sont supprimés du stockage (suppression rejouable tant que le stockage ne l'a pas confirmée : bouton
+   « réessayer »). La ligne est conservée (qui, quand, motif).
+4. **Caches** : les pages et lectures publiques School ne sont jamais mises en cache (`no-store`) :
+   retrait, dépublication, résiliation ou fin du maintien valent immédiatement. L'API répond 404 dès le
+   retrait. Les images ne passent pas par l'optimiseur d'images de Next.js (pas de copie qui survivrait
+   au retrait). Seule une image déjà affichée peut rester dans le cache du navigateur ou d'un CDN, au
+   plus **5 minutes** (`Cache-Control: public, max-age=300`).
 5. Aucune donnée scolaire n'entre dans un site : le contenu est saisi pour le site, rien n'est repris
    automatiquement de l'établissement (ni coordonnées, ni élèves, notes, présences, finances).
 
@@ -124,7 +124,7 @@ consultée le 30/10/2026) ; ils sont à **revérifier** au moment de la mise en 
 4. Variables, sur l'API **et** le web : `SCHOOL_SITES_BASE_DOMAIN=ocall.school`,
    `SCHOOL_SITES_SUBDOMAINS_ENABLED=true`. API : `SCHOOL_SITES_PUBLIC_ORIGIN` (origine de l'application,
    pour les adresses provisoires). Web : ajouter `app.ocall.school` à `APP_HOSTS` s'il sert
-   l'application. `SITES_REVALIDATE_SECRET` identique dans les deux services.
+   l'application.
 5. Redéployer, puis vérifier réellement : résolution DNS d'un sous-domaine, certificat valide
    (`https://<slug>.ocall.school`), page publiée, sous-domaine inconnu en 404, `/school` et
    `/api/v1/school/*` en 404 sur un hôte de site, `sitemap.xml` de l'hôte.
@@ -157,11 +157,10 @@ Le stockage est celui de la plateforme (`MEDIA_STORAGE`) :
 
 ## 9. Variables
 
-| Variable                           | Service  | Défaut       | Rôle                                              |
-| ---------------------------------- | -------- | ------------ | ------------------------------------------------- |
-| `SCHOOL_SITES_BASE_DOMAIN`         | api, web | —            | Domaine des sous-domaines (`ocall.school`)        |
-| `SCHOOL_SITES_SUBDOMAINS_ENABLED`  | api, web | `false`      | `true` seulement après le § 7                     |
-| `SCHOOL_SITES_PUBLIC_ORIGIN`       | api      | `WEB_ORIGIN` | Origine des adresses provisoires `/s/<slug>`      |
-| `SCHOOL_SITES_GRACE_DAYS`          | api      | `30`         | Maintien d'un site après suspension ou expiration |
-| `SITES_REVALIDATE_URL` / `_SECRET` | api, web | —            | Régénération des pages (partagée avec Park)       |
-| `MEDIA_STORAGE`, `S3_*`            | api      | `local`      | Stockage des médias (§ 8)                         |
+| Variable                          | Service  | Défaut       | Rôle                                              |
+| --------------------------------- | -------- | ------------ | ------------------------------------------------- |
+| `SCHOOL_SITES_BASE_DOMAIN`        | api, web | —            | Domaine des sous-domaines (`ocall.school`)        |
+| `SCHOOL_SITES_SUBDOMAINS_ENABLED` | api, web | `false`      | `true` seulement après le § 7                     |
+| `SCHOOL_SITES_PUBLIC_ORIGIN`      | api      | `WEB_ORIGIN` | Origine des adresses provisoires `/s/<slug>`      |
+| `SCHOOL_SITES_GRACE_DAYS`         | api      | `30`         | Maintien d'un site après suspension ou expiration |
+| `MEDIA_STORAGE`, `S3_*`           | api      | `local`      | Stockage des médias (§ 8)                         |

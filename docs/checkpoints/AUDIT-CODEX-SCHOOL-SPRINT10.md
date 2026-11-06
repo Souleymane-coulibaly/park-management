@@ -16,7 +16,7 @@ technique : `docs/SITES-VITRINES-SCHOOL.md`.
   `@AllowInReadOnly` du garde School (actions protectrices), `SuiteContractsService.contractWindow`.
 - **Web** : pages publiques `app/s/[slug]/[[...path]]`, composants `components/school-site/*`,
   administration `app/school/site` ; middleware et `site-hosts.ts` (hôtes `*.<SCHOOL_SITES_BASE_DOMAIN>`),
-  route de régénération (étiquettes `school-site:<slug>`), plan du site par hôte.
+  plan du site par hôte ; pages publiques School lues sans cache.
 - **Tests** : unitaires partagés et API, intégration `school-sprint10`, E2E `school-8-sites` (sous-domaines
   locaux `*.ecoles.localhost`).
 
@@ -47,4 +47,4 @@ technique : `docs/SITES-VITRINES-SCHOOL.md`.
    `rel="noopener noreferrer"`.
 5. Contrat : calcul du maintien (date de passage en lecture seule), refus de publication, exemptions
    `@AllowInReadOnly` limitées aux actions protectrices, résiliation et export.
-6. Non-régression Park : middleware, `isAppHost`, route de régénération, plan du site.
+6. Non-régression Park : middleware, `isAppHost`, plan du site.
