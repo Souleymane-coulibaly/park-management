@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 
 const NAV: NavItem[] = [
   { key: 'school-home', label: 'Tableau de bord', href: '/school' },
+  { key: 'school-reports', label: 'Rapports', href: '/school/rapports' },
+  { key: 'school-audit', label: 'Historique des opérations', href: '/school/historique' },
+  { key: 'school-ai', label: 'Ocall School AI', href: '/school/ia' },
   { key: 'school-students', label: 'Élèves', href: '/school/eleves' },
   { key: 'school-enrollments', label: 'Inscriptions', href: '/school/inscriptions' },
   { key: 'school-guardians', label: 'Responsables', href: '/school/responsables' },

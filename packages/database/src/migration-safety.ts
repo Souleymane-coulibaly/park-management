@@ -33,7 +33,9 @@ export function databaseIdentity(url: string): string {
   const u = new URL(url);
   const host = u.hostname.toLowerCase().replace('-pooler.', '.');
   const name = decodeURIComponent(u.pathname.slice(1)) || decodeURIComponent(u.username);
-  return `${host === 'localhost' ? '127.0.0.1' : host}:${u.port || '5432'}/${name}`;
+  // Alias locaux (localhost, ::1) ramenés à 127.0.0.1 : une même base locale a une seule identité.
+  const local = host === 'localhost' || host === '[::1]' || host === '::1';
+  return `${local ? '127.0.0.1' : host}:${u.port || '5432'}/${name}`;
 }
 
 /**

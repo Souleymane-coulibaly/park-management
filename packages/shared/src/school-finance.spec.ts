@@ -13,6 +13,7 @@ import {
   paymentVerification,
   receiptNumber,
   splitAmount,
+  toMajorUnits,
 } from './school-finance';
 
 describe('Ocall School — montants exacts', () => {
@@ -202,5 +203,13 @@ describe('Ocall School — soldes et statuts', () => {
       balance: 7000,
       status: 'OVERDUE',
     });
+  });
+});
+
+describe('toMajorUnits (exports et copilote)', () => {
+  it('unités mineures converties selon la devise', () => {
+    expect(toMajorUnits(10_000, 'XOF')).toBe(10_000);
+    expect(toMajorUnits(10_000, 'EUR')).toBe(100);
+    expect(toMajorUnits(12_345, 'EUR')).toBe(123.45);
   });
 });

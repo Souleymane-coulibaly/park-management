@@ -15,6 +15,7 @@ import { OriginGuard } from './common/guards/origin.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 import { HttpExceptionFilter } from './common/http-exception.filter';
 import { throttlerOptions } from './common/throttling';
+import { AiCoreModule } from './ai-core/ai-core.module';
 import { AiModule } from './modules/ai/ai.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { PublicSitesModule } from './modules/public-sites/public-sites.module';
@@ -78,6 +79,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     CrmModule,
     LoyaltyModule,
     PlanningModule,
+    AiCoreModule,
     AiModule,
     AnalyticsModule,
     PublicSitesModule,

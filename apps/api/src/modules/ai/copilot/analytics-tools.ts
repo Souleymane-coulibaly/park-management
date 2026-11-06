@@ -14,7 +14,7 @@ import {
 import type { PrismaService } from '../../../prisma/prisma.service';
 import type { AnalyticsScope } from '../../analytics/analytics-scope';
 import type { AnalyticsService } from '../../analytics/analytics.service';
-import type { JsonSchema } from '../providers/ai-provider';
+import { type AiTool, exactKeys, strictObject } from '../../../ai-core/ai-tools';
 
 /**
  * Registre FERMÉ des fonctions analytiques du copilote : uniquement des lectures, calculées par le
@@ -47,16 +47,11 @@ export interface AnalyticsResult {
   missing: string[];
 }
 
-export interface AnalyticsTool {
-  name: string;
-  description: string;
-  parameters: JsonSchema;
+/** Outil du copilote : outil d'Ocall AI Core, avec la permission et l'activité exigées par Park. */
+export interface AnalyticsTool extends AiTool<AnalyticsContext, AnalyticsResult> {
   permission: Permission;
   /** Activité exigée de l'établissement (restaurant, parc) ; absente = toutes. */
   activity?: Activity;
-  /** Validation stricte des arguments proposés par le modèle ; null = refusés. */
-  parse(args: unknown): Record<string, unknown> | null;
-  run(ctx: AnalyticsContext, args: Record<string, unknown>): Promise<AnalyticsResult>;
 }
 
 const periodSchema = {
@@ -65,22 +60,6 @@ const periodSchema = {
   description:
     'Période analysée : today, yesterday, this_week (depuis lundi), last_7_days, this_month, last_30_days.',
 };
-
-const strictObject = (properties: Record<string, unknown>): JsonSchema => ({
-  type: 'object',
-  additionalProperties: false,
-  required: Object.keys(properties),
-  properties,
-});
-
-/** Accepte exactement les clés attendues : toute clé en plus (ex. un établissement) est refusée. */
-function exactKeys(args: unknown, keys: string[]): Record<string, unknown> | null {
-  if (!args || typeof args !== 'object' || Array.isArray(args)) return null;
-  const record = args as Record<string, unknown>;
-  const given = Object.keys(record);
-  if (given.length !== keys.length || !given.every((k) => keys.includes(k))) return null;
-  return record;
-}
 
 const isPeriod = (v: unknown): v is CopilotPeriod => COPILOT_PERIODS.includes(v as CopilotPeriod);
 

@@ -26,6 +26,8 @@ jobs:
       DIRECT_URL: postgresql://postgres:postgres@localhost:5432/ocall_suite_ci
       TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ocall_suite_ci
       TEST_DIRECT_URL: postgresql://postgres:postgres@localhost:5432/ocall_suite_ci
+      # Base Suite du conteneur de service, détruite avec le job : déclarée jetable pour la garde des tests.
+      OCALL_TEST_EPHEMERAL_DATABASE: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -50,6 +52,8 @@ jobs:
       - name: Tests d'intégration School
         env:
           SCHOOL_TEST_DATABASE_URL: ${{ secrets.SCHOOL_TEST_DATABASE_URL }}
+          # Base distante marquée « test » : dérogation explicite à la garde des bases locales jetables.
+          OCALL_TEST_ALLOW_MARKED_REMOTE: '1'
         run: |
           pnpm --filter @ocall/api exec jest --runInBand --json --outputFile=school-results.json school-sprint
           node -e "const r=require('./apps/api/school-results.json');if(r.numPassedTests===0){console.error('Aucun test School execute.');process.exit(1)}"

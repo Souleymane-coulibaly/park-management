@@ -1,56 +1,13 @@
 import { normalizeLabel } from '@ocall/shared';
-import {
-  type AiProvider,
-  AiProviderError,
-  type AiResult,
-  type AiToolCall,
-  type AiToolDefinition,
-  type AiUsageReport,
-  type JsonSchema,
-} from './ai-provider';
+import type { AiToolCall } from '../../ai-core/ai-provider';
+import { type AiSimulation } from '../../ai-core/providers/simulated.provider';
+import { PARK_COPILOT_PROMPT } from './copilot/copilot.prompt';
 
 /**
- * Fournisseur SIMULÉ : déterministe, sans réseau ni coût, pour le développement et les tests
- * automatisés. Il ne prétend à aucune qualité de reconnaissance : il sert à éprouver les règles
- * du serveur (validation, isolation, quotas, confirmation humaine).
- *
- * Conventions :
- * - un contenu (fichier, audio, question) contenant `OCALL-SIM:` suivi d'un JSON fait renvoyer
- *   exactement ce JSON, ce qui permet de simuler une réponse valide, incertaine, invalide ou
- *   malveillante du modèle ;
- * - `OCALL-SIM-DOWN` simule une panne du fournisseur ;
- * - sans marqueur : document illisible, transcription vide, ou réponse par mots-clés (copilote,
- *   commande vocale).
+ * Scénarios de simulation d'Ocall Park, inscrits auprès du fournisseur simulé d'Ocall AI Core :
+ * réponse par mots-clés du copilote analytique et interprétation déterministe d'une commande dictée.
+ * Ils ne servent qu'en développement et en test (le fournisseur simulé est refusé en production).
  */
-export const SIM_MARKER = 'OCALL-SIM:';
-export const SIM_DOWN = 'OCALL-SIM-DOWN';
-
-/**
- * Retire les consignes de simulation (`OCALL-SIM:…:FIN`) d'un texte. Le copilote s'en sert pour que
- * la réponse imposée par une consigne ne compte pas parmi les données autorisées : retirer ce texte
- * ne peut que rendre le contrôle des chiffres plus strict.
- */
-export function stripSimulationDirectives(text: string): string {
-  return text.replace(/OCALL-SIM:[\s\S]*?(?::FIN|$)/g, ' ');
-}
-
-const USAGE: AiUsageReport = { inputTokens: 1000, cachedInputTokens: 0, outputTokens: 200 };
-
-function marker(content: string): unknown {
-  if (content.includes(SIM_DOWN)) {
-    throw new AiProviderError('AI_UNAVAILABLE', 'Le service IA est momentanément indisponible.');
-  }
-  const at = content.indexOf(SIM_MARKER);
-  if (at < 0) return undefined;
-  const raw = content.slice(at + SIM_MARKER.length);
-  const end = raw.indexOf(':FIN');
-  try {
-    return JSON.parse(end >= 0 ? raw.slice(0, end) : raw);
-  } catch {
-    throw new AiProviderError('AI_INVALID_OUTPUT', 'Réponse IA illisible. Réessayez.');
-  }
-}
-
 const QUANTITY_WORDS: Record<string, number> = {
   un: 1,
   une: 1,
@@ -74,46 +31,21 @@ const PERIODS: Array<[RegExp, string]> = [
   [/30 derniers jours/, 'last_30_days'],
 ];
 
-export class SimulatedAiProvider implements AiProvider {
-  readonly name = 'simulated';
+export const PARK_AI_SIMULATION: AiSimulation = {
+  structureText(request) {
+    return request.schemaName === 'voice_order' ? interpretVoiceOrder(request.text) : undefined;
+  },
 
-  async extractFromDocument<T>(request: {
-    document: { data: Buffer };
-    schema: JsonSchema;
-  }): Promise<AiResult<T>> {
-    const value = marker(request.document.data.toString('latin1'));
-    return { value: (value ?? { readable: false, items: [] }) as T, usage: USAGE };
-  }
-
-  async structureText<T>(request: { text: string; schemaName: string }): Promise<AiResult<T>> {
-    const value = marker(request.text);
-    if (value !== undefined) return { value: value as T, usage: USAGE };
-    if (request.schemaName !== 'voice_order') {
-      throw new AiProviderError('AI_INVALID_OUTPUT', 'Réponse IA illisible. Réessayez.');
-    }
-    return { value: interpretVoiceOrder(request.text) as T, usage: USAGE };
-  }
-
-  async runWithTools(request: {
-    question: string;
-    tools: AiToolDefinition[];
-    execute: (call: AiToolCall) => Promise<unknown>;
-  }): Promise<AiResult<{ answer: string }>> {
-    const scripted = marker(request.question) as
-      { calls?: AiToolCall[]; answer?: string } | undefined;
-    if (scripted) {
-      for (const call of scripted.calls ?? []) await request.execute(call);
-      return { value: { answer: scripted.answer ?? '' }, usage: USAGE };
-    }
+  runWithTools(request): { calls: AiToolCall[]; answer: string } | undefined {
+    // Seulement pour le copilote de Park (son prompt, suivi du nom de l'établissement).
+    if (!request.instructions.startsWith(PARK_COPILOT_PROMPT.instructions)) return undefined;
     const q = normalizeLabel(request.question);
     if (/\b(modifie|change|baisse|augmente|supprime|cree|annule|paie|encaisse)\b/.test(q)) {
       return {
-        value: {
-          answer:
-            'Je suis en lecture seule : je ne peux ni modifier un prix, ni créer une commande, ni ' +
-            'déclencher un paiement, ni changer les stocks.',
-        },
-        usage: USAGE,
+        calls: [],
+        answer:
+          'Je suis en lecture seule : je ne peux ni modifier un prix, ni créer une commande, ni ' +
+          'déclencher un paiement, ni changer les stocks.',
       };
     }
     const period = PERIODS.find(([re]) => re.test(q))?.[1] ?? 'today';
@@ -165,37 +97,15 @@ export class SimulatedAiProvider implements AiProvider {
     const selected = call ?? fallback;
     if (!selected) {
       return {
-        value: {
-          answer:
-            'Pouvez-vous préciser votre question ? Par exemple : « Quel est mon chiffre ' +
-            'd’affaires aujourd’hui ? » ou « Quels produits sont proches de la rupture ? »',
-        },
-        usage: USAGE,
+        calls: [],
+        answer:
+          'Pouvez-vous préciser votre question ? Par exemple : « Quel est mon chiffre ' +
+          'd’affaires aujourd’hui ? » ou « Quels produits sont proches de la rupture ? »',
       };
     }
-    await request.execute(selected);
-    return { value: { answer: 'Voici les résultats calculés sur vos données.' }, usage: USAGE };
-  }
-
-  async transcribe(request: { audio: Buffer }): Promise<AiResult<{ text: string }>> {
-    const content = request.audio.toString('latin1');
-    if (content.includes(SIM_DOWN)) {
-      throw new AiProviderError('AI_UNAVAILABLE', 'Le service IA est momentanément indisponible.');
-    }
-    const at = content.indexOf(SIM_MARKER);
-    const text =
-      at < 0
-        ? ''
-        : content
-            .slice(at + SIM_MARKER.length)
-            .split(':FIN')[0]!
-            .trim();
-    return {
-      value: { text },
-      usage: { inputTokens: 0, cachedInputTokens: 0, outputTokens: 0, audioSeconds: 5 },
-    };
-  }
-}
+    return { calls: [selected], answer: 'Voici les résultats calculés sur vos données.' };
+  },
+};
 
 /**
  * Interprétation déterministe d'une commande dictée, pour le mode simulé : quantité en chiffres

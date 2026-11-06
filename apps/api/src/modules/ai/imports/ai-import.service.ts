@@ -30,7 +30,7 @@ import {
   CATALOG_SCHEMA,
   type CatalogLine,
   type ExistingName,
-  IMPORT_INSTRUCTIONS,
+  PARK_IMPORT_PROMPT,
   type ImportAnalysis,
   TICKETS_SCHEMA,
   type TicketLine,
@@ -185,15 +185,21 @@ export class AiImportService {
 
     let raw: unknown;
     try {
-      raw = await this.ai.run(auth, feature, establishment.id, this.ai.model(feature), (provider) =>
-        provider.extractFromDocument({
-          model: this.ai.model(feature),
-          instructions: IMPORT_INSTRUCTIONS,
-          prompt,
-          document: { mimeType, data: file.buffer, fileName },
-          schemaName: kind === 'CATALOG' ? 'restaurant_menu' : 'park_ticket_prices',
-          schema: kind === 'CATALOG' ? CATALOG_SCHEMA : TICKETS_SCHEMA,
-        }),
+      raw = await this.ai.run(
+        auth,
+        feature,
+        establishment.id,
+        this.ai.model(feature),
+        (provider) =>
+          provider.extractFromDocument({
+            model: this.ai.model(feature),
+            instructions: PARK_IMPORT_PROMPT.instructions,
+            prompt,
+            document: { mimeType, data: file.buffer, fileName },
+            schemaName: kind === 'CATALOG' ? 'restaurant_menu' : 'park_ticket_prices',
+            schema: kind === 'CATALOG' ? CATALOG_SCHEMA : TICKETS_SCHEMA,
+          }),
+        PARK_IMPORT_PROMPT,
       );
     } catch (error) {
       // Échec du fournisseur : tracé (qui, quel fichier), puis signalé à l'utilisateur.
@@ -203,7 +209,9 @@ export class AiImportService {
         code?.startsWith('AI_') &&
         code !== 'AI_QUOTA_EXCEEDED' &&
         code !== 'AI_FEATURE_DISABLED' &&
-        code !== 'AI_NOT_CONFIGURED'
+        code !== 'AI_NOT_CONFIGURED' &&
+        // Limitation de débit d'Ocall AI Core : refus avant tout appel, pas une erreur du fournisseur.
+        code !== 'AI_TOO_MANY_REQUESTS'
       ) {
         await this.prisma.aiImport.create({ data: { ...base, status: 'FAILED', errorCode: code } });
       }

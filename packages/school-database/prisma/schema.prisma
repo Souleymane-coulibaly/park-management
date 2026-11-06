@@ -283,6 +283,8 @@ model School {
   sms           SchoolSmsSettings?
   rooms         SchoolRoom[]
   events        SchoolCalendarEvent[]
+  reportViews   SchoolReportView[]
+  aiSettings    SchoolAiSettings?
 
   @@unique([organizationId, id])
   @@unique([organizationId, name])
@@ -1821,4 +1823,134 @@ model SchoolExamSchedule {
 
   @@unique([organizationId, evaluationId])
   @@index([organizationId, schoolId, date])
+}
+
+/// Vue de reporting enregistrée (Sprint 8) : un rapport et ses filtres (classe, période, dates), propre à
+/// l'utilisateur qui l'a créée, pour un établissement. L'année est choisie à l'ouverture.
+model SchoolReportView {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  schoolId       String   @db.Uuid
+  ownerUserId    String   @db.Uuid
+  name           String
+  kind           String
+  filters        Json
+  createdAt      DateTime @default(now())
+
+  school School @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Cascade)
+
+  @@index([organizationId, ownerUserId, schoolId])
+}
+
+/// Ocall School AI (Sprint 8) : réglages par établissement. L'IA est désactivée tant que la direction ne
+/// l'a pas activée (vérification préalable des garanties du fournisseur) ; chaque module peut être coupé.
+model SchoolAiSettings {
+  organizationId            String   @db.Uuid
+  schoolId                  String   @id @db.Uuid
+  enabled                   Boolean  @default(false)
+  copilotEnabled            Boolean  @default(true)
+  teachingEnabled           Boolean  @default(true)
+  analysisEnabled           Boolean  @default(true)
+  /// Plafond mensuel d'appels IA de l'établissement.
+  monthlyCallLimit          Int      @default(300)
+  alertPercent              Int      @default(80)
+  /// Conservation des conversations du copilote, en jours.
+  conversationRetentionDays Int      @default(30)
+  updatedByUserId           String?  @db.Uuid
+  updatedAt                 DateTime @updatedAt
+
+  school School @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Cascade)
+
+  @@unique([organizationId, schoolId])
+}
+
+/// Consommation IA de School (Ocall AI Core) : une ligne par appel, sans aucun contenu.
+model SchoolAiUsage {
+  id                    String   @id @default(uuid()) @db.Uuid
+  organizationId        String   @db.Uuid
+  schoolId              String   @db.Uuid
+  actorUserId           String   @db.Uuid
+  memberId              String?  @db.Uuid
+  feature               String
+  provider              String
+  model                 String
+  promptId              String?
+  promptVersion         Int?
+  /// PENDING (réservé), SUCCEEDED, FAILED.
+  status                String   @default("PENDING")
+  inputTokens           Int      @default(0)
+  cachedInputTokens     Int      @default(0)
+  outputTokens          Int      @default(0)
+  /// null = coût non estimable, jamais présenté comme nul.
+  estimatedCostMicroUsd Int?
+  latencyMs             Int?
+  errorCode             String?
+  createdAt             DateTime @default(now())
+
+  @@index([organizationId, schoolId, createdAt])
+  @@index([status, createdAt])
+}
+
+/// Conversation du copilote de direction : propre à son auteur, conservée selon le réglage de l'école.
+model SchoolAiConversation {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  schoolId       String   @db.Uuid
+  ownerUserId    String   @db.Uuid
+  title          String
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  messages SchoolAiMessage[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, ownerUserId, schoolId, updatedAt])
+  @@index([expiresAt])
+}
+
+/// Message d'une conversation : question, ou réponse avec les sources métier utilisées.
+model SchoolAiMessage {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  conversationId String   @db.Uuid
+  role           String
+  content        String
+  /// Réponse : rapports utilisés (titre, période, filtres) et chiffres calculés par le serveur.
+  sources        Json?
+  grounded       Boolean?
+  createdAt      DateTime @default(now())
+
+  conversation SchoolAiConversation @relation(fields: [organizationId, conversationId], references: [organizationId, id], onDelete: Cascade)
+
+  @@index([organizationId, conversationId, createdAt])
+}
+
+/// Contenu pédagogique généré (assistant des enseignants) : brouillon modifiable, validé par son auteur
+/// avant toute diffusion. Aucune note ni évaluation n'est jamais modifiée.
+model SchoolAiDocument {
+  id                String    @id @default(uuid()) @db.Uuid
+  organizationId    String    @db.Uuid
+  schoolId          String    @db.Uuid
+  authorUserId      String    @db.Uuid
+  authorMemberId    String?   @db.Uuid
+  classId           String?   @db.Uuid
+  levelId           String?   @db.Uuid
+  subjectId         String    @db.Uuid
+  kind              String
+  language          String
+  difficulty        String
+  topic             String
+  objectives        String
+  title             String
+  /// [{ key, heading, body }]
+  sections          Json
+  status            String    @default("DRAFT")
+  promptVersion     Int
+  validatedAt       DateTime?
+  validatedByUserId String?   @db.Uuid
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([organizationId, schoolId, authorUserId, updatedAt])
 }

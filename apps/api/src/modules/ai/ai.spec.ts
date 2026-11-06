@@ -1,8 +1,15 @@
-import { loadAiConfig } from './ai.config';
+import { loadAiConfig, modelFor } from '../../ai-core/ai-core.config';
 import { ANALYTICS_TOOLS } from './copilot/analytics-tools';
 import { normalizeCatalog, normalizeTickets } from './imports/import-extraction';
 import { numbersAreGrounded } from '@ocall/shared';
-import { SimulatedAiProvider, stripSimulationDirectives } from './providers/simulated.provider';
+import {
+  SimulatedAiProvider,
+  registerAiSimulation,
+  stripSimulationDirectives,
+} from '../../ai-core/providers/simulated.provider';
+import { PARK_AI_SIMULATION } from './park-ai-simulation';
+import { PARK_COPILOT_PROMPT } from './copilot/copilot.prompt';
+import { PARK_VOICE_PROMPT } from './voice/voice-order.service';
 
 /**
  * Tests unitaires (sans base) des règles IA du serveur. Les parcours complets sont couverts par
@@ -22,7 +29,7 @@ describe('Configuration IA : aucun appel réel par oubli', () => {
       { AI_PROVIDER: 'openai', OPENAI_API_KEY: 'sk-test', AI_REAL_CALLS_ENABLED: 'true' },
       'development',
     );
-    expect(config.models.COPILOT).toBe('gpt-5');
+    expect(modelFor(config, 'COPILOT')).toBe('gpt-5');
     expect(config.transcribeModel).toBe('gpt-transcribe');
   });
 
@@ -31,7 +38,8 @@ describe('Configuration IA : aucun appel réel par oubli', () => {
       { AI_PROVIDER: 'simulated', OPENAI_MODEL_COPILOT: 'gpt-5-mini' },
       'development',
     );
-    expect(config.models).toMatchObject({ COPILOT: 'gpt-5-mini', CATALOG_IMPORT: 'gpt-5' });
+    expect(modelFor(config, 'COPILOT')).toBe('gpt-5-mini');
+    expect(modelFor(config, 'CATALOG_IMPORT')).toBe('gpt-5');
     expect(() => loadAiConfig({ AI_PROVIDER: 'simulated' }, 'production')).toThrow(/production/);
   });
 });
@@ -309,6 +317,7 @@ describe('Copilote : la consigne simulée ne compte pas parmi les données autor
 
 describe('Fournisseur simulé (tests déterministes)', () => {
   const provider = new SimulatedAiProvider();
+  registerAiSimulation(PARK_AI_SIMULATION);
 
   it('commande vocale : quantités, produits du catalogue, table, quantité incertaine', async () => {
     const text = [
@@ -324,7 +333,7 @@ describe('Fournisseur simulé (tests déterministes)', () => {
     const { value } = await provider.structureText<{
       lines: Array<{ ref: string | null; quantity: number | null }>;
       tableRef: string | null;
-    }>({ text, schemaName: 'voice_order' });
+    }>({ instructions: PARK_VOICE_PROMPT.instructions, text, schemaName: 'voice_order' });
     expect(value.tableRef).toBe('t1');
     expect(value.lines).toEqual([
       expect.objectContaining({ ref: 'p1', quantity: 2 }),
@@ -342,9 +351,11 @@ describe('Fournisseur simulé (tests déterministes)', () => {
 
 describe('Fournisseur simulé — questions du Sprint 9B', () => {
   const provider = new SimulatedAiProvider();
+  registerAiSimulation(PARK_AI_SIMULATION);
   const callFor = async (question: string) => {
     const calls: unknown[] = [];
     await provider.runWithTools({
+      instructions: `${PARK_COPILOT_PROMPT.instructions} Établissement courant : Test.`,
       question,
       tools: [],
       execute: async (c) => {

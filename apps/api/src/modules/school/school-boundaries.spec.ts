@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { resolveSchoolIds } from './school-access';
 import { loadSchoolConfig } from './school.config';
 
@@ -21,8 +21,13 @@ describe('frontières entre Ocall School et Ocall Park', () => {
   it('le module School n’importe aucun module métier Park', () => {
     const offending = sources(join(MODULES, 'school')).flatMap((file) =>
       importsOf(file)
-        .filter((i) => i.startsWith('../') && !i.startsWith('../../'))
-        .filter((i) => !ALLOWED_FROM_SCHOOL.has(i.split('/')[1]!))
+        .filter((i) => i.startsWith('.'))
+        // Chemin réel de l'import : un module métier est un dossier de src/modules (le cœur IA, la
+        // configuration ou les services communs sont hors de src/modules).
+        .filter((i) => {
+          const target = relative(MODULES, resolve(dirname(file), i));
+          return !target.startsWith('..') && !ALLOWED_FROM_SCHOOL.has(target.split(/[\\/]/)[0]!);
+        })
         .map((i) => `${file} -> ${i}`),
     );
     expect(offending).toEqual([]);

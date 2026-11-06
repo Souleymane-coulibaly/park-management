@@ -860,6 +860,139 @@ historique, annulation d'un cours, indisponibilités), `/school/mon-planning`, `
 `/school/examens`, `/school/salles`. Parents : `/parents/enfants/[id]/planning`, `/parents/calendrier`.
 Français et arabe (RTL), un seul jeu de composants.
 
+## 13 bis. Sprint 8 : reporting consolidé, exports, historique (phase 1)
+
+Un seul point de calcul, `SchoolReportingService`, réutilisé par les écrans, les exports et, en phase 3, les
+outils d'Ocall School AI : aucun second système de reporting.
+
+- **Direction** : élèves actifs (inscriptions validées de l'année), classes, enseignants en poste
+  (affectations actives), répartition par classe, assiduité, résultats de la dernière période commencée,
+  et pour les rôles qui ont les rapports financiers : facturé, encaissé, reste dû, échu impayé.
+- **Pédagogie** : par classe et période, moyenne, réussite, répartition des moyennes générales (cinq
+  tranches du barème), tendance ; matières de l'établissement (moyenne des moyennes de classe) ; moyennes
+  calculées par le moteur du Sprint 4 (`compute`, résultats figés si validés). Moins de 3 élèves notés :
+  « effectif insuffisant ». Une tendance décrit une série agrégée, jamais un élève.
+- **Assiduité** : agrégats par classe, mois et statut calculés par la base, sans nom d'élève.
+- **Finances** : tableau de bord du Sprint 5 (frais scolaires, jamais les abonnements SaaS).
+- **Exports** PDF (socle PDF des bulletins, arabe de droite à gauche), XLSX (une feuille par section) et
+  CSV : nom de l'école, titre, période, filtres ; créneaux d'export partagés, plafond de lignes,
+  journalisation `school.report_exported` sans contenu.
+- **Vues enregistrées** (`SchoolReportView`) : rapport et filtres connus seulement, propres à l'utilisateur,
+  50 au plus.
+- **Historique des opérations sensibles** : journal d'audit « school.* » du client, paginé ; réservé à la
+  direction du groupe (il couvre tous les établissements).
+
+Permissions : `school.reports.read` et `school.reports.export` (direction), `school.audit.read` (direction
+du groupe) ; le financier exige `school.finance.reports`, vérifié aussi dans le service.
+
+API (`/api/v1/school/reports`) : `GET overview|pedagogy|attendance|finance` (filtres `schoolYearId`,
+`classId`, `periodId`, `from`, `to`), `GET export?kind&format`, `GET|POST views`, `DELETE views/:id`,
+`GET audit?action&from&to&page`. Écrans : `/school/rapports` (onglets, filtres, exports, vues),
+`/school/historique`. Migration additive `20261111000000_reporting_vues_enregistrees`.
+
+Tests d'intégration : uniquement sur des bases PostgreSQL locales jetables ; `createTestApp` refuse toute
+base distante (sauf dérogation explicite `OCALL_TEST_ALLOW_MARKED_REMOTE=1`, marqueur « test » exigé), toute
+base configurée pour l'application et l'environnement de production (`assertDisposableTestDatabases`).
+
+## 13 ter. Sprint 8 : Ocall School AI (phase 3)
+
+Trois modules sur **Ocall AI Core** (`docs/OCALL-AI-CORE.md`), le moteur IA commun d'Ocall Suite. School
+inscrit son application `school` : consommation dans la base School, prompts versionnés `school.*`,
+scénarios du fournisseur simulé. Aucun microservice, aucune écriture dans les données scolaires.
+
+- **A. Copilote de direction** (`school.ai.copilot`, direction) : questions en langage naturel. Le modèle
+  ne choisit que parmi cinq lectures du reporting du Sprint 8 (`school_overview`, `results_by_period`,
+  `compare_periods`, `attendance_summary`, `finance_summary`, ce dernier avec `school.finance.reports`),
+  aux arguments stricts. L'établissement et l'année viennent de la session. Aucun SQL. Une réponse qui
+  cite un chiffre absent des résultats est écartée (nombres décimaux comparés à la française). La période,
+  les filtres et les sources sont affichés ; les données indisponibles sont signalées. L'historique est
+  propre à son auteur : 40 messages par conversation, 50 conversations par utilisateur, conservation
+  réglable (30 jours par défaut, purge à la consultation et à la modification du réglage).
+- **B. Assistant pédagogique** (`school.ai.teaching`, enseignants et direction) : fiche de cours, plan de
+  leçon, exercices, QCM, devoir, corrigé, activité ; classe, matière, sujet, objectifs, difficulté, langue
+  (français ou arabe). Le contenu est structuré en sections propres à chaque type, revalidé par le serveur,
+  modifiable, et chaque section peut être régénérée. Il est enregistré comme brouillon de son auteur. Seul
+  l'auteur le valide, et un contenu validé ne se modifie plus. Le PDF n'est produit que pour un contenu
+  validé. L'enseignant est limité à ses affectations actives. Aucune note ni évaluation n'est lue ni
+  modifiée.
+- **C. Analyse scolaire** (`school.ai.analysis`, direction) : indicateurs déterministes calculés par le
+  serveur à partir des rapports du Sprint 8 :
+  - évolution des moyennes par classe et matière ;
+  - comparaison des deux dernières périodes ;
+  - fréquence des absences ;
+  - tendances ;
+  - indicateurs d'accompagnement de classes ou de matières (moyenne en baisse, réussite sous 50 %, absences
+    au-dessus de 15 % sur au moins 10 relevés), jamais d'élève.
+
+  Les données insuffisantes sont signalées. L'IA ne rédige qu'une synthèse de ces indicateurs, sans aucune
+  donnée nominative ; une synthèse qui cite un chiffre absent est remplacée.
+
+**Réglages par établissement** (`school.ai.manage`, direction) :
+
+- IA désactivée par défaut, à activer après vérification des garanties du fournisseur ;
+- chaque module peut être coupé séparément ;
+- plafond mensuel d'appels (300 par défaut), seuil d'alerte, conservation des conversations ;
+- consultation de la consommation et du coût estimé.
+
+**Codes d'erreur :**
+
+| Code                                                        | Statut    | Cas                                       |
+| ----------------------------------------------------------- | --------- | ----------------------------------------- |
+| `AI_SCHOOL_DISABLED`                                        | 403       | IA non activée pour l'établissement       |
+| `AI_FEATURE_DISABLED`                                       | 403       | module coupé par la direction             |
+| `AI_QUOTA_EXCEEDED`                                         | 429       | plafond mensuel atteint                   |
+| `AI_TOO_MANY_REQUESTS`                                      | 429       | limitation de débit du cœur               |
+| `AI_NO_ACTIVE_YEAR`                                         | 422       | aucune année scolaire en cours            |
+| codes du fournisseur (`AI_UNAVAILABLE`, `AI_TIMEOUT`, etc.) | 502 à 504 | message « Vous pouvez continuer sans IA » |
+
+**API** (`/api/v1/school/ai`) :
+
+- `GET status`, `GET|PUT settings`, `GET usage`, `POST purge` ;
+- `POST copilot/ask`, `GET copilot/conversations`, `GET|DELETE copilot/conversations/:id` ;
+- `GET|POST teaching/contents`, `GET|PUT teaching/contents/:id`,
+  `POST teaching/contents/:id/sections/:key/regenerate`, `POST teaching/contents/:id/validate|archive`,
+  `GET teaching/contents/:id/pdf` ;
+- `GET analysis`, `POST analysis/summary`.
+
+**Écran** `/school/ia` : espaces Direction, Enseignants, Analyses et Réglages selon le rôle ; états de
+chargement, d'erreur, de désactivation et de quota épuisé.
+
+**Migration additive** `20261112000000_ocall_school_ai` : `SchoolAiSettings`, `SchoolAiUsage`,
+`SchoolAiConversation`, `SchoolAiMessage`, `SchoolAiDocument`, avec leurs contraintes.
+
+### Modèle de quotas et estimation des coûts
+
+Chaque appel IA compte une unité dans le plafond mensuel de l'établissement, y compris en cas d'échec, comme
+pour Park. Pour le copilote, une question vaut un appel, quel que soit le nombre de tours d'outils.
+
+Le coût est estimé par appel à partir des jetons rapportés par le fournisseur (`estimateAiCostMicroUsd`,
+taux indicatif `AI_USD_XOF_RATE`). Il est affiché à titre indicatif et ne crée aucune facturation SaaS.
+
+Ordres de grandeur avec un modèle de la famille GPT-5 :
+
+| Module              | Jetons par appel (entrée, sortie)  | Coût indicatif                         |
+| ------------------- | ---------------------------------- | -------------------------------------- |
+| Copilote            | environ 4 000 à 8 000 et 300 à 600 | quelques dizaines de FCFA par question |
+| Contenu pédagogique | environ 1 000 et 1 500 à 3 000     |                                        |
+| Synthèse d'analyse  | environ 3 000 et 500               |                                        |
+
+Un établissement au plafond par défaut (300 appels) reste dans un budget mensuel de l'ordre de quelques
+milliers de FCFA. Ces chiffres sont à confirmer par la consommation réelle relevée dans les réglages.
+
+### Exploitation
+
+1. **Activer sur la plateforme :** `AI_PROVIDER=openai`, `OPENAI_API_KEY` (secret Railway, jamais dans
+   Git), `AI_REAL_CALLS_ENABLED=true`. Facultatif : `OPENAI_MODEL_SCHOOL_COPILOT`,
+   `OPENAI_MODEL_SCHOOL_TEACHING` et `OPENAI_MODEL_SCHOOL_ANALYSIS`. Faire cette activation seulement
+   après vérification des garanties contractuelles et de protection des données du fournisseur.
+2. **Activer par établissement :** Ocall School AI, puis Réglages, puis activer. Ajuster ensuite le plafond
+   et la conservation.
+3. **Suivre :** consommation et coût estimé dans les Réglages ; alerte de seuil journalisée
+   (`school.ai_quota_alert`) ; journal technique `OcallAiCore` pour les erreurs du fournisseur (sans
+   contenu).
+4. **Couper :** décocher l'activation de l'établissement (effet immédiat), ou revenir à `AI_PROVIDER=none`
+   (toutes applications).
+
 ## 14. Limites actuelles
 
 - Réserves P3 de l'audit du Sprint 6 (non bloquantes) : reprise de l'écran d'appel quand la réponse du
@@ -879,6 +1012,11 @@ Français et arabe (RTL), un seul jeu de composants.
 - Fil des enseignants : un enseignant dont tous les cours disparaissent d'une classe lors du remplacement
   par une nouvelle version publiée n'y voit pas ce remplacement (son planning, lui, est à jour ; les
   familles sont notifiées) — réserve P3 de l'audit du Sprint 7.
+- Ocall School AI : aucun appel réel n'a été fait (tests et preuves avec le fournisseur simulé). La qualité
+  des réponses du modèle réel reste à évaluer avant activation. Le contrôle des chiffres vérifie les nombres
+  cités, pas la justesse du raisonnement ; la synthèse reste une aide à relire. La limitation de débit est
+  en mémoire, par instance d'API. Les contenus pédagogiques sont personnels : il n'y a pas de partage entre
+  enseignants. L'historique des opérations sensibles n'est pas filtrable par établissement.
 - Examens : le surveillant n'est pas comparé à ses propres cours. La programmation fixe la date de
   l'évaluation (dans sa période, tant que les résultats ne sont pas validés).
 - L'enseignant d'un groupe voit la liste restreinte de toute la classe (choix validé au cadrage).
@@ -928,4 +1066,7 @@ Français et arabe (RTL), un seul jeu de composants.
   d’application est future ne se génère qu’à partir de cette date (créer un frais distinct pour un
   changement programmé).
 - La réduction fixe s’applique à chaque échéance concernée ; un taux s’arrondit à l’unité inférieure.
-- Les montants d’export sont en unités mineures de la devise.
+- Montants : stockés et échangés par l’API métier en unités mineures de la devise. Les exports
+  financiers du Sprint 5 (impayés, encaissements) restent en unités mineures. Les exports du reporting
+  du Sprint 8 et les données remises au copilote IA sont convertis dans l’unité de la devise
+  (`toMajorUnits`), à côté du code de la devise.

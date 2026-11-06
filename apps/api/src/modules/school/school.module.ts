@@ -23,6 +23,15 @@ import { SchoolMembersService } from './school-members.service';
 import { SchoolNotificationsService } from './school-notifications.service';
 import { SchoolPaymentsService } from './school-payments.service';
 import { SchoolCalendarController, SchoolPlanningController } from './school-planning.controller';
+import { SchoolAiAnalysisService } from './ai/school-ai-analysis.service';
+import { SchoolAiCopilotService } from './ai/school-ai-copilot.service';
+import { SchoolAiPrivacyService } from './ai/school-ai-privacy.service';
+import { SchoolAiTeachingService } from './ai/school-ai-teaching.service';
+import { SchoolAiUsageStore } from './ai/school-ai-usage.store';
+import { SchoolAiController } from './ai/school-ai.controller';
+import { SchoolAiService } from './ai/school-ai.service';
+import { SchoolReportingController } from './school-reporting.controller';
+import { SchoolReportingService } from './school-reporting.service';
 import { SchoolPortalAccountsService } from './school-portal-accounts.service';
 import {
   SchoolPortalActivationController,
@@ -67,6 +76,8 @@ import { SchoolService } from './school.service';
     SchoolPortalController,
     SchoolPlanningController,
     SchoolCalendarController,
+    SchoolReportingController,
+    SchoolAiController,
   ],
   providers: [
     SchoolPrismaService,
@@ -99,6 +110,14 @@ import { SchoolService } from './school.service';
     SchoolRoomsService,
     SchoolCalendarService,
     SchoolExamsService,
+    SchoolReportingService,
+    // Sprint 8 : Ocall School AI sur Ocall AI Core (copilote, assistant pédagogique, analyse).
+    SchoolAiUsageStore,
+    SchoolAiPrivacyService,
+    SchoolAiService,
+    SchoolAiCopilotService,
+    SchoolAiTeachingService,
+    SchoolAiAnalysisService,
     SchoolTimetablesService,
   ],
 })

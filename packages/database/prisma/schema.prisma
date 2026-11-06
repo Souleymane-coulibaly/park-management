@@ -1750,6 +1750,9 @@ model AiUsage {
   estimatedCostMicroUsd Int?
   latencyMs             Int?
   errorCode             String?
+  /// Prompt versionné d'Ocall AI Core utilisé pour l'appel (null : appel sans prompt, ex. transcription).
+  promptId              String?
+  promptVersion         Int?
   createdAt             DateTime     @default(now())
 
   organization  Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)

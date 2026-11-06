@@ -57,6 +57,16 @@ export function formatAmount(minor: number, currency: SchoolCurrency, locale = '
   return `${sign}${wholeText}${fractionText} ${currency}`;
 }
 
+/**
+ * Montant stocké en unités mineures converti dans l'unité de la devise (10000 → 100 pour EUR, 10000 →
+ * 10000 pour XOF, 10000 → 10 pour TND). Pour les exports et les données remises au copilote IA, qui
+ * présentent un nombre à côté du code de la devise : jamais d'unités mineures sous un libellé de devise.
+ */
+export function toMajorUnits(minor: number, currency: SchoolCurrency): number {
+  const decimals = SCHOOL_CURRENCIES[currency];
+  return decimals === 0 ? minor : Number((minor / 10 ** decimals).toFixed(decimals));
+}
+
 // ─── Frais ───
 
 export const SCHOOL_FEE_CATEGORIES = [

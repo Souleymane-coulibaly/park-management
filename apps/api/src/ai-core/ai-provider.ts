@@ -94,6 +94,29 @@ export interface AiProvider {
 
 export const AI_PROVIDER = Symbol('AI_PROVIDER');
 
+const USAGE_KEY = 'ocallAiUsage';
+
+/**
+ * Joint à TOUTE erreur survenue après un appel facturé (erreur d'outil métier, refus, réponse
+ * illisible) la consommation déjà rapportée : l'erreur garde son type, son code et son statut.
+ */
+export function attachAiUsage(error: unknown, usage: AiUsageReport): void {
+  if (error instanceof AiProviderError) {
+    error.usage = usage;
+  } else if (error && typeof error === 'object') {
+    (error as Record<string, unknown>)[USAGE_KEY] = usage;
+  }
+}
+
+/** Consommation jointe à une erreur, si elle en porte une. */
+export function aiUsageOf(error: unknown): AiUsageReport | undefined {
+  if (error instanceof AiProviderError) return error.usage;
+  if (error && typeof error === 'object') {
+    return (error as Record<string, unknown>)[USAGE_KEY] as AiUsageReport | undefined;
+  }
+  return undefined;
+}
+
 export type AiErrorCode =
   'AI_UNAVAILABLE' | 'AI_TIMEOUT' | 'AI_RATE_LIMITED' | 'AI_INVALID_OUTPUT' | 'AI_REFUSED';
 
@@ -102,6 +125,8 @@ export class AiProviderError extends Error {
   constructor(
     readonly code: AiErrorCode,
     message: string,
+    /** Consommation déjà rapportée par le fournisseur avant l'échec (tours réussis, réponse illisible). */
+    public usage?: AiUsageReport,
   ) {
     super(message);
   }

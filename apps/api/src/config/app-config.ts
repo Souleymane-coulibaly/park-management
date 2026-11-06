@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { type AiConfig, loadAiConfig } from '../modules/ai/ai.config';
+import { type AiConfig, loadAiConfig } from '../ai-core/ai-core.config';
 import { type SchoolConfig, loadSchoolConfig } from '../modules/school/school.config';
 import { type SitesConfig, loadSitesConfig } from '../modules/public-sites/sites.config';
 import {

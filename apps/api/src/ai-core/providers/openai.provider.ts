@@ -7,12 +7,14 @@ import type {
 import {
   type AiProvider,
   AiProviderError,
+  aiUsageOf,
+  attachAiUsage,
   type AiResult,
   type AiToolCall,
   type AiToolDefinition,
   type AiUsageReport,
   type JsonSchema,
-} from './ai-provider';
+} from '../ai-provider';
 
 /**
  * Fournisseur OpenAI : API Responses pour le modèle de langage (GPT-5 par défaut), API de
@@ -104,6 +106,27 @@ export class OpenAiProvider implements AiProvider {
     const input: ResponseInputItem[] = [
       { role: 'user', content: [{ type: 'input_text', text: request.question }] },
     ];
+    try {
+      return await this.toolRounds(request, total, input);
+    } catch (error) {
+      // Tours déjà facturés avant l'échec (erreur du fournisseur ou d'un outil métier) : leur
+      // consommation accompagne l'erreur, qui garde son type et son statut.
+      attachAiUsage(error, sumUsage(total, aiUsageOf(error)));
+      throw error;
+    }
+  }
+
+  private async toolRounds(
+    request: {
+      model: string;
+      instructions: string;
+      tools: AiToolDefinition[];
+      execute: (call: AiToolCall) => Promise<unknown>;
+      maxRounds: number;
+    },
+    total: AiUsageReport,
+    input: ResponseInputItem[],
+  ): Promise<AiResult<{ answer: string }>> {
     for (let round = 0; round <= request.maxRounds; round++) {
       const response = await this.call(() =>
         this.client.responses.create({
@@ -211,6 +234,15 @@ function usageOf(usage: ResponseUsage | undefined): AiUsageReport {
   };
 }
 
+function sumUsage(a: AiUsageReport, b: AiUsageReport | undefined): AiUsageReport {
+  if (!b) return { ...a };
+  return {
+    inputTokens: a.inputTokens + b.inputTokens,
+    cachedInputTokens: a.cachedInputTokens + b.cachedInputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+  };
+}
+
 function addUsage(total: AiUsageReport, usage: AiUsageReport) {
   total.inputTokens += usage.inputTokens;
   total.cachedInputTokens += usage.cachedInputTokens;
@@ -226,13 +258,20 @@ function assertNotRefused(response: Response) {
 }
 
 function parseJson<T>(response: Response): T {
-  assertNotRefused(response);
+  // Réponse facturée même si elle est refusée, incomplète ou illisible : sa consommation suit l'erreur.
+  const usage = usageOf(response.usage);
+  try {
+    assertNotRefused(response);
+  } catch (error) {
+    if (error instanceof AiProviderError) error.usage = usage;
+    throw error;
+  }
   if (response.status === 'incomplete') {
-    throw new AiProviderError('AI_INVALID_OUTPUT', 'Réponse IA incomplète. Réessayez.');
+    throw new AiProviderError('AI_INVALID_OUTPUT', 'Réponse IA incomplète. Réessayez.', usage);
   }
   try {
     return JSON.parse(response.output_text) as T;
   } catch {
-    throw new AiProviderError('AI_INVALID_OUTPUT', 'Réponse IA illisible. Réessayez.');
+    throw new AiProviderError('AI_INVALID_OUTPUT', 'Réponse IA illisible. Réessayez.', usage);
   }
 }

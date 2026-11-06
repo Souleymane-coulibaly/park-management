@@ -8,7 +8,8 @@ import {
   isPotentialDuplicate,
   normalizeLabel,
 } from '@ocall/shared';
-import type { JsonSchema } from '../providers/ai-provider';
+import { defineAiPrompt } from '../../../ai-core/ai-prompts';
+import type { JsonSchema } from '../../../ai-core/ai-provider';
 
 /**
  * Import IA : schémas imposés au modèle et revalidation SERVEUR de sa réponse.
@@ -24,6 +25,13 @@ export const IMPORT_INSTRUCTIONS =
   'texte exact lu dans priceText. Les prix sont des entiers en FCFA (XOF) : « 2.500 F » ou ' +
   '« 2 500 FCFA » valent 2500. N’indique une disponibilité que si elle est écrite explicitement. ' +
   'Si le document est illisible ou n’est pas une carte ou une grille tarifaire, readable = false.';
+
+/** Prompt versionné (Ocall AI Core) : toute modification du texte exige une nouvelle version. */
+export const PARK_IMPORT_PROMPT = defineAiPrompt({
+  id: 'park.import',
+  version: 1,
+  instructions: IMPORT_INSTRUCTIONS,
+});
 
 const nullable = (type: string) => ({ type: [type, 'null'] });
 

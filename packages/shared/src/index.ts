@@ -26,3 +26,5 @@ export * from './school-quran';
 export * from './school-finance';
 export * from './school-portal';
 export * from './school-planning';
+export * from './school-reporting';
+export * from './school-ai';

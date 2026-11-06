@@ -12,6 +12,9 @@ export {
   type TestDatabase,
   TEST_MARKER_QUERY,
   assertTestDatabaseMarker,
+  REMOTE_TEST_OPT_IN,
+  EPHEMERAL_OPT_IN,
+  assertDisposableTestDatabases,
   isLocalDatabase,
   resolveTestDatabase,
 } from './test-database';

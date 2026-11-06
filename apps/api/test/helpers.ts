@@ -5,6 +5,7 @@ import request from 'supertest';
 import {
   PrismaClient,
   assertTestDatabaseMarker,
+  assertDisposableTestDatabases,
   resolveTestDatabase,
   databaseIdentity,
 } from '@ocall/database';
@@ -17,6 +18,21 @@ import { PrismaService } from '../src/prisma/prisma.service';
 import { setupApp } from '../src/setup-app';
 
 export const PASSWORD = 'Bamako2026Secure';
+/**
+ * Bases configurées pour l'application (apps/api/.env : développement), lues au chargement, avant que
+ * `createTestApp` ne pointe DATABASE_URL et SCHOOL_DATABASE_URL vers les bases de test.
+ */
+const APP_DATABASES: NodeJS.ProcessEnv = {
+  DATABASE_URL: process.env.DATABASE_URL,
+  DIRECT_URL: process.env.DIRECT_URL,
+  SCHOOL_DATABASE_URL: process.env.SCHOOL_DATABASE_URL,
+  NODE_ENV: process.env.OCALL_ORIGINAL_NODE_ENV || process.env.NODE_ENV,
+  RAILWAY_ENVIRONMENT_NAME: process.env.RAILWAY_ENVIRONMENT_NAME,
+  CI: process.env.CI,
+  OCALL_TEST_EPHEMERAL_DATABASE: process.env.OCALL_TEST_EPHEMERAL_DATABASE,
+  OCALL_TEST_ALLOW_MARKED_REMOTE: process.env.OCALL_TEST_ALLOW_MARKED_REMOTE,
+};
+
 /** Suffixe unique par exécution : les données de test sont identifiables et nettoyées. */
 export const RUN = randomBytes(4).toString('hex');
 
@@ -28,6 +44,15 @@ export type Agent = ReturnType<typeof request.agent>;
  */
 export async function createTestApp(): Promise<{ app: INestApplication; prisma: PrismaService }> {
   const testDb = resolveTestDatabase();
+  // Protection bloquante : bases locales jetables seulement, jamais une base configurée pour l'application.
+  assertDisposableTestDatabases(
+    [
+      testDb.databaseUrl,
+      testDb.directUrl,
+      process.env.SCHOOL_TEST_DATABASE_URL ?? process.env.TEST_SCHOOL_DATABASE_URL,
+    ],
+    APP_DATABASES,
+  );
   // Base distante : refusée sans le marqueur d'environnement « test » (Sprint 13).
   const probe = new PrismaClient({ datasourceUrl: testDb.databaseUrl });
   try {

@@ -161,6 +161,20 @@ export const SchoolPermission = {
   CALENDAR_MANAGE: 'school.calendar.manage',
   /** Programmer et publier les examens (date, heure, durée, salle, surveillant). */
   EXAMS_MANAGE: 'school.exams.manage',
+  /** Tableau de bord de direction, rapports pédagogiques et d'assiduité (Sprint 8). */
+  REPORTS_READ: 'school.reports.read',
+  /** Exporter les rapports (PDF, XLSX, CSV) ; journalisé. Le financier exige aussi FINANCE_REPORTS. */
+  REPORTS_EXPORT: 'school.reports.export',
+  /** Historique des opérations sensibles du client : direction du groupe seulement (tous établissements). */
+  AUDIT_READ: 'school.audit.read',
+  /** Ocall School AI (Sprint 8) : copilote de direction, en lecture seule sur les rapports autorisés. */
+  AI_COPILOT: 'school.ai.copilot',
+  /** Assistant pédagogique : contenus générés, validés par l'enseignant avant toute diffusion. */
+  AI_TEACHING: 'school.ai.teaching',
+  /** Analyse scolaire : indicateurs calculés par le serveur, synthèse rédigée par l'IA. */
+  AI_ANALYSIS: 'school.ai.analysis',
+  /** Activer l'IA par établissement, quotas, conservation des conversations, consommation. */
+  AI_MANAGE: 'school.ai.manage',
 } as const;
 export type SchoolPermission = (typeof SchoolPermission)[keyof typeof SchoolPermission];
 
@@ -215,6 +229,12 @@ const DIRECTION: readonly SchoolPermission[] = [
   SP.PLANNING_PUBLISH,
   SP.CALENDAR_MANAGE,
   SP.EXAMS_MANAGE,
+  SP.REPORTS_READ,
+  SP.REPORTS_EXPORT,
+  SP.AI_COPILOT,
+  SP.AI_TEACHING,
+  SP.AI_ANALYSIS,
+  SP.AI_MANAGE,
 ];
 
 /**
@@ -229,9 +249,12 @@ const DIRECTION: readonly SchoolPermission[] = [
  * l'appel et examine les justificatifs ; l'enseignant fait l'appel et publie des annonces pour ses classes.
  * Planning (Sprint 7) : le secrétariat prépare emplois du temps, salles, calendrier et examens, la direction
  * publie les emplois du temps ; tout le personnel consulte, l'enseignant seulement ses classes.
+ * Reporting et IA (Sprint 8) : la direction consulte et exporte les rapports et utilise le copilote et
+ * l'analyse ; l'historique des opérations sensibles, qui couvre tout le client, est réservé à la direction
+ * du groupe ; l'enseignant dispose de l'assistant pédagogique pour ses classes.
  */
 export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermission[]> = {
-  GROUP_DIRECTOR: [...DIRECTION, SP.SCHOOLS_MANAGE],
+  GROUP_DIRECTOR: [...DIRECTION, SP.SCHOOLS_MANAGE, SP.AUDIT_READ],
   SCHOOL_DIRECTOR: DIRECTION,
   SECRETARY: [
     SP.STRUCTURE_READ,
@@ -272,6 +295,7 @@ export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermissi
     SP.ATTENDANCE_TAKE,
     SP.ANNOUNCEMENTS_CLASS,
     SP.PLANNING_READ,
+    SP.AI_TEACHING,
   ],
   SUPERVISOR: [
     SP.STRUCTURE_READ,
