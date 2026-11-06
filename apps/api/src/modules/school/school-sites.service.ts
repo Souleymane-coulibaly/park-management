@@ -147,6 +147,15 @@ export class SchoolSitesService {
    * Disponibilité d'un site selon les contrats qui couvrent SON établissement (périmètre du contrat),
    * la plus favorable l'emportant quel que soit l'ordre des contrats.
    */
+  /**
+   * Verrou du site, pris EN PREMIER par toute transaction qui écrit le site, ses actualités, ses liens
+   * ou ses médias : un seul ordre de verrouillage (aucun interblocage) et aucune écriture à partir
+   * d'une lecture périmée (publication, retrait, actualité concurrents).
+   */
+  async lockSite(tx: Db, siteId: string): Promise<void> {
+    await tx.$executeRaw`SELECT 1 FROM "SchoolSite" WHERE "id" = ${siteId}::uuid FOR UPDATE`;
+  }
+
   async availability(organizationId: string, schoolId: string): Promise<SchoolSiteAvailability> {
     const windows = await this.contracts.contractWindows(
       organizationId,
@@ -279,6 +288,7 @@ export class SchoolSitesService {
   async setEnabled(ctx: SchoolContext, siteId: string, enabled: boolean) {
     const site = await this.findSite(ctx, siteId);
     const updated = await this.db.$transaction(async (tx) => {
+      await this.lockSite(tx, site.id);
       const row = await tx.schoolSite.update({
         where: { id: site.id },
         data: enabled ? { enabled } : { enabled, isOnline: false },
@@ -412,7 +422,12 @@ export class SchoolSitesService {
       cover: pick(draft.media.coverId),
       gallery: draft.media.gallery.flatMap((g) => {
         const m = pick(g.mediaId);
-        return m ? [{ ...m, caption: g.caption }] : [];
+        if (!m) return [];
+        const alt = {
+          fr: m.alt.fr.trim() || g.caption.fr.trim(),
+          ar: m.alt.ar.trim() || g.caption.ar.trim(),
+        };
+        return [{ ...m, alt, caption: g.caption }];
       }),
     };
   }
@@ -468,8 +483,17 @@ export class SchoolSitesService {
       });
     }
     const updated = await this.db.$transaction(async (tx) => {
+      await this.lockSite(tx, site.id);
       const fresh = await this.findSite(ctx, siteId, tx);
       const published = await this.buildPublished(tx, fresh);
+      // Image informative sans aucune description (galerie) : publication refusée.
+      if (published.gallery.some((g) => !g.alt.fr.trim() && !g.alt.ar.trim())) {
+        throw new BadRequestException({
+          code: 'SITE_IMAGE_ALT_REQUIRED',
+          message:
+            'Une photo de la galerie n’a ni description ni légende : décrivez-la avant de publier.',
+        });
+      }
       const row = await tx.schoolSite.update({
         where: { id: site.id },
         data: {
@@ -491,6 +515,7 @@ export class SchoolSitesService {
   async unpublish(ctx: SchoolContext, siteId: string) {
     const site = await this.findSite(ctx, siteId);
     const updated = await this.db.$transaction(async (tx) => {
+      await this.lockSite(tx, site.id);
       const row = await tx.schoolSite.update({
         where: { id: site.id },
         data: { isOnline: false },
@@ -726,11 +751,12 @@ export class SchoolSitesService {
         message: 'Ordre invalide : indiquez chaque lien du site une seule fois.',
       });
     }
-    await this.db.$transaction(
-      ids.map((id, position) =>
-        this.db.schoolSiteLink.update({ where: { id }, data: { position } }),
-      ),
-    );
+    await this.db.$transaction(async (tx) => {
+      await this.lockSite(tx, site.id);
+      for (const [position, id] of ids.entries()) {
+        await tx.schoolSiteLink.update({ where: { id }, data: { position } });
+      }
+    });
     return this.listLinks(ctx, siteId);
   }
 
@@ -801,6 +827,16 @@ export class SchoolSitesService {
   private async newsMedia(site: SiteRow, mediaId: string | null | undefined) {
     if (!mediaId) return null;
     await this.assertMediaOfSite(site, [mediaId]);
+    const media = await this.db.schoolSiteMedia.findFirst({
+      where: { id: mediaId, organizationId: site.organizationId, siteId: site.id },
+      select: { alt: true, altAr: true },
+    });
+    if (!media?.alt.trim() && !media?.altAr.trim()) {
+      throw new BadRequestException({
+        code: 'SITE_IMAGE_ALT_REQUIRED',
+        message: 'Cette photo n’a pas de description : choisissez une photo décrite.',
+      });
+    }
     return mediaId;
   }
 
@@ -889,16 +925,6 @@ export class SchoolSitesService {
   ) {
     const site = await this.findSite(ctx, siteId);
     const news = await this.findNews(site, newsId);
-    // Une actualité en ligne modifiée l'est aussitôt pour le public : c'est une publication.
-    if (
-      news.status === 'PUBLISHED' &&
-      !hasSchoolPermission(ctx.role, SchoolPermission.SITE_PUBLISH)
-    ) {
-      throw new ForbiddenException({
-        code: 'SITE_NEWS_PUBLISHED',
-        message: 'Actualité publiée : seule la direction peut la modifier (ou la retirer du site).',
-      });
-    }
     const text = this.checkedNews({
       title: dto.title ?? news.title,
       titleAr: dto.titleAr ?? news.titleAr,
@@ -907,6 +933,25 @@ export class SchoolSitesService {
     });
     const mediaId = dto.mediaId === undefined ? undefined : await this.newsMedia(site, dto.mediaId);
     await this.db.$transaction(async (tx) => {
+      await this.lockSite(tx, site.id);
+      // Statut relu sous le verrou du site, que la publication prend aussi : une actualité publiée
+      // entre-temps ne peut plus être modifiée sans le droit de publication.
+      const current = await tx.schoolSiteNews.findFirst({
+        where: { id: news.id, organizationId: site.organizationId, siteId: site.id },
+        select: { status: true },
+      });
+      if (!current) throw new NotFoundException(NOT_FOUND);
+      // Une actualité en ligne modifiée l'est aussitôt pour le public : c'est une publication.
+      if (
+        current.status === 'PUBLISHED' &&
+        !hasSchoolPermission(ctx.role, SchoolPermission.SITE_PUBLISH)
+      ) {
+        throw new ForbiddenException({
+          code: 'SITE_NEWS_PUBLISHED',
+          message:
+            'Actualité publiée : seule la direction peut la modifier (ou la retirer du site).',
+        });
+      }
       await tx.schoolSiteNews.update({
         where: { id: news.id },
         data: {
@@ -924,6 +969,7 @@ export class SchoolSitesService {
     const site = await this.findSite(ctx, siteId);
     const news = await this.findNews(site, newsId);
     await this.db.$transaction(async (tx) => {
+      await this.lockSite(tx, site.id);
       await tx.schoolSiteNews.update({
         where: { id: news.id },
         data: publish ? { status: 'PUBLISHED', publishedAt: new Date() } : { status: 'DRAFT' },
@@ -944,6 +990,7 @@ export class SchoolSitesService {
     const site = await this.findSite(ctx, siteId);
     const news = await this.findNews(site, newsId);
     await this.db.$transaction(async (tx) => {
+      await this.lockSite(tx, site.id);
       await tx.schoolSiteNews.delete({ where: { id: news.id } });
       await this.syncPublishedMedia(tx, site);
     });
@@ -1082,13 +1129,18 @@ export class SchoolSitesService {
       !this.sitesConfig.subdomainsEnabled &&
       normalizeHost(host) === new URL(this.sitesConfig.publicOrigin).hostname
     ) {
-      const rows = await this.db.schoolSite.findMany({
-        where: { enabled: true, isOnline: true },
-        select: { slug: true },
-        orderBy: { publishedAt: 'desc' },
-        take: 200,
-      });
-      slugs = rows.map((r) => r.slug);
+      for (let cursor: string | undefined; ;) {
+        const rows = await this.db.schoolSite.findMany({
+          where: { enabled: true, isOnline: true },
+          select: { id: true, slug: true },
+          orderBy: { id: 'asc' },
+          take: 200,
+          ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        });
+        slugs.push(...rows.map((r) => r.slug));
+        if (rows.length < 200) break;
+        cursor = rows[rows.length - 1]!.id;
+      }
     }
     const entries: { url: string; lastModified: string | null }[] = [];
     for (const slug of slugs) {

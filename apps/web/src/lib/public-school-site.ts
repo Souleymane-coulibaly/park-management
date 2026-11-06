@@ -34,7 +34,8 @@ export async function fetchSchoolSitemap(
 ): Promise<{ url: string; lastModified: string | null }[]> {
   const res = await fetch(
     `${API_URL}/api/v1/public/school-sites/sitemap?host=${encodeURIComponent(host)}`,
-    { next: { revalidate: 600 } },
+    // Sans cache : une dépublication ou une résiliation retire aussitôt les pages du plan.
+    { cache: 'no-store' },
   );
   return res.ok ? res.json() : [];
 }

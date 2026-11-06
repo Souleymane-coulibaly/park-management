@@ -498,6 +498,32 @@ suite('Ocall School — Sprint 10, sites vitrines (intégration)', () => {
       expect(res.body.code).toBe('MEDIA_ALT_REQUIRED');
     });
 
+    it('photo sans description réutilisée dans la galerie : publication refusée', async () => {
+      const cover = await upload(
+        secretary.agent,
+        siteId,
+        { kind: 'COVER', containsMinors: 'false' },
+        await photo(),
+      ).expect(201);
+      const current = await ownerA.get(`/api/v1/school/sites?schoolId=${schoolA}`).expect(200);
+      const content = current.body.draft;
+      const gallery = content.media.gallery;
+      content.media.gallery = [...gallery, { mediaId: cover.body.id, caption: { fr: '', ar: '' } }];
+      await ownerA.put(`/api/v1/school/sites/${siteId}/draft`).send({ content }).expect(200);
+      const refused = await ownerA.post(`/api/v1/school/sites/${siteId}/publish`).expect(400);
+      expect(refused.body.code).toBe('SITE_IMAGE_ALT_REQUIRED');
+      // Une légende suffit à décrire la photo.
+      content.media.gallery = [
+        ...gallery,
+        { mediaId: cover.body.id, caption: { fr: 'Façade de l’école', ar: '' } },
+      ];
+      await ownerA.put(`/api/v1/school/sites/${siteId}/draft`).send({ content }).expect(200);
+      await ownerA.post(`/api/v1/school/sites/${siteId}/publish`).expect(200);
+      content.media.gallery = gallery;
+      await ownerA.put(`/api/v1/school/sites/${siteId}/draft`).send({ content }).expect(200);
+      await ownerA.post(`/api/v1/school/sites/${siteId}/publish`).expect(200);
+    });
+
     it('actualité publiée : le secrétariat ne peut plus la modifier, la direction oui', async () => {
       const list = await secretary.agent.get(`/api/v1/school/sites/${siteId}/news`).expect(200);
       const published = list.body.find((n: { status: string }) => n.status === 'PUBLISHED');

@@ -14,12 +14,10 @@ const escapeXml = (s: string) =>
 export async function GET(request: NextRequest) {
   const host = requestHost(request.headers);
   const origin = `${request.nextUrl.protocol}//${host}`;
-  // Hôte d'un site School : ses seules pages publiées ; sinon, sites Park et pages commerciales.
   // Hôte d'un site School : ses seules pages. Hôte de l'application : sites Park et sites School
   // servis à l'adresse provisoire /s/<slug> (sous-domaines School non activés).
-  const entries = isSchoolSiteHost(host)
-    ? await fetchSchoolSitemap(host)
-    : [...(await fetchSitemap(host)), ...(isAppHost(host) ? await fetchSchoolSitemap(host) : [])];
+  const school = isSchoolSiteHost(host) || isAppHost(host) ? await fetchSchoolSitemap(host) : [];
+  const entries = isSchoolSiteHost(host) ? school : [...(await fetchSitemap(host)), ...school];
   const marketing = isAppHost(host)
     ? [
         '/',
@@ -46,7 +44,8 @@ export async function GET(request: NextRequest) {
   return new Response(body, {
     headers: {
       'content-type': 'application/xml; charset=utf-8',
-      'cache-control': 'public, max-age=600',
+      // Plan citant des sites School : jamais mis en cache (retrait immédiat) ; plans Park inchangés.
+      'cache-control': school.length > 0 ? 'no-store' : 'public, max-age=600',
     },
   });
 }

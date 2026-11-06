@@ -29,6 +29,9 @@ export type SchoolSiteMediaKind = (typeof SCHOOL_SITE_MEDIA_KINDS)[number];
 /** Plafond d'images actives par site (logos, couvertures, galerie, actualités). */
 const MAX_MEDIA_PER_SITE = 120;
 const NOT_FOUND = { code: 'SCHOOL_SITE_MEDIA_NOT_FOUND', message: 'Image introuvable.' };
+/** Média en cours d'envoi (fichiers pas encore tous écrits), puis envoi échoué. */
+const UPLOAD_PENDING = 'Envoi en cours';
+const UPLOAD_FAILED = 'Envoi échoué';
 
 const MEDIA_VIEW = {
   id: true,
@@ -144,74 +147,83 @@ export class SchoolSiteMediaService {
     }
     const storageKey = `${randomUUID()}.webp`;
     const thumbKey = `${randomUUID()}.webp`;
-    const stored: string[] = [];
-    let media: Prisma.SchoolSiteMediaGetPayload<{ select: typeof MEDIA_VIEW }>;
+    // 1. Intention enregistrée AVANT toute écriture de fichier : le média existe, retiré et marqué
+    //    « envoi en cours », avec ses deux clés. Aucun fichier ne peut devenir orphelin : un échec, même
+    //    partiel, laisse ses clés sur la ligne, et le retrait (bouton « réessayer ») les supprime.
+    const pending = await this.db.$transaction(async (tx) => {
+      await this.sites.lockSite(tx, site.id);
+      const count = await tx.schoolSiteMedia.count({
+        where: { siteId: site.id, withdrawnAt: null },
+      });
+      if (count >= MAX_MEDIA_PER_SITE) {
+        throw new ConflictException({
+          code: 'MEDIA_LIMIT',
+          message: `${MAX_MEDIA_PER_SITE} images au plus par site : retirez-en d’abord.`,
+        });
+      }
+      return tx.schoolSiteMedia.create({
+        data: {
+          organizationId: site.organizationId,
+          siteId: site.id,
+          kind: dto.kind,
+          storageKey,
+          thumbKey,
+          mimeType: 'image/webp',
+          bytes: processed.full.body.length + processed.thumb.body.length,
+          width: processed.full.width,
+          height: processed.full.height,
+          alt: (dto.alt ?? '').trim().slice(0, SCHOOL_SITE_LIMITS.altText),
+          altAr: (dto.altAr ?? '').trim().slice(0, SCHOOL_SITE_LIMITS.altText),
+          containsMinors: dto.containsMinors,
+          ...(dto.containsMinors
+            ? {
+                consentReference: consent,
+                consentAttestedByUserId: ctx.userId,
+                consentAttestedAt: new Date(),
+              }
+            : {}),
+          withdrawnAt: new Date(),
+          withdrawalReason: UPLOAD_PENDING,
+          createdByUserId: ctx.userId,
+        },
+        select: { id: true },
+      });
+    });
+    // 2. Écriture des fichiers ; en cas d'échec, suppression de ce qui a pu être écrit (rejouable).
     try {
       await this.storage.put(storageKey, processed.full.body, 'image/webp');
-      stored.push(storageKey);
       await this.storage.put(thumbKey, processed.thumb.body, 'image/webp');
-      stored.push(thumbKey);
-      media = await this.db.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT 1 FROM "SchoolSite" WHERE "id" = ${site.id}::uuid FOR UPDATE`;
-        const count = await tx.schoolSiteMedia.count({
-          where: { siteId: site.id, withdrawnAt: null },
-        });
-        if (count >= MAX_MEDIA_PER_SITE) {
-          throw new ConflictException({
-            code: 'MEDIA_LIMIT',
-            message: `${MAX_MEDIA_PER_SITE} images au plus par site : retirez-en d’abord.`,
-          });
-        }
-        return tx.schoolSiteMedia.create({
-          data: {
-            organizationId: site.organizationId,
-            siteId: site.id,
-            kind: dto.kind,
-            storageKey,
-            thumbKey,
-            mimeType: 'image/webp',
-            bytes: processed.full.body.length + processed.thumb.body.length,
-            width: processed.full.width,
-            height: processed.full.height,
-            alt: (dto.alt ?? '').trim().slice(0, SCHOOL_SITE_LIMITS.altText),
-            altAr: (dto.altAr ?? '').trim().slice(0, SCHOOL_SITE_LIMITS.altText),
-            containsMinors: dto.containsMinors,
-            ...(dto.containsMinors
-              ? {
-                  consentReference: consent,
-                  consentAttestedByUserId: ctx.userId,
-                  consentAttestedAt: new Date(),
-                }
-              : {}),
-            createdByUserId: ctx.userId,
-          },
-          select: MEDIA_VIEW,
-        });
-      });
     } catch (error) {
-      // Échec avant l'enregistrement (stockage, plafond) : aucun fichier orphelin.
-      await this.deleteObjects(stored);
+      const deleted = await this.deleteObjects([storageKey, thumbKey]);
+      await this.clearDeletedKeys(pending.id, deleted);
+      await this.db.schoolSiteMedia.update({
+        where: { id: pending.id },
+        data: { withdrawalReason: UPLOAD_FAILED },
+      });
       throw error;
     }
-    // Média enregistré : ses fichiers ne sont plus jamais supprimés par la compensation.
-    {
-      await this.school.log(ctx, 'school.site_media_uploaded', 'SchoolSiteMedia', media.id, {
-        kind: dto.kind,
-        containsMinors: dto.containsMinors ? 'oui' : 'non',
-      });
-      if (dto.containsMinors) {
-        await this.school.log(
-          ctx,
-          'school.site_media_consent_attested',
-          'SchoolSiteMedia',
-          media.id,
-          {
-            reference: consent,
-          },
-        );
-      }
-      return this.view(site.id, media);
+    // 3. Fichiers stockés : le média devient utilisable.
+    const media = await this.db.schoolSiteMedia.update({
+      where: { id: pending.id },
+      data: { withdrawnAt: null, withdrawalReason: null },
+      select: MEDIA_VIEW,
+    });
+    await this.school.log(ctx, 'school.site_media_uploaded', 'SchoolSiteMedia', media.id, {
+      kind: dto.kind,
+      containsMinors: dto.containsMinors ? 'oui' : 'non',
+    });
+    if (dto.containsMinors) {
+      await this.school.log(
+        ctx,
+        'school.site_media_consent_attested',
+        'SchoolSiteMedia',
+        media.id,
+        {
+          reference: consent,
+        },
+      );
     }
+    return this.view(site.id, media);
   }
 
   /** Fichier d'un média du site (aperçu de l'administration, export), jamais mis en cache public. */
@@ -242,9 +254,26 @@ export class SchoolSiteMediaService {
       await tx.$executeRaw`SELECT 1 FROM "SchoolSite" WHERE "id" = ${site.id}::uuid FOR UPDATE`;
       const media = await tx.schoolSiteMedia.findFirst({
         where: { id: mediaId, organizationId: site.organizationId, siteId: site.id },
-        select: { id: true, storageKey: true, thumbKey: true, withdrawnAt: true },
+        select: {
+          id: true,
+          storageKey: true,
+          thumbKey: true,
+          withdrawnAt: true,
+          withdrawalReason: true,
+          createdAt: true,
+        },
       });
       if (!media) throw new NotFoundException(NOT_FOUND);
+      // Envoi encore en cours (moins de 10 minutes) : ses fichiers ne sont pas supprimés sous lui.
+      if (
+        media.withdrawalReason === UPLOAD_PENDING &&
+        Date.now() - media.createdAt.getTime() < 10 * 60_000
+      ) {
+        throw new ConflictException({
+          code: 'MEDIA_UPLOAD_IN_PROGRESS',
+          message: 'Envoi de cette photo en cours : réessayez dans quelques minutes.',
+        });
+      }
       // Déjà retiré : seule la suppression des fichiers restants est rejouée.
       if (media.withdrawnAt) {
         return {

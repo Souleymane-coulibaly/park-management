@@ -15,7 +15,8 @@ const SITE_PASSTHROUGH =
  */
 const SCHOOL_SITE_PASSTHROUGH =
   /^\/(_next\/|api\/v1\/public\/school-media\/|sitemap\.xml$|robots\.txt$|favicon\.ico$|icon\.svg$)/;
-const SCHOOL_PUBLIC_API = /^\/api\/v1\/public\/school-/;
+// Insensible à la casse, comme le routeur de l'API : /api/v1/public/School-sites reste exclu.
+const SCHOOL_PUBLIC_API = /^\/api\/v1\/public\/school-/i;
 const SITE_HOST_HEADER = 'x-ocall-site-host';
 
 /** Cache court des domaines personnalisés résolus (évite un appel à l'API par requête). */
