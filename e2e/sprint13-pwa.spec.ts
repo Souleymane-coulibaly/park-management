@@ -217,6 +217,9 @@ test.describe('Sprint 13 — PWA du parc', () => {
   }) => {
     const [qr] = await parkWithTickets(page, ['Awa']);
     await page.goto('/app/controle-acces');
+    // Coupure APRÈS le chargement de l'écran : couper pendant son chargement affiche l'erreur de
+    // chargement (comportement attendu) au lieu du scanner, et le test devenait aléatoire.
+    await expect(page.getByLabel('Saisie manuelle du code')).toBeVisible(NETWORK_WAIT);
     await context.setOffline(true);
     await expect(page.getByTestId('connectivity-badge')).toBeVisible();
     await expect(page.getByTestId('scan-result')).toHaveAttribute('data-result', 'UNCERTAIN');

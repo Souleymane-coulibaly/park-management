@@ -155,17 +155,20 @@ export function SiteEditor({ siteId }: { siteId: string }) {
   const [look, setLook] = useState<Look | null>(null);
   const [livePreview, setLivePreview] = useState(true);
 
+  // Dépendance sur les DONNÉES chargées, pas sur l'objet `site` : useApi en renvoie un nouveau à chaque
+  // rendu, et l'effet réinitialisait alors le brouillon à chaque saisie (modifications annulées).
+  const loaded = site.state === 'success' ? site.data : null;
   useEffect(() => {
-    if (site.state === 'success') {
-      setView(site.data);
-      setDraft(site.data.draft);
+    if (loaded) {
+      setView(loaded);
+      setDraft(loaded.draft);
       setLook({
-        theme: site.data.theme,
-        primaryColor: site.data.primaryColor,
-        accentColor: site.data.accentColor,
+        theme: loaded.theme,
+        primaryColor: loaded.primaryColor,
+        accentColor: loaded.accentColor,
       });
     }
-  }, [site]);
+  }, [loaded]);
 
   if (site.state === 'loading' || !view || !draft || !look) return <LoadingState />;
   if (site.state === 'error') return <ErrorState error={site.error} onRetry={site.reload} />;

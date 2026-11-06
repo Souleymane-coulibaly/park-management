@@ -37,9 +37,10 @@ const nextConfig: NextConfig = {
           { key: 'X-Frame-Options', value: 'DENY' },
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-          // Caméra autorisée à l'application elle-même (scanner de billets), jamais à un tiers. Valeur
-          // globale : une navigation interne conserve la politique de la page d'arrivée (connexion).
-          { key: 'Permissions-Policy', value: 'camera=(self), microphone=(), geolocation=()' },
+          // Caméra (scanner de billets) et micro (commande vocale) autorisés à l'application elle-même,
+          // jamais à un tiers. Valeur globale : une navigation interne conserve la politique de la page
+          // d'arrivée (connexion). `microphone=()` interdisait le micro partout, commande vocale comprise.
+          { key: 'Permissions-Policy', value: 'camera=(self), microphone=(self), geolocation=()' },
         ],
       },
       {

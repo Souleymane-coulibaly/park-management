@@ -586,6 +586,11 @@ describe('Sprint 9 — analyses (intégration)', () => {
           createdAt: s.createdAt,
         })),
       });
+      // Statistiques du planificateur à jour, comme en exploitation où l'autovacuum les entretient au fil
+      // des ventes. Sans cela, 5 000 ventes insérées d'un coup puis interrogées aussitôt sont estimées à
+      // une ligne : plan en boucles imbriquées, dépassement du délai de 10 s (503) selon que l'autovacuum
+      // est passé ou non. Mesuré : > 10 s sans, 0,7 à 1,4 s avec.
+      await prisma.$executeRawUnsafe('ANALYZE "Sale", "SaleLine", "Payment"');
       const month = { period: 'custom', from: '2026-10-01', to: '2026-10-31' };
       for (const path of [
         '/analytics/overview',
