@@ -117,10 +117,13 @@ describe('configuration School', () => {
 });
 
 describe('périmètre des établissements', () => {
-  it('la couverture du contrat réduit le périmètre du rôle', () => {
-    expect(resolveSchoolIds(null, [])).toBeNull();
+  it('la couverture des contrats réduit le périmètre du rôle (null = tous, [] = aucun)', () => {
+    expect(resolveSchoolIds(null, null)).toBeNull();
     expect(resolveSchoolIds(null, ['a'])).toEqual(['a']);
-    expect(resolveSchoolIds(['a', 'b'], [])).toEqual(['a', 'b']);
+    expect(resolveSchoolIds(['a', 'b'], null)).toEqual(['a', 'b']);
     expect(resolveSchoolIds(['a', 'b'], ['b', 'c'])).toEqual(['b']);
+    // Aucun établissement sous contrat actif : une écriture n'en voit aucun.
+    expect(resolveSchoolIds(null, [])).toEqual([]);
+    expect(resolveSchoolIds(['a'], [])).toEqual([]);
   });
 });

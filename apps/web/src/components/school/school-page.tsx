@@ -25,6 +25,8 @@ export interface SchoolSummary {
   defaultLocale: SchoolLocale;
   isActive: boolean;
   timezone: string;
+  /** Accès selon les contrats qui couvrent cet établissement (contrats multiples). */
+  contractAccess?: ProductAccess;
 }
 
 export interface SchoolContextView {
@@ -155,7 +157,8 @@ export function SchoolPage({
           context: data,
           school,
           canWrite: (permission) =>
-            data.access === 'full' && hasSchoolPermission(data.role, permission),
+            (school?.contractAccess ?? data.access) === 'full' &&
+            hasSchoolPermission(data.role, permission),
           reloadContext: context.reload,
         }}
       >
@@ -198,7 +201,8 @@ function SchoolFrame({
         />
       )}
       <div className="space-y-4">
-        {data.access === 'read_only' && (
+        {/* Bandeau : contrat de l'établissement affiché (contrats multiples), sinon celui du client. */}
+        {(school?.contractAccess ?? data.access) === 'read_only' && (
           <div data-testid="school-read-only">
             <Alert tone="info" title={text.t('frame.readOnlyTitle')}>
               {text.t('frame.readOnly')}

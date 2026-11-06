@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   Logger,
@@ -14,6 +15,7 @@ import {
   type SchoolLocale,
   schoolShowsArabic,
   validateGradingRules,
+  schoolAccessIn,
 } from '@ocall/shared';
 
 const ARABIC_KEYS = new Set(['nameAr', 'labelAr', 'lastNameAr', 'firstNameAr']);
@@ -91,7 +93,11 @@ export class SchoolService {
       access: ctx.access,
       modules: ctx.modules,
       limits: ctx.limits,
-      schools,
+      // Accès de chaque établissement selon les contrats qui le couvrent (écriture ou lecture seule).
+      schools: schools.map((school) => ({
+        ...school,
+        contractAccess: ctx.contract ? schoolAccessIn(ctx.contract, school.id) : ctx.access,
+      })),
     };
   }
 
@@ -820,9 +826,27 @@ export class SchoolService {
     });
     // Le filtre ctx.schoolIds n'est pas écrasé : un identifiant hors périmètre reste introuvable.
     if (!school || (ctx.schoolIds && !ctx.schoolIds.includes(id))) {
+      await this.assertNotReadOnlySchool(ctx, id);
       throw new NotFoundException(NOT_FOUND);
     }
     return { defaultLocale: school.defaultLocale };
+  }
+
+  /**
+   * Écriture refusée sur un établissement seulement sous contrat suspendu ou expiré (contrats multiples) :
+   * message explicite plutôt qu'introuvable, si l'établissement appartient au client et au périmètre du rôle.
+   */
+  private async assertNotReadOnlySchool(ctx: SchoolContext, id: string) {
+    if (!ctx.writeNarrowed || !ctx.contract) return;
+    if (schoolAccessIn(ctx.contract, id) !== 'read_only') return;
+    const exists = await this.db.school.count({
+      where: { ...this.schoolWhere({ ...ctx, schoolIds: ctx.readSchoolIds ?? null }), id },
+    });
+    if (exists === 0) return;
+    throw new ForbiddenException({
+      code: 'CONTRACT_READ_ONLY',
+      message: 'Le contrat de cet établissement ne permet plus que la consultation et l’export.',
+    });
   }
 
   async findYear(ctx: SchoolContext, id: string) {
