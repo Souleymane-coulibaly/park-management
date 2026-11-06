@@ -32,6 +32,7 @@ const NOT_FOUND = { code: 'SCHOOL_SITE_MEDIA_NOT_FOUND', message: 'Image introuv
 /** Média en cours d'envoi (fichiers pas encore tous écrits), puis envoi échoué. */
 const UPLOAD_PENDING = 'Envoi en cours';
 const UPLOAD_FAILED = 'Envoi échoué';
+const UPLOAD_ABANDONED = 'Envoi abandonné';
 
 const MEDIA_VIEW = {
   id: true,
@@ -153,7 +154,11 @@ export class SchoolSiteMediaService {
     const pending = await this.db.$transaction(async (tx) => {
       await this.sites.lockSite(tx, site.id);
       const count = await tx.schoolSiteMedia.count({
-        where: { siteId: site.id, withdrawnAt: null },
+        // Les envois en cours réservent leur place : deux envois simultanés ne dépassent pas le plafond.
+        where: {
+          siteId: site.id,
+          OR: [{ withdrawnAt: null }, { withdrawalReason: UPLOAD_PENDING }],
+        },
       });
       if (count >= MAX_MEDIA_PER_SITE) {
         throw new ConflictException({
@@ -194,18 +199,37 @@ export class SchoolSiteMediaService {
       await this.storage.put(storageKey, processed.full.body, 'image/webp');
       await this.storage.put(thumbKey, processed.thumb.body, 'image/webp');
     } catch (error) {
+      await this.db.$transaction(async (tx) => {
+        await this.sites.lockSite(tx, site.id);
+        await tx.schoolSiteMedia.updateMany({
+          where: { id: pending.id, withdrawalReason: UPLOAD_PENDING },
+          data: { withdrawalReason: UPLOAD_FAILED },
+        });
+      });
       const deleted = await this.deleteObjects([storageKey, thumbKey]);
       await this.clearDeletedKeys(pending.id, deleted);
-      await this.db.schoolSiteMedia.update({
-        where: { id: pending.id },
-        data: { withdrawalReason: UPLOAD_FAILED },
-      });
       throw error;
     }
-    // 3. Fichiers stockés : le média devient utilisable.
-    const media = await this.db.schoolSiteMedia.update({
+    // 3. Fichiers stockés : le média devient utilisable, SEULEMENT s'il est encore « envoi en cours »
+    //    (un retrait d'envoi abandonné a pu intervenir entre-temps).
+    const finalized = await this.db.$transaction(async (tx) => {
+      await this.sites.lockSite(tx, site.id);
+      const { count } = await tx.schoolSiteMedia.updateMany({
+        where: { id: pending.id, withdrawalReason: UPLOAD_PENDING },
+        data: { withdrawnAt: null, withdrawalReason: null },
+      });
+      return count === 1;
+    });
+    if (!finalized) {
+      const deleted = await this.deleteObjects([storageKey, thumbKey]);
+      await this.clearDeletedKeys(pending.id, deleted);
+      throw new ConflictException({
+        code: 'MEDIA_UPLOAD_CANCELLED',
+        message: 'Envoi annulé pendant son traitement : renvoyez la photo.',
+      });
+    }
+    const media = await this.db.schoolSiteMedia.findUniqueOrThrow({
       where: { id: pending.id },
-      data: { withdrawnAt: null, withdrawalReason: null },
       select: MEDIA_VIEW,
     });
     await this.school.log(ctx, 'school.site_media_uploaded', 'SchoolSiteMedia', media.id, {
@@ -272,6 +296,12 @@ export class SchoolSiteMediaService {
         throw new ConflictException({
           code: 'MEDIA_UPLOAD_IN_PROGRESS',
           message: 'Envoi de cette photo en cours : réessayez dans quelques minutes.',
+        });
+      }
+      if (media.withdrawalReason === UPLOAD_PENDING) {
+        await tx.schoolSiteMedia.update({
+          where: { id: media.id },
+          data: { withdrawalReason: UPLOAD_ABANDONED },
         });
       }
       // Déjà retiré : seule la suppression des fichiers restants est rejouée.

@@ -336,11 +336,16 @@ export class SchoolSitesService {
         errors: result.errors.slice(0, 20),
       });
     }
-    await this.assertMediaOfSite(site, schoolSiteMediaIds(result.content));
-    const updated = await this.db.schoolSite.update({
-      where: { id: site.id },
-      data: { draft: result.content as unknown as Prisma.InputJsonValue },
-      select: SITE_SELECT,
+    // Sous le verrou du site : un retrait concurrent ne peut pas être annulé par une sauvegarde
+    // validée avant lui (référence à une image retirée).
+    const updated = await this.db.$transaction(async (tx) => {
+      await this.lockSite(tx, site.id);
+      await this.assertMediaOfSite(site, schoolSiteMediaIds(result.content), tx);
+      return tx.schoolSite.update({
+        where: { id: site.id },
+        data: { draft: result.content as unknown as Prisma.InputJsonValue },
+        select: SITE_SELECT,
+      });
     });
     return this.view(updated, await this.availability(site.organizationId, site.schoolId));
   }
@@ -485,6 +490,12 @@ export class SchoolSitesService {
     const updated = await this.db.$transaction(async (tx) => {
       await this.lockSite(tx, site.id);
       const fresh = await this.findSite(ctx, siteId, tx);
+      if (!fresh.enabled) {
+        throw new ConflictException({
+          code: 'SITE_DISABLED',
+          message: 'Activez le site avant de le publier.',
+        });
+      }
       const published = await this.buildPublished(tx, fresh);
       // Image informative sans aucune description (galerie) : publication refusée.
       if (published.gallery.some((g) => !g.alt.fr.trim() && !g.alt.ar.trim())) {
@@ -712,10 +723,16 @@ export class SchoolSitesService {
             dto.label ?? link.label,
           )
         : null;
-    const updated = await this.db.schoolSiteLink.update({
-      where: { id: link.id },
-      data: { ...(checked ?? {}), ...(dto.enabled !== undefined ? { enabled: dto.enabled } : {}) },
-      select: { id: true, kind: true, label: true, url: true, enabled: true, position: true },
+    const updated = await this.db.$transaction(async (tx) => {
+      await this.lockSite(tx, site.id);
+      return tx.schoolSiteLink.update({
+        where: { id: link.id },
+        data: {
+          ...(checked ?? {}),
+          ...(dto.enabled !== undefined ? { enabled: dto.enabled } : {}),
+        },
+        select: { id: true, kind: true, label: true, url: true, enabled: true, position: true },
+      });
     });
     await this.school.log(ctx, 'school.site_link_updated', 'SchoolSiteLink', link.id, {
       kind: link.kind,
@@ -726,7 +743,10 @@ export class SchoolSitesService {
   async removeLink(ctx: SchoolContext, siteId: string, linkId: string) {
     const site = await this.findSite(ctx, siteId);
     const link = await this.findLink(site, linkId);
-    await this.db.schoolSiteLink.delete({ where: { id: link.id } });
+    await this.db.$transaction(async (tx) => {
+      await this.lockSite(tx, site.id);
+      await tx.schoolSiteLink.deleteMany({ where: { id: link.id, siteId: site.id } });
+    });
     await this.school.log(ctx, 'school.site_link_deleted', 'SchoolSiteLink', link.id, {
       kind: link.kind,
     });
@@ -736,23 +756,24 @@ export class SchoolSitesService {
   /** Ordre d'affichage : la liste complète des liens du site, dans l'ordre voulu. */
   async reorderLinks(ctx: SchoolContext, siteId: string, ids: string[]) {
     const site = await this.findSite(ctx, siteId);
-    const links = await this.db.schoolSiteLink.findMany({
-      where: { organizationId: site.organizationId, siteId: site.id },
-      select: { id: true },
-    });
-    const known = new Set(links.map((l) => l.id));
-    if (
-      ids.length !== known.size ||
-      new Set(ids).size !== ids.length ||
-      !ids.every((id) => known.has(id))
-    ) {
-      throw new BadRequestException({
-        code: 'SITE_LINKS_ORDER',
-        message: 'Ordre invalide : indiquez chaque lien du site une seule fois.',
-      });
-    }
     await this.db.$transaction(async (tx) => {
       await this.lockSite(tx, site.id);
+      // Liste relue sous le verrou : un ordre devenu obsolète est refusé proprement.
+      const links = await tx.schoolSiteLink.findMany({
+        where: { organizationId: site.organizationId, siteId: site.id },
+        select: { id: true },
+      });
+      const known = new Set(links.map((l) => l.id));
+      if (
+        ids.length !== known.size ||
+        new Set(ids).size !== ids.length ||
+        !ids.every((id) => known.has(id))
+      ) {
+        throw new BadRequestException({
+          code: 'SITE_LINKS_ORDER',
+          message: 'Ordre invalide : indiquez chaque lien du site une seule fois.',
+        });
+      }
       for (const [position, id] of ids.entries()) {
         await tx.schoolSiteLink.update({ where: { id }, data: { position } });
       }
@@ -824,10 +845,10 @@ export class SchoolSitesService {
     return { title, titleAr, body, bodyAr };
   }
 
-  private async newsMedia(site: SiteRow, mediaId: string | null | undefined) {
+  private async newsMedia(site: SiteRow, mediaId: string | null | undefined, db: Db = this.db) {
     if (!mediaId) return null;
-    await this.assertMediaOfSite(site, [mediaId]);
-    const media = await this.db.schoolSiteMedia.findFirst({
+    await this.assertMediaOfSite(site, [mediaId], db);
+    const media = await db.schoolSiteMedia.findFirst({
       where: { id: mediaId, organizationId: site.organizationId, siteId: site.id },
       select: { alt: true, altAr: true },
     });
@@ -854,10 +875,11 @@ export class SchoolSitesService {
   ) {
     const site = await this.findSite(ctx, siteId);
     const text = this.checkedNews(dto);
-    const mediaId = await this.newsMedia(site, dto.mediaId);
     const base = slugify(text.title || 'actualite').slice(0, 60) || 'actualite';
     const news = await this.db.$transaction(async (tx) => {
-      await tx.$executeRaw`SELECT 1 FROM "SchoolSite" WHERE "id" = ${site.id}::uuid FOR UPDATE`;
+      await this.lockSite(tx, site.id);
+      // Image validée sous le verrou : un retrait concurrent ne peut pas être contourné.
+      const mediaId = await this.newsMedia(site, dto.mediaId, tx);
       if ((await tx.schoolSiteNews.count({ where: { siteId: site.id } })) >= MAX_NEWS) {
         throw new ConflictException({
           code: 'SITE_NEWS_LIMIT',
@@ -925,20 +947,13 @@ export class SchoolSitesService {
   ) {
     const site = await this.findSite(ctx, siteId);
     const news = await this.findNews(site, newsId);
-    const text = this.checkedNews({
-      title: dto.title ?? news.title,
-      titleAr: dto.titleAr ?? news.titleAr,
-      body: dto.body ?? news.body,
-      bodyAr: dto.bodyAr ?? news.bodyAr,
-    });
-    const mediaId = dto.mediaId === undefined ? undefined : await this.newsMedia(site, dto.mediaId);
     await this.db.$transaction(async (tx) => {
       await this.lockSite(tx, site.id);
-      // Statut relu sous le verrou du site, que la publication prend aussi : une actualité publiée
-      // entre-temps ne peut plus être modifiée sans le droit de publication.
+      // Actualité relue EN ENTIER sous le verrou du site (que la publication prend aussi) : statut à
+      // jour et aucune correction concurrente écrasée par des valeurs lues avant le verrou.
       const current = await tx.schoolSiteNews.findFirst({
         where: { id: news.id, organizationId: site.organizationId, siteId: site.id },
-        select: { status: true },
+        select: { status: true, title: true, titleAr: true, body: true, bodyAr: true },
       });
       if (!current) throw new NotFoundException(NOT_FOUND);
       // Une actualité en ligne modifiée l'est aussitôt pour le public : c'est une publication.
@@ -952,10 +967,21 @@ export class SchoolSitesService {
             'Actualité publiée : seule la direction peut la modifier (ou la retirer du site).',
         });
       }
+      const text = this.checkedNews({
+        title: dto.title ?? current.title,
+        titleAr: dto.titleAr ?? current.titleAr,
+        body: dto.body ?? current.body,
+        bodyAr: dto.bodyAr ?? current.bodyAr,
+      });
+      const mediaId =
+        dto.mediaId === undefined ? undefined : await this.newsMedia(site, dto.mediaId, tx);
       await tx.schoolSiteNews.update({
         where: { id: news.id },
         data: {
-          ...text,
+          ...(dto.title !== undefined ? { title: text.title } : {}),
+          ...(dto.titleAr !== undefined ? { titleAr: text.titleAr } : {}),
+          ...(dto.body !== undefined ? { body: text.body } : {}),
+          ...(dto.bodyAr !== undefined ? { bodyAr: text.bodyAr } : {}),
           ...(dto.publishedOn ? { publishedOn: new Date(`${dto.publishedOn}T00:00:00.000Z`) } : {}),
           ...(mediaId !== undefined ? { mediaId } : {}),
         },

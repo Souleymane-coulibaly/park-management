@@ -16,7 +16,10 @@ export async function GET(request: NextRequest) {
   const origin = `${request.nextUrl.protocol}//${host}`;
   // Hôte d'un site School : ses seules pages. Hôte de l'application : sites Park et sites School
   // servis à l'adresse provisoire /s/<slug> (sous-domaines School non activés).
-  const school = isSchoolSiteHost(host) || isAppHost(host) ? await fetchSchoolSitemap(host) : [];
+  // Périmètre School (hôte de site School, ou application qui sert l'adresse provisoire) : réponse
+  // jamais mise en cache, même vide (une publication y apparaît aussitôt).
+  const schoolScope = isSchoolSiteHost(host) || isAppHost(host);
+  const school = schoolScope ? await fetchSchoolSitemap(host) : [];
   const entries = isSchoolSiteHost(host) ? school : [...(await fetchSitemap(host)), ...school];
   const marketing = isAppHost(host)
     ? [
@@ -44,8 +47,8 @@ export async function GET(request: NextRequest) {
   return new Response(body, {
     headers: {
       'content-type': 'application/xml; charset=utf-8',
-      // Plan citant des sites School : jamais mis en cache (retrait immédiat) ; plans Park inchangés.
-      'cache-control': school.length > 0 ? 'no-store' : 'public, max-age=600',
+      // Périmètre School : jamais mis en cache ; plans des hôtes de sites Park inchangés.
+      'cache-control': schoolScope ? 'no-store' : 'public, max-age=600',
     },
   });
 }
