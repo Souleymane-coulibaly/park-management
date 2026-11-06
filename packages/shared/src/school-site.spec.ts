@@ -19,6 +19,9 @@ describe('Sites des établissements — adresses et pages', () => {
     expect(schoolSiteSlugError('medersa-annour')).toBeNull();
     expect(schoolSiteSlugError('www')).toBe('SLUG_RESERVED');
     expect(schoolSiteSlugError('ecole')).toBe('SLUG_RESERVED');
+    // Segments des routes techniques de l'API publique School : réservés pour les sites School.
+    expect(schoolSiteSlugError('sitemap')).toBe('SLUG_RESERVED');
+    expect(schoolSiteSlugError('resolve')).toBe('SLUG_RESERVED');
     expect(schoolSiteSlugError('Ecole')).toBe('SLUG_FORMAT');
     expect(schoolSiteSlugError('a--b')).toBe('SLUG_FORMAT');
     expect(schoolSiteSlugError('ab')).toBe('SLUG_LENGTH');

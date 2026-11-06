@@ -1,5 +1,5 @@
 import { contractAccess, type ContractWindow } from './suite-contracts';
-import { siteSlugError } from './sites';
+import { type SiteSlugError, siteSlugError } from './sites';
 
 /**
  * Sites vitrines des établissements Ocall School (Sprint 10) : règles partagées par l'API, l'éditeur
@@ -44,8 +44,18 @@ export function localizedText(
 
 // ─── Adresse publique ───
 
+/**
+ * Noms réservés propres aux sites School, en plus de ceux des sites Park : segments des routes
+ * techniques de l'API publique School (`public/school-sites/sitemap`, `/resolve`).
+ */
+export const SCHOOL_SITE_RESERVED_SLUGS: readonly string[] = ['sitemap', 'resolve'];
+
 /** Mêmes règles que les sites Ocall Park (format, longueur, noms réservés), autre domaine de base. */
-export const schoolSiteSlugError = siteSlugError;
+export function schoolSiteSlugError(slug: string): SiteSlugError | null {
+  const error = siteSlugError(slug);
+  if (error) return error;
+  return SCHOOL_SITE_RESERVED_SLUGS.includes(slug) ? 'SLUG_RESERVED' : null;
+}
 
 /** Pages publiques d'un site d'établissement : chemin de chaque page (français à la racine). */
 export const SCHOOL_SITE_PAGES = [

@@ -6,6 +6,7 @@ import {
   IsArray,
   IsBoolean,
   IsIn,
+  IsISO8601,
   IsObject,
   IsOptional,
   IsString,
@@ -145,6 +146,8 @@ export class SiteNewsDto {
   bodyAr?: string;
 
   @Matches(DAY)
+  // Date réelle du calendrier (2026-02-30 refusée, jamais normalisée au 2 mars).
+  @IsISO8601({ strict: true })
   publishedOn!: string;
 
   @IsOptional()
@@ -176,6 +179,8 @@ export class SiteNewsUpdateDto {
 
   @IsOptional()
   @Matches(DAY)
+  // Date réelle du calendrier (2026-02-30 refusée, jamais normalisée au 2 mars).
+  @IsISO8601({ strict: true })
   publishedOn?: string;
 
   @ApiPropertyOptional({ nullable: true })

@@ -1,6 +1,10 @@
 import 'server-only';
 import { headers } from 'next/headers';
-import type { SchoolSitePublicResponse, SchoolSitePublishedNews } from '@ocall/shared';
+import {
+  type SchoolSitePublicResponse,
+  type SchoolSitePublishedNews,
+  schoolSiteSlugError,
+} from '@ocall/shared';
 
 const API_URL = process.env.API_URL ?? 'http://localhost:4000';
 
@@ -33,7 +37,8 @@ async function visitorHeaders(): Promise<Record<string, string>> {
  * une résiliation de contrat, la fin du maintien ou le retrait d'une photo valent immédiatement.
  */
 export async function fetchSchoolSite(slug: string): Promise<SchoolSitePublicResponse | null> {
-  if (!/^[a-z0-9-]{1,40}$/.test(slug)) return null;
+  // Adresse invalide ou réservée (ex. « sitemap ») : introuvable, sans appel à l'API.
+  if (schoolSiteSlugError(slug)) return null;
   const res = await fetch(`${API_URL}/api/v1/public/school-sites/${slug}`, {
     cache: 'no-store',
     headers: await visitorHeaders(),
@@ -48,7 +53,7 @@ export async function fetchSchoolNews(
   slug: string,
   newsSlug: string,
 ): Promise<SchoolSitePublishedNews | null> {
-  if (!/^[a-z0-9-]{1,40}$/.test(slug) || !/^[a-z0-9-]{1,80}$/.test(newsSlug)) return null;
+  if (schoolSiteSlugError(slug) || !/^[a-z0-9-]{1,80}$/.test(newsSlug)) return null;
   const res = await fetch(`${API_URL}/api/v1/public/school-sites/${slug}/news/${newsSlug}`, {
     cache: 'no-store',
     headers: await visitorHeaders(),
