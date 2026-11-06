@@ -19,7 +19,7 @@ const schoolDb = resolveSchoolTestDatabase({ ...apiEnv, ...process.env }, testDb
 const schoolEnv: Record<string, string> = schoolDb
   ? {
       SCHOOL_ENABLED: 'true',
-      SCHOOL_DATABASE_URL: schoolDb,
+      SCHOOL_DATABASE_URL: schoolDb.url,
       // Clé de chiffrement aléatoire, propre à l'exécution : les données fictives ne lui survivent pas.
       SCHOOL_DATA_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
     }

@@ -53,7 +53,7 @@ test('emploi du temps : créé et publié, conflit enseignant rejeté ; l’ense
   }
   await call('/school/rooms', 'POST', { schoolId: school.id, name: 'Salle 1', capacity: 30 });
   const validFrom = `${school.startYear}-09-01`;
-  const validTo = `${school.startYear + 1}-07-31`;
+  const validTo = `${school.startYear + 1}-08-31`;
   await chooseSchool(page, school.id);
 
   await page.goto('/school/emplois-du-temps');

@@ -190,7 +190,8 @@ export async function seedSchool(
     schoolId: school.id,
     label,
     startsOn: `${y}-09-01`,
-    endsOn: `${y + 1}-07-31`,
+    // Septembre à fin août : toute date d'exécution (août compris) appartient à l'année créée.
+    endsOn: `${y + 1}-08-31`,
   });
   await call(`/school/years/${year.id}/status`, 'POST', { status: 'ACTIVE' });
   const periodIds: string[] = [];

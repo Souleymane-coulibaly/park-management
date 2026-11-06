@@ -97,7 +97,11 @@ test('rapports : indicateurs, tendance, export PDF ; enseignant refusé (403)', 
   const kpis = page.getByTestId('overview-kpis');
   await expect(kpis).toContainText(/Élèves actifs\s*3/, { timeout: 30_000 });
   await expect(kpis).toContainText(/Classes\s*2/);
-  await expect(kpis).toContainText('11,33');
+  // Le tableau de bord montre la dernière période commencée : T1 (11,33) jusqu'au 3 janvier, puis T2 (14).
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Dakar' }).format(new Date());
+  await expect(kpis).toContainText(
+    today >= `${school.startYear + 1}-01-04` ? /14(,00)? \/ 20/ : /11,33 \/ 20/,
+  );
 
   await page.getByTestId('report-tab-pedagogy').click();
   const ped = page.getByTestId('pedagogy-classes');
