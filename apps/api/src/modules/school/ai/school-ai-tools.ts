@@ -204,7 +204,8 @@ export const SCHOOL_AI_TOOLS: readonly SchoolAiTool[] = [
             ...(p.scaleMixed ? { scaleMixed: true } : {}),
             passRatePercent: pct(p.passRate),
             gradedStudents: p.graded,
-            insufficient: p.insufficient,
+            // Période sans aucune note : absence de résultats (voir `missing`), pas un effectif insuffisant.
+            insufficient: p.graded > 0 && p.insufficient,
           })),
           classes: d.classes.map((c) => ({
             class: c.name,
@@ -231,7 +232,12 @@ export const SCHOOL_AI_TOOLS: readonly SchoolAiTool[] = [
             })),
           })),
         },
-        missing: d.periods.length === 0 ? ['aucune période scolaire définie'] : [],
+        missing: [
+          ...(d.periods.length === 0 ? ['aucune période scolaire définie'] : []),
+          ...d.schoolByPeriod
+            .filter((p) => p.graded === 0)
+            .map((p) => `aucun élève noté en ${label.get(p.periodId)}`),
+        ],
       };
     },
   },
@@ -276,6 +282,13 @@ export const SCHOOL_AI_TOOLS: readonly SchoolAiTool[] = [
       const short = (p: { graded: number; insufficient: boolean } | undefined) =>
         !!p && p.graded > 0 && p.insufficient;
       const reserves: string[] = [];
+      const schoolComparable =
+        !!s1 &&
+        !!s2 &&
+        !s1.scaleMixed &&
+        !s2.scaleMixed &&
+        s1.scale != null &&
+        s1.scale === s2.scale;
       return {
         tool: 'compare_periods',
         title: 'Rapport pédagogique — comparaison',
@@ -303,8 +316,12 @@ export const SCHOOL_AI_TOOLS: readonly SchoolAiTool[] = [
             passRatePercent: pct(s2?.passRate ?? null),
             gradedStudents: s2?.graded ?? 0,
           },
-          // Barèmes différents entre classes ou périodes : aucun écart d'établissement.
-          averageChange: d.scale === null ? null : diff(s1?.average, s2?.average),
+          // Écart d'établissement seulement si les DEUX périodes comparées ont un même barème unique
+          // (un barème différent sur une autre période de l'année ne suspend pas cette comparaison).
+          averageChange: schoolComparable ? diff(s1?.average, s2?.average) : null,
+          ...(schoolComparable || s1?.average == null || s2?.average == null
+            ? {}
+            : { scaleChanged: true }),
           classes: d.classes.map((c) => {
             const pa = c.periods.find((p) => p.periodId === first.id);
             const pb = c.periods.find((p) => p.periodId === second.id);

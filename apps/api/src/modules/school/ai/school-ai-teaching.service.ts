@@ -187,21 +187,8 @@ export class SchoolAiTeachingService {
       dto.topic,
       dto.objectives,
     ]);
-    // Les contenus archivés ne comptent pas : archiver libère une place.
-    const count = await this.db.schoolAiDocument.count({
-      where: {
-        organizationId: ctx.organizationId,
-        authorUserId: ctx.userId,
-        status: { not: 'ARCHIVED' },
-      },
-    });
-    if (count >= SCHOOL_AI_LIMITS.documentsPerUser) {
-      throw new UnprocessableEntityException({
-        code: 'AI_DOCUMENTS_LIMIT',
-        message:
-          'Vous avez atteint le nombre maximal de contenus en cours : archivez-en pour libérer des places.',
-      });
-    }
+    // Contrôle préalable : aucun appel au fournisseur quand le plafond est déjà atteint.
+    await this.assertDocumentRoom(this.db, ctx);
     const sections = SCHOOL_AI_SECTIONS[dto.kind];
     const raw = await this.ai.run(
       ctx,
@@ -227,31 +214,59 @@ export class SchoolAiTeachingService {
         }),
     );
     const content = normalizeContent(dto.kind, raw);
-    const doc = await this.db.schoolAiDocument.create({
-      data: {
-        organizationId: ctx.organizationId,
-        schoolId: school.id,
-        authorUserId: ctx.userId,
-        authorMemberId: ctx.memberId,
-        classId: target.classId,
-        levelId: target.levelId,
-        subjectId: dto.subjectId,
-        kind: dto.kind,
-        language: dto.language,
-        difficulty: dto.difficulty,
-        topic: topic!,
-        objectives: objectives!,
-        title: content.title,
-        sections: content.sections as object[],
-        promptVersion: SCHOOL_TEACHING_PROMPT.version,
-      },
-      select: DOCUMENT_SELECT,
+    // Plafond atomique : recompte et création sous un verrou propre à l'auteur, deux générations
+    // simultanées ne peuvent pas dépasser le plafond.
+    const doc = await this.db.$transaction(async (tx) => {
+      const key = `school-ai-documents:${ctx.organizationId.toLowerCase()}:${ctx.userId.toLowerCase()}`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
+      await this.assertDocumentRoom(tx, ctx);
+      return tx.schoolAiDocument.create({
+        data: {
+          organizationId: ctx.organizationId,
+          schoolId: school.id,
+          authorUserId: ctx.userId,
+          authorMemberId: ctx.memberId,
+          classId: target.classId,
+          levelId: target.levelId,
+          subjectId: dto.subjectId,
+          kind: dto.kind,
+          language: dto.language,
+          difficulty: dto.difficulty,
+          topic: topic!,
+          objectives: objectives!,
+          title: content.title,
+          sections: content.sections as object[],
+          promptVersion: SCHOOL_TEACHING_PROMPT.version,
+        },
+        select: DOCUMENT_SELECT,
+      });
     });
     await this.school.log(ctx, 'school.ai_content_generated', 'SchoolAiDocument', doc.id, {
       kind: dto.kind,
       language: dto.language,
     });
     return { ...doc, missing: content.missing };
+  }
+
+  /** Plafond des contenus en cours par auteur ; les contenus archivés ne comptent pas. */
+  private async assertDocumentRoom(
+    db: Pick<SchoolPrismaService, 'schoolAiDocument'>,
+    ctx: SchoolContext,
+  ): Promise<void> {
+    const count = await db.schoolAiDocument.count({
+      where: {
+        organizationId: ctx.organizationId,
+        authorUserId: ctx.userId,
+        status: { not: 'ARCHIVED' },
+      },
+    });
+    if (count >= SCHOOL_AI_LIMITS.documentsPerUser) {
+      throw new UnprocessableEntityException({
+        code: 'AI_DOCUMENTS_LIMIT',
+        message:
+          'Vous avez atteint le nombre maximal de contenus en cours : archivez-en pour libérer des places.',
+      });
+    }
   }
 
   async list(ctx: SchoolContext, q: ContentListDto) {

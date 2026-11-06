@@ -232,8 +232,22 @@ describe('Changement de barème entre deux périodes', () => {
         scaleMixed: true,
         periods,
         schoolByPeriod: [
-          { periodId: 'p1', average: 60, passRate: 5000, graded: 10, insufficient: false },
-          { periodId: 'p2', average: 12, passRate: 5000, graded: 10, insufficient: false },
+          {
+            periodId: 'p1',
+            average: 60,
+            scale: 100,
+            passRate: 5000,
+            graded: 10,
+            insufficient: false,
+          },
+          {
+            periodId: 'p2',
+            average: 12,
+            scale: 20,
+            passRate: 5000,
+            graded: 10,
+            insufficient: false,
+          },
         ],
         classes: [
           {
@@ -603,5 +617,168 @@ describe('Copilote : réserves d’effectif et bornes des sources', () => {
     const r = await tool('compare_periods').run({ reporting } as never, { first: 2, second: 1 });
     expect(r.period).toEqual({ label: 'T2 et T1', from: '2026-10-01', to: '2027-03-31' });
     expect(r.missing).toEqual(['aucun élève noté en T2']);
+  });
+
+  /** Établissement noté sur 20 aux deux trimestres ; `yearScale` : barème global de l'année. */
+  const pedagogyWith = (
+    second: { scale: number | null; scaleMixed?: boolean },
+    yearScale: number | null,
+  ) => ({
+    pedagogy: async () => ({
+      school: { id: 's', name: 'École' },
+      year: { id: 'y', label: '2026-2027' },
+      filters: {},
+      scale: yearScale,
+      scaleMixed: yearScale === null,
+      periods,
+      schoolByPeriod: [
+        {
+          periodId: 'p1',
+          average: 12,
+          scale: 20,
+          scaleMixed: false,
+          passRate: 6000,
+          graded: 30,
+          insufficient: false,
+        },
+        {
+          periodId: 'p2',
+          average: 14,
+          scale: second.scale,
+          scaleMixed: second.scaleMixed ?? false,
+          passRate: 7000,
+          graded: 30,
+          insufficient: false,
+        },
+      ],
+      schoolTrend: null,
+      classes: [],
+      subjects: [],
+    }),
+  });
+
+  it('compare_periods : écart calculé sur le barème des deux périodes, même si l’année en mélange d’autres', async () => {
+    const r = await tool('compare_periods').run(
+      { reporting: pedagogyWith({ scale: 20 }, null) } as never,
+      {
+        first: 1,
+        second: 2,
+      },
+    );
+    expect(r.data.averageChange).toBe(2);
+    expect(r.data).not.toHaveProperty('scaleChanged');
+  });
+
+  it('compare_periods : barème différent ou mélangé sur une des deux périodes → aucun écart, signalé', async () => {
+    for (const second of [{ scale: 10 }, { scale: null, scaleMixed: true }]) {
+      const r = await tool('compare_periods').run(
+        { reporting: pedagogyWith(second, 20) } as never,
+        {
+          first: 1,
+          second: 2,
+        },
+      );
+      expect(r.data.averageChange).toBeNull();
+      expect(r.data.scaleChanged).toBe(true);
+    }
+  });
+
+  it('results_by_period : période sans note → absence de résultats, jamais « effectif insuffisant »', async () => {
+    const reporting = {
+      pedagogy: async () => ({
+        year: { id: 'y', label: '2026-2027' },
+        from: '2026-10-01',
+        to: '2027-03-31',
+        periods,
+        schoolByPeriod: [
+          {
+            periodId: 'p1',
+            average: 12,
+            scale: 20,
+            scaleMixed: false,
+            passRate: 6000,
+            graded: 2,
+            insufficient: true,
+          },
+          {
+            periodId: 'p2',
+            average: null,
+            scale: null,
+            scaleMixed: false,
+            passRate: null,
+            graded: 0,
+            insufficient: true,
+          },
+        ],
+        classes: [],
+        subjects: [],
+      }),
+    };
+    const r = await tool('results_by_period').run(
+      { reporting, classes: [{ id: 'c1', name: 'CM1 A', nameAr: null }] } as never,
+      { className: 'CM1 A' },
+    );
+    expect((r.data.school as { insufficient: boolean }[]).map((p) => p.insufficient)).toEqual([
+      true,
+      false,
+    ]);
+    expect(r.missing).toEqual(['aucun élève noté en T2']);
+  });
+});
+
+describe('Analyse : période sans note', () => {
+  it('limite « aucun élève noté », jamais « effectif insuffisant »', async () => {
+    const periods = [
+      { id: 'p1', label: 'T1', labelAr: null, startsOn: '2026-10-01', endsOn: '2026-12-20' },
+      { id: 'p2', label: 'T2', labelAr: null, startsOn: '2027-01-04', endsOn: '2027-03-31' },
+    ];
+    const school = { id: 's', name: 'École' };
+    const reporting = {
+      pedagogy: async () => ({
+        school,
+        year: { id: 'y', label: '2026-2027' },
+        filters: {},
+        scale: 20,
+        scaleMixed: false,
+        periods,
+        schoolByPeriod: [
+          {
+            periodId: 'p1',
+            average: 12,
+            scale: 20,
+            passRate: 6000,
+            graded: 30,
+            insufficient: false,
+          },
+          {
+            periodId: 'p2',
+            average: null,
+            scale: null,
+            passRate: null,
+            graded: 0,
+            insufficient: true,
+          },
+        ],
+        schoolTrend: null,
+        classes: [],
+        subjects: [],
+      }),
+      attendance: async () => ({
+        from: '2026-09-01',
+        to: '2027-03-31',
+        insufficient: false,
+        total: { sessions: 100, absenceRate: 500, lateRate: 100 },
+        byClass: [],
+        byMonth: [],
+      }),
+    };
+    const service = new SchoolAiAnalysisService(
+      { scope: async () => school } as never,
+      reporting as never,
+    );
+    const r = await service.indicators({} as never, { schoolId: 's', schoolYearId: 'y' } as never);
+    expect(r.results.school.map((p) => p.insufficient)).toEqual([false, false]);
+    expect(r.insufficient).toContain('aucun élève noté en T2');
+    expect(r.insufficient).not.toContain('effectif noté insuffisant en T2');
   });
 });
