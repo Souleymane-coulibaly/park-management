@@ -99,9 +99,12 @@ médias.
 
 **Limitation de débit des pages publiques.** Les pages sont lues sans cache : le serveur web interroge
 l'API pour chaque visite. Pour que la limite par IP de l'API compte chaque visiteur (et non le serveur
-web), le web transmet l'IP du visiteur (dernière entrée de `X-Forwarded-For`, ajoutée par le proxy de
-l'hébergeur) avec le secret partagé `SITES_REVALIDATE_SECRET` ; sans ce secret, l'API garde l'IP de la
-requête. Le secret doit donc être identique sur l'API et le web.
+web), le web transmet l'IP du visiteur, authentifiée par le secret partagé `SITES_REVALIDATE_SECRET`,
+seulement pour les lectures publiques School. Frontière de confiance explicite : `WEB_TRUSTED_PROXY_HOPS`
+(web) indique combien de proxys de confiance précèdent le web (Railway : `1`, l'edge) ; l'IP retenue est
+l'entrée de `X-Forwarded-For` ajoutée par le plus éloigné. Valeur `0` (défaut, accès direct) : aucune
+identité transmise, l'API garde l'IP de la requête. Une valeur fournie par le visiteur n'est jamais
+signée. **À vérifier au déploiement**, comme `TRUST_PROXY_HOPS` (voir `DEPLOIEMENT-RAILWAY.md` § 4).
 
 ## 6. Réseaux sociaux et liens externes
 

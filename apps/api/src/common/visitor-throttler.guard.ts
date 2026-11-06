@@ -21,10 +21,21 @@ function sameSecret(given: string, expected: string): boolean {
  * web/API (SITES_REVALIDATE_SECRET) — sinon tous les visiteurs partageraient la limite de l'IP du
  * serveur web. Sans secret valide : comportement inchangé.
  */
+/** Seules les lectures publiques des sites School acceptent une identité de visiteur transmise. */
+const VISITOR_ROUTES = /^\/api\/v1\/public\/school-(sites|media)\//i;
+
 export function throttleTracker(
-  req: { ip?: string; headers?: Record<string, string | string[] | undefined> },
+  req: {
+    ip?: string;
+    method?: string;
+    originalUrl?: string;
+    url?: string;
+    headers?: Record<string, string | string[] | undefined>;
+  },
   secret: string | undefined,
 ): string {
+  const path = req.originalUrl ?? req.url ?? '';
+  if (req.method !== 'GET' || !VISITOR_ROUTES.test(path)) return req.ip ?? '';
   const header = (name: string) => {
     const v = req.headers?.[name];
     return typeof v === 'string' ? v.trim() : '';

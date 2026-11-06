@@ -567,9 +567,12 @@ function ContentTab({
       const highlights = Array.from({ length: Math.max(fr.length, ar.length) }, (_, i) => ({
         fr: (fr[i] ?? '').trim(),
         ar: (ar[i] ?? '').trim(),
-      }))
-        .filter((h) => h.fr || h.ar)
-        .slice(0, 6);
+      })).filter((h) => h.fr || h.ar);
+      if (highlights.length > 6) {
+        setHighlightError(true);
+        return;
+      }
+      setHighlightError(false);
       const content = { ...c, home: { ...c.home, highlights } };
       await api(`/school/sites/${site.id}/draft`, { method: 'PUT', body: { content } });
       setC(content);
@@ -581,6 +584,7 @@ function ContentTab({
   }
   // Points forts : texte saisi conservé tel quel pendant l'édition (lignes vides comprises, pour
   // passer à la ligne au clavier), converti en liste à l'enregistrement.
+  const [highlightError, setHighlightError] = useState(false);
   const [highlightText, setHighlightText] = useState<Record<SchoolSiteLanguage, string>>({
     fr: c.home.highlights.map((h) => h.fr).join('\n'),
     ar: c.home.highlights.map((h) => h.ar).join('\n'),
@@ -703,6 +707,7 @@ function ContentTab({
           )}
         </form>
         <div className="mt-3 space-y-2">
+          {highlightError && <Alert tone="error">{t('site.f.highlightsTooMany')}</Alert>}
           {saved && <Alert tone="success">{t('site.draftSaved')}</Alert>}
           <ApiErrorAlert error={error} />
         </div>
