@@ -285,6 +285,7 @@ model School {
   events        SchoolCalendarEvent[]
   reportViews   SchoolReportView[]
   aiSettings    SchoolAiSettings?
+  site          SchoolSite?
 
   @@unique([organizationId, id])
   @@unique([organizationId, name])
@@ -1953,4 +1954,117 @@ model SchoolAiDocument {
   updatedAt         DateTime  @updatedAt
 
   @@index([organizationId, schoolId, authorUserId, updatedAt])
+}
+
+/// Site vitrine public d'un établissement (Sprint 10) : brouillon et version publiée séparés. Le contenu
+/// est saisi pour le site : aucune donnée scolaire (élèves, notes, présences, finances) n'y est reprise.
+model SchoolSite {
+  id                String    @id @default(uuid()) @db.Uuid
+  organizationId    String    @db.Uuid
+  schoolId          String    @unique @db.Uuid
+  /// Sous-domaine <slug>.<domaine des sites School> ; unique sur toute la plateforme School.
+  slug              String    @unique
+  /// Site activé par l'établissement (préparation et prévisualisation possibles).
+  enabled           Boolean   @default(false)
+  /// Version publiée visible du public.
+  isOnline          Boolean   @default(false)
+  /// Langues publiées : fr, ar (au moins une).
+  languages         String[]  @default(["fr"])
+  defaultLanguage   String    @default("fr")
+  theme             String    @default("CLASSIC")
+  primaryColor      String    @default("#176B53") @db.Char(7)
+  draft             Json
+  published         Json?
+  publishedAt       DateTime?
+  publishedByUserId String?   @db.Uuid
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  school School            @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+  media  SchoolSiteMedia[]
+  news   SchoolSiteNews[]
+  links  SchoolSiteLink[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, schoolId])
+}
+
+/// Image d'un site, réencodée par le serveur (métadonnées EXIF/GPS supprimées) en deux tailles. Photo où
+/// figurent des mineurs : attestation d'autorisation enregistrée (qui, quand, référence), sans valeur de
+/// preuve à elle seule. Retrait : fichiers supprimés, ligne conservée pour la traçabilité.
+model SchoolSiteMedia {
+  id                      String    @id @default(uuid()) @db.Uuid
+  organizationId          String    @db.Uuid
+  siteId                  String    @db.Uuid
+  /// LOGO, COVER, GALLERY, NEWS
+  kind                    String
+  storageKey              String?   @unique
+  thumbKey                String?   @unique
+  mimeType                String
+  bytes                   Int
+  width                   Int
+  height                  Int
+  alt                     String    @default("")
+  altAr                   String    @default("")
+  isPublished             Boolean   @default(false)
+  containsMinors          Boolean   @default(false)
+  consentReference        String?
+  consentAttestedByUserId String?   @db.Uuid
+  consentAttestedAt       DateTime?
+  withdrawnAt             DateTime?
+  withdrawnByUserId       String?   @db.Uuid
+  withdrawalReason        String?
+  createdByUserId         String    @db.Uuid
+  createdAt               DateTime  @default(now())
+
+  site SchoolSite @relation(fields: [organizationId, siteId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@index([organizationId, siteId, createdAt])
+}
+
+/// Actualité du site : brouillon ou publiée (visible seulement si le site est en ligne).
+model SchoolSiteNews {
+  id              String    @id @default(uuid()) @db.Uuid
+  organizationId  String    @db.Uuid
+  siteId          String    @db.Uuid
+  slug            String
+  title           String
+  titleAr         String    @default("")
+  body            String
+  bodyAr          String    @default("")
+  publishedOn     DateTime  @db.Date
+  mediaId         String?   @db.Uuid
+  /// DRAFT, PUBLISHED
+  status          String    @default("DRAFT")
+  publishedAt     DateTime?
+  createdByUserId String    @db.Uuid
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  site SchoolSite @relation(fields: [organizationId, siteId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([siteId, slug])
+  @@unique([organizationId, id])
+  @@index([organizationId, siteId, status, publishedOn])
+}
+
+/// Réseau social ou lien externe du site : activable, ordonné ; adresse https validée (WhatsApp : wa.me).
+model SchoolSiteLink {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  siteId         String   @db.Uuid
+  /// FACEBOOK, INSTAGRAM, TIKTOK, YOUTUBE, WHATSAPP, LINKEDIN, OTHER
+  kind           String
+  label          String   @default("")
+  url            String
+  enabled        Boolean  @default(true)
+  position       Int
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  site SchoolSite @relation(fields: [organizationId, siteId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@index([organizationId, siteId, position])
 }

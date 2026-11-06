@@ -13,6 +13,12 @@ const testDb = resolveTestDatabase({ ...apiEnv, ...process.env });
 // Régénération des sites vitrines (API → frontend) : secret aléatoire propre à chaque exécution,
 // jamais écrit dans le dépôt. Sans elle, une page dépubliée reste servie depuis le cache de Next.js.
 const revalidateSecret = randomBytes(24).toString('hex');
+// Sites des établissements (Sprint 10) : sous-domaines locaux `<slug>.ecoles.localhost`, que Chromium
+// résout vers 127.0.0.1 sans DNS. Aucun DNS ni certificat réel n'est testé ici.
+const SCHOOL_SITES_ENV = {
+  SCHOOL_SITES_BASE_DOMAIN: 'ecoles.localhost',
+  SCHOOL_SITES_SUBDOMAINS_ENABLED: 'true',
+};
 // Ocall School : activé seulement avec une base School de test dédiée (TEST_SCHOOL_DATABASE_URL),
 // distincte de la base Suite ; sinon les specs School sont ignorées (hors CI, où elles sont exigées).
 const schoolDb = resolveSchoolTestDatabase({ ...apiEnv, ...process.env }, testDb.databaseUrl);
@@ -24,6 +30,7 @@ const schoolEnv: Record<string, string> = schoolDb
       SCHOOL_DATABASE_URL: schoolDb.url,
       // Clé de chiffrement aléatoire, propre à l'exécution : les données fictives ne lui survivent pas.
       SCHOOL_DATA_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
+      ...SCHOOL_SITES_ENV,
     }
   : { SCHOOL_ENABLED: 'false' };
 
@@ -80,7 +87,7 @@ export default defineConfig({
       command: 'npx next start -p 3000',
       cwd: 'apps/web',
       url: 'http://localhost:3000',
-      env: { SITES_REVALIDATE_SECRET: revalidateSecret },
+      env: { SITES_REVALIDATE_SECRET: revalidateSecret, ...SCHOOL_SITES_ENV },
       reuseExistingServer: false,
       timeout: 120_000,
     },

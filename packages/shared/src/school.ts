@@ -175,6 +175,10 @@ export const SchoolPermission = {
   AI_ANALYSIS: 'school.ai.analysis',
   /** Activer l'IA par établissement, quotas, conservation des conversations, consommation. */
   AI_MANAGE: 'school.ai.manage',
+  /** Site vitrine public de l'établissement (Sprint 10) : contenus, médias, actualités, liens. */
+  SITE_MANAGE: 'school.site.manage',
+  /** Publier, dépublier ou activer le site vitrine ; retirer immédiatement une photo publiée. */
+  SITE_PUBLISH: 'school.site.publish',
 } as const;
 export type SchoolPermission = (typeof SchoolPermission)[keyof typeof SchoolPermission];
 
@@ -235,6 +239,8 @@ const DIRECTION: readonly SchoolPermission[] = [
   SP.AI_TEACHING,
   SP.AI_ANALYSIS,
   SP.AI_MANAGE,
+  SP.SITE_MANAGE,
+  SP.SITE_PUBLISH,
 ];
 
 /**
@@ -252,6 +258,8 @@ const DIRECTION: readonly SchoolPermission[] = [
  * Reporting et IA (Sprint 8) : la direction consulte et exporte les rapports et utilise le copilote et
  * l'analyse ; l'historique des opérations sensibles, qui couvre tout le client, est réservé à la direction
  * du groupe ; l'enseignant dispose de l'assistant pédagogique pour ses classes.
+ * Site vitrine (Sprint 10) : le secrétariat prépare contenus, médias, actualités et liens ; la direction
+ * publie, dépublie et peut retirer immédiatement une photo publiée.
  */
 export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermission[]> = {
   GROUP_DIRECTOR: [...DIRECTION, SP.SCHOOLS_MANAGE, SP.AUDIT_READ],
@@ -283,6 +291,7 @@ export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermissi
     SP.PLANNING_MANAGE,
     SP.CALENDAR_MANAGE,
     SP.EXAMS_MANAGE,
+    SP.SITE_MANAGE,
   ],
   TEACHER: [
     SP.STRUCTURE_READ,

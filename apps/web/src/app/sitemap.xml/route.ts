@@ -1,5 +1,7 @@
 import type { NextRequest } from 'next/server';
 import { fetchSitemap, isAppHost, requestHost } from '@/lib/public-site';
+import { fetchSchoolSitemap } from '@/lib/public-school-site';
+import { isSchoolSiteHost } from '@/lib/site-hosts';
 
 const escapeXml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -12,7 +14,10 @@ const escapeXml = (s: string) =>
 export async function GET(request: NextRequest) {
   const host = requestHost(request.headers);
   const origin = `${request.nextUrl.protocol}//${host}`;
-  const entries = await fetchSitemap(host);
+  // Hôte d'un site School : ses seules pages publiées ; sinon, sites Park et pages commerciales.
+  const entries = isSchoolSiteHost(host)
+    ? await fetchSchoolSitemap(host)
+    : await fetchSitemap(host);
   const marketing = isAppHost(host)
     ? [
         '/',

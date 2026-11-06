@@ -104,6 +104,45 @@ export class SuiteContractsService {
     };
   }
 
+  /**
+   * Fenêtre du meilleur contrat d'un client pour un produit, avec la date de passage en lecture seule
+   * (dernier changement vers le statut actuel, à défaut la dernière mise à jour du contrat) : sert au
+   * maintien temporaire des sites publiés (Sprint 10 School). null sans contrat.
+   */
+  async contractWindow(
+    organizationId: string,
+    productCode: string,
+  ): Promise<{
+    status: SuiteContractStatus;
+    startsOn: Date;
+    endsOn: Date;
+    readOnlySince: Date | null;
+  } | null> {
+    const contracts = await this.prisma.suiteContract.findMany({
+      where: { organizationId, product: { code: productCode } },
+      select: {
+        status: true,
+        startsOn: true,
+        endsOn: true,
+        updatedAt: true,
+        events: {
+          where: { toStatus: { in: ['SUSPENDED', 'EXPIRED', 'TERMINATED'] } },
+          orderBy: { createdAt: 'desc' },
+          take: 5,
+          select: { toStatus: true, createdAt: true },
+        },
+      },
+    });
+    const best = bestContract(contracts);
+    if (!best) return null;
+    const c = best.contract;
+    const readOnlySince =
+      c.status === 'ACTIVE' || c.status === 'DRAFT'
+        ? null
+        : (c.events.find((e) => e.toStatus === c.status)?.createdAt ?? c.updatedAt);
+    return { status: c.status, startsOn: c.startsOn, endsOn: c.endsOn, readOnlySince };
+  }
+
   /** Applications du portail Ocall Suite accessibles à ce membre, décidées par le serveur. */
   async apps(auth: TenantContext, schoolEnabled: boolean): Promise<AuthProductApp[]> {
     const apps: AuthProductApp[] = [];

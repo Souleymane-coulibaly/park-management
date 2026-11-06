@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { slugFromHost } from '@ocall/shared';
-import { isAppHost, requestHost } from '@/lib/site-hosts';
+import { parseSchoolSitePath, slugFromHost } from '@ocall/shared';
+import { isAppHost, isSchoolSiteHost, requestHost, schoolSitesBaseDomain } from '@/lib/site-hosts';
 
 const API_URL = process.env.API_URL ?? 'http://localhost:4000';
 // Portail parents : privé, sauf la page publique d'activation par le lien d'invitation.
@@ -40,6 +40,8 @@ async function slugForHost(host: string): Promise<string | null> {
 /**
  * - Hôtes de l'application : filtre rapide des espaces privés (sans cookie de session → connexion ;
  *   la vérification réelle est faite par l'API et les layouts serveur).
+ * - Hôtes des sites School (`<slug>.<domaine School>`) : pages publiques du site (réécrites vers
+ *   /s/<slug>/…), rien d'autre.
  * - Hôtes de sites (`<slug>.<domaine Ocall>`, domaine personnalisé ACTIF) : seule la page d'accueil
  *   du site est servie (réécrite vers /e/<slug>) ; espaces privés, autres pages et API internes y
  *   sont introuvables.
@@ -60,6 +62,21 @@ export async function middleware(request: NextRequest) {
   }
 
   if (SITE_PASSTHROUGH.test(path)) return NextResponse.next({ request: { headers } });
+
+  // Sites des établissements Ocall School (`<slug>.<domaine School>`) : uniquement les pages publiques
+  // connues du site (réécrites vers /s/<slug>/…) ; tout autre chemin, ou un libellé invalide ou
+  // réservé, est introuvable. Jamais résolu par les sites Park ni servi par l'application.
+  if (isSchoolSiteHost(host)) {
+    const schoolSlug = slugFromHost(host, schoolSitesBaseDomain());
+    const route = parseSchoolSitePath(path);
+    headers.set(SITE_HOST_HEADER, '1');
+    const target =
+      schoolSlug && route
+        ? `/s/${schoolSlug}${path === '/' ? '' : path.replace(/\/$/, '')}`
+        : '/s/__introuvable';
+    return NextResponse.rewrite(new URL(target, request.url), { request: { headers } });
+  }
+
   const slug = await slugForHost(host);
   headers.set(SITE_HOST_HEADER, '1');
   const target = slug && path === '/' ? `/e/${slug}` : '/e/__introuvable';

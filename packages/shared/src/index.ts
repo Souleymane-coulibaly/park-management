@@ -28,3 +28,4 @@ export * from './school-portal';
 export * from './school-planning';
 export * from './school-reporting';
 export * from './school-ai';
+export * from './school-site';
