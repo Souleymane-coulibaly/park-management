@@ -15,9 +15,11 @@ export async function GET(request: NextRequest) {
   const host = requestHost(request.headers);
   const origin = `${request.nextUrl.protocol}//${host}`;
   // Hôte d'un site School : ses seules pages publiées ; sinon, sites Park et pages commerciales.
+  // Hôte d'un site School : ses seules pages. Hôte de l'application : sites Park et sites School
+  // servis à l'adresse provisoire /s/<slug> (sous-domaines School non activés).
   const entries = isSchoolSiteHost(host)
     ? await fetchSchoolSitemap(host)
-    : await fetchSitemap(host);
+    : [...(await fetchSitemap(host)), ...(isAppHost(host) ? await fetchSchoolSitemap(host) : [])];
   const marketing = isAppHost(host)
     ? [
         '/',

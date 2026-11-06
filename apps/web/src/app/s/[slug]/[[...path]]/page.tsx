@@ -5,13 +5,14 @@ import {
   SCHOOL_SITE_PAGE_LABELS,
   type SchoolSiteLanguage,
   type SchoolSitePublicResponse,
+  type SchoolSitePublishedNews,
   type SchoolSiteRoute,
   localizedText,
   parseSchoolSitePath,
   schoolSitePath,
 } from '@ocall/shared';
 import { SchoolSitePageContent, SchoolSiteShell } from '@/components/school-site/school-site-view';
-import { fetchSchoolSite } from '@/lib/public-school-site';
+import { fetchSchoolNews, fetchSchoolSite } from '@/lib/public-school-site';
 
 type Params = { params: Promise<{ slug: string; path?: string[] }> };
 
@@ -22,6 +23,7 @@ type Resolved =
       kind: 'page';
       data: Extract<SchoolSitePublicResponse, { state: 'PUBLISHED' }>;
       route: SchoolSiteRoute;
+      article: SchoolSitePublishedNews | null;
     };
 
 /** Page demandée : chemin connu, langue publiée, actualité publiée ; tout le reste est introuvable. */
@@ -33,9 +35,10 @@ async function resolve(params: Params['params']): Promise<Resolved> {
   if (!data) return { kind: 'missing' };
   if (data.state === 'UNAVAILABLE') return { kind: 'unavailable', data };
   if (!data.site.languages.includes(route.lang)) return { kind: 'missing' };
-  if (route.newsSlug && !data.news.some((n) => n.slug === route.newsSlug))
-    return { kind: 'missing' };
-  return { kind: 'page', data, route };
+  // Article résolu par son adresse : un article publié reste accessible hors des 50 plus récents.
+  const article = route.newsSlug ? await fetchSchoolNews(slug, route.newsSlug) : null;
+  if (route.newsSlug && !article) return { kind: 'missing' };
+  return { kind: 'page', data, route, article };
 }
 
 const absolute = (canonical: string, lang: SchoolSiteLanguage, r: SchoolSiteRoute) => {
@@ -60,7 +63,7 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { site, canonicalUrl } = r.data;
   const lang = r.route.lang;
   const name = localizedText(site.name, lang)?.text ?? '';
-  const news = r.route.newsSlug ? r.data.news.find((n) => n.slug === r.route.newsSlug) : null;
+  const news = r.article;
   const pageTitle = news
     ? (localizedText(news.title, lang)?.text ?? '')
     : r.route.page === 'home'
@@ -158,10 +161,16 @@ export default async function SchoolSitePage({ params }: Params) {
     page: r.route.page,
     base: servedByHost ? '' : `/s/${slug}`,
     readOnlyUntil: r.data.readOnlyUntil,
+    newsSlug: r.route.newsSlug,
   };
   return (
     <SchoolSiteShell data={r.data} chrome={chrome}>
-      <SchoolSitePageContent data={r.data} chrome={chrome} newsSlug={r.route.newsSlug} />
+      <SchoolSitePageContent
+        data={r.data}
+        chrome={chrome}
+        newsSlug={r.route.newsSlug}
+        article={r.article}
+      />
     </SchoolSiteShell>
   );
 }

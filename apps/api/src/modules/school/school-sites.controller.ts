@@ -370,8 +370,25 @@ export class PublicSchoolSitesController {
     const site = /^[a-z0-9-]{1,40}$/.test(slug) ? await this.sites.publicBySlug(slug) : null;
     if (!site)
       throw new NotFoundException({ code: 'SITE_NOT_FOUND', message: 'Site introuvable.' });
-    res.setHeader('Cache-Control', 'public, max-age=60, stale-while-revalidate=300');
+    // Jamais mis en cache : une dépublication, une résiliation ou un retrait valent immédiatement.
+    res.setHeader('Cache-Control', 'no-store');
     return site;
+  }
+
+  /** Article publié, résolu par son adresse (y compris au-delà des 50 plus récents). */
+  @Get('school-sites/:slug/news/:newsSlug')
+  async news(
+    @Param('slug') slug: string,
+    @Param('newsSlug') newsSlug: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const news = /^[a-z0-9-]{1,40}$/.test(slug)
+      ? await this.sites.publicNews(slug, newsSlug)
+      : null;
+    if (!news)
+      throw new NotFoundException({ code: 'SITE_NOT_FOUND', message: 'Actualité introuvable.' });
+    res.setHeader('Cache-Control', 'no-store');
+    return news;
   }
 
   /** Cache court : une image retirée cesse d'être servie aussitôt, et des caches sous 5 minutes. */

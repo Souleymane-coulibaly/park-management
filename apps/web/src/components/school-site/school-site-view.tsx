@@ -175,6 +175,8 @@ export interface SchoolSiteChrome {
   /** Préfixe des liens internes : '' sur le sous-domaine du site, `/s/<slug>` ailleurs. */
   base: string;
   readOnlyUntil?: string | null;
+  /** Article affiché : le changement de langue mène au même article. */
+  newsSlug?: string | null;
   /** Prévisualisation : liens internes désactivés (aucune navigation hors de l'aperçu). */
   preview?: boolean;
 }
@@ -307,7 +309,11 @@ export function SchoolSiteShell({
           <div className="flex items-center gap-2">
             {site.languages.includes(other) && (
               <a
-                href={chrome.preview ? undefined : href(chrome, other, chrome.page)}
+                href={
+                  chrome.preview
+                    ? undefined
+                    : href(chrome, other, chrome.page, chrome.newsSlug ?? undefined)
+                }
                 lang={other}
                 hrefLang={other}
                 className="rounded border border-current/30 px-2.5 py-1 text-sm"
@@ -455,10 +461,13 @@ export function SchoolSitePageContent({
   data,
   chrome,
   newsSlug,
+  article,
 }: {
   data: SchoolSiteRenderData;
   chrome: SchoolSiteChrome;
   newsSlug: string | null;
+  /** Article résolu par son adresse (page publique) ; sinon recherché dans la liste (aperçu). */
+  article?: SchoolSitePublishedNews | null;
 }) {
   const { site } = data;
   const { lang } = chrome;
@@ -571,7 +580,7 @@ export function SchoolSitePageContent({
       );
     case 'news': {
       if (newsSlug) {
-        const n = data.news.find((x) => x.slug === newsSlug);
+        const n = article ?? data.news.find((x) => x.slug === newsSlug);
         if (!n) return null;
         return (
           <article>

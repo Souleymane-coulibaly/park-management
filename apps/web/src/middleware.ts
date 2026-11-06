@@ -9,6 +9,13 @@ const PRIVATE =
 /** Chemins servis tels quels sur un hôte de site : ressources, images publiées, contrôle, SEO. */
 const SITE_PASSTHROUGH =
   /^\/(_next\/|api\/v1\/public\/|\.well-known\/ocall-site$|sitemap\.xml$|robots\.txt$|favicon\.ico$|icon\.svg$)/;
+/**
+ * Sur un hôte de site School : ressources, images publiées des sites School, SEO. Les routes publiques
+ * des sites Park n'y sont pas servies, et réciproquement (isolation des deux produits).
+ */
+const SCHOOL_SITE_PASSTHROUGH =
+  /^\/(_next\/|api\/v1\/public\/school-media\/|sitemap\.xml$|robots\.txt$|favicon\.ico$|icon\.svg$)/;
+const SCHOOL_PUBLIC_API = /^\/api\/v1\/public\/school-/;
 const SITE_HOST_HEADER = 'x-ocall-site-host';
 
 /** Cache court des domaines personnalisés résolus (évite un appel à l'API par requête). */
@@ -61,12 +68,12 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next({ request: { headers } });
   }
 
-  if (SITE_PASSTHROUGH.test(path)) return NextResponse.next({ request: { headers } });
-
   // Sites des établissements Ocall School (`<slug>.<domaine School>`) : uniquement les pages publiques
   // connues du site (réécrites vers /s/<slug>/…) ; tout autre chemin, ou un libellé invalide ou
   // réservé, est introuvable. Jamais résolu par les sites Park ni servi par l'application.
+  // L'hôte est classé AVANT toute exemption de chemin.
   if (isSchoolSiteHost(host)) {
+    if (SCHOOL_SITE_PASSTHROUGH.test(path)) return NextResponse.next({ request: { headers } });
     const schoolSlug = slugFromHost(host, schoolSitesBaseDomain());
     const route = parseSchoolSitePath(path);
     headers.set(SITE_HOST_HEADER, '1');
@@ -77,6 +84,10 @@ export async function middleware(request: NextRequest) {
     return NextResponse.rewrite(new URL(target, request.url), { request: { headers } });
   }
 
+  // Hôte de site Park : routes publiques des sites School exclues.
+  if (SITE_PASSTHROUGH.test(path) && !SCHOOL_PUBLIC_API.test(path)) {
+    return NextResponse.next({ request: { headers } });
+  }
   const slug = await slugForHost(host);
   headers.set(SITE_HOST_HEADER, '1');
   const target = slug && path === '/' ? `/e/${slug}` : '/e/__introuvable';

@@ -252,7 +252,7 @@ suite('Ocall School — Sprint 10, sites vitrines (intégration)', () => {
       await upload(
         secretary.agent,
         siteId,
-        { kind: 'GALLERY', containsMinors: 'false' },
+        { kind: 'GALLERY', alt: 'Cour de récréation', containsMinors: 'false' },
         Buffer.from('<svg><script/></svg>'),
       ).expect(400);
     });
@@ -349,7 +349,7 @@ suite('Ocall School — Sprint 10, sites vitrines (intégration)', () => {
       const unpublished = await upload(
         secretary.agent,
         siteId,
-        { kind: 'GALLERY', containsMinors: 'false' },
+        { kind: 'GALLERY', alt: 'Cour de récréation', containsMinors: 'false' },
         await photo(),
       ).expect(201);
       const key = (unpublished.body.url as string).split('/').pop();
@@ -483,6 +483,73 @@ suite('Ocall School — Sprint 10, sites vitrines (intégration)', () => {
       const kept = await ownerA.get(`/api/v1/school/sites?schoolId=${schoolA}`).expect(200);
       expect(kept.body.draft.home.tagline.fr).toBe('Apprendre ensemble');
       await ownerA.post(`/api/v1/school/sites/${siteId}/publish`).expect(200);
+      expect((await publicSite().expect(200)).body.state).toBe('PUBLISHED');
+    });
+  });
+
+  describe('corrections de l’audit (passe 1)', () => {
+    it('image informative sans description refusée', async () => {
+      const res = await upload(
+        secretary.agent,
+        siteId,
+        { kind: 'GALLERY', containsMinors: 'false' },
+        await photo(),
+      ).expect(400);
+      expect(res.body.code).toBe('MEDIA_ALT_REQUIRED');
+    });
+
+    it('actualité publiée : le secrétariat ne peut plus la modifier, la direction oui', async () => {
+      const list = await secretary.agent.get(`/api/v1/school/sites/${siteId}/news`).expect(200);
+      const published = list.body.find((n: { status: string }) => n.status === 'PUBLISHED');
+      const draft = list.body.find((n: { status: string }) => n.status === 'DRAFT');
+      const refused = await secretary.agent
+        .patch(`/api/v1/school/sites/${siteId}/news/${published.id}`)
+        .send({ body: 'Texte modifié sans validation.' })
+        .expect(403);
+      expect(refused.body.code).toBe('SITE_NEWS_PUBLISHED');
+      await secretary.agent
+        .patch(`/api/v1/school/sites/${siteId}/news/${draft.id}`)
+        .send({ body: 'Brouillon modifiable.' })
+        .expect(200);
+      await ownerA
+        .patch(`/api/v1/school/sites/${siteId}/news/${published.id}`)
+        .send({ body: 'Lundi 5 octobre, 8 h.' })
+        .expect(200);
+      const site = await publicSite().expect(200);
+      expect(site.body.news[0].body.fr).toBe('Lundi 5 octobre, 8 h.');
+    });
+
+    it('article publié résolu par son adresse ; brouillon introuvable ; lecture jamais mise en cache', async () => {
+      const article = await pub()
+        .get(`/api/v1/public/school-sites/${slug}/news/rentree-scolaire`)
+        .expect(200);
+      expect(article.body).toMatchObject({ slug: 'rentree-scolaire', publishedOn: '2026-10-01' });
+      expect(article.headers['cache-control']).toBe('no-store');
+      await pub().get(`/api/v1/public/school-sites/${slug}/news/rentree-scolaire-2`).expect(404);
+      const site = await publicSite().expect(200);
+      expect(site.headers['cache-control']).toBe('no-store');
+    });
+
+    it('plan du site de l’hôte de l’application : sites servis à l’adresse provisoire /s/<slug>', async () => {
+      const res = await pub()
+        .get('/api/v1/public/school-sites/sitemap?host=localhost:3000')
+        .expect(200);
+      const urls = res.body.map((e: { url: string }) => e.url);
+      expect(urls).toContain(`http://localhost:3000/s/${slug}/a-propos`);
+      expect(urls).toContain(`http://localhost:3000/s/${slug}/actualites/rentree-scolaire`);
+      expect(urls).not.toContain(`http://localhost:3000/s/${slug}/actualites/rentree-scolaire-2`);
+    });
+
+    it('périmètre du contrat : un établissement retiré du contrat n’a plus de site public', async () => {
+      await platform.agent
+        .patch(`/api/v1/platform/contracts/${contractA}`)
+        .send({ coveredSchoolIds: [schoolA2] })
+        .expect(200);
+      expect((await publicSite().expect(200)).body.state).toBe('UNAVAILABLE');
+      await platform.agent
+        .patch(`/api/v1/platform/contracts/${contractA}`)
+        .send({ coveredSchoolIds: [] })
+        .expect(200);
       expect((await publicSite().expect(200)).body.state).toBe('PUBLISHED');
     });
   });

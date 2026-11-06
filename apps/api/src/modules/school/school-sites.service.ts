@@ -3,7 +3,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
-  Logger,
+  ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@ocall/school-database';
@@ -24,9 +24,10 @@ import {
   type SchoolSitePublishedNews,
   type SchoolSiteText,
   emptySchoolSiteContent,
+  isNewsSlug,
   isAccessibleBrandColor,
   isHexColor,
-  schoolSiteAvailability,
+  bestSchoolSiteAvailability,
   schoolSiteMediaIds,
   schoolSitePath,
   schoolSiteSlugError,
@@ -34,6 +35,8 @@ import {
   validateSchoolSiteContent,
   validateSchoolSiteLink,
   SITE_SLUG_ERRORS,
+  SchoolPermission,
+  hasSchoolPermission,
 } from '@ocall/shared';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
 import { SuiteContractsService } from '../suite-contracts/suite-contracts.service';
@@ -42,6 +45,7 @@ import { SchoolPrismaService } from './school-prisma.service';
 import {
   SCHOOL_SITE_HOST_RESOLVERS,
   type SchoolSiteHostResolver,
+  normalizeHost,
   schoolSiteCanonicalUrl,
 } from './school-site-host';
 import { SchoolService } from './school.service';
@@ -53,8 +57,18 @@ const NOT_FOUND = { code: 'SCHOOL_SITE_NOT_FOUND', message: 'Site introuvable.' 
 const MAX_NEWS = 200;
 const PUBLIC_NEWS = 50;
 
-export const schoolSiteTag = (slug: string) => `school-site:${slug}`;
 export const publicMediaUrl = (key: string) => `/api/v1/public/school-media/${key}`;
+
+const NEWS_PUBLIC_SELECT = {
+  slug: true,
+  title: true,
+  titleAr: true,
+  body: true,
+  bodyAr: true,
+  publishedOn: true,
+  mediaId: true,
+  status: true,
+} as const;
 
 const SITE_SELECT = {
   id: true,
@@ -103,8 +117,6 @@ const MEDIA_FIELDS = {
  */
 @Injectable()
 export class SchoolSitesService {
-  private readonly logger = new Logger(SchoolSitesService.name);
-
   constructor(
     private readonly db: SchoolPrismaService,
     private readonly school: SchoolService,
@@ -131,9 +143,17 @@ export class SchoolSitesService {
     return site;
   }
 
-  async availability(organizationId: string): Promise<SchoolSiteAvailability> {
-    const window = await this.contracts.contractWindow(organizationId, SCHOOL_PRODUCT_CODE);
-    return schoolSiteAvailability(window, this.sitesConfig.graceDays);
+  /**
+   * Disponibilité d'un site selon les contrats qui couvrent SON établissement (périmètre du contrat),
+   * la plus favorable l'emportant quel que soit l'ordre des contrats.
+   */
+  async availability(organizationId: string, schoolId: string): Promise<SchoolSiteAvailability> {
+    const windows = await this.contracts.contractWindows(
+      organizationId,
+      SCHOOL_PRODUCT_CODE,
+      schoolId,
+    );
+    return bestSchoolSiteAvailability(windows, this.sitesConfig.graceDays);
   }
 
   private view(site: SiteRow, availability: SchoolSiteAvailability) {
@@ -171,7 +191,9 @@ export class SchoolSitesService {
       where: { organizationId: ctx.organizationId, schoolId },
       select: SITE_SELECT,
     });
-    return site ? this.view(site, await this.availability(ctx.organizationId)) : null;
+    return site
+      ? this.view(site, await this.availability(site.organizationId, site.schoolId))
+      : null;
   }
 
   /** Création du site (adresse choisie) : désactivé, brouillon vide, rien n'est publié. */
@@ -193,7 +215,7 @@ export class SchoolSitesService {
       'Cette adresse est déjà utilisée, ou cet établissement a déjà un site.',
     );
     await this.school.log(ctx, 'school.site_created', 'SchoolSite', site.id, { slug });
-    return this.view(site, await this.availability(ctx.organizationId));
+    return this.view(site, await this.availability(site.organizationId, site.schoolId));
   }
 
   private assertSlug(slug: string) {
@@ -250,7 +272,7 @@ export class SchoolSitesService {
       },
       select: SITE_SELECT,
     });
-    return this.view(updated, await this.availability(ctx.organizationId));
+    return this.view(updated, await this.availability(site.organizationId, site.schoolId));
   }
 
   /** Activation (adresse réservée, préparation) ou désactivation (le site sort du public). */
@@ -274,8 +296,7 @@ export class SchoolSitesService {
         slug: site.slug,
       },
     );
-    if (!enabled) void this.revalidate([site.slug]);
-    return this.view(updated, await this.availability(ctx.organizationId));
+    return this.view(updated, await this.availability(site.organizationId, site.schoolId));
   }
 
   /** Changement d'adresse : l'ancienne cesse aussitôt de répondre. */
@@ -292,8 +313,7 @@ export class SchoolSitesService {
       from: site.slug,
       to: slug,
     });
-    void this.revalidate([site.slug, slug]);
-    return this.view(updated, await this.availability(ctx.organizationId));
+    return this.view(updated, await this.availability(site.organizationId, site.schoolId));
   }
 
   async saveDraft(ctx: SchoolContext, siteId: string, input: unknown) {
@@ -312,7 +332,7 @@ export class SchoolSitesService {
       data: { draft: result.content as unknown as Prisma.InputJsonValue },
       select: SITE_SELECT,
     });
-    return this.view(updated, await this.availability(ctx.organizationId));
+    return this.view(updated, await this.availability(site.organizationId, site.schoolId));
   }
 
   /** Médias cités : ceux du site, jamais retirés (un identifiant étranger est refusé). */
@@ -401,12 +421,13 @@ export class SchoolSitesService {
    * Médias servis au public : exactement ceux de la version publiée et des actualités publiées d'un
    * site en ligne ; tous les autres cessent aussitôt d'être servis.
    */
-  async syncPublishedMedia(
-    tx: Db,
-    site: Pick<SiteRow, 'id' | 'organizationId' | 'isOnline' | 'published'>,
-  ) {
-    const where = { organizationId: site.organizationId, siteId: site.id };
-    if (!site.isOnline || !site.published) {
+  async syncPublishedMedia(tx: Db, ref: Pick<SiteRow, 'id' | 'organizationId'>) {
+    // Verrou du site puis relecture : une opération concurrente (publication, actualité, retrait)
+    // ne peut pas resynchroniser à partir d'une version publiée périmée.
+    const [site] = await tx.$queryRaw<{ isOnline: boolean; published: unknown }[]>`
+      SELECT "isOnline", "published" FROM "SchoolSite" WHERE "id" = ${ref.id}::uuid FOR UPDATE`;
+    const where = { organizationId: ref.organizationId, siteId: ref.id };
+    if (!site || !site.isOnline || !site.published) {
       await tx.schoolSiteMedia.updateMany({ where, data: { isPublished: false } });
       return;
     }
@@ -439,7 +460,7 @@ export class SchoolSitesService {
         message: 'Activez le site avant de le publier.',
       });
     }
-    const availability = await this.availability(ctx.organizationId);
+    const availability = await this.availability(site.organizationId, site.schoolId);
     if (!availability.canPublish) {
       throw new ConflictException({
         code: 'SITE_CONTRACT_REQUIRED',
@@ -463,7 +484,6 @@ export class SchoolSitesService {
       return row;
     });
     await this.school.log(ctx, 'school.site_published', 'SchoolSite', site.id, { slug: site.slug });
-    void this.revalidate([site.slug]);
     return this.view(updated, availability);
   }
 
@@ -482,8 +502,7 @@ export class SchoolSitesService {
     await this.school.log(ctx, 'school.site_unpublished', 'SchoolSite', site.id, {
       slug: site.slug,
     });
-    void this.revalidate([site.slug]);
-    return this.view(updated, await this.availability(ctx.organizationId));
+    return this.view(updated, await this.availability(site.organizationId, site.schoolId));
   }
 
   /** Prévisualisation du brouillon (images servies par l'API authentifiée), jamais mise en cache. */
@@ -640,7 +659,6 @@ export class SchoolSitesService {
     await this.school.log(ctx, 'school.site_link_created', 'SchoolSiteLink', link.id, {
       kind: dto.kind,
     });
-    if (site.isOnline) void this.revalidate([site.slug]);
     return link;
   }
 
@@ -677,7 +695,6 @@ export class SchoolSitesService {
     await this.school.log(ctx, 'school.site_link_updated', 'SchoolSiteLink', link.id, {
       kind: link.kind,
     });
-    if (site.isOnline) void this.revalidate([site.slug]);
     return updated;
   }
 
@@ -688,7 +705,6 @@ export class SchoolSitesService {
     await this.school.log(ctx, 'school.site_link_deleted', 'SchoolSiteLink', link.id, {
       kind: link.kind,
     });
-    if (site.isOnline) void this.revalidate([site.slug]);
     return { deleted: true };
   }
 
@@ -715,7 +731,6 @@ export class SchoolSitesService {
         this.db.schoolSiteLink.update({ where: { id }, data: { position } }),
       ),
     );
-    if (site.isOnline) void this.revalidate([site.slug]);
     return this.listLinks(ctx, siteId);
   }
 
@@ -874,6 +889,16 @@ export class SchoolSitesService {
   ) {
     const site = await this.findSite(ctx, siteId);
     const news = await this.findNews(site, newsId);
+    // Une actualité en ligne modifiée l'est aussitôt pour le public : c'est une publication.
+    if (
+      news.status === 'PUBLISHED' &&
+      !hasSchoolPermission(ctx.role, SchoolPermission.SITE_PUBLISH)
+    ) {
+      throw new ForbiddenException({
+        code: 'SITE_NEWS_PUBLISHED',
+        message: 'Actualité publiée : seule la direction peut la modifier (ou la retirer du site).',
+      });
+    }
     const text = this.checkedNews({
       title: dto.title ?? news.title,
       titleAr: dto.titleAr ?? news.titleAr,
@@ -892,7 +917,6 @@ export class SchoolSitesService {
       });
       await this.syncPublishedMedia(tx, site);
     });
-    if (site.isOnline && news.status === 'PUBLISHED') void this.revalidate([site.slug]);
     return { id: news.id };
   }
 
@@ -913,7 +937,6 @@ export class SchoolSitesService {
       news.id,
       { slug: news.slug },
     );
-    if (site.isOnline) void this.revalidate([site.slug]);
     return { id: news.id, status: publish ? 'PUBLISHED' : 'DRAFT' };
   }
 
@@ -927,7 +950,6 @@ export class SchoolSitesService {
     await this.school.log(ctx, 'school.site_news_deleted', 'SchoolSiteNews', news.id, {
       slug: news.slug,
     });
-    if (site.isOnline && news.status === 'PUBLISHED') void this.revalidate([site.slug]);
     return { deleted: true };
   }
 
@@ -944,17 +966,15 @@ export class SchoolSitesService {
       },
       orderBy: [{ publishedOn: 'desc' }, { createdAt: 'desc' }],
       take: PUBLIC_NEWS,
-      select: {
-        slug: true,
-        title: true,
-        titleAr: true,
-        body: true,
-        bodyAr: true,
-        publishedOn: true,
-        mediaId: true,
-        status: true,
-      },
+      select: NEWS_PUBLIC_SELECT,
     });
+    return this.toPublicNews(site, rows);
+  }
+
+  private async toPublicNews(
+    site: SiteRow,
+    rows: Prisma.SchoolSiteNewsGetPayload<{ select: typeof NEWS_PUBLIC_SELECT }>[],
+  ): Promise<(SchoolSitePublishedNews & { status: string })[]> {
     const media = await this.mediaMap(
       this.db,
       site,
@@ -997,7 +1017,7 @@ export class SchoolSitesService {
       where: { organizationId: site.organizationId, id: site.schoolId },
       select: { name: true, nameAr: true, isActive: true },
     });
-    const availability = await this.availability(site.organizationId);
+    const availability = await this.availability(site.organizationId, site.schoolId);
     const online =
       site.enabled &&
       site.isOnline &&
@@ -1010,6 +1030,24 @@ export class SchoolSitesService {
       online,
       readOnlyUntil: availability.online ? availability.readOnlyUntil : null,
     };
+  }
+
+  /** Article publié d'un site en ligne, résolu par son adresse (au-delà des 50 plus récents). */
+  async publicNews(slug: string, newsSlug: string): Promise<SchoolSitePublishedNews | null> {
+    const found = await this.publicSite(slug);
+    if (!found?.online || !isNewsSlug(newsSlug)) return null;
+    const row = await this.db.schoolSiteNews.findFirst({
+      where: {
+        organizationId: found.site.organizationId,
+        siteId: found.site.id,
+        slug: newsSlug,
+        status: 'PUBLISHED',
+      },
+      select: NEWS_PUBLIC_SELECT,
+    });
+    if (!row) return null;
+    const [news] = await this.toPublicNews(found.site, [row]);
+    return news ?? null;
   }
 
   async publicBySlug(slug: string): Promise<SchoolSitePublicResponse | null> {
@@ -1030,24 +1068,59 @@ export class SchoolSitesService {
     };
   }
 
-  /** Plan du site d'un hôte de site School : pages des langues publiées et actualités publiées. */
+  /**
+   * Plan du site d'un hôte : le site de ce sous-domaine ; ou, sur l'hôte de l'application quand les
+   * sous-domaines sont désactivés, les sites servis à l'adresse provisoire `/s/<slug>`. Pages des
+   * langues publiées et toutes les actualités publiées ; rien d'un site indisponible.
+   */
   async sitemap(host: string): Promise<{ url: string; lastModified: string | null }[]> {
+    if (!this.config.school.enabled) return [];
     const resolved = await this.resolveHost(host);
-    if (!resolved) return [];
-    const data = await this.publicBySlug(resolved.slug);
-    if (!data || data.state !== 'PUBLISHED') return [];
-    const origin = data.canonicalUrl;
-    const lastModified = data.site.publishedAt.slice(0, 10);
-    return data.site.languages.flatMap((lang) => [
-      ...SCHOOL_SITE_PAGES.map((page) => ({
-        url: `${origin}${schoolSitePath(lang, page) === '/' ? '' : schoolSitePath(lang, page)}`,
-        lastModified,
-      })),
-      ...data.news.map((n) => ({
-        url: `${origin}${schoolSitePath(lang, 'news', n.slug)}`,
-        lastModified: n.publishedOn,
-      })),
-    ]);
+    let slugs: string[] = [];
+    if (resolved) slugs = [resolved.slug];
+    else if (
+      !this.sitesConfig.subdomainsEnabled &&
+      normalizeHost(host) === new URL(this.sitesConfig.publicOrigin).hostname
+    ) {
+      const rows = await this.db.schoolSite.findMany({
+        where: { enabled: true, isOnline: true },
+        select: { slug: true },
+        orderBy: { publishedAt: 'desc' },
+        take: 200,
+      });
+      slugs = rows.map((r) => r.slug);
+    }
+    const entries: { url: string; lastModified: string | null }[] = [];
+    for (const slug of slugs) {
+      const found = await this.publicSite(slug);
+      if (!found?.online) continue;
+      const published = found.site.published as unknown as SchoolSitePublished;
+      const origin = schoolSiteCanonicalUrl(this.sitesConfig, slug);
+      const news = await this.db.schoolSiteNews.findMany({
+        where: {
+          organizationId: found.site.organizationId,
+          siteId: found.site.id,
+          status: 'PUBLISHED',
+        },
+        select: { slug: true, publishedOn: true },
+        orderBy: { publishedOn: 'desc' },
+        take: MAX_NEWS,
+      });
+      const lastModified = published.publishedAt.slice(0, 10);
+      for (const lang of published.languages) {
+        for (const page of SCHOOL_SITE_PAGES) {
+          const path = schoolSitePath(lang, page);
+          entries.push({ url: `${origin}${path === '/' ? '' : path}`, lastModified });
+        }
+        for (const n of news) {
+          entries.push({
+            url: `${origin}${schoolSitePath(lang, 'news', n.slug)}`,
+            lastModified: n.publishedOn.toISOString().slice(0, 10),
+          });
+        }
+      }
+    }
+    return entries;
   }
 
   /** Image publique : publiée, non retirée, d'un site en ligne et disponible. */
@@ -1065,22 +1138,5 @@ export class SchoolSitesService {
     if (!media) return null;
     const found = await this.publicSite(media.site.slug);
     return found?.online ? { storageKey: key } : null;
-  }
-
-  // ─── Régénération des pages publiques ───
-
-  async revalidate(slugs: string[]): Promise<void> {
-    const { revalidateUrl, revalidateSecret } = this.config.sites;
-    if (!revalidateUrl || !revalidateSecret) return;
-    try {
-      await fetch(revalidateUrl, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-revalidate-secret': revalidateSecret },
-        body: JSON.stringify({ schoolSlugs: [...new Set(slugs)] }),
-        signal: AbortSignal.timeout(3_000),
-      });
-    } catch (e) {
-      this.logger.warn(`Revalidation des sites School impossible : ${(e as Error).message}`);
-    }
   }
 }

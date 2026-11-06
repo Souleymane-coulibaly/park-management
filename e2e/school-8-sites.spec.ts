@@ -255,6 +255,14 @@ test('site vitrine : création, contenus FR/AR, liens, photo, publication, sous-
     expect((await browserGet(probe, siteUrl(slug, path))).status, path).toBe(404);
   }
   expect((await browserGet(probe, siteUrl(slug, '/api/v1/school/context'))).status).toBe(404);
+  // Isolation des produits : routes publiques des sites Park, et API publique School elle-même, non
+  // servies par un hôte de site School (seules ses images publiées le sont).
+  for (const path of [
+    '/api/v1/public/sites/sitemap?host=x',
+    `/api/v1/public/school-sites/${slug}`,
+  ]) {
+    expect((await browserGet(probe, siteUrl(slug, path))).status, path).toBe(404);
+  }
   expect((await browserGet(probe, siteUrl('site-inexistant-e2e'))).status).toBe(404);
 
   // ─── Retrait immédiat de la photo : la page publique ne la montre plus, le fichier est supprimé ───

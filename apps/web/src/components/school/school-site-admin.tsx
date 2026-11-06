@@ -57,6 +57,8 @@ interface MediaView {
   containsMinors: boolean;
   consentReference: string | null;
   withdrawnAt: string | null;
+  /** Retiré, mais un fichier n'a pas encore pu être supprimé du stockage : retrait à rejouer. */
+  filesPending: boolean;
   url: string | null;
   thumbUrl: string | null;
 }
@@ -763,6 +765,16 @@ function MediaTab({
     }
   }
 
+  async function retryWithdraw(m: MediaView) {
+    setError(null);
+    try {
+      await api(`/school/sites/${site.id}/media/${m.id}/withdraw`, { method: 'POST', body: {} });
+      media.reload();
+    } catch (err) {
+      setError(toApiError(err));
+    }
+  }
+
   async function withdraw(m: MediaView) {
     if (!window.confirm(t('site.m.withdrawConfirm'))) return;
     const reason = window.prompt(t('site.m.withdrawReason')) ?? '';
@@ -816,6 +828,11 @@ function MediaTab({
                   {m.isPublished && <Badge tone="forest">{t('site.m.published')}</Badge>}
                   {m.containsMinors && <Badge tone="savanna">{t('site.m.minorsBadge')}</Badge>}
                   {m.withdrawnAt && <Badge tone="terracotta">{t('site.m.withdrawn')}</Badge>}
+                  {m.filesPending && protective && (
+                    <Button size="sm" variant="ghost" onClick={() => void retryWithdraw(m)}>
+                      {t('site.m.retryDelete')}
+                    </Button>
+                  )}
                 </div>
                 {!m.withdrawnAt && (
                   <div className="mt-2 flex flex-wrap gap-1">
@@ -947,7 +964,13 @@ function MediaTab({
               <Button
                 type="submit"
                 loading={sending}
-                disabled={!file || (form.minors && !form.consent.trim())}
+                disabled={
+                  !file ||
+                  (form.minors && !form.consent.trim()) ||
+                  ((form.kind === 'GALLERY' || form.kind === 'NEWS') &&
+                    !form.alt.trim() &&
+                    !form.altAr.trim())
+                }
               >
                 {t('site.m.send')}
               </Button>

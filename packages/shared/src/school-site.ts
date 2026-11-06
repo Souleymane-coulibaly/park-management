@@ -538,3 +538,27 @@ export function schoolSiteAvailability(
   }
   return { online: true, canPublish: false, readOnlyUntil: until };
 }
+
+/**
+ * Disponibilité d'un site couvert par plusieurs contrats (renouvellement, ancien contrat résilié) :
+ * la plus favorable l'emporte — publication permise, sinon maintien le plus long ; hors ligne
+ * seulement si aucun contrat ne permet le maintien. Indépendante de l'ordre des contrats.
+ */
+export function bestSchoolSiteAvailability(
+  contracts: readonly (ContractWindow & { readOnlySince: Date | null })[],
+  graceDays: number,
+  now: Date = new Date(),
+): SchoolSiteAvailability {
+  let best: SchoolSiteAvailability = { online: false, canPublish: false, reason: 'NO_CONTRACT' };
+  const until = (a: SchoolSiteAvailability) =>
+    a.online ? (a.canPublish ? Infinity : (a.readOnlyUntil?.getTime() ?? 0)) : -1;
+  const offlineRank = { NO_CONTRACT: 0, GRACE_ENDED: 1, TERMINATED: 2 } as const;
+  for (const c of contracts) {
+    const a = schoolSiteAvailability(c, graceDays, now);
+    if (until(a) > until(best)) best = a;
+    // Hors ligne des deux côtés : le motif le plus explicite (résiliation, fin du maintien).
+    else if (!a.online && !best.online && offlineRank[a.reason] > offlineRank[best.reason])
+      best = a;
+  }
+  return best;
+}

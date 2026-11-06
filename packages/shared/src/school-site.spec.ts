@@ -1,5 +1,6 @@
 import {
   SCHOOL_SITE_LIMITS,
+  bestSchoolSiteAvailability,
   emptySchoolSiteContent,
   localizedText,
   parseSchoolSitePath,
@@ -225,5 +226,41 @@ describe('Disponibilité selon le contrat', () => {
     expect(
       schoolSiteAvailability({ ...base, status: 'EXPIRED', readOnlySince: null }, 30, now),
     ).toEqual({ online: false, canPublish: false, reason: 'GRACE_ENDED' });
+  });
+});
+
+describe('Disponibilité avec plusieurs contrats', () => {
+  const now = new Date('2026-11-06T12:00:00Z');
+  const terminated = {
+    startsOn: '2025-01-01',
+    endsOn: '2025-12-31',
+    status: 'TERMINATED' as const,
+    readOnlySince: new Date('2025-12-31T00:00:00Z'),
+  };
+  const suspended = {
+    startsOn: '2026-01-01',
+    endsOn: '2026-12-31',
+    status: 'SUSPENDED' as const,
+    readOnlySince: new Date('2026-11-01T00:00:00Z'),
+  };
+
+  it('le maintien d’un contrat suspendu l’emporte sur un ancien contrat résilié, quel que soit l’ordre', () => {
+    for (const order of [
+      [terminated, suspended],
+      [suspended, terminated],
+    ]) {
+      expect(bestSchoolSiteAvailability(order, 30, now)).toEqual({
+        online: true,
+        canPublish: false,
+        readOnlyUntil: new Date('2026-12-01T00:00:00Z'),
+      });
+    }
+  });
+
+  it('aucun contrat : hors ligne ; résilié seul : motif de résiliation', () => {
+    expect(bestSchoolSiteAvailability([], 30, now)).toMatchObject({ reason: 'NO_CONTRACT' });
+    expect(bestSchoolSiteAvailability([terminated], 30, now)).toMatchObject({
+      reason: 'TERMINATED',
+    });
   });
 });

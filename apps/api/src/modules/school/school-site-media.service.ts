@@ -85,8 +85,9 @@ export class SchoolSiteMediaService {
       withdrawnAt: m.withdrawnAt?.toISOString() ?? null,
       withdrawalReason: m.withdrawalReason,
       createdAt: m.createdAt.toISOString(),
-      url: url(m.storageKey),
-      thumbUrl: url(m.thumbKey),
+      url: m.withdrawnAt ? null : url(m.storageKey),
+      thumbUrl: m.withdrawnAt ? null : url(m.thumbKey),
+      filesPending: !!m.withdrawnAt && !!(m.storageKey || m.thumbKey),
     };
   }
 
@@ -129,6 +130,13 @@ export class SchoolSiteMediaService {
         message: 'Référence trop longue.',
       });
     }
+    if ((dto.kind === 'GALLERY' || dto.kind === 'NEWS') && !dto.alt?.trim() && !dto.altAr?.trim()) {
+      throw new BadRequestException({
+        code: 'MEDIA_ALT_REQUIRED',
+        message:
+          'Décrivez la photo (en français ou en arabe) pour les personnes qui ne la voient pas.',
+      });
+    }
     const processed = await processSchoolSiteImage(file.buffer);
     if ('code' in processed) {
       if (processed.code === 'MEDIA_TOO_LARGE') throw new PayloadTooLargeException(processed);
@@ -136,10 +144,14 @@ export class SchoolSiteMediaService {
     }
     const storageKey = `${randomUUID()}.webp`;
     const thumbKey = `${randomUUID()}.webp`;
-    await this.storage.put(storageKey, processed.full.body, 'image/webp');
-    await this.storage.put(thumbKey, processed.thumb.body, 'image/webp');
+    const stored: string[] = [];
+    let media: Prisma.SchoolSiteMediaGetPayload<{ select: typeof MEDIA_VIEW }>;
     try {
-      const media = await this.db.$transaction(async (tx) => {
+      await this.storage.put(storageKey, processed.full.body, 'image/webp');
+      stored.push(storageKey);
+      await this.storage.put(thumbKey, processed.thumb.body, 'image/webp');
+      stored.push(thumbKey);
+      media = await this.db.$transaction(async (tx) => {
         await tx.$executeRaw`SELECT 1 FROM "SchoolSite" WHERE "id" = ${site.id}::uuid FOR UPDATE`;
         const count = await tx.schoolSiteMedia.count({
           where: { siteId: site.id, withdrawnAt: null },
@@ -176,6 +188,13 @@ export class SchoolSiteMediaService {
           select: MEDIA_VIEW,
         });
       });
+    } catch (error) {
+      // Échec avant l'enregistrement (stockage, plafond) : aucun fichier orphelin.
+      await this.deleteObjects(stored);
+      throw error;
+    }
+    // Média enregistré : ses fichiers ne sont plus jamais supprimés par la compensation.
+    {
       await this.school.log(ctx, 'school.site_media_uploaded', 'SchoolSiteMedia', media.id, {
         kind: dto.kind,
         containsMinors: dto.containsMinors ? 'oui' : 'non',
@@ -192,10 +211,6 @@ export class SchoolSiteMediaService {
         );
       }
       return this.view(site.id, media);
-    } catch (error) {
-      // Refus après stockage (plafond) : aucun fichier orphelin.
-      await this.deleteObjects([storageKey, thumbKey]);
-      throw error;
     }
   }
 
@@ -218,19 +233,25 @@ export class SchoolSiteMediaService {
 
   /**
    * Retrait immédiat d'une image, publiée ou non : retirée du brouillon, de la version publiée (sans
-   * attendre une nouvelle publication) et des actualités ; fichiers supprimés du stockage ; pages
-   * publiques régénérées. La ligne reste, sans fichier, pour la traçabilité (qui, quand, pourquoi).
+   * attendre une nouvelle publication) et des actualités ; fichiers supprimés du stockage (suppression
+   * rejouable jusqu'à confirmation) ; les pages publiques, lues sans cache, ne la montrent plus. La ligne reste, sans fichier, pour la traçabilité (qui, quand, pourquoi).
    */
   async withdraw(ctx: SchoolContext, siteId: string, mediaId: string, reason: string) {
     const site = await this.sites.findSite(ctx, siteId);
-    const keys = await this.db.$transaction(async (tx) => {
+    const result = await this.db.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT 1 FROM "SchoolSite" WHERE "id" = ${site.id}::uuid FOR UPDATE`;
       const media = await tx.schoolSiteMedia.findFirst({
         where: { id: mediaId, organizationId: site.organizationId, siteId: site.id },
         select: { id: true, storageKey: true, thumbKey: true, withdrawnAt: true },
       });
       if (!media) throw new NotFoundException(NOT_FOUND);
-      if (media.withdrawnAt) return [];
+      // Déjà retiré : seule la suppression des fichiers restants est rejouée.
+      if (media.withdrawnAt) {
+        return {
+          first: false,
+          keys: [media.storageKey, media.thumbKey].filter((k): k is string => !!k),
+        };
+      }
       const fresh = await this.sites.findSite(ctx, siteId, tx);
       const draft = fresh.draft as unknown as SchoolSiteContent;
       const cleanedDraft: SchoolSiteContent = {
@@ -270,8 +291,6 @@ export class SchoolSiteMediaService {
       await tx.schoolSiteMedia.update({
         where: { id: media.id },
         data: {
-          storageKey: null,
-          thumbKey: null,
           isPublished: false,
           withdrawnAt: new Date(),
           withdrawnByUserId: ctx.userId,
@@ -279,17 +298,35 @@ export class SchoolSiteMediaService {
         },
       });
       await this.sites.syncPublishedMedia(tx, row);
-      return [media.storageKey, media.thumbKey].filter((k): k is string => !!k);
+      return {
+        first: true,
+        keys: [media.storageKey, media.thumbKey].filter((k): k is string => !!k),
+      };
     });
-    if (keys.length === 0) return { withdrawn: true };
-    // Fichiers supprimés après la validation : l'image n'est plus servie (lien public → 404).
-    await this.deleteObjects(keys);
-    await this.school.log(ctx, 'school.site_media_withdrawn', 'SchoolSiteMedia', mediaId, {
-      reason: reason.trim().slice(0, 300) || null,
+    if (result.first) {
+      await this.school.log(ctx, 'school.site_media_withdrawn', 'SchoolSiteMedia', mediaId, {
+        reason: reason.trim().slice(0, 300) || null,
+      });
+    }
+    // L'image n'est déjà plus servie (média retiré : lien public → 404). Chaque fichier supprimé du
+    // stockage est effacé de la ligne ; un échec laisse sa clé, et un nouveau retrait le rejoue.
+    const deleted = await this.deleteObjects(result.keys);
+    await this.clearDeletedKeys(mediaId, deleted);
+    const filesPending = deleted.length < result.keys.length;
+    return { withdrawn: true, filesPending };
+  }
+
+  /** Efface de la ligne les clés dont le fichier a été supprimé du stockage. */
+  private async clearDeletedKeys(mediaId: string, deleted: string[]) {
+    if (deleted.length === 0) return;
+    await this.db.schoolSiteMedia.updateMany({
+      where: { id: mediaId, storageKey: { in: deleted } },
+      data: { storageKey: null },
     });
-    // Purge du cache des pages publiques (ISR Next.js) : la page ne cite plus l'image.
-    await this.sites.revalidate([site.slug]);
-    return { withdrawn: true };
+    await this.db.schoolSiteMedia.updateMany({
+      where: { id: mediaId, thumbKey: { in: deleted } },
+      data: { thumbKey: null },
+    });
   }
 
   /** Image publique : publiée, non retirée, d'un site en ligne et disponible ; null sinon. */
@@ -299,13 +336,17 @@ export class SchoolSiteMediaService {
     return body ? { body } : null;
   }
 
-  private async deleteObjects(keys: string[]) {
+  /** Supprime des fichiers du stockage ; renvoie ceux dont la suppression est confirmée. */
+  private async deleteObjects(keys: string[]): Promise<string[]> {
+    const deleted: string[] = [];
     for (const key of keys) {
       try {
         await this.storage.delete(key);
+        deleted.push(key);
       } catch (e) {
         this.logger.warn(`Suppression d'un fichier de site impossible : ${(e as Error).message}`);
       }
     }
+    return deleted;
   }
 }
