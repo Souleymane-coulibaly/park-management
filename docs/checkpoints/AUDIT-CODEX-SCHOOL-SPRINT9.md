@@ -58,3 +58,26 @@ l'étape E2E.
 4. Le verrou du plafond documentaire est-il correct (clé, transaction, cohérence avec l'archivage) ?
 5. Les nouvelles règles d'effectif et de barème du copilote restent-elles cohérentes avec le reporting
    du Sprint 8 et les exports ?
+
+## 5. Passes Codex
+
+Rapports : `C:\Users\couli\ocall-audits\audit-codex-school-9-passe1..3.md`.
+
+| Passe | Commit    | Verdict | Constats                                                                                                                                                                                                                       |
+| ----- | --------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1     | `b525408` | NO GO   | P2 : garde School acceptant une URL locale sans marqueur (tunnel, base persistante) ; E2E dépendants de la date (moyenne de janvier, appel du jour en août). P3 : comptes parents non nettoyés, et trois réserves ci-dessous. |
+| 2     | `bcb8fbe` | NO GO   | P2 : teardown pouvant purger une base refusée et serveurs démarrés avant le contrôle ; planning faux la première semaine de septembre ; compte parent supprimable malgré un accès portail conservé.                            |
+| 3     | `3671c95` | **GO**  | Aucune anomalie P0 à P3.                                                                                                                                                                                                       |
+
+Corrections : `bcb8fbe` (garde stricte, année septembre–août, moyenne selon la période, comptes parents),
+`3671c95` (contrôle synchrone avant les serveurs et imposé par les fonctions destructives, créneau du
+jour, filtre des comptes parents).
+
+### Réserves P3 conservées (non bloquantes)
+
+- Nettoyage E2E sélectionné par le suffixe du nom d'organisation (sélecteur antérieur, étendu à School) ;
+  un identifiant de lancement serait plus sûr.
+- Période sans aucune note : l'IA dit « aucun élève noté », mais le rapport pédagogique et ses exports
+  indiquent encore « Effectif insuffisant : Oui » ; à harmoniser (aucune moyenne fausse).
+- Certaines assertions E2E d'export (PDF, XLSX) et de finances vérifient le format et les libellés, pas
+  les valeurs calculées.
