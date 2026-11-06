@@ -16,7 +16,7 @@ describe('conflits de planning : détails limités au périmètre de la requête
     { id: 'class-b', name: 'CM1 B', nameAr: null, year: { schoolId: 'school-b' } },
   ];
   const tx = { schoolClass: { findMany: jest.fn().mockResolvedValue(classes) } };
-  const conflicts: PlanningConflict[] = [
+  const conflicts: (PlanningConflict & { requested?: { start: number; end: number } })[] = [
     {
       code: 'SLOT_TEACHER_CONFLICT',
       slotId: 'slot-a',
@@ -32,12 +32,14 @@ describe('conflits de planning : détails limités au périmètre de la requête
       weekday: 1,
       start: 480,
       end: 540,
+      // Plage demandée (09:30–09:45), seule restituée pour un établissement hors périmètre.
+      requested: { start: 570, end: 585 },
     },
   ];
   const named = (ctx: Partial<SchoolContext>) =>
     (
       service as unknown as {
-        withClassNames(db: unknown, ctx: unknown, c: PlanningConflict[]): Promise<unknown[]>;
+        withClassNames(db: unknown, ctx: unknown, c: typeof conflicts): Promise<unknown[]>;
       }
     ).withClassNames(tx, { organizationId: 'org', ...ctx }, conflicts);
 
@@ -52,7 +54,8 @@ describe('conflits de planning : détails limités au périmètre de la requête
         code: 'SLOT_TEACHER_CONFLICT',
         slotId: null,
         class: null,
-        start: '08:00',
+        start: '09:30',
+        end: '09:45',
       }),
     ]);
     // Classes recherchées dans l'organisation de la requête seulement.
@@ -71,6 +74,8 @@ describe('conflits de planning : détails limités au périmètre de la requête
       expect.objectContaining({
         slotId: 'slot-b',
         class: expect.objectContaining({ id: 'class-b' }),
+        start: '08:00',
+        end: '09:00',
       }),
     ]);
   });

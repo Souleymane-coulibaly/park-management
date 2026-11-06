@@ -675,7 +675,11 @@ export class SchoolReportingService {
       actorUserId: true,
       createdAt: true,
     } as const;
-    const scoped = ctx.schoolIds ? await this.scopedAuditPage(ctx, q, page) : null;
+    // Périmètre réellement partiel seulement : couvrir explicitement TOUS les établissements du client
+    // équivaut à un périmètre complet (entrées non rattachables visibles, aucune résolution).
+    const scoped = (await this.coversAllSchools(ctx))
+      ? null
+      : await this.scopedAuditPage(ctx, q, page);
     const [total, rows] = scoped
       ? [
           scoped.total,
@@ -757,6 +761,17 @@ export class SchoolReportingService {
         ORDER BY "createdAt" DESC, id DESC OFFSET ${(page - 1) * 50} LIMIT 50`,
     ]);
     return { total: Number(count[0]?.n ?? 0), ids: rows.map((r) => r.id) };
+  }
+
+  /** Le périmètre de la requête couvre-t-il tous les établissements de l'organisation ? */
+  private async coversAllSchools(ctx: SchoolContext): Promise<boolean> {
+    if (!ctx.schoolIds) return true;
+    const scope = new Set(ctx.schoolIds);
+    const schools = await this.db.school.findMany({
+      where: { organizationId: ctx.organizationId },
+      select: { id: true },
+    });
+    return schools.every((s) => scope.has(s.id));
   }
 
   /**

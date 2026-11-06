@@ -285,6 +285,10 @@ suite('Ocall School — contrats multiples (intégration)', () => {
         expect.arrayContaining([schoolA, schoolB, schoolC]),
       );
       expect(page.items.some((i) => i.targetType === 'User')).toBe(true);
+      // Couverture EXPLICITE de tous les établissements du client : équivaut à un périmètre complet.
+      await scope(contract1, { coveredSchoolIds: [schoolA, schoolB, schoolC] });
+      page = await entries();
+      expect(page.items.some((i) => i.targetType === 'User')).toBe(true);
       await scope(contract1, { coveredSchoolIds: [schoolA] });
       await scope(contract2, { coveredSchoolIds: [schoolB] });
     });

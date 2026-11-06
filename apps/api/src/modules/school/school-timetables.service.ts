@@ -132,6 +132,9 @@ interface WeekFilter {
  * salle, indisponibilité, affectation), sous le verrou du planning de l'organisation. Les fermetures du
  * calendrier suspendent les cours ; un cours publié s'annule à une date précise.
  */
+/** Conflit détecté, avec la plage demandée (seule restituée pour un établissement hors périmètre). */
+type RestitutedConflict = PlanningConflict & { requested?: { start: number; end: number } };
+
 @Injectable()
 export class SchoolTimetablesService {
   constructor(
@@ -726,6 +729,7 @@ export class SchoolTimetablesService {
             weekday: dto.weekday,
             start: l.startMinute,
             end: l.endMinute,
+            requested: { start, end },
           })),
         );
         throw new ConflictException({
@@ -1221,7 +1225,7 @@ export class SchoolTimetablesService {
         }))
       : [];
     const seen = new Set<string>();
-    const result: PlanningConflict[] = [];
+    const result: RestitutedConflict[] = [];
     for (const candidate of candidates) {
       for (const c of slotConflicts(candidate, existing, unavailable)) {
         // Une paire de créneaux de la même version n'est signalée qu'une fois.
@@ -1231,7 +1235,7 @@ export class SchoolTimetablesService {
         ].join('|');
         if (seen.has(key)) continue;
         seen.add(key);
-        result.push(c);
+        result.push({ ...c, requested: { start: candidate.start, end: candidate.end } });
       }
     }
     return result;
@@ -1506,10 +1510,10 @@ export class SchoolTimetablesService {
   /**
    * Noms des classes en conflit, lus dans la transaction de l'appelant. La détection reste globale (un
    * enseignant ne peut pas être réservé deux fois), mais un conflit avec une classe d'un établissement
-   * hors du périmètre de la requête ne révèle ni la classe ni le créneau : seul le motif et la plage
-   * demandée sont restitués.
+   * hors du périmètre de la requête ne révèle ni la classe, ni le créneau, ni ses horaires : seuls le
+   * motif, le jour et la plage DEMANDÉE sont restitués.
    */
-  private async withClassNames(db: Tx, ctx: SchoolContext, conflicts: PlanningConflict[]) {
+  private async withClassNames(db: Tx, ctx: SchoolContext, conflicts: RestitutedConflict[]) {
     const ids = [...new Set(conflicts.map((c) => c.classId).filter((x): x is string => !!x))];
     const classes = ids.length
       ? await db.schoolClass.findMany({
@@ -1530,8 +1534,12 @@ export class SchoolTimetablesService {
         slotId: hidden ? null : (c.slotId ?? null),
         class: cls ?? null,
         weekday: c.weekday,
-        start: minutesToTime(c.start),
-        end: minutesToTime(c.end),
+        start: hidden
+          ? c.requested
+            ? minutesToTime(c.requested.start)
+            : null
+          : minutesToTime(c.start),
+        end: hidden ? (c.requested ? minutesToTime(c.requested.end) : null) : minutesToTime(c.end),
       };
     });
   }
