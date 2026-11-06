@@ -54,6 +54,8 @@ export interface RosterStudentView {
 
 export interface EvaluationView {
   id: string;
+  /** Établissement de l'évaluation (droits de la saisie selon son contrat). */
+  schoolId?: string;
   classId: string;
   periodId: string;
   groupId: string | null;

@@ -36,6 +36,7 @@ import type {
 import { SchoolImportsService } from './school-imports.service';
 import { Prisma } from '@ocall/database';
 import { PrismaService } from '../../prisma/prisma.service';
+import { AUDIT_TARGET_SCOPES } from './school-audit-scope';
 import { SchoolStudentsService } from './school-students.service';
 import { SchoolService } from './school.service';
 
@@ -723,30 +724,32 @@ export class SchoolReportingService {
 
   /**
    * Journal limité aux établissements de la requête (contrats ∩ affectation) : chaque entrée est rattachée
-   * à l'établissement de sa cible ; une entrée qui ne peut pas l'être (membre, utilisateur, cible supprimée)
-   * n'apparaît que pour un périmètre complet. Les identifiants autorisés passent en UN tableau SQL (aucune
-   * limite de paramètres) ; la base School est distincte, d'où la résolution préalable des cibles.
+   * à l'établissement de sa cible (school-audit-scope.ts) ; une entrée qui ne peut pas l'être (membre,
+   * utilisateur, cible supprimée) n'apparaît que pour un périmètre complet. La base School étant distincte,
+   * seules les cibles PRÉSENTES dans le journal filtré (période, action) sont résolues, par lots ; les
+   * identifiants retenus passent en un tableau SQL par type (aucune limite de paramètres).
    */
   private async scopedAuditPage(ctx: SchoolContext, q: AuditQueryDto, page: number) {
-    const allowed = await this.auditTargetsIn(ctx.organizationId, ctx.schoolIds ?? []);
-    const byType = [...allowed].filter(([, ids]) => ids.length > 0);
-    if (byType.length === 0) return { total: 0, ids: [] as string[] };
+    const base = [
+      Prisma.sql`"organizationId" = ${ctx.organizationId}::uuid`,
+      Prisma.sql`starts_with("action", ${q.action ?? 'school.'})`,
+    ];
+    if (q.from) base.push(Prisma.sql`"createdAt" >= ${toDate(q.from)}`);
+    if (q.to) base.push(Prisma.sql`"createdAt" < ${new Date(toDate(q.to).getTime() + 86_400_000)}`);
+    const types = Object.keys(AUDIT_TARGET_SCOPES);
+    const candidates = await this.core.$queryRaw<{ targetType: string; targetId: string }[]>`
+      SELECT DISTINCT "targetType", "targetId" FROM "AuditLog"
+      WHERE ${Prisma.join(base, ' AND ')}
+        AND "targetType" = ANY(${types}::text[]) AND "targetId" IS NOT NULL`;
+    const allowed = await this.auditTargetsIn(ctx.organizationId, ctx.schoolIds ?? [], candidates);
+    if (allowed.size === 0) return { total: 0, ids: [] as string[] };
     const targets = Prisma.join(
-      byType.map(
+      [...allowed].map(
         ([type, ids]) => Prisma.sql`("targetType" = ${type} AND "targetId" = ANY(${ids}::text[]))`,
       ),
       ' OR ',
     );
-    const conditions = [
-      Prisma.sql`"organizationId" = ${ctx.organizationId}::uuid`,
-      Prisma.sql`starts_with("action", ${q.action ?? 'school.'})`,
-      Prisma.sql`(${targets})`,
-    ];
-    if (q.from) conditions.push(Prisma.sql`"createdAt" >= ${toDate(q.from)}`);
-    if (q.to) {
-      conditions.push(Prisma.sql`"createdAt" < ${new Date(toDate(q.to).getTime() + 86_400_000)}`);
-    }
-    const where = Prisma.join(conditions, ' AND ');
+    const where = Prisma.join([...base, Prisma.sql`(${targets})`], ' AND ');
     const [count, rows] = await Promise.all([
       this.core.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM "AuditLog" WHERE ${where}`,
       this.core.$queryRaw<{ id: string }[]>`
@@ -756,65 +759,40 @@ export class SchoolReportingService {
     return { total: Number(count[0]?.n ?? 0), ids: rows.map((r) => r.id) };
   }
 
-  /** Cibles d'audit rattachées aux établissements donnés, par type (base School, organisation vérifiée). */
-  private async auditTargetsIn(organizationId: string, schoolIds: readonly string[]) {
-    const ids = (rows: { id: string }[]) => rows.map((r) => r.id);
-    const inSchools = { organizationId, schoolId: { in: [...schoolIds] } };
-    const select = { id: true } as const;
-    const db = this.db;
-    const direct = {
-      Cycle: db.cycle,
-      GradingPolicyVersion: db.gradingPolicyVersion,
-      PedagogicalTrack: db.pedagogicalTrack,
-      SchoolAiDocument: db.schoolAiDocument,
-      SchoolEnrollment: db.schoolEnrollment,
-      SchoolEvaluation: db.schoolEvaluation,
-      SchoolFee: db.schoolFee,
-      SchoolGuardian: db.schoolGuardian,
-      SchoolImportJob: db.schoolImportJob,
-      SchoolPayment: db.schoolPayment,
-      SchoolRoom: db.schoolRoom,
-      SchoolSite: db.schoolSite,
-      SchoolStudent: db.schoolStudent,
-      SchoolTimetable: db.schoolTimetable,
-      SchoolYear: db.schoolYear,
-      Subject: db.subject,
-    } as const;
+  /**
+   * Parmi les cibles candidates, celles qui appartiennent aux établissements donnés (organisation
+   * vérifiée), par type. Un identifiant qui n'est pas un UUID ne désigne aucune ligne School.
+   */
+  private async auditTargetsIn(
+    organizationId: string,
+    schoolIds: readonly string[],
+    candidates: readonly { targetType: string; targetId: string }[],
+  ) {
+    const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const byType = new Map<string, string[]>();
+    for (const c of candidates) {
+      if (!UUID.test(c.targetId)) continue;
+      const list = byType.get(c.targetType);
+      if (list) list.push(c.targetId);
+      else byType.set(c.targetType, [c.targetId]);
+    }
+    const filter = { organizationId, schoolId: { in: [...schoolIds] } };
     const result = new Map<string, string[]>();
-    await Promise.all([
-      ...Object.entries(direct).map(async ([type, model]) => {
-        const rows = await (
-          model as unknown as { findMany(a: object): Promise<{ id: string }[]> }
-        ).findMany({ where: inSchools, select });
-        result.set(type, ids(rows));
-      }),
-      db.school
-        .findMany({ where: { organizationId, id: { in: [...schoolIds] } }, select })
-        .then((r) => result.set('School', ids(r))),
-      db.level
-        .findMany({ where: { organizationId, cycle: inSchools }, select })
-        .then((r) => result.set('Level', ids(r))),
-      db.academicPeriod
-        .findMany({ where: { organizationId, year: inSchools }, select })
-        .then((r) => result.set('AcademicPeriod', ids(r))),
-      db.schoolClass
-        .findMany({ where: { organizationId, year: inSchools }, select })
-        .then((r) => result.set('SchoolClass', ids(r))),
-      db.schoolClassGroup
-        .findMany({ where: { organizationId, class: { year: inSchools } }, select })
-        .then((r) => result.set('SchoolClassGroup', ids(r))),
-      db.schoolStudentDocument
-        .findMany({ where: { organizationId, student: inSchools }, select })
-        .then((r) => result.set('SchoolStudentDocument', ids(r))),
-      ...(['SchoolSiteLink', 'SchoolSiteMedia', 'SchoolSiteNews'] as const).map(async (type) => {
-        const model = {
-          SchoolSiteLink: db.schoolSiteLink,
-          SchoolSiteMedia: db.schoolSiteMedia,
-          SchoolSiteNews: db.schoolSiteNews,
-        }[type] as unknown as { findMany(a: object): Promise<{ id: string }[]> };
-        result.set(type, ids(await model.findMany({ where: { site: inSchools }, select })));
-      }),
-    ]);
+    for (const [type, ids] of byType) {
+      const scope = AUDIT_TARGET_SCOPES[type]!;
+      const delegate = (this.db as unknown as Record<string, unknown>)[scope.model] as {
+        findMany(a: object): Promise<{ id: string }[]>;
+      };
+      const kept: string[] = [];
+      for (let i = 0; i < ids.length; i += 5_000) {
+        const rows = await delegate.findMany({
+          where: { AND: [{ id: { in: ids.slice(i, i + 5_000) } }, scope.where(filter)] },
+          select: { id: true },
+        });
+        kept.push(...rows.map((r) => r.id));
+      }
+      if (kept.length > 0) result.set(type, kept);
+    }
     return result;
   }
 

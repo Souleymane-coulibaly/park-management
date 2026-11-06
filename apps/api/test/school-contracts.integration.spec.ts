@@ -121,6 +121,7 @@ suite('Ocall School — contrats multiples (intégration)', () => {
   afterAll(async () => {
     const where = { organizationId: { in: organizations } };
     await db.schoolReportView.deleteMany({ where });
+    await db.schoolAiConversation.deleteMany({ where });
     await db.schoolSiteNews.deleteMany({ where });
     await db.schoolSite.deleteMany({ where });
     await db.schoolMemberAssignment.deleteMany({ where });
@@ -285,6 +286,35 @@ suite('Ocall School — contrats multiples (intégration)', () => {
       );
       expect(page.items.some((i) => i.targetType === 'User')).toBe(true);
       await scope(contract1, { coveredSchoolIds: [schoolA] });
+      await scope(contract2, { coveredSchoolIds: [schoolB] });
+    });
+  });
+
+  describe('corrections de l’audit Codex (passe 2)', () => {
+    it('conversation IA de B : suppression refusée en lecture seule, introuvable hors couverture', async () => {
+      await scope(contract2, { coveredSchoolIds: [schoolB] });
+      const user = await prisma.user.findFirstOrThrow({
+        where: { email: email('owner-ctr-multi') },
+        select: { id: true },
+      });
+      const conversation = await db.schoolAiConversation.create({
+        data: {
+          organizationId,
+          schoolId: schoolB,
+          ownerUserId: user.id,
+          title: 'Bilan B',
+          expiresAt: new Date(Date.now() + 86_400_000),
+        },
+      });
+      const remove = () =>
+        owner.delete(
+          `/api/v1/school/ai/copilot/conversations/${conversation.id}?schoolId=${schoolB}`,
+        );
+      const refused = await remove().expect(403);
+      expect(refused.body.code).toBe('CONTRACT_READ_ONLY');
+      await scope(contract2, { coveredSchoolIds: [schoolC] });
+      await remove().expect(404);
+      expect(await db.schoolAiConversation.count({ where: { id: conversation.id } })).toBe(1);
       await scope(contract2, { coveredSchoolIds: [schoolB] });
     });
   });

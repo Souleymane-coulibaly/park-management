@@ -403,6 +403,7 @@ export class SchoolExamsService {
         durationMinutes: true,
         roomId: true,
         supervisorMemberId: true,
+        schoolId: true,
         evaluation: { select: { classId: true, groupId: true, title: true } },
       },
     });
@@ -424,7 +425,8 @@ export class SchoolExamsService {
           details: [
             {
               code,
-              examId: other.id,
+              // Examen d'un établissement hors du périmètre de la requête : non identifié.
+              examId: !ctx.schoolIds || ctx.schoolIds.includes(other.schoolId) ? other.id : null,
               start: minutesToTime(other.startMinute),
               end: minutesToTime(other.startMinute + other.durationMinutes),
             },

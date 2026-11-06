@@ -16,7 +16,11 @@ import {
   type SchoolSex,
 } from '@ocall/shared';
 import { SchoolLanguage, toApiError, useSchoolText } from '@/components/school/school-language';
-import { SchoolPage, type SchoolPageApi } from '@/components/school/school-page';
+import {
+  SchoolPage,
+  type SchoolPageApi,
+  SchoolReadOnlyNotice,
+} from '@/components/school/school-page';
 import {
   Fact,
   type NamedView,
@@ -72,7 +76,12 @@ function Sheet({ id, page }: { id: string; page: SchoolPageApi }) {
     page.context.schools.find((s) => s.id === student.data.schoolId)?.defaultLocale ?? 'FR';
   return (
     <SchoolLanguage locale={locale} className="space-y-4">
-      <SheetContent student={student.data} page={page} reload={student.reload} />
+      <SchoolReadOnlyNotice page={page.forSchool(student.data.schoolId)} />
+      <SheetContent
+        student={student.data}
+        page={page.forSchool(student.data.schoolId)}
+        reload={student.reload}
+      />
     </SchoolLanguage>
   );
 }
