@@ -48,3 +48,35 @@ technique : `docs/SITES-VITRINES-SCHOOL.md`.
 5. Contrat : calcul du maintien (date de passage en lecture seule), refus de publication, exemptions
    `@AllowInReadOnly` limitées aux actions protectrices, résiliation et export.
 6. Non-régression Park : middleware, `isAppHost`, plan du site.
+
+## 4. Passes Codex
+
+Rapports : `C:\Users\couli\ocall-audits\audit-codex-school-10-passe1..11.md`.
+
+| Passe | Commit    | Verdict | Constats principaux                                                                                                                                                                                                                                                                                                                  |
+| ----- | --------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | `50f3f10` | NO GO   | P1 actualité publiée modifiable par le secrétariat ; P2 caches publics, périmètre du contrat, synchronisation concurrente des médias, compensation d'envoi, suppression non rejouable, expiration tardive, ordre des contrats, API publiques de l'autre produit, article au-delà des 50 récents.                                  |
+| 2     | `d1f4669` | NO GO   | P1 actualité devenue publiée pendant une modification ; P2 interblocage, image retirée réintroduite par une publication, orphelins à l'envoi, casse dans le middleware.                                                                                                                                                            |
+| 3     | `fbf230c` | NO GO   | P2 envoi long, plafond contournable, actualité écrasée, brouillon réintroduisant une image retirée.                                                                                                                                                                                                                                 |
+| 4     | `819ab70` | NO GO   | P2 clés d'un envoi abandonné effacées trop tôt, lien et réglages écrasés.                                                                                                                                                                                                                                                         |
+| 5     | `731e172` | NO GO   | P2 interface renvoyant tous les champs, limite de 24 h insuffisante.                                                                                                                                                                                                                                                              |
+| 6     | `8953522` | NO GO   | P2 différences calculées contre les données rechargées, points forts perdus.                                                                                                                                                                                                                                                      |
+| 7     | `00905b5` | NO GO   | P2 limite par IP partagée entre visiteurs (lectures sans cache), saisie des points forts.                                                                                                                                                                                                                                          |
+| 8     | `d69bae6` | NO GO   | P2 IP de visiteur fournie par l'appelant signée par le web.                                                                                                                                                                                                                                                                       |
+| 9     | `bdea304` | NO GO   | P2 adresses « sitemap » et « resolve » en collision avec les routes techniques.                                                                                                                                                                                                                                                   |
+| 10    | `eb1c69b` | NO GO   | P2 brouillon complet écrasé depuis un navigateur périmé.                                                                                                                                                                                                                                                                          |
+| 11    | `ddf0215` | **GO**  | Aucune anomalie P0 à P2.                                                                                                                                                                                                                                                                                                          |
+
+Vérification finale sur `ddf0215` (PostgreSQL jetable) : intégration complète 27/27 suites, 623/623 ;
+E2E 64/64 (deux exécutions, la première interrompue par le plantage natif de Node 24 sous Windows).
+
+### Réserves conservées
+
+- **P3** — reprise après un conflit de brouillon : la sauvegarde est refusée (409) mais le formulaire
+  garde sa révision ; une reprise guidée (rechargement avec conservation des saisies) reste à faire.
+- **Hors Sprint 10, décision du client** — le garde School (Sprint 1, tous modules) résout les droits
+  d'administration sur un seul contrat : avec deux contrats couvrant des établissements différents,
+  l'administration d'un établissement couvert peut être refusée. La disponibilité publique des sites, elle,
+  est calculée par établissement.
+- `WEB_TRUSTED_PROXY_HOPS` (web) et `TRUST_PROXY_HOPS` (API) à vérifier au premier déploiement.
+- DNS/TLS de `ocall.school` non configurés (domaine inexistant au 06/11/2026).
