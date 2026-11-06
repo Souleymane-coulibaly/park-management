@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { parse } from 'dotenv';
 import { PrismaClient, assertTestDatabaseMarker, resolveTestDatabase } from '@ocall/database';
+import { assertSchoolTestDatabase, resolveSchoolTestDatabase } from './school-database';
 
 /**
  * Avant tout test E2E : la base de test distante doit porter le marqueur d'environnement « test »
@@ -15,4 +16,6 @@ export default async function globalSetup(): Promise<void> {
   } finally {
     await prisma.$disconnect();
   }
+  const schoolUrl = resolveSchoolTestDatabase({ ...apiEnv, ...process.env }, testDb.databaseUrl);
+  if (schoolUrl) await assertSchoolTestDatabase(schoolUrl);
 }

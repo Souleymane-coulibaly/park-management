@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { parse } from 'dotenv';
 import { resolveTestDatabase } from '@ocall/database';
+import { resolveSchoolTestDatabase } from './e2e/school-database';
 
 // Base de TEST obligatoire (branche Neon `test` ou base éphémère de CI) : la configuration échoue
 // plutôt que de lancer les tests sur la base de développement. apps/api/.env est lu sans être injecté
@@ -12,6 +13,17 @@ const testDb = resolveTestDatabase({ ...apiEnv, ...process.env });
 // Régénération des sites vitrines (API → frontend) : secret aléatoire propre à chaque exécution,
 // jamais écrit dans le dépôt. Sans elle, une page dépubliée reste servie depuis le cache de Next.js.
 const revalidateSecret = randomBytes(24).toString('hex');
+// Ocall School : activé seulement avec une base School de test dédiée (TEST_SCHOOL_DATABASE_URL),
+// distincte de la base Suite ; sinon les specs School sont ignorées (hors CI, où elles sont exigées).
+const schoolDb = resolveSchoolTestDatabase({ ...apiEnv, ...process.env }, testDb.databaseUrl);
+const schoolEnv: Record<string, string> = schoolDb
+  ? {
+      SCHOOL_ENABLED: 'true',
+      SCHOOL_DATABASE_URL: schoolDb,
+      // Clé de chiffrement aléatoire, propre à l'exécution : les données fictives ne lui survivent pas.
+      SCHOOL_DATA_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
+    }
+  : { SCHOOL_ENABLED: 'false' };
 
 /**
  * Tests E2E : l'API (port 4000) et le frontend (port 3000) doivent être construits au préalable
@@ -57,6 +69,7 @@ export default defineConfig({
         LOGIN_THROTTLE_LIMIT: '10000',
         SITES_REVALIDATE_URL: 'http://localhost:3000/api/site-revalidate',
         SITES_REVALIDATE_SECRET: revalidateSecret,
+        ...schoolEnv,
       },
       reuseExistingServer: false,
       timeout: 120_000,
