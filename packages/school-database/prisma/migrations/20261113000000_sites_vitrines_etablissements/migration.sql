@@ -44,6 +44,7 @@ CREATE TABLE "SchoolSiteMedia" (
     "withdrawnAt" TIMESTAMP(3),
     "withdrawnByUserId" UUID,
     "withdrawalReason" TEXT,
+    "uploadState" TEXT,
     "createdByUserId" UUID NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
 

@@ -2014,6 +2014,8 @@ model SchoolSiteMedia {
   withdrawnAt             DateTime?
   withdrawnByUserId       String?   @db.Uuid
   withdrawalReason        String?
+  /// État technique d'un envoi : PENDING, FAILED, ABANDONED ; null une fois l'image utilisable.
+  uploadState             String?
   createdByUserId         String    @db.Uuid
   createdAt               DateTime  @default(now())
 

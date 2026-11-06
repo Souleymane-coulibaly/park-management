@@ -29,10 +29,15 @@ export type SchoolSiteMediaKind = (typeof SCHOOL_SITE_MEDIA_KINDS)[number];
 /** Plafond d'images actives par site (logos, couvertures, galerie, actualités). */
 const MAX_MEDIA_PER_SITE = 120;
 const NOT_FOUND = { code: 'SCHOOL_SITE_MEDIA_NOT_FOUND', message: 'Image introuvable.' };
-/** Média en cours d'envoi (fichiers pas encore tous écrits), puis envoi échoué. */
-const UPLOAD_PENDING = 'Envoi en cours';
-const UPLOAD_FAILED = 'Envoi échoué';
-const UPLOAD_ABANDONED = 'Envoi abandonné';
+/**
+ * État technique d'un envoi (colonne `uploadState`, distincte du motif de retrait saisi) : en cours
+ * (fichiers pas encore tous écrits), échoué, abandonné (retiré pendant un envoi trop long).
+ */
+const UPLOAD_PENDING = 'PENDING';
+const UPLOAD_FAILED = 'FAILED';
+const UPLOAD_ABANDONED = 'ABANDONED';
+/** Un envoi n'attend jamais plus longtemps : au-delà, son écrivain a forcément terminé ou disparu. */
+const WRITER_MAX_MS = 24 * 3_600_000;
 
 const MEDIA_VIEW = {
   id: true,
@@ -50,6 +55,7 @@ const MEDIA_VIEW = {
   consentAttestedAt: true,
   withdrawnAt: true,
   withdrawalReason: true,
+  uploadState: true,
   createdAt: true,
 } as const;
 
@@ -88,6 +94,7 @@ export class SchoolSiteMediaService {
       consentAttestedAt: m.consentAttestedAt?.toISOString() ?? null,
       withdrawnAt: m.withdrawnAt?.toISOString() ?? null,
       withdrawalReason: m.withdrawalReason,
+      uploadState: m.uploadState,
       createdAt: m.createdAt.toISOString(),
       url: m.withdrawnAt ? null : url(m.storageKey),
       thumbUrl: m.withdrawnAt ? null : url(m.thumbKey),
@@ -157,7 +164,7 @@ export class SchoolSiteMediaService {
         // Les envois en cours réservent leur place : deux envois simultanés ne dépassent pas le plafond.
         where: {
           siteId: site.id,
-          OR: [{ withdrawnAt: null }, { withdrawalReason: UPLOAD_PENDING }],
+          OR: [{ withdrawnAt: null }, { uploadState: UPLOAD_PENDING }],
         },
       });
       if (count >= MAX_MEDIA_PER_SITE) {
@@ -188,7 +195,7 @@ export class SchoolSiteMediaService {
               }
             : {}),
           withdrawnAt: new Date(),
-          withdrawalReason: UPLOAD_PENDING,
+          uploadState: UPLOAD_PENDING,
           createdByUserId: ctx.userId,
         },
         select: { id: true },
@@ -202,8 +209,8 @@ export class SchoolSiteMediaService {
       await this.db.$transaction(async (tx) => {
         await this.sites.lockSite(tx, site.id);
         await tx.schoolSiteMedia.updateMany({
-          where: { id: pending.id, withdrawalReason: UPLOAD_PENDING },
-          data: { withdrawalReason: UPLOAD_FAILED },
+          where: { id: pending.id, uploadState: UPLOAD_PENDING },
+          data: { uploadState: UPLOAD_FAILED },
         });
       });
       const deleted = await this.deleteObjects([storageKey, thumbKey]);
@@ -215,8 +222,8 @@ export class SchoolSiteMediaService {
     const finalized = await this.db.$transaction(async (tx) => {
       await this.sites.lockSite(tx, site.id);
       const { count } = await tx.schoolSiteMedia.updateMany({
-        where: { id: pending.id, withdrawalReason: UPLOAD_PENDING },
-        data: { withdrawnAt: null, withdrawalReason: null },
+        where: { id: pending.id, uploadState: UPLOAD_PENDING },
+        data: { withdrawnAt: null, uploadState: null },
       });
       return count === 1;
     });
@@ -283,14 +290,17 @@ export class SchoolSiteMediaService {
           storageKey: true,
           thumbKey: true,
           withdrawnAt: true,
-          withdrawalReason: true,
+          uploadState: true,
           createdAt: true,
         },
       });
       if (!media) throw new NotFoundException(NOT_FOUND);
+      const writerMayRun =
+        (media.uploadState === UPLOAD_PENDING || media.uploadState === UPLOAD_ABANDONED) &&
+        Date.now() - media.createdAt.getTime() < WRITER_MAX_MS;
       // Envoi encore en cours (moins de 10 minutes) : ses fichiers ne sont pas supprimés sous lui.
       if (
-        media.withdrawalReason === UPLOAD_PENDING &&
+        media.uploadState === UPLOAD_PENDING &&
         Date.now() - media.createdAt.getTime() < 10 * 60_000
       ) {
         throw new ConflictException({
@@ -298,16 +308,18 @@ export class SchoolSiteMediaService {
           message: 'Envoi de cette photo en cours : réessayez dans quelques minutes.',
         });
       }
-      if (media.withdrawalReason === UPLOAD_PENDING) {
+      if (media.uploadState === UPLOAD_PENDING) {
         await tx.schoolSiteMedia.update({
           where: { id: media.id },
-          data: { withdrawalReason: UPLOAD_ABANDONED },
+          data: { uploadState: UPLOAD_ABANDONED },
         });
       }
-      // Déjà retiré : seule la suppression des fichiers restants est rejouée.
+      // Déjà retiré : seule la suppression des fichiers restants est rejouée. Les clés d'un envoi dont
+      // l'écrivain peut encore déposer un fichier restent enregistrées (il les efface lui-même).
       if (media.withdrawnAt) {
         return {
           first: false,
+          keepKeys: writerMayRun,
           keys: [media.storageKey, media.thumbKey].filter((k): k is string => !!k),
         };
       }
@@ -359,6 +371,7 @@ export class SchoolSiteMediaService {
       await this.sites.syncPublishedMedia(tx, row);
       return {
         first: true,
+        keepKeys: false,
         keys: [media.storageKey, media.thumbKey].filter((k): k is string => !!k),
       };
     });
@@ -370,8 +383,8 @@ export class SchoolSiteMediaService {
     // L'image n'est déjà plus servie (média retiré : lien public → 404). Chaque fichier supprimé du
     // stockage est effacé de la ligne ; un échec laisse sa clé, et un nouveau retrait le rejoue.
     const deleted = await this.deleteObjects(result.keys);
-    await this.clearDeletedKeys(mediaId, deleted);
-    const filesPending = deleted.length < result.keys.length;
+    if (!result.keepKeys) await this.clearDeletedKeys(mediaId, deleted);
+    const filesPending = result.keepKeys || deleted.length < result.keys.length;
     return { withdrawn: true, filesPending };
   }
 

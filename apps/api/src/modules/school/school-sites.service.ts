@@ -244,21 +244,6 @@ export class SchoolSitesService {
     },
   ) {
     const site = await this.findSite(ctx, siteId);
-    const languages = dto.languages ?? site.languages;
-    const defaultLanguage = dto.defaultLanguage ?? site.defaultLanguage;
-    const known = (l: string): l is SchoolSiteLanguage =>
-      (SCHOOL_SITE_LANGUAGES as readonly string[]).includes(l);
-    if (
-      languages.length === 0 ||
-      new Set(languages).size !== languages.length ||
-      !languages.every(known) ||
-      !(languages as string[]).includes(defaultLanguage)
-    ) {
-      throw new BadRequestException({
-        code: 'SITE_LANGUAGES',
-        message: 'Langues invalides : au moins une, la langue par défaut parmi elles.',
-      });
-    }
     if (dto.theme && !(SCHOOL_SITE_THEMES as readonly string[]).includes(dto.theme)) {
       throw new BadRequestException({ code: 'SITE_THEME', message: 'Thème inconnu.' });
     }
@@ -271,15 +256,36 @@ export class SchoolSitesService {
         message: 'Couleur trop claire : le texte blanc doit rester lisible (contraste 4,5:1).',
       });
     }
-    const updated = await this.db.schoolSite.update({
-      where: { id: site.id },
-      data: {
-        languages,
-        defaultLanguage,
-        ...(dto.theme ? { theme: dto.theme } : {}),
-        ...(dto.primaryColor ? { primaryColor: dto.primaryColor.toUpperCase() } : {}),
-      },
-      select: SITE_SELECT,
+    const updated = await this.db.$transaction(async (tx) => {
+      await this.lockSite(tx, site.id);
+      // Réglages relus sous le verrou : une modification concurrente (langues) n'est pas écrasée par
+      // des valeurs lues avant ; seuls les champs demandés sont écrits.
+      const fresh = await this.findSite(ctx, siteId, tx);
+      const languages = dto.languages ?? fresh.languages;
+      const defaultLanguage = dto.defaultLanguage ?? fresh.defaultLanguage;
+      const known = (l: string): l is SchoolSiteLanguage =>
+        (SCHOOL_SITE_LANGUAGES as readonly string[]).includes(l);
+      if (
+        languages.length === 0 ||
+        new Set(languages).size !== languages.length ||
+        !languages.every(known) ||
+        !(languages as string[]).includes(defaultLanguage)
+      ) {
+        throw new BadRequestException({
+          code: 'SITE_LANGUAGES',
+          message: 'Langues invalides : au moins une, la langue par défaut parmi elles.',
+        });
+      }
+      return tx.schoolSite.update({
+        where: { id: site.id },
+        data: {
+          ...(dto.languages ? { languages } : {}),
+          ...(dto.defaultLanguage ? { defaultLanguage } : {}),
+          ...(dto.theme ? { theme: dto.theme } : {}),
+          ...(dto.primaryColor ? { primaryColor: dto.primaryColor.toUpperCase() } : {}),
+        },
+        select: SITE_SELECT,
+      });
     });
     return this.view(updated, await this.availability(site.organizationId, site.schoolId));
   }
@@ -715,20 +721,27 @@ export class SchoolSitesService {
   ) {
     const site = await this.findSite(ctx, siteId);
     const link = await this.findLink(site, linkId);
-    const checked =
-      dto.url !== undefined || dto.label !== undefined
-        ? this.checkedLink(
-            link.kind as SchoolSiteLinkKind,
-            dto.url ?? link.url,
-            dto.label ?? link.label,
-          )
-        : null;
     const updated = await this.db.$transaction(async (tx) => {
       await this.lockSite(tx, site.id);
+      // Lien relu sous le verrou : fusion avec les valeurs à jour, seuls les champs demandés écrits.
+      const current = await tx.schoolSiteLink.findFirst({
+        where: { id: link.id, organizationId: site.organizationId, siteId: site.id },
+        select: { kind: true, label: true, url: true },
+      });
+      if (!current) throw new NotFoundException(NOT_FOUND);
+      const checked =
+        dto.url !== undefined || dto.label !== undefined
+          ? this.checkedLink(
+              current.kind as SchoolSiteLinkKind,
+              dto.url ?? current.url,
+              dto.label ?? current.label,
+            )
+          : null;
       return tx.schoolSiteLink.update({
         where: { id: link.id },
         data: {
-          ...(checked ?? {}),
+          ...(checked && dto.url !== undefined ? { url: checked.url } : {}),
+          ...(checked && dto.label !== undefined ? { label: checked.label } : {}),
           ...(dto.enabled !== undefined ? { enabled: dto.enabled } : {}),
         },
         select: { id: true, kind: true, label: true, url: true, enabled: true, position: true },
