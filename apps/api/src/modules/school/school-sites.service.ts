@@ -38,6 +38,7 @@ import {
   SITE_SLUG_ERRORS,
   SchoolPermission,
   hasSchoolPermission,
+  schoolAccessIn,
 } from '@ocall/shared';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
 import { SuiteContractsService } from '../suite-contracts/suite-contracts.service';
@@ -163,6 +164,20 @@ export class SchoolSitesService {
    */
   async lockSite(tx: Db, siteId: string): Promise<void> {
     await tx.$executeRaw`SELECT 1 FROM "SchoolSite" WHERE "id" = ${siteId}::uuid FOR UPDATE`;
+  }
+
+  /**
+   * Action d'écriture sur une route qui accepte aussi les actions protectrices (lecture seule) :
+   * le contrat de L'ÉTABLISSEMENT du site doit être actif (jamais celui d'un autre établissement).
+   */
+  private assertWritableSchool(ctx: SchoolContext, schoolId: string) {
+    const access = ctx.contract ? schoolAccessIn(ctx.contract, schoolId) : ctx.access;
+    if (access !== 'full') {
+      throw new ForbiddenException({
+        code: 'CONTRACT_READ_ONLY',
+        message: 'Le contrat de cet établissement ne permet plus que la consultation et l’export.',
+      });
+    }
   }
 
   async availability(organizationId: string, schoolId: string): Promise<SchoolSiteAvailability> {
@@ -303,6 +318,7 @@ export class SchoolSitesService {
   /** Activation (adresse réservée, préparation) ou désactivation (le site sort du public). */
   async setEnabled(ctx: SchoolContext, siteId: string, enabled: boolean) {
     const site = await this.findSite(ctx, siteId);
+    if (enabled) this.assertWritableSchool(ctx, site.schoolId);
     const updated = await this.db.$transaction(async (tx) => {
       await this.lockSite(tx, site.id);
       const row = await tx.schoolSite.update({
@@ -1024,6 +1040,7 @@ export class SchoolSitesService {
 
   async setNewsStatus(ctx: SchoolContext, siteId: string, newsId: string, publish: boolean) {
     const site = await this.findSite(ctx, siteId);
+    if (publish) this.assertWritableSchool(ctx, site.schoolId);
     const news = await this.findNews(site, newsId);
     await this.db.$transaction(async (tx) => {
       await this.lockSite(tx, site.id);

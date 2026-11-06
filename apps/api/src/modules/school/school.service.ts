@@ -839,8 +839,11 @@ export class SchoolService {
   private async assertNotReadOnlySchool(ctx: SchoolContext, id: string) {
     if (!ctx.writeNarrowed || !ctx.contract) return;
     if (schoolAccessIn(ctx.contract, id) !== 'read_only') return;
+    // Périmètre de lecture de l'utilisateur (rôle ∩ contrats) vérifié explicitement : un établissement
+    // hors de son affectation reste introuvable (aucune révélation d'existence ni d'état du contrat).
+    if (ctx.readSchoolIds && !ctx.readSchoolIds.includes(id)) return;
     const exists = await this.db.school.count({
-      where: { ...this.schoolWhere({ ...ctx, schoolIds: ctx.readSchoolIds ?? null }), id },
+      where: { organizationId: ctx.organizationId, id },
     });
     if (exists === 0) return;
     throw new ForbiddenException({

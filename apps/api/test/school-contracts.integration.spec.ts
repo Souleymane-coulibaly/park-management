@@ -120,6 +120,11 @@ suite('Ocall School — contrats multiples (intégration)', () => {
 
   afterAll(async () => {
     const where = { organizationId: { in: organizations } };
+    await db.schoolReportView.deleteMany({ where });
+    await db.schoolSiteNews.deleteMany({ where });
+    await db.schoolSite.deleteMany({ where });
+    await db.schoolMemberAssignment.deleteMany({ where });
+    await db.schoolMember.deleteMany({ where });
     await db.schoolYear.deleteMany({ where });
     await db.school.deleteMany({ where });
     await db.schoolGroup.deleteMany({ where });
@@ -177,6 +182,111 @@ suite('Ocall School — contrats multiples (intégration)', () => {
     await status(contract1, 'ACTIVE');
     await createYear(owner, schoolA, '2028-2029').expect(201);
     await createYear(owner, schoolB, '2028-2029').expect(403);
+  });
+
+  describe('corrections de l’audit Codex (passe 1)', () => {
+    let siteB: string;
+    let newsB: string;
+    let viewB: string;
+    let directorA: Agent;
+
+    beforeAll(async () => {
+      // État de départ : A et B sous contrat actif, chacun couvert par le sien.
+      await status(contract2, 'ACTIVE');
+      await scope(contract1, { coveredSchoolIds: [schoolA], limits: {} });
+      await scope(contract2, { coveredSchoolIds: [schoolB], limits: {} });
+      siteB = (
+        await owner
+          .post('/api/v1/school/sites')
+          .send({ schoolId: schoolB, slug: `ecole-b-${RUN}`.toLowerCase() })
+          .expect(201)
+      ).body.id;
+      newsB = (
+        await owner
+          .post(`/api/v1/school/sites/${siteB}/news`)
+          .send({ title: 'Kermesse', body: 'Samedi.', publishedOn: '2026-10-02' })
+          .expect(201)
+      ).body.id;
+      viewB = (
+        await owner
+          .post('/api/v1/school/reports/views')
+          .send({ name: 'Vue B', kind: 'pedagogy', schoolId: schoolB, filters: {} })
+          .expect(201)
+      ).body.id;
+      const res = await owner
+        .post('/api/v1/school/members')
+        .send({
+          firstName: 'Ibrahima',
+          lastName: 'Diop',
+          role: 'SCHOOL_DIRECTOR',
+          schoolIds: [schoolA],
+        })
+        .expect(201);
+      directorA = await connect(res.body.member.loginId, res.body.temporaryPassword);
+      await status(contract2, 'SUSPENDED');
+    }, 120_000);
+
+    it('site de B (contrat suspendu) : ni activation ni publication grâce au contrat actif de A', async () => {
+      const enable = await owner
+        .put(`/api/v1/school/sites/${siteB}/enabled`)
+        .send({ enabled: true })
+        .expect(403);
+      expect(enable.body.code).toBe('CONTRACT_READ_ONLY');
+      const publish = await owner
+        .put(`/api/v1/school/sites/${siteB}/news/${newsB}/status`)
+        .send({ publish: true })
+        .expect(403);
+      expect(publish.body.code).toBe('CONTRACT_READ_ONLY');
+      // Actions protectrices maintenues en lecture seule.
+      await owner.put(`/api/v1/school/sites/${siteB}/enabled`).send({ enabled: false }).expect(200);
+      await owner
+        .put(`/api/v1/school/sites/${siteB}/news/${newsB}/status`)
+        .send({ publish: false })
+        .expect(200);
+    });
+
+    it('vue enregistrée de B : suppression refusée tant que B est en lecture seule', async () => {
+      await owner.delete(`/api/v1/school/reports/views/${viewB}`).expect(404);
+      expect(await db.schoolReportView.count({ where: { id: viewB } })).toBe(1);
+    });
+
+    it('établissement hors affectation : introuvable (404), jamais « lecture seule » (403)', async () => {
+      await createYear(directorA, schoolB, '2030-2031').expect(404);
+      await createYear(directorA, schoolA, '2030-2031').expect(201);
+    });
+
+    it('journal d’audit : entrées des établissements hors contrat et entrées non rattachables masquées', async () => {
+      const entries = async () =>
+        (await owner.get('/api/v1/school/reports/audit').expect(200)).body as {
+          total: number;
+          items: { targetType: string; targetId: string | null }[];
+        };
+      // B en lecture seule : toujours visible dans le journal ; C (hors contrat) et le membre masqués.
+      let page = await entries();
+      let targets = page.items.map((i) => i.targetId);
+      expect(targets).toEqual(expect.arrayContaining([schoolA, schoolB, siteB]));
+      expect(targets).not.toContain(schoolC);
+      expect(page.items.some((i) => i.targetType === 'User')).toBe(false);
+      expect(page.total).toBe(page.items.length);
+      // B retiré de toute couverture : ses entrées disparaissent, A reste visible.
+      await scope(contract2, { coveredSchoolIds: [schoolC] });
+      page = await entries();
+      targets = page.items.map((i) => i.targetId);
+      expect(targets).toContain(schoolA);
+      expect(targets).not.toContain(schoolB);
+      expect(targets).not.toContain(siteB);
+      // C couvert désormais par le contrat suspendu (lecture seule) : visible.
+      expect(targets).toContain(schoolC);
+      // Couverture complète : tout réapparaît, y compris les entrées non rattachables.
+      await scope(contract1, { coveredSchoolIds: [] });
+      page = await entries();
+      expect(page.items.map((i) => i.targetId)).toEqual(
+        expect.arrayContaining([schoolA, schoolB, schoolC]),
+      );
+      expect(page.items.some((i) => i.targetType === 'User')).toBe(true);
+      await scope(contract1, { coveredSchoolIds: [schoolA] });
+      await scope(contract2, { coveredSchoolIds: [schoolB] });
+    });
   });
 
   it('autre client : aucun droit sur les établissements du premier, quel que soit son contrat', async () => {

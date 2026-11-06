@@ -34,6 +34,7 @@ import type {
   ReportFiltersDto,
 } from './school-reporting.dto';
 import { SchoolImportsService } from './school-imports.service';
+import { Prisma } from '@ocall/database';
 import { PrismaService } from '../../prisma/prisma.service';
 import { SchoolStudentsService } from './school-students.service';
 import { SchoolService } from './school.service';
@@ -626,7 +627,13 @@ export class SchoolReportingService {
 
   async deleteView(ctx: SchoolContext, id: string) {
     const deleted = await this.db.schoolReportView.deleteMany({
-      where: { id, organizationId: ctx.organizationId, ownerUserId: ctx.userId },
+      where: {
+        id,
+        organizationId: ctx.organizationId,
+        ownerUserId: ctx.userId,
+        // Établissement de la vue dans le périmètre de la requête (écriture : contrat actif).
+        ...(ctx.schoolIds ? { schoolId: { in: ctx.schoolIds } } : {}),
+      },
     });
     if (deleted.count === 0) {
       throw new NotFoundException({
@@ -658,24 +665,43 @@ export class SchoolReportingService {
           }
         : {}),
     };
-    const [total, rows] = await Promise.all([
-      this.core.auditLog.count({ where }),
-      this.core.auditLog.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * 50,
-        take: 50,
-        select: {
-          id: true,
-          action: true,
-          targetType: true,
-          targetId: true,
-          metadata: true,
-          actorUserId: true,
-          createdAt: true,
-        },
-      }),
-    ]);
+    const select = {
+      id: true,
+      action: true,
+      targetType: true,
+      targetId: true,
+      metadata: true,
+      actorUserId: true,
+      createdAt: true,
+    } as const;
+    const scoped = ctx.schoolIds ? await this.scopedAuditPage(ctx, q, page) : null;
+    const [total, rows] = scoped
+      ? [
+          scoped.total,
+          await this.core.auditLog.findMany({
+            where: { id: { in: scoped.ids }, organizationId: ctx.organizationId },
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            select,
+          }),
+        ]
+      : await Promise.all([
+          this.core.auditLog.count({ where }),
+          this.core.auditLog.findMany({
+            where,
+            orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+            skip: (page - 1) * 50,
+            take: 50,
+            select: {
+              id: true,
+              action: true,
+              targetType: true,
+              targetId: true,
+              metadata: true,
+              actorUserId: true,
+              createdAt: true,
+            },
+          }),
+        ]);
     const actorIds = [...new Set(rows.map((r) => r.actorUserId).filter((v): v is string => !!v))];
     const actors = actorIds.length
       ? await this.core.user.findMany({
@@ -693,6 +719,103 @@ export class SchoolReportingService {
         actor: r.actorUserId ? (name.get(r.actorUserId) ?? null) : null,
       })),
     };
+  }
+
+  /**
+   * Journal limité aux établissements de la requête (contrats ∩ affectation) : chaque entrée est rattachée
+   * à l'établissement de sa cible ; une entrée qui ne peut pas l'être (membre, utilisateur, cible supprimée)
+   * n'apparaît que pour un périmètre complet. Les identifiants autorisés passent en UN tableau SQL (aucune
+   * limite de paramètres) ; la base School est distincte, d'où la résolution préalable des cibles.
+   */
+  private async scopedAuditPage(ctx: SchoolContext, q: AuditQueryDto, page: number) {
+    const allowed = await this.auditTargetsIn(ctx.organizationId, ctx.schoolIds ?? []);
+    const byType = [...allowed].filter(([, ids]) => ids.length > 0);
+    if (byType.length === 0) return { total: 0, ids: [] as string[] };
+    const targets = Prisma.join(
+      byType.map(
+        ([type, ids]) => Prisma.sql`("targetType" = ${type} AND "targetId" = ANY(${ids}::text[]))`,
+      ),
+      ' OR ',
+    );
+    const conditions = [
+      Prisma.sql`"organizationId" = ${ctx.organizationId}::uuid`,
+      Prisma.sql`starts_with("action", ${q.action ?? 'school.'})`,
+      Prisma.sql`(${targets})`,
+    ];
+    if (q.from) conditions.push(Prisma.sql`"createdAt" >= ${toDate(q.from)}`);
+    if (q.to) {
+      conditions.push(Prisma.sql`"createdAt" < ${new Date(toDate(q.to).getTime() + 86_400_000)}`);
+    }
+    const where = Prisma.join(conditions, ' AND ');
+    const [count, rows] = await Promise.all([
+      this.core.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM "AuditLog" WHERE ${where}`,
+      this.core.$queryRaw<{ id: string }[]>`
+        SELECT id::text AS id FROM "AuditLog" WHERE ${where}
+        ORDER BY "createdAt" DESC, id DESC OFFSET ${(page - 1) * 50} LIMIT 50`,
+    ]);
+    return { total: Number(count[0]?.n ?? 0), ids: rows.map((r) => r.id) };
+  }
+
+  /** Cibles d'audit rattachées aux établissements donnés, par type (base School, organisation vérifiée). */
+  private async auditTargetsIn(organizationId: string, schoolIds: readonly string[]) {
+    const ids = (rows: { id: string }[]) => rows.map((r) => r.id);
+    const inSchools = { organizationId, schoolId: { in: [...schoolIds] } };
+    const select = { id: true } as const;
+    const db = this.db;
+    const direct = {
+      Cycle: db.cycle,
+      GradingPolicyVersion: db.gradingPolicyVersion,
+      PedagogicalTrack: db.pedagogicalTrack,
+      SchoolAiDocument: db.schoolAiDocument,
+      SchoolEnrollment: db.schoolEnrollment,
+      SchoolEvaluation: db.schoolEvaluation,
+      SchoolFee: db.schoolFee,
+      SchoolGuardian: db.schoolGuardian,
+      SchoolImportJob: db.schoolImportJob,
+      SchoolPayment: db.schoolPayment,
+      SchoolRoom: db.schoolRoom,
+      SchoolSite: db.schoolSite,
+      SchoolStudent: db.schoolStudent,
+      SchoolTimetable: db.schoolTimetable,
+      SchoolYear: db.schoolYear,
+      Subject: db.subject,
+    } as const;
+    const result = new Map<string, string[]>();
+    await Promise.all([
+      ...Object.entries(direct).map(async ([type, model]) => {
+        const rows = await (
+          model as unknown as { findMany(a: object): Promise<{ id: string }[]> }
+        ).findMany({ where: inSchools, select });
+        result.set(type, ids(rows));
+      }),
+      db.school
+        .findMany({ where: { organizationId, id: { in: [...schoolIds] } }, select })
+        .then((r) => result.set('School', ids(r))),
+      db.level
+        .findMany({ where: { organizationId, cycle: inSchools }, select })
+        .then((r) => result.set('Level', ids(r))),
+      db.academicPeriod
+        .findMany({ where: { organizationId, year: inSchools }, select })
+        .then((r) => result.set('AcademicPeriod', ids(r))),
+      db.schoolClass
+        .findMany({ where: { organizationId, year: inSchools }, select })
+        .then((r) => result.set('SchoolClass', ids(r))),
+      db.schoolClassGroup
+        .findMany({ where: { organizationId, class: { year: inSchools } }, select })
+        .then((r) => result.set('SchoolClassGroup', ids(r))),
+      db.schoolStudentDocument
+        .findMany({ where: { organizationId, student: inSchools }, select })
+        .then((r) => result.set('SchoolStudentDocument', ids(r))),
+      ...(['SchoolSiteLink', 'SchoolSiteMedia', 'SchoolSiteNews'] as const).map(async (type) => {
+        const model = {
+          SchoolSiteLink: db.schoolSiteLink,
+          SchoolSiteMedia: db.schoolSiteMedia,
+          SchoolSiteNews: db.schoolSiteNews,
+        }[type] as unknown as { findMany(a: object): Promise<{ id: string }[]> };
+        result.set(type, ids(await model.findMany({ where: { site: inSchools }, select })));
+      }),
+    ]);
+    return result;
   }
 
   // ─── Outils ───

@@ -37,7 +37,9 @@ export default function CashDeskPage() {
           key={school!.id}
           schoolId={school!.id}
           canCollect={canWrite('school.finance.collect')}
-          secretaryMay={context.role === 'SECRETARY' && context.access === 'full'}
+          secretaryMay={
+            context.role === 'SECRETARY' && (school!.contractAccess ?? context.access) === 'full'
+          }
         >
           <YearPicker key={school!.id} schoolId={school!.id}>
             {(year) => (
