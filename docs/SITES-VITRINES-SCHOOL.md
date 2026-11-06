@@ -97,6 +97,12 @@ retrait d'une actualité ou d'un lien. L'export (`GET /school/sites/:id/export`,
 `ocall-school-site/1`) contient réglages, brouillon, version publiée, actualités, liens et la liste des
 médias.
 
+**Limitation de débit des pages publiques.** Les pages sont lues sans cache : le serveur web interroge
+l'API pour chaque visite. Pour que la limite par IP de l'API compte chaque visiteur (et non le serveur
+web), le web transmet l'IP du visiteur (dernière entrée de `X-Forwarded-For`, ajoutée par le proxy de
+l'hébergeur) avec le secret partagé `SITES_REVALIDATE_SECRET` ; sans ce secret, l'API garde l'IP de la
+requête. Le secret doit donc être identique sur l'API et le web.
+
 ## 6. Réseaux sociaux et liens externes
 
 - Facebook, Instagram, TikTok, YouTube, WhatsApp, LinkedIn et autres liens (libellé obligatoire),
@@ -157,10 +163,11 @@ Le stockage est celui de la plateforme (`MEDIA_STORAGE`) :
 
 ## 9. Variables
 
-| Variable                          | Service  | Défaut       | Rôle                                              |
-| --------------------------------- | -------- | ------------ | ------------------------------------------------- |
-| `SCHOOL_SITES_BASE_DOMAIN`        | api, web | —            | Domaine des sous-domaines (`ocall.school`)        |
-| `SCHOOL_SITES_SUBDOMAINS_ENABLED` | api, web | `false`      | `true` seulement après le § 7                     |
-| `SCHOOL_SITES_PUBLIC_ORIGIN`      | api      | `WEB_ORIGIN` | Origine des adresses provisoires `/s/<slug>`      |
-| `SCHOOL_SITES_GRACE_DAYS`         | api      | `30`         | Maintien d'un site après suspension ou expiration |
-| `MEDIA_STORAGE`, `S3_*`           | api      | `local`      | Stockage des médias (§ 8)                         |
+| Variable                          | Service  | Défaut       | Rôle                                                          |
+| --------------------------------- | -------- | ------------ | ------------------------------------------------------------- |
+| `SCHOOL_SITES_BASE_DOMAIN`        | api, web | —            | Domaine des sous-domaines (`ocall.school`)                    |
+| `SCHOOL_SITES_SUBDOMAINS_ENABLED` | api, web | `false`      | `true` seulement après le § 7                                 |
+| `SCHOOL_SITES_PUBLIC_ORIGIN`      | api      | `WEB_ORIGIN` | Origine des adresses provisoires `/s/<slug>`                  |
+| `SCHOOL_SITES_GRACE_DAYS`         | api      | `30`         | Maintien d'un site après suspension ou expiration             |
+| `SITES_REVALIDATE_SECRET`         | api, web | —            | Secret partagé : IP des visiteurs pour la limitation de débit |
+| `MEDIA_STORAGE`, `S3_*`           | api      | `local`      | Stockage des médias (§ 8)                                     |

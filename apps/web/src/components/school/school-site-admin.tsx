@@ -560,24 +560,31 @@ function ContentTab({
     setError(null);
     setSaved(false);
     try {
-      await api(`/school/sites/${site.id}/draft`, { method: 'PUT', body: { content: c } });
+      // Ligne par ligne, une langue à côté de l'autre ; seules les lignes vides dans les DEUX langues
+      // disparaissent (aucun texte de l'autre langue perdu).
+      const fr = highlightText.fr.split('\n');
+      const ar = highlightText.ar.split('\n');
+      const highlights = Array.from({ length: Math.max(fr.length, ar.length) }, (_, i) => ({
+        fr: (fr[i] ?? '').trim(),
+        ar: (ar[i] ?? '').trim(),
+      }))
+        .filter((h) => h.fr || h.ar)
+        .slice(0, 6);
+      const content = { ...c, home: { ...c.home, highlights } };
+      await api(`/school/sites/${site.id}/draft`, { method: 'PUT', body: { content } });
+      setC(content);
       setSaved(true);
       reload();
     } catch (err) {
       setError(toApiError(err));
     }
   }
-  const highlights = (l: SchoolSiteLanguage) => c.home.highlights.map((h) => h[l]).join('\n');
-  const setHighlights = (l: SchoolSiteLanguage, raw: string) => {
-    const lines = raw.split('\n').slice(0, 6);
-    // Longueur existante conservée : les points forts de l'autre langue ne sont jamais perdus.
-    const count = Math.max(lines.length, c.home.highlights.length);
-    const next: SchoolSiteText[] = Array.from({ length: count }, (_, i) => ({
-      fr: l === 'fr' ? (lines[i] ?? '') : (c.home.highlights[i]?.fr ?? ''),
-      ar: l === 'ar' ? (lines[i] ?? '') : (c.home.highlights[i]?.ar ?? ''),
-    })).filter((h) => h.fr || h.ar);
-    setC({ ...c, home: { ...c.home, highlights: next } });
-  };
+  // Points forts : texte saisi conservé tel quel pendant l'édition (lignes vides comprises, pour
+  // passer à la ligne au clavier), converti en liste à l'enregistrement.
+  const [highlightText, setHighlightText] = useState<Record<SchoolSiteLanguage, string>>({
+    fr: c.home.highlights.map((h) => h.fr).join('\n'),
+    ar: c.home.highlights.map((h) => h.ar).join('\n'),
+  });
   return (
     <Card>
       <CardBody>
@@ -603,8 +610,8 @@ function ContentTab({
                   dir={l === 'ar' ? 'rtl' : 'ltr'}
                   lang={l}
                   disabled={!editable}
-                  value={highlights(l)}
-                  onChange={(e) => setHighlights(l, e.target.value)}
+                  value={highlightText[l]}
+                  onChange={(e) => setHighlightText({ ...highlightText, [l]: e.target.value })}
                   className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm"
                 />
               ))}
