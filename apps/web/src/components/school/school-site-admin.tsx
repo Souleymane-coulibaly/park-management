@@ -389,7 +389,17 @@ function SettingsTab({
     setError(null);
     setSaved(false);
     try {
-      await api(`/school/sites/${site.id}/settings`, { method: 'PATCH', body: form });
+      // Seuls les champs modifiés depuis l'ouverture : un réglage changé entre-temps par un autre
+      // utilisateur (langues, couleur) n'est pas écrasé par une valeur restée affichée.
+      const changed: Partial<typeof form> = {};
+      if (form.languages.join() !== site.languages.join()) changed.languages = form.languages;
+      if (form.defaultLanguage !== site.defaultLanguage)
+        changed.defaultLanguage = form.defaultLanguage;
+      if (form.theme !== site.theme) changed.theme = form.theme;
+      if (form.primaryColor.toUpperCase() !== site.primaryColor.toUpperCase()) {
+        changed.primaryColor = form.primaryColor;
+      }
+      await api(`/school/sites/${site.id}/settings`, { method: 'PATCH', body: changed });
       setSaved(true);
       reload();
     } catch (err) {
@@ -1236,7 +1246,12 @@ function LinksTab({ site, rights }: { site: SiteView; rights: SiteRights }) {
                       void run(async () => {
                         await api(`/school/sites/${site.id}/links/${l.id}`, {
                           method: 'PATCH',
-                          body: { url: editing.url, label: editing.label },
+                          // Seuls les champs modifiés : une correction concurrente de l'autre champ
+                          // n'est pas annulée.
+                          body: {
+                            ...(editing.url !== l.url ? { url: editing.url } : {}),
+                            ...(editing.label !== l.label ? { label: editing.label } : {}),
+                          },
                         });
                         setEditing(null);
                       });

@@ -36,8 +36,6 @@ const NOT_FOUND = { code: 'SCHOOL_SITE_MEDIA_NOT_FOUND', message: 'Image introuv
 const UPLOAD_PENDING = 'PENDING';
 const UPLOAD_FAILED = 'FAILED';
 const UPLOAD_ABANDONED = 'ABANDONED';
-/** Un envoi n'attend jamais plus longtemps : au-delà, son écrivain a forcément terminé ou disparu. */
-const WRITER_MAX_MS = 24 * 3_600_000;
 
 const MEDIA_VIEW = {
   id: true,
@@ -214,7 +212,7 @@ export class SchoolSiteMediaService {
         });
       });
       const deleted = await this.deleteObjects([storageKey, thumbKey]);
-      await this.clearDeletedKeys(pending.id, deleted);
+      await this.clearDeletedKeys(site.id, pending.id, deleted);
       throw error;
     }
     // 3. Fichiers stockés : le média devient utilisable, SEULEMENT s'il est encore « envoi en cours »
@@ -229,7 +227,7 @@ export class SchoolSiteMediaService {
     });
     if (!finalized) {
       const deleted = await this.deleteObjects([storageKey, thumbKey]);
-      await this.clearDeletedKeys(pending.id, deleted);
+      await this.clearDeletedKeys(site.id, pending.id, deleted);
       throw new ConflictException({
         code: 'MEDIA_UPLOAD_CANCELLED',
         message: 'Envoi annulé pendant son traitement : renvoyez la photo.',
@@ -295,9 +293,11 @@ export class SchoolSiteMediaService {
         },
       });
       if (!media) throw new NotFoundException(NOT_FOUND);
+      // Envoi en cours ou abandonné : son écrivain peut encore déposer un fichier, à tout moment.
+      // Ses clés ne sont JAMAIS effacées par un retrait (la suppression reste rejouable) ; seul
+      // l'écrivain, une fois terminé, efface celles de ses propres fichiers.
       const writerMayRun =
-        (media.uploadState === UPLOAD_PENDING || media.uploadState === UPLOAD_ABANDONED) &&
-        Date.now() - media.createdAt.getTime() < WRITER_MAX_MS;
+        media.uploadState === UPLOAD_PENDING || media.uploadState === UPLOAD_ABANDONED;
       // Envoi encore en cours (moins de 10 minutes) : ses fichiers ne sont pas supprimés sous lui.
       if (
         media.uploadState === UPLOAD_PENDING &&
@@ -383,21 +383,25 @@ export class SchoolSiteMediaService {
     // L'image n'est déjà plus servie (média retiré : lien public → 404). Chaque fichier supprimé du
     // stockage est effacé de la ligne ; un échec laisse sa clé, et un nouveau retrait le rejoue.
     const deleted = await this.deleteObjects(result.keys);
-    if (!result.keepKeys) await this.clearDeletedKeys(mediaId, deleted);
+    if (!result.keepKeys) await this.clearDeletedKeys(site.id, mediaId, deleted);
     const filesPending = result.keepKeys || deleted.length < result.keys.length;
     return { withdrawn: true, filesPending };
   }
 
   /** Efface de la ligne les clés dont le fichier a été supprimé du stockage. */
-  private async clearDeletedKeys(mediaId: string, deleted: string[]) {
+  private async clearDeletedKeys(siteId: string, mediaId: string, deleted: string[]) {
     if (deleted.length === 0) return;
-    await this.db.schoolSiteMedia.updateMany({
-      where: { id: mediaId, storageKey: { in: deleted } },
-      data: { storageKey: null },
-    });
-    await this.db.schoolSiteMedia.updateMany({
-      where: { id: mediaId, thumbKey: { in: deleted } },
-      data: { thumbKey: null },
+    // Sous le verrou du site, comme toute écriture d'un média.
+    await this.db.$transaction(async (tx) => {
+      await this.sites.lockSite(tx, siteId);
+      await tx.schoolSiteMedia.updateMany({
+        where: { id: mediaId, storageKey: { in: deleted } },
+        data: { storageKey: null },
+      });
+      await tx.schoolSiteMedia.updateMany({
+        where: { id: mediaId, thumbKey: { in: deleted } },
+        data: { thumbKey: null },
+      });
     });
   }
 
