@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { parse } from 'dotenv';
 import { resolveTestDatabase } from '@ocall/database';
-import { resolveSchoolTestDatabase } from './e2e/school-database';
+import { assertSchoolTestDatabase, resolveSchoolTestDatabase } from './e2e/school-database';
 
 // Base de TEST obligatoire (branche Neon `test` ou base éphémère de CI) : la configuration échoue
 // plutôt que de lancer les tests sur la base de développement. apps/api/.env est lu sans être injecté
@@ -16,6 +16,8 @@ const revalidateSecret = randomBytes(24).toString('hex');
 // Ocall School : activé seulement avec une base School de test dédiée (TEST_SCHOOL_DATABASE_URL),
 // distincte de la base Suite ; sinon les specs School sont ignorées (hors CI, où elles sont exigées).
 const schoolDb = resolveSchoolTestDatabase({ ...apiEnv, ...process.env }, testDb.databaseUrl);
+// Contrôle du marqueur AVANT le démarrage des serveurs (dont les traitements School de fond).
+if (schoolDb) assertSchoolTestDatabase(schoolDb);
 const schoolEnv: Record<string, string> = schoolDb
   ? {
       SCHOOL_ENABLED: 'true',

@@ -1,9 +1,5 @@
-import {
-  PrismaClient,
-  TEST_MARKER_QUERY,
-  databaseIdentity,
-  isLocalDatabase,
-} from '@ocall/database';
+import { execFileSync } from 'node:child_process';
+import { PrismaClient, databaseIdentity, isLocalDatabase } from '@ocall/database';
 
 /**
  * Base Ocall School des tests E2E : `TEST_SCHOOL_DATABASE_URL` (ou `SCHOOL_TEST_DATABASE_URL`, comme les
@@ -46,18 +42,29 @@ export function resolveSchoolTestDatabase(
 /**
  * Toute base School de test porte le marqueur d'environnement « test » (`pnpm db:school:mark-test`),
  * locale ou distante ; seule une base locale déclarée jetable en est dispensée.
+ *
+ * SYNCHRONE (processus enfant) : la configuration Playwright l'appelle à son chargement, AVANT le
+ * démarrage des serveurs ; le setup et chaque opération destructive la rappellent.
  */
-export async function assertSchoolTestDatabase(target: SchoolTestDatabase): Promise<void> {
+export function assertSchoolTestDatabase(target: SchoolTestDatabase): void {
   if (target.ephemeral) return;
-  const db = new PrismaClient({ datasourceUrl: target.url });
-  let value: unknown = null;
+  const probe = [
+    "const { PrismaClient, TEST_MARKER_QUERY } = require('@ocall/database');",
+    'const db = new PrismaClient({ datasourceUrl: process.env.OCALL_PROBE_URL });',
+    'db.$queryRawUnsafe(TEST_MARKER_QUERY)',
+    "  .then((rows) => process.stdout.write(String((rows[0] && rows[0].value) || '')), () => {})",
+    '  .finally(() => db.$disconnect());',
+  ].join('\n');
+  let value = '';
   try {
-    const rows = (await db.$queryRawUnsafe(TEST_MARKER_QUERY)) as { value?: unknown }[];
-    value = rows[0]?.value ?? null;
+    value = execFileSync(process.execPath, ['-e', probe], {
+      env: { ...process.env, OCALL_PROBE_URL: target.url },
+      encoding: 'utf8',
+      timeout: 30_000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
   } catch {
-    value = null;
-  } finally {
-    await db.$disconnect();
+    value = '';
   }
   if (value !== 'test') {
     throw new Error(
@@ -67,17 +74,25 @@ export async function assertSchoolTestDatabase(target: SchoolTestDatabase): Prom
   }
 }
 
-/** Comptes Suite des responsables (portail parents) des organisations E2E, avant la purge School. */
+/**
+ * Comptes Suite des responsables (portail parents) des organisations E2E, à supprimer : seulement ceux
+ * qui n'ont AUCUN accès portail dans une organisation conservée (pas de compte orphelin ailleurs).
+ */
 export async function schoolPortalUserIds(
-  url: string,
+  target: SchoolTestDatabase,
   organizationIds: string[],
 ): Promise<string[]> {
+  assertSchoolTestDatabase(target);
   if (organizationIds.length === 0) return [];
-  const db = new PrismaClient({ datasourceUrl: url });
+  const db = new PrismaClient({ datasourceUrl: target.url });
   try {
     const rows = await db.$queryRaw<{ userId: string }[]>`
-      SELECT "userId"::text AS "userId" FROM "SchoolPortalAccount"
-      WHERE "organizationId"::text = ANY(${organizationIds}::text[])`;
+      SELECT DISTINCT a."userId"::text AS "userId" FROM "SchoolPortalAccount" a
+      WHERE a."organizationId"::text = ANY(${organizationIds}::text[])
+        AND NOT EXISTS (
+          SELECT 1 FROM "SchoolPortalAccount" o
+          WHERE o."userId" = a."userId" AND NOT (o."organizationId"::text = ANY(${organizationIds}::text[]))
+        )`;
     return rows.map((r) => r.userId);
   } finally {
     await db.$disconnect();
@@ -90,11 +105,13 @@ export async function schoolPortalUserIds(
  * retirant les lignes qui ne sont plus référencées, jusqu'à ce qu'il n'en reste aucune.
  */
 export async function purgeSchoolOrganizations(
-  url: string,
+  target: SchoolTestDatabase,
   organizationIds: string[],
 ): Promise<void> {
+  // Jamais sur une base refusée par la garde, même si le setup a échoué avant (teardown exécuté).
+  assertSchoolTestDatabase(target);
   if (organizationIds.length === 0) return;
-  const db = new PrismaClient({ datasourceUrl: url });
+  const db = new PrismaClient({ datasourceUrl: target.url });
   try {
     const tables = await db.$queryRaw<{ table_name: string }[]>`
       SELECT table_name FROM information_schema.columns

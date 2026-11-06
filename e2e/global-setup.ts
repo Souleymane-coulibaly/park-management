@@ -17,5 +17,5 @@ export default async function globalSetup(): Promise<void> {
     await prisma.$disconnect();
   }
   const school = resolveSchoolTestDatabase({ ...apiEnv, ...process.env }, testDb.databaseUrl);
-  if (school) await assertSchoolTestDatabase(school);
+  if (school) assertSchoolTestDatabase(school);
 }

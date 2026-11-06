@@ -22,8 +22,8 @@ export default async function globalTeardown(): Promise<void> {
     // Données Ocall School des organisations E2E (base distincte, sans clé étrangère vers la Suite).
     // Comptes des responsables (portail parents) : sans adhésion à l'organisation, relevés avant la purge.
     const school = resolveSchoolTestDatabase({ ...apiEnv, ...process.env }, testDb.databaseUrl);
-    const portalUsers = school ? await schoolPortalUserIds(school.url, orgIds) : [];
-    if (school) await purgeSchoolOrganizations(school.url, orgIds);
+    const portalUsers = school ? await schoolPortalUserIds(school, orgIds) : [];
+    if (school) await purgeSchoolOrganizations(school, orgIds);
     const members = await prisma.organizationMembership.findMany({
       where: { organizationId: { in: orgIds } },
       select: { userId: true },

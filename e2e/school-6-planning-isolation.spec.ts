@@ -54,6 +54,13 @@ test('emploi du temps : créé et publié, conflit enseignant rejeté ; l’ense
   await call('/school/rooms', 'POST', { schoolId: school.id, name: 'Salle 1', capacity: 30 });
   const validFrom = `${school.startYear}-09-01`;
   const validTo = `${school.startYear + 1}-08-31`;
+  // Créneau placé le jour même de l'exécution : dans la semaine affichée (direction et enseignant) et
+  // dans la validité de l'emploi du temps, y compris la première semaine de septembre.
+  const now = new Date(
+    new Intl.DateTimeFormat('en-CA', { timeZone: 'Africa/Dakar' }).format(new Date()) +
+      'T00:00:00Z',
+  );
+  const weekday = String(now.getUTCDay() || 7);
   await chooseSchool(page, school.id);
 
   await page.goto('/school/emplois-du-temps');
@@ -66,6 +73,7 @@ test('emploi du temps : créé et publié, conflit enseignant rejeté ; l’ense
     .getByTestId('slot-form')
     .getByLabel('Matière et enseignant')
     .selectOption({ index: 1 });
+  await page.getByTestId('slot-form').getByLabel('Jour', { exact: true }).selectOption(weekday);
   await page.getByTestId('slot-form').getByLabel('Salle').selectOption({ label: 'Salle 1' });
   await page.getByRole('button', { name: 'Enregistrer le créneau' }).click();
   await expect(page.getByTestId('slots').getByText('Mathématiques')).toBeVisible({
@@ -86,6 +94,7 @@ test('emploi du temps : créé et publié, conflit enseignant rejeté ; l’ense
   await expect(subjectSelect.locator('option', { hasText: 'Mathématiques' })).toHaveCount(1, {
     timeout: 30_000,
   });
+  await form.getByLabel('Jour', { exact: true }).selectOption(weekday);
   await subjectSelect.selectOption({
     label: (await subjectSelect.locator('option', { hasText: 'Mathématiques' }).innerText()).trim(),
   });
