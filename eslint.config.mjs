@@ -35,7 +35,7 @@ export default tseslint.config(
     rules: { '@typescript-eslint/consistent-type-imports': 'off' },
   },
   {
-    files: ['apps/api/test/**/*.ts', '**/*.spec.ts'],
+    files: ['apps/api/test/**/*.ts', 'e2e/**/*.ts', '**/*.spec.ts'],
     rules: { '@typescript-eslint/no-explicit-any': 'off' },
   },
   {

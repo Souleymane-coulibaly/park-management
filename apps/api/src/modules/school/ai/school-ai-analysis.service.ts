@@ -132,8 +132,12 @@ export class SchoolAiAnalysisService {
     const insufficient: string[] = [
       ...(pedagogy.periods.length === 0 ? ['aucune période scolaire définie'] : []),
       ...(pedagogy.periods.length === 1 ? ['une seule période : aucune évolution mesurable'] : []),
+      // Période sans aucune note : absence de résultats, distincte d'un effectif insuffisant.
       ...pedagogy.schoolByPeriod
-        .filter((p) => p.insufficient)
+        .filter((p) => p.graded === 0)
+        .map((p) => `aucun élève noté en ${label.get(p.periodId)}`),
+      ...pedagogy.schoolByPeriod
+        .filter((p) => p.graded > 0 && p.insufficient)
         .map((p) => `effectif noté insuffisant en ${label.get(p.periodId)}`),
       ...pedagogy.subjects.flatMap((s) =>
         s.byPeriod
@@ -177,7 +181,7 @@ export class SchoolAiAnalysisService {
           scaleMixed: p.scaleMixed,
           passRatePercent: pct(p.passRate),
           graded: p.graded,
-          insufficient: p.insufficient,
+          insufficient: p.graded > 0 && p.insufficient,
         })),
         schoolTrend: pedagogy.schoolTrend,
         classes: pedagogy.classes.map((c) => ({

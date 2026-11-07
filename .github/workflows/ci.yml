@@ -79,6 +79,9 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
       - name: Tests E2E Playwright
         run: pnpm test:e2e
+        env:
+          # Parcours Ocall School : base School éphémère, distincte de la base Suite.
+          TEST_SCHOOL_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ocall_school_ci
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
