@@ -7,7 +7,12 @@ import {
   type OnModuleInit,
 } from '@nestjs/common';
 import type { Prisma } from '@ocall/school-database';
-import { SCHOOL_INVITATION_TTL_DAYS, type SchoolLocale, smsText } from '@ocall/shared';
+import {
+  SCHOOL_INVITATION_TTL_DAYS,
+  type SchoolLocale,
+  schoolAccessIn,
+  smsText,
+} from '@ocall/shared';
 import type { RequestMeta } from '../../common/request-meta';
 import { PasswordService } from '../../common/security/password.service';
 import { PortalAccounts, type PortalAccountSource } from '../../common/security/portal-accounts';
@@ -16,7 +21,10 @@ import { generateToken, hashToken } from '../../common/security/tokens';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OrganizationProvisioningService } from '../organizations/organization-provisioning.service';
-import { SuiteContractsService } from '../suite-contracts/suite-contracts.service';
+import {
+  type ProductEntitlement,
+  SuiteContractsService,
+} from '../suite-contracts/suite-contracts.service';
 import type { SchoolContext } from './school-access';
 import { SchoolPrismaService } from './school-prisma.service';
 import { SchoolSmsService } from './school-sms.service';
@@ -92,14 +100,12 @@ export class SchoolPortalAccountsService implements OnModuleInit, PortalAccountS
    * contrat School donne encore accès, avec les établissements couverts (vide : tous). Relu à chaque
    * requête : une suspension ou une réduction du contrat prend effet immédiatement.
    */
-  private async organizationsOf(
-    userId: string,
-  ): Promise<Map<string, { access: 'full' | 'read_only'; covered: string[] }>> {
+  private async organizationsOf(userId: string): Promise<Map<string, ProductEntitlement>> {
     const accounts = await this.db.schoolPortalAccount.findMany({
       where: { userId, status: 'ACTIVE' },
       select: { organizationId: true },
     });
-    const result = new Map<string, { access: 'full' | 'read_only'; covered: string[] }>();
+    const result = new Map<string, ProductEntitlement>();
     if (accounts.length === 0) return result;
     const active = await this.core.organization.findMany({
       where: { id: { in: accounts.map((a) => a.organizationId) }, status: 'ACTIVE' },
@@ -108,7 +114,7 @@ export class SchoolPortalAccountsService implements OnModuleInit, PortalAccountS
     for (const { id } of active) {
       const entitlement = await this.contracts.entitlement(id, SCHOOL_PRODUCT_CODE);
       if (entitlement.access !== 'none') {
-        result.set(id, { access: entitlement.access, covered: entitlement.coveredSchoolIds });
+        result.set(id, entitlement);
       }
     }
     return result;
@@ -501,9 +507,10 @@ export class SchoolPortalAccountsService implements OnModuleInit, PortalAccountS
     const byStudent = new Map<string, PortalChild>();
     for (const { guardian, student } of links) {
       if (guardian.schoolId !== student.schoolId) continue;
-      const org = access.get(student.organizationId)!;
-      // Établissement hors du périmètre du contrat : comme pour le personnel, il n'est plus accessible.
-      if (org.covered.length > 0 && !org.covered.includes(student.schoolId)) continue;
+      // Accès selon le contrat de l'établissement de l'enfant (contrats multiples) : actif = écriture
+      // (justificatif), suspendu ou expiré = consultation, hors de tout contrat = inaccessible.
+      const schoolAccess = schoolAccessIn(access.get(student.organizationId)!, student.schoolId);
+      if (schoolAccess === 'none') continue;
       const known = byStudent.get(student.id);
       if (known) {
         known.guardianIds.push(guardian.id);
@@ -514,7 +521,7 @@ export class SchoolPortalAccountsService implements OnModuleInit, PortalAccountS
         ...rest,
         class: enrollments[0]?.class ?? null,
         guardianIds: [guardian.id],
-        access: org.access,
+        access: schoolAccess,
       });
     }
     return [...byStudent.values()].sort(

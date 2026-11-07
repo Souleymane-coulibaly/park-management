@@ -8,10 +8,10 @@ import { Prisma } from '@ocall/database';
 import {
   SCHOOL_PRODUCT_CODE,
   type AuthProductApp,
-  type ProductAccess,
   type SuiteContractStatus,
   activitiesOf,
-  bestContract,
+  type ResolvedProductEntitlement,
+  resolveProductEntitlement,
   canTransitionContract,
   isValidDateRange,
 } from '@ocall/shared';
@@ -48,21 +48,12 @@ const SELECT = {
 
 const NOT_FOUND = { code: 'CONTRACT_NOT_FOUND', message: 'Contrat introuvable.' };
 
-export interface ProductEntitlement {
-  access: ProductAccess;
-  contractId: string | null;
-  modules: string[];
-  limits: { maxSchools?: number };
-  coveredSchoolIds: string[];
-}
-
-const NO_ENTITLEMENT: ProductEntitlement = {
-  access: 'none',
-  contractId: null,
-  modules: [],
-  limits: {},
-  coveredSchoolIds: [],
-};
+/**
+ * Droits d'un client sur un produit, résolus sur TOUS ses contrats (voir resolveProductEntitlement) :
+ * accès le plus large, périmètres de lecture et d'écriture par établissement (null = tous),
+ * union des modules, limite d'établissements la plus favorable.
+ */
+export type ProductEntitlement = ResolvedProductEntitlement;
 
 const toDate = (day: string) => new Date(`${day}T00:00:00.000Z`);
 
@@ -84,7 +75,6 @@ export class SuiteContractsService {
     const contracts = await this.prisma.suiteContract.findMany({
       where: { organizationId, product: { code: productCode } },
       select: {
-        id: true,
         status: true,
         startsOn: true,
         endsOn: true,
@@ -93,15 +83,13 @@ export class SuiteContractsService {
         coveredSchoolIds: true,
       },
     });
-    const best = bestContract(contracts);
-    if (!best) return NO_ENTITLEMENT;
-    return {
-      access: best.access,
-      contractId: best.contract.id,
-      modules: best.contract.modules,
-      limits: best.contract.limits as ProductEntitlement['limits'],
-      coveredSchoolIds: best.contract.coveredSchoolIds,
-    };
+    // Tous les contrats valides comptent, jamais un seul retenu selon l'ordre de la base.
+    return resolveProductEntitlement(
+      contracts.map((c) => ({
+        ...c,
+        limits: (c.limits ?? {}) as { maxSchools?: number },
+      })),
+    );
   }
 
   /**

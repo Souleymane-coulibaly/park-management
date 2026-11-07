@@ -11,7 +11,11 @@ import {
   useScore,
 } from '@/components/school/school-assessment';
 import { toApiError, useSchoolText } from '@/components/school/school-language';
-import { SchoolPage } from '@/components/school/school-page';
+import {
+  SchoolPage,
+  type SchoolPageApi,
+  SchoolReadOnlyNotice,
+} from '@/components/school/school-page';
 import { StudentName } from '@/components/school/school-students';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody } from '@/components/ui/card';
@@ -52,7 +56,7 @@ export default function GradeSheetPage() {
   const { id } = useParams<{ id: string }>();
   return (
     <SchoolPage title="grades.title" description="grades.desc" needsSchool={false}>
-      {({ canWrite }) => <GradeSheet id={id} canManage={canWrite('school.assessment.manage')} />}
+      {(page) => <GradeSheet id={id} page={page} />}
     </SchoolPage>
   );
 }
@@ -63,7 +67,7 @@ const toDraft = (s: SheetStudent): Draft => ({
   comment: s.comment ?? '',
 });
 
-function GradeSheet({ id, canManage }: { id: string; canManage: boolean }) {
+function GradeSheet({ id, page }: { id: string; page: SchoolPageApi }) {
   const { t, name, date } = useSchoolText();
   const score = useScore();
   const sheet = useApi<Sheet>(`/school/evaluations/${id}`);
@@ -77,6 +81,8 @@ function GradeSheet({ id, canManage }: { id: string; canManage: boolean }) {
   if (sheet.state === 'loading') return <LoadingState />;
   if (sheet.state === 'error') return <ErrorState error={sheet.error} onRetry={sheet.reload} />;
   const { evaluation: e, locked, students } = sheet.data;
+  const own = page.forSchool(e.schoolId);
+  const canManage = own.canWrite('school.assessment.manage');
   const editable = canManage && !locked;
   const draftOf = (s: SheetStudent) => drafts[s.id] ?? toDraft(s);
   const changed = students.filter((s) => JSON.stringify(draftOf(s)) !== JSON.stringify(toDraft(s)));
@@ -133,6 +139,7 @@ function GradeSheet({ id, canManage }: { id: string; canManage: boolean }) {
 
   return (
     <div className="space-y-4">
+      <SchoolReadOnlyNotice page={own} />
       <Link href="/school/evaluations" className="text-sm font-medium text-forest hover:underline">
         {t('grades.back')}
       </Link>

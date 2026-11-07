@@ -132,6 +132,9 @@ interface WeekFilter {
  * salle, indisponibilité, affectation), sous le verrou du planning de l'organisation. Les fermetures du
  * calendrier suspendent les cours ; un cours publié s'annule à une date précise.
  */
+/** Conflit détecté, avec la plage demandée (seule restituée pour un établissement hors périmètre). */
+type RestitutedConflict = PlanningConflict & { requested?: { start: number; end: number } };
+
 @Injectable()
 export class SchoolTimetablesService {
   constructor(
@@ -715,16 +718,27 @@ export class SchoolTimetablesService {
       });
       const lessons = upcoming;
       if (lessons.length > 0) {
-        throw new ConflictException({
-          code: 'UNAVAILABILITY_CONFLICT',
-          message: 'L’enseignant a déjà des cours publiés sur cette plage.',
-          details: lessons.map((l) => ({
-            code: 'UNAVAILABILITY_CONFLICT',
+        // Cours d'un autre établissement que ceux de la requête : ni créneau ni classe restitués.
+        const details = await this.withClassNames(
+          tx,
+          ctx,
+          lessons.map((l) => ({
+            code: 'UNAVAILABILITY_CONFLICT' as PlanningConflict['code'],
             slotId: l.id,
             classId: l.timetable.classId,
             weekday: dto.weekday,
-            start: minutesToTime(l.startMinute),
-            end: minutesToTime(l.endMinute),
+            start: l.startMinute,
+            end: l.endMinute,
+            requested: { start, end },
+          })),
+        );
+        throw new ConflictException({
+          code: 'UNAVAILABILITY_CONFLICT',
+          message: 'L’enseignant a déjà des cours publiés sur cette plage.',
+          details: details.map(({ class: cls, ...d }) => ({
+            ...d,
+            classId: cls?.id ?? null,
+            class: cls,
           })),
         });
       }
@@ -1096,7 +1110,7 @@ export class SchoolTimetablesService {
         });
       }
     }
-    return this.withClassNames(tx, conflicts);
+    return this.withClassNames(tx, ctx, conflicts);
   }
 
   /**
@@ -1151,7 +1165,7 @@ export class SchoolTimetablesService {
     candidates: PlanningSlot[],
   ) {
     const conflicts = await this.conflicts(tx, ctx, tt, candidates);
-    if (conflicts.length > 0) throw this.conflict(await this.withClassNames(tx, conflicts));
+    if (conflicts.length > 0) throw this.conflict(await this.withClassNames(tx, ctx, conflicts));
   }
 
   /**
@@ -1211,7 +1225,7 @@ export class SchoolTimetablesService {
         }))
       : [];
     const seen = new Set<string>();
-    const result: PlanningConflict[] = [];
+    const result: RestitutedConflict[] = [];
     for (const candidate of candidates) {
       for (const c of slotConflicts(candidate, existing, unavailable)) {
         // Une paire de créneaux de la même version n'est signalée qu'une fois.
@@ -1221,7 +1235,7 @@ export class SchoolTimetablesService {
         ].join('|');
         if (seen.has(key)) continue;
         seen.add(key);
-        result.push(c);
+        result.push({ ...c, requested: { start: candidate.start, end: candidate.end } });
       }
     }
     return result;
@@ -1493,24 +1507,42 @@ export class SchoolTimetablesService {
     return created.id;
   }
 
-  /** Noms des classes en conflit, lus dans la transaction de l'appelant. */
-  private async withClassNames(db: Tx, conflicts: PlanningConflict[]) {
+  /**
+   * Noms des classes en conflit, lus dans la transaction de l'appelant. La détection reste globale (un
+   * enseignant ne peut pas être réservé deux fois), mais un conflit avec une classe d'un établissement
+   * hors du périmètre de la requête ne révèle ni la classe, ni le créneau, ni ses horaires : seuls le
+   * motif, le jour et la plage DEMANDÉE sont restitués.
+   */
+  private async withClassNames(db: Tx, ctx: SchoolContext, conflicts: RestitutedConflict[]) {
     const ids = [...new Set(conflicts.map((c) => c.classId).filter((x): x is string => !!x))];
     const classes = ids.length
       ? await db.schoolClass.findMany({
-          where: { id: { in: ids } },
-          select: { id: true, name: true, nameAr: true },
+          where: { id: { in: ids }, organizationId: ctx.organizationId },
+          select: { id: true, name: true, nameAr: true, year: { select: { schoolId: true } } },
         })
       : [];
-    const byId = new Map(classes.map((c) => [c.id, c]));
-    return conflicts.map((c) => ({
-      code: c.code,
-      slotId: c.slotId ?? null,
-      class: c.classId ? (byId.get(c.classId) ?? null) : null,
-      weekday: c.weekday,
-      start: minutesToTime(c.start),
-      end: minutesToTime(c.end),
-    }));
+    const visible = new Map(
+      classes
+        .filter((c) => !ctx.schoolIds || ctx.schoolIds.includes(c.year.schoolId))
+        .map((c) => [c.id, { id: c.id, name: c.name, nameAr: c.nameAr }]),
+    );
+    return conflicts.map((c) => {
+      const cls = c.classId ? visible.get(c.classId) : undefined;
+      // Indisponibilité : sans classe ni établissement restitués, seule la plage demandée est rendue.
+      const hidden = (!!c.classId && !cls) || c.code === 'SLOT_TEACHER_UNAVAILABLE';
+      return {
+        code: c.code,
+        slotId: hidden ? null : (c.slotId ?? null),
+        class: cls ?? null,
+        weekday: c.weekday,
+        start: hidden
+          ? c.requested
+            ? minutesToTime(c.requested.start)
+            : null
+          : minutesToTime(c.start),
+        end: hidden ? (c.requested ? minutesToTime(c.requested.end) : null) : minutesToTime(c.end),
+      };
+    });
   }
 
   private conflict(conflicts: { code: string }[]) {

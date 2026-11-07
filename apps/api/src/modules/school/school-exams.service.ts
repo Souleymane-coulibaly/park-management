@@ -403,6 +403,7 @@ export class SchoolExamsService {
         durationMinutes: true,
         roomId: true,
         supervisorMemberId: true,
+        schoolId: true,
         evaluation: { select: { classId: true, groupId: true, title: true } },
       },
     });
@@ -417,6 +418,8 @@ export class SchoolExamsService {
       ) {
         continue;
       }
+      // Examen d'un établissement hors du périmètre de la requête : ni identifiant ni horaires.
+      const visible = !ctx.schoolIds || ctx.schoolIds.includes(other.schoolId);
       const conflict = (code: string, message: string) =>
         new ConflictException({
           code,
@@ -424,9 +427,9 @@ export class SchoolExamsService {
           details: [
             {
               code,
-              examId: other.id,
-              start: minutesToTime(other.startMinute),
-              end: minutesToTime(other.startMinute + other.durationMinutes),
+              examId: visible ? other.id : null,
+              start: minutesToTime(visible ? other.startMinute : startMinute),
+              end: minutesToTime(visible ? other.startMinute + other.durationMinutes : end),
             },
           ],
         });

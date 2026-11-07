@@ -1529,6 +1529,7 @@ class RosterChanged extends Error {}
 
 const EVALUATION_VIEW = {
   id: true,
+  schoolId: true,
   classId: true,
   periodId: true,
   groupId: true,

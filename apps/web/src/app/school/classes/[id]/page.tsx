@@ -4,7 +4,12 @@ import { useParams } from 'next/navigation';
 import { useState } from 'react';
 import { hasSchoolPermission, type SchoolYearStatus } from '@ocall/shared';
 import { SchoolLanguage, toApiError, useSchoolText } from '@/components/school/school-language';
-import { BiName, SchoolPage, type SchoolPageApi } from '@/components/school/school-page';
+import {
+  BiName,
+  SchoolPage,
+  type SchoolPageApi,
+  SchoolReadOnlyNotice,
+} from '@/components/school/school-page';
 import {
   Fact,
   type NamedView,
@@ -68,7 +73,12 @@ function Sheet({ id, page }: { id: string; page: SchoolPageApi }) {
     page.context.schools.find((s) => s.id === detail.data.schoolId)?.defaultLocale ?? 'FR';
   return (
     <SchoolLanguage locale={locale} className="space-y-4">
-      <SheetContent cls={detail.data} page={page} reload={detail.reload} />
+      <SchoolReadOnlyNotice page={page.forSchool(detail.data.schoolId)} />
+      <SheetContent
+        cls={detail.data}
+        page={page.forSchool(detail.data.schoolId)}
+        reload={detail.reload}
+      />
     </SchoolLanguage>
   );
 }

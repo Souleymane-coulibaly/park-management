@@ -3,6 +3,7 @@ import { SCHOOL_AI_LIMITS, hasSchoolPermission, numbersAreGrounded } from '@ocal
 import { toolExecutor } from '../../../ai-core/ai-tools';
 import type { SchoolContext } from '../school-access';
 import { SchoolPrismaService } from '../school-prisma.service';
+import { SchoolService } from '../school.service';
 import { today } from '../school-report-cards.service';
 import { SchoolReportingService } from '../school-reporting.service';
 import {
@@ -37,6 +38,7 @@ export function groundTruthOf(...parts: string[]): string {
 export class SchoolAiCopilotService {
   constructor(
     private readonly db: SchoolPrismaService,
+    private readonly school: SchoolService,
     private readonly ai: SchoolAiService,
     private readonly reporting: SchoolReportingService,
     private readonly privacy: SchoolAiPrivacyService,
@@ -195,9 +197,11 @@ export class SchoolAiCopilotService {
   }
 
   async deleteConversation(ctx: SchoolContext, schoolId: string, id: string) {
+    // Écriture : établissement dans le périmètre de la requête (contrat actif), sinon 403 ou 404.
+    await this.school.assertSchool(ctx, schoolId);
     await this.ownConversation(ctx, schoolId, id);
     await this.db.schoolAiConversation.deleteMany({
-      where: { id, organizationId: ctx.organizationId },
+      where: { id, organizationId: ctx.organizationId, schoolId, ownerUserId: ctx.userId },
     });
     return { ok: true };
   }

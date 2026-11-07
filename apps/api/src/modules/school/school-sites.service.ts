@@ -303,6 +303,8 @@ export class SchoolSitesService {
   /** Activation (adresse réservée, préparation) ou désactivation (le site sort du public). */
   async setEnabled(ctx: SchoolContext, siteId: string, enabled: boolean) {
     const site = await this.findSite(ctx, siteId);
+    // Route ouverte aux actions protectrices : l'activation exige le contrat actif du site.
+    if (enabled) this.school.assertContractWritable(ctx, site.schoolId);
     const updated = await this.db.$transaction(async (tx) => {
       await this.lockSite(tx, site.id);
       const row = await tx.schoolSite.update({
@@ -1024,6 +1026,7 @@ export class SchoolSitesService {
 
   async setNewsStatus(ctx: SchoolContext, siteId: string, newsId: string, publish: boolean) {
     const site = await this.findSite(ctx, siteId);
+    if (publish) this.school.assertContractWritable(ctx, site.schoolId);
     const news = await this.findNews(site, newsId);
     await this.db.$transaction(async (tx) => {
       await this.lockSite(tx, site.id);

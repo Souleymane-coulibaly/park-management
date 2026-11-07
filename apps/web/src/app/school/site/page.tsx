@@ -14,7 +14,10 @@ export default function SchoolSitePage() {
         <SchoolSiteAdmin
           key={school!.id}
           schoolId={school!.id}
-          rights={{ role: context.role, full: context.access === 'full' }}
+          rights={{
+            role: context.role,
+            full: (school!.contractAccess ?? context.access) === 'full',
+          }}
         />
       )}
     </SchoolPage>

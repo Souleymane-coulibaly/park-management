@@ -25,6 +25,8 @@ export interface SchoolSummary {
   defaultLocale: SchoolLocale;
   isActive: boolean;
   timezone: string;
+  /** Accès selon les contrats qui couvrent cet établissement (contrats multiples). */
+  contractAccess?: ProductAccess;
 }
 
 export interface SchoolContextView {
@@ -40,6 +42,42 @@ export interface SchoolPageApi {
   /** Permission du rôle, et contrat autorisant l'écriture. */
   canWrite: (permission: SchoolPermission) => boolean;
   reloadContext: () => void;
+  /**
+   * Même interface, rapportée à l'établissement d'une ressource affichée (fiche d'élève, de classe,
+   * d'évaluation, ligne d'une liste) : droits et langue selon SON contrat, pas l'établissement mémorisé.
+   */
+  forSchool: (schoolId: string | null | undefined) => SchoolPageApi;
+}
+
+/** Interface de page pour un établissement donné (contrats multiples : accès par établissement). */
+function pageApi(
+  data: SchoolContextView,
+  school: SchoolSummary | null,
+  reloadContext: () => void,
+): SchoolPageApi {
+  return {
+    context: data,
+    school,
+    canWrite: (permission) =>
+      (school?.contractAccess ?? data.access) === 'full' &&
+      hasSchoolPermission(data.role, permission),
+    reloadContext,
+    forSchool: (schoolId) =>
+      pageApi(data, data.schools.find((s) => s.id === schoolId) ?? null, reloadContext),
+  };
+}
+
+/** Bandeau « lecture seule » d'un établissement (fiches sans sélecteur d'établissement). */
+export function SchoolReadOnlyNotice({ page }: { page: SchoolPageApi }) {
+  const text = useSchoolText();
+  if ((page.school?.contractAccess ?? page.context.access) !== 'read_only') return null;
+  return (
+    <div data-testid="school-read-only">
+      <Alert tone="info" title={text.t('frame.readOnlyTitle')}>
+        {text.t('frame.readOnly')}
+      </Alert>
+    </div>
+  );
 }
 
 const STORAGE_KEY = 'ocp.school.current';
@@ -151,13 +189,7 @@ export function SchoolPage({
             // Stockage indisponible : le choix vaut pour cette page.
           }
         }}
-        api={{
-          context: data,
-          school,
-          canWrite: (permission) =>
-            data.access === 'full' && hasSchoolPermission(data.role, permission),
-          reloadContext: context.reload,
-        }}
+        api={pageApi(data, school, context.reload)}
       >
         {children}
       </SchoolFrame>
@@ -198,12 +230,12 @@ function SchoolFrame({
         />
       )}
       <div className="space-y-4">
-        {data.access === 'read_only' && (
-          <div data-testid="school-read-only">
-            <Alert tone="info" title={text.t('frame.readOnlyTitle')}>
-              {text.t('frame.readOnly')}
-            </Alert>
-          </div>
+        {/* Bandeau : contrat de l'établissement choisi (contrats multiples). Sans sélecteur, seulement
+            si tout le client est en lecture seule ; les fiches affichent celui de leur établissement. */}
+        {needsSchool ? (
+          <SchoolReadOnlyNotice page={api} />
+        ) : (
+          data.access === 'read_only' && <SchoolReadOnlyNotice page={api.forSchool(null)} />
         )}
         {needsSchool && data.schools.length > 1 && (
           <div className="max-w-sm">

@@ -103,6 +103,7 @@ function Sheet({ id, page }: { id: string; page: SchoolPageApi }) {
         teacher={d}
         schoolId={page.school!.id}
         canEdit={page.canWrite('school.teaching.manage')}
+        writable={(id) => page.forSchool(id).school?.contractAccess === 'full'}
         onDone={teacher.reload}
       />
       <Card>
@@ -150,11 +151,14 @@ function Subjects({
   teacher,
   schoolId,
   canEdit,
+  writable,
   onDone,
 }: {
   teacher: TeacherDetail;
   schoolId: string;
   canEdit: boolean;
+  /** Établissement dont les matières peuvent être réécrites (contrat actif). */
+  writable: (schoolId: string) => boolean;
   onDone: () => void;
 }) {
   const { t, name } = useSchoolText();
@@ -174,7 +178,11 @@ function Subjects({
     setSaving(true);
     setError(null);
     setSaved(false);
-    const elsewhere = teacher.subjects.filter((s) => s.schoolId !== schoolId).map((s) => s.id);
+    // Matières des autres établissements conservées, sauf celles d'un établissement en lecture seule :
+    // l'API ne les modifie pas (elles restent intactes) et refuserait de les recevoir.
+    const elsewhere = teacher.subjects
+      .filter((s) => s.schoolId !== schoolId && writable(s.schoolId))
+      .map((s) => s.id);
     try {
       await api(`/school/teachers/${teacher.id}/subjects`, {
         method: 'PUT',
