@@ -27,6 +27,25 @@ const config: Config = {
         surface: token('surface'),
         line: token('line'),
         muted: token('muted'),
+        /**
+         * Identité Ocall Suite (SUITE-S01) : palette propre au site commercial, distincte de la charte
+         * des applications Park et School (aucun composant applicatif ne l'utilise).
+         */
+        suite: {
+          green: token('suite-green'),
+          'green-dark': token('suite-green-dark'),
+          'green-soft': token('suite-green-soft'),
+          gold: token('suite-gold'),
+          'gold-soft': token('suite-gold-soft'),
+          clay: token('suite-clay'),
+          'clay-text': token('suite-clay-text'),
+          'clay-soft': token('suite-clay-soft'),
+          wine: token('suite-wine'),
+          'wine-soft': token('suite-wine-soft'),
+          ivory: token('suite-ivory'),
+          ink: token('suite-ink'),
+          'ink-soft': token('suite-ink-soft'),
+        },
       },
       fontFamily: {
         sans: ['var(--font-body)', 'system-ui', 'sans-serif'],
