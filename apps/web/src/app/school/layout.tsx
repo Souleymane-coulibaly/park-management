@@ -21,6 +21,7 @@ const NAV: NavItem[] = [
     href: '/school/presences/justificatifs',
   },
   { key: 'school-communication', label: 'Communication', href: '/school/communication' },
+  { key: 'school-site', label: 'Site vitrine', href: '/school/site' },
   { key: 'school-timetables', label: 'Emplois du temps', href: '/school/emplois-du-temps' },
   { key: 'school-my-planning', label: 'Mon planning', href: '/school/mon-planning' },
   { key: 'school-calendar', label: 'Calendrier scolaire', href: '/school/calendrier' },

@@ -53,6 +53,11 @@ import { SchoolTeachingService } from './school-teaching.service';
 import { SchoolTimetablesService } from './school-timetables.service';
 import { SchoolController, SchoolPlatformController } from './school.controllers';
 import { SchoolService } from './school.service';
+import { SCHOOL_SITE_HOST_RESOLVERS, SubdomainHostResolver } from './school-site-host';
+import { SchoolSiteMediaService } from './school-site-media.service';
+import { PublicSchoolSitesController, SchoolSitesController } from './school-sites.controller';
+import { SchoolSitesService } from './school-sites.service';
+import { APP_CONFIG, type AppConfig } from '../../config/app-config';
 
 /**
  * Domaine Ocall School. N'importe aucun module métier Ocall Park (règle vérifiée par un test) : seuls
@@ -78,6 +83,8 @@ import { SchoolService } from './school.service';
     SchoolCalendarController,
     SchoolReportingController,
     SchoolAiController,
+    SchoolSitesController,
+    PublicSchoolSitesController,
   ],
   providers: [
     SchoolPrismaService,
@@ -119,6 +126,14 @@ import { SchoolService } from './school.service';
     SchoolAiTeachingService,
     SchoolAiAnalysisService,
     SchoolTimetablesService,
+    // Sprint 10 : sites vitrines publics (sous-domaines ; domaines personnalisés au Sprint 13).
+    SchoolSitesService,
+    SchoolSiteMediaService,
+    {
+      provide: SCHOOL_SITE_HOST_RESOLVERS,
+      inject: [APP_CONFIG],
+      useFactory: (config: AppConfig) => [new SubdomainHostResolver(config.school.sites)],
+    },
   ],
 })
 export class SchoolModule {}

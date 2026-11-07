@@ -1,4 +1,5 @@
 import { databaseIdentity } from '@ocall/database';
+import { SCHOOL_SITE_DEFAULT_GRACE_DAYS } from '@ocall/shared';
 
 /** Configuration d'Ocall School : désactivé par défaut, jamais sur la base Ocall Suite. */
 export interface SchoolConfig {
@@ -9,6 +10,47 @@ export interface SchoolConfig {
   /** Adresse publique du portail parents (liens d'invitation envoyés par SMS) ; facultative. */
   portalBaseUrl: string | null;
   sms: SchoolSmsConfig;
+  sites: SchoolSitesConfig;
+}
+
+/**
+ * Sites vitrines des établissements (Sprint 10). Sous-domaines `<slug>.<SCHOOL_SITES_BASE_DOMAIN>`
+ * annoncés seulement si SCHOOL_SITES_SUBDOMAINS_ENABLED=true (DNS wildcard et certificat réellement
+ * configurés, voir docs/SITES-VITRINES-SCHOOL.md) ; sinon adresses `<origine>/s/<slug>`.
+ */
+export interface SchoolSitesConfig {
+  baseDomain: string | null;
+  subdomainsEnabled: boolean;
+  /** Origine du frontend pour les adresses `/s/<slug>` et les liens de prévisualisation. */
+  publicOrigin: string;
+  /** Contrat suspendu ou expiré : jours de maintien en ligne, en lecture seule, du site publié. */
+  graceDays: number;
+}
+
+const DOMAIN = /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))+$/;
+
+export function loadSchoolSitesConfig(env: NodeJS.ProcessEnv): SchoolSitesConfig {
+  const baseDomain = env.SCHOOL_SITES_BASE_DOMAIN?.trim().toLowerCase() || null;
+  if (baseDomain && !DOMAIN.test(baseDomain)) {
+    throw new Error('SCHOOL_SITES_BASE_DOMAIN invalide (ex. ocall.school).');
+  }
+  const grace = env.SCHOOL_SITES_GRACE_DAYS?.trim();
+  const graceDays = grace ? Number(grace) : SCHOOL_SITE_DEFAULT_GRACE_DAYS;
+  if (!Number.isInteger(graceDays) || graceDays < 0 || graceDays > 365) {
+    throw new Error('SCHOOL_SITES_GRACE_DAYS invalide : nombre entier de jours entre 0 et 365.');
+  }
+  return {
+    baseDomain,
+    subdomainsEnabled: env.SCHOOL_SITES_SUBDOMAINS_ENABLED === 'true' && baseDomain !== null,
+    publicOrigin: (
+      env.SCHOOL_SITES_PUBLIC_ORIGIN ||
+      env.WEB_ORIGIN?.split(',')[0] ||
+      'http://localhost:3000'
+    )
+      .trim()
+      .replace(/\/$/, ''),
+    graceDays,
+  };
 }
 
 /**
@@ -70,6 +112,7 @@ export function loadSchoolConfig(env: NodeJS.ProcessEnv): SchoolConfig {
       dataKey: null,
       portalBaseUrl: null,
       sms: loadSmsConfig({}),
+      sites: loadSchoolSitesConfig({}),
     };
   }
   if (!databaseUrl) {
@@ -84,5 +127,6 @@ export function loadSchoolConfig(env: NodeJS.ProcessEnv): SchoolConfig {
     dataKey: loadDataKey(env),
     portalBaseUrl: loadPortalBaseUrl(env),
     sms: loadSmsConfig(env),
+    sites: loadSchoolSitesConfig(env),
   };
 }

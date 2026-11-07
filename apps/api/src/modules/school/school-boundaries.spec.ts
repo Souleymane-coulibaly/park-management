@@ -56,6 +56,12 @@ describe('configuration School', () => {
       dataKey: null,
       portalBaseUrl: null,
       sms: { provider: 'simulated', apiKey: null, sender: null },
+      sites: {
+        baseDomain: null,
+        subdomainsEnabled: false,
+        publicOrigin: 'http://localhost:3000',
+        graceDays: 30,
+      },
     });
   });
 

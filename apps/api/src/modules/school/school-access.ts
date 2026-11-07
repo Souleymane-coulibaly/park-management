@@ -25,6 +25,7 @@ import { SchoolPrismaService } from './school-prisma.service';
 
 const SCHOOL_PERMISSION = 'schoolPermission';
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+const ALLOWED_IN_READ_ONLY = 'schoolAllowedInReadOnly';
 
 /** Contexte d'une requête School : seule source fiable du client, du rôle et des établissements. */
 export interface SchoolContext {
@@ -44,6 +45,12 @@ type SchoolRequest = Request & { school?: SchoolContext };
 
 export const RequireSchoolPermission = (permission: SchoolPermission) =>
   SetMetadata(SCHOOL_PERMISSION, permission);
+
+/**
+ * Écriture PROTECTRICE permise en lecture seule (contrat suspendu ou expiré) : retirer une photo publiée
+ * ou dépublier le site ne fait que réduire ce qui est exposé. Aucune création ni publication.
+ */
+export const AllowInReadOnly = () => SetMetadata(ALLOWED_IN_READ_ONLY, true);
 
 export const CurrentSchool = createParamDecorator((_data: unknown, ctx: ExecutionContext) => {
   return ctx.switchToHttp().getRequest<SchoolRequest>().school as SchoolContext;
@@ -89,7 +96,11 @@ export class SchoolAccessGuard implements CanActivate {
       });
     }
     // Contrat suspendu ou expiré : consultation et export uniquement, aucune donnée n'est supprimée.
-    if (entitlement.access === 'read_only' && !SAFE_METHODS.has(req.method)) {
+    const protective = this.reflector.getAllAndOverride<boolean | undefined>(ALLOWED_IN_READ_ONLY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (entitlement.access === 'read_only' && !SAFE_METHODS.has(req.method) && !protective) {
       throw new ForbiddenException({
         code: 'CONTRACT_READ_ONLY',
         message: 'Votre contrat ne permet plus que la consultation et l’export des données.',

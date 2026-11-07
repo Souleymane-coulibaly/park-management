@@ -104,6 +104,49 @@ export class SuiteContractsService {
     };
   }
 
+  /**
+   * Contrats d'un client pour un produit qui couvrent un établissement (couverture vide = tous), avec
+   * la date EFFECTIVE de passage en lecture seule : la plus ancienne entre le dernier changement vers le
+   * statut actuel et le lendemain de l'échéance déjà dépassée (une expiration administrative tardive ne
+   * redémarre pas le maintien). Sert au maintien temporaire des sites publiés (Sprint 10 School).
+   */
+  async contractWindows(
+    organizationId: string,
+    productCode: string,
+    schoolId: string,
+  ): Promise<
+    { status: SuiteContractStatus; startsOn: Date; endsOn: Date; readOnlySince: Date | null }[]
+  > {
+    const contracts = await this.prisma.suiteContract.findMany({
+      where: { organizationId, product: { code: productCode } },
+      select: {
+        status: true,
+        startsOn: true,
+        endsOn: true,
+        updatedAt: true,
+        coveredSchoolIds: true,
+        events: {
+          where: { toStatus: { in: ['SUSPENDED', 'EXPIRED', 'TERMINATED'] } },
+          orderBy: { createdAt: 'desc' },
+          take: 5,
+          select: { toStatus: true, createdAt: true },
+        },
+      },
+    });
+    const DAY_MS = 86_400_000;
+    return contracts
+      .filter((c) => c.coveredSchoolIds.length === 0 || c.coveredSchoolIds.includes(schoolId))
+      .map((c) => {
+        let readOnlySince: Date | null = null;
+        if (c.status !== 'ACTIVE' && c.status !== 'DRAFT') {
+          const changed = c.events.find((e) => e.toStatus === c.status)?.createdAt ?? c.updatedAt;
+          const afterEnd = new Date(c.endsOn.getTime() + DAY_MS);
+          readOnlySince = afterEnd < changed ? afterEnd : changed;
+        }
+        return { status: c.status, startsOn: c.startsOn, endsOn: c.endsOn, readOnlySince };
+      });
+  }
+
   /** Applications du portail Ocall Suite accessibles à ce membre, décidées par le serveur. */
   async apps(auth: TenantContext, schoolEnabled: boolean): Promise<AuthProductApp[]> {
     const apps: AuthProductApp[] = [];
