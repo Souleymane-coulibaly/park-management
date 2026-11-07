@@ -19,8 +19,19 @@ export async function GET(request: NextRequest) {
   // Périmètre School (hôte de site School, ou application qui sert l'adresse provisoire) : réponse
   // jamais mise en cache, même vide (une publication y apparaît aussitôt).
   const schoolScope = isSchoolSiteHost(host) || isAppHost(host);
+  // Contribution School isolée : son indisponibilité n'empêche pas de servir les entrées Park et
+  // commerciales. Sur l'hôte d'un site School, elle est tout le plan : réponse 503, jamais un plan vide.
   const school = schoolScope ? await fetchSchoolSitemap(host) : [];
-  const entries = isSchoolSiteHost(host) ? school : [...(await fetchSitemap(host)), ...school];
+  if (school === null && isSchoolSiteHost(host)) {
+    return new Response('Plan du site momentanément indisponible.', {
+      status: 503,
+      headers: { 'cache-control': 'no-store', 'retry-after': '60' },
+    });
+  }
+  const schoolEntries = school ?? [];
+  const entries = isSchoolSiteHost(host)
+    ? schoolEntries
+    : [...(await fetchSitemap(host)), ...schoolEntries];
   const marketing = isAppHost(host)
     ? [
         '/',

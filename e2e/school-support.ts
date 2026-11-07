@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { type APIRequestContext, type Browser, type Page, expect, test } from '@playwright/test';
 import { parse } from 'dotenv';
 import { PrismaClient, type SuiteContractStatus, resolveTestDatabase } from '@ocall/database';
-import { resolveSchoolTestDatabase } from './school-database';
+import { assertE2eDatabases, resolveSchoolTestDatabase } from './school-database';
 import { E2E_SUFFIX, PASSWORD, uniqueEmail } from './support';
 
 /**
@@ -12,6 +12,8 @@ import { E2E_SUFFIX, PASSWORD, uniqueEmail } from './support';
 const apiEnv = existsSync('apps/api/.env') ? parse(readFileSync('apps/api/.env')) : {};
 const testDb = resolveTestDatabase({ ...apiEnv, ...process.env });
 const schoolUrl = resolveSchoolTestDatabase({ ...apiEnv, ...process.env }, testDb.databaseUrl);
+// Ce module écrit dans les deux bases (contrats, données School) : même garde, dans chaque worker.
+assertE2eDatabases({ ...apiEnv, ...process.env }, testDb, schoolUrl);
 
 /** À appeler en tête de chaque fichier School : ignoré sans base School de test, exigé en CI. */
 export function requireSchool(): void {

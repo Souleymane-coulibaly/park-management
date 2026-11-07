@@ -1,12 +1,14 @@
-# Tests School sur la branche Neon School `test`. Déclenchement manuel uniquement.
-# Suite reste une base éphémère : la base Ocall Park n'est jamais utilisée.
-name: School Neon test
+# Tests d'intégration Ocall School sur bases PostgreSQL JETABLES (conteneur de service, détruit avec le
+# job). Déclenchement manuel. La CI n'utilise jamais Neon : aucun secret de base, aucune dérogation
+# distante. La recette sur la base Neon School `test` se fait en local uniquement (pnpm school:recette:neon,
+# identité de la base vérifiée explicitement) — voir docs/OCALL-SCHOOL.md § 7.
+name: School tests (base jetable)
 
 on:
   workflow_dispatch:
 
 jobs:
-  school-neon-test:
+  school-tests:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -26,7 +28,8 @@ jobs:
       DIRECT_URL: postgresql://postgres:postgres@localhost:5432/ocall_suite_ci
       TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ocall_suite_ci
       TEST_DIRECT_URL: postgresql://postgres:postgres@localhost:5432/ocall_suite_ci
-      # Base Suite du conteneur de service, détruite avec le job : déclarée jetable pour la garde des tests.
+      TEST_SCHOOL_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ocall_school_ci
+      # Bases locales du conteneur de service, détruites avec le job : déclarées jetables pour la garde.
       OCALL_TEST_EPHEMERAL_DATABASE: '1'
     steps:
       - uses: actions/checkout@v4
@@ -38,22 +41,14 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm db:migrate:deploy
-      - name: Vérifie le marqueur « test » de la base School, sans afficher son adresse
-        env:
-          SCHOOL_TEST_DATABASE_URL: ${{ secrets.SCHOOL_TEST_DATABASE_URL }}
+      - name: Base School jetable et migrations (ajouts seuls)
         run: |
-          value=$(psql "$SCHOOL_TEST_DATABASE_URL" -At -c "SELECT value FROM \"_ocall_environment\" WHERE key = 'environment'")
-          [ "$value" = "test" ] || { echo "Refus : cette base n'est pas marquée test."; exit 1; }
-      - name: Migrations School (ajouts seuls, refus de toute instruction destructrice)
-        run: pnpm db:school:migrate:deploy
+          PGPASSWORD=postgres psql -h localhost -U postgres -c 'CREATE DATABASE ocall_school_ci'
+          pnpm db:school:migrate:deploy
         env:
           SCHOOL_ENABLED: 'true'
-          SCHOOL_DATABASE_URL: ${{ secrets.SCHOOL_TEST_DATABASE_URL }}
+          SCHOOL_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ocall_school_ci
       - name: Tests d'intégration School
-        env:
-          SCHOOL_TEST_DATABASE_URL: ${{ secrets.SCHOOL_TEST_DATABASE_URL }}
-          # Base distante marquée « test » : dérogation explicite à la garde des bases locales jetables.
-          OCALL_TEST_ALLOW_MARKED_REMOTE: '1'
         run: |
-          pnpm --filter @ocall/api exec jest --runInBand --json --outputFile=school-results.json school-sprint
+          pnpm --filter @ocall/api exec jest --runInBand --json --outputFile=school-results.json --testPathPattern 'test/school-.*\.integration\.spec\.ts$'
           node -e "const r=require('./apps/api/school-results.json');if(r.numPassedTests===0){console.error('Aucun test School execute.');process.exit(1)}"
