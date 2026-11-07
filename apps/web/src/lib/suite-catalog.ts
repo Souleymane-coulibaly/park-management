@@ -9,6 +9,7 @@ import {
   UtensilsCrossed,
   Waves,
 } from 'lucide-react';
+import { connection } from 'next/server';
 
 /** Produit du catalogue public, tel que renvoyé par l'API (statut décidé par le serveur). */
 export interface PublicProduct {
@@ -27,26 +28,44 @@ export interface PublicProduct {
 
 const API = () => process.env.API_URL ?? 'http://localhost:4000';
 
-/** Catalogue public (cache 5 min) ; null si l'API est momentanément indisponible. */
-export async function loadCatalog(): Promise<PublicProduct[] | null> {
-  try {
-    const res = await fetch(`${API()}/api/v1/public/suite/products`, { next: { revalidate: 300 } });
-    return res.ok ? ((await res.json()) as PublicProduct[]) : null;
-  } catch {
-    return null;
-  }
+/**
+ * Une indisponibilité de l'API ne doit jamais être figée dans une page statique.
+ * `connection()` rend le rendu dynamique : au `next build` (API absente), la page
+ * n'est pas prérendue avec le message d'indisponibilité ; lors d'une régénération
+ * ISR, l'échec conserve la dernière version valide au lieu de la remplacer.
+ * Appelé hors de tout try/catch pour que Next.js intercepte le signal.
+ */
+async function neverCacheUnavailable(): Promise<void> {
+  await connection();
 }
 
+/** Catalogue public (cache 5 min) ; null si l'API est momentanément indisponible. */
+export async function loadCatalog(): Promise<PublicProduct[] | null> {
+  let catalog: PublicProduct[] | null = null;
+  try {
+    const res = await fetch(`${API()}/api/v1/public/suite/products`, { next: { revalidate: 300 } });
+    if (res.ok) catalog = (await res.json()) as PublicProduct[];
+  } catch {
+    catalog = null;
+  }
+  if (!catalog) await neverCacheUnavailable();
+  return catalog;
+}
+
+/** Fiche produit (cache 5 min) ; null si inconnu, 'unavailable' si l'API ne répond pas. */
 export async function loadProduct(slug: string): Promise<PublicProduct | null | 'unavailable'> {
+  let product: PublicProduct | null | 'unavailable' = 'unavailable';
   try {
     const res = await fetch(`${API()}/api/v1/public/suite/products/${encodeURIComponent(slug)}`, {
       next: { revalidate: 300 },
     });
-    if (res.status === 404) return null;
-    return res.ok ? ((await res.json()) as PublicProduct) : 'unavailable';
+    if (res.status === 404) product = null;
+    else if (res.ok) product = (await res.json()) as PublicProduct;
   } catch {
-    return 'unavailable';
+    product = 'unavailable';
   }
+  if (product === 'unavailable') await neverCacheUnavailable();
+  return product;
 }
 
 export const PRODUCT_ICONS: Record<string, LucideIcon> = {
