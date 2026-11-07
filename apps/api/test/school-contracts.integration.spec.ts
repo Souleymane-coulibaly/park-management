@@ -122,6 +122,13 @@ suite('Ocall School — contrats multiples (intégration)', () => {
     const where = { organizationId: { in: organizations } };
     await db.schoolReportView.deleteMany({ where });
     await db.schoolAiConversation.deleteMany({ where });
+    await db.schoolStudentEvent.deleteMany({ where });
+    await db.schoolStudentGuardian.deleteMany({ where });
+    await db.schoolGuardian.deleteMany({ where });
+    await db.schoolStudent.deleteMany({ where });
+    await db.schoolNumberCounter.deleteMany({ where });
+    await db.schoolStudentSettings.deleteMany({ where });
+    await db.schoolAccessDecision.deleteMany({ where });
     await db.schoolSiteNews.deleteMany({ where });
     await db.schoolSite.deleteMany({ where });
     await db.schoolMemberAssignment.deleteMany({ where });
@@ -291,6 +298,48 @@ suite('Ocall School — contrats multiples (intégration)', () => {
       expect(page.items.some((i) => i.targetType === 'User')).toBe(true);
       await scope(contract1, { coveredSchoolIds: [schoolA] });
       await scope(contract2, { coveredSchoolIds: [schoolB] });
+    });
+  });
+
+  describe('corrections de l’audit Codex (passe 4)', () => {
+    it('responsable de B lié à un enfant de A : non modifiable sans contrat actif sur B', async () => {
+      await scope(contract2, { coveredSchoolIds: [schoolB] });
+      await status(contract2, 'ACTIVE');
+      const child = await owner
+        .post('/api/v1/school/students')
+        .send({ schoolId: schoolA, lastName: 'Keita', firstName: 'Awa', birthDate: '2018-03-14' })
+        .expect(201);
+      const parent = await owner
+        .post('/api/v1/school/guardians')
+        .send({
+          schoolId: schoolB,
+          lastName: 'Keita',
+          firstName: 'Moussa',
+          phone: '+223 70 00 00 09',
+        })
+        .expect(201);
+      await owner
+        .post(`/api/v1/school/students/${child.body.id}/guardians`)
+        .send({ guardianId: parent.body.id, relation: 'FATHER' })
+        .expect(201);
+      const stored = () =>
+        db.schoolGuardian.findUniqueOrThrow({
+          where: { id: parent.body.id },
+          select: { searchText: true },
+        });
+      const before = await stored();
+      await status(contract2, 'SUSPENDED');
+      const edit = () =>
+        owner
+          .patch(`/api/v1/school/guardians/${parent.body.id}`)
+          .send({ phone: '+223 70 00 00 10' });
+      // B suspendu : la fiche reste visible par l'enfant de A, mais n'est pas modifiable.
+      expect((await edit().expect(403)).body.code).toBe('CONTRACT_READ_ONLY');
+      // B hors de toute couverture : toujours refusée.
+      await scope(contract2, { coveredSchoolIds: [schoolC] });
+      expect((await edit().expect(403)).body.code).toBe('CONTRACT_READ_ONLY');
+      await scope(contract2, { coveredSchoolIds: [schoolB] });
+      expect(await stored()).toEqual(before);
     });
   });
 

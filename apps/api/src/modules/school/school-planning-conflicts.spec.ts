@@ -64,6 +64,25 @@ describe('conflits de planning : détails limités au périmètre de la requête
     );
   });
 
+  it('conflit avec une indisponibilité : seule la plage demandée, même en périmètre complet', async () => {
+    const result = await (
+      service as unknown as {
+        withClassNames(db: unknown, ctx: unknown, c: typeof conflicts): Promise<unknown[]>;
+      }
+    ).withClassNames(tx, { organizationId: 'org', schoolIds: null }, [
+      {
+        code: 'SLOT_TEACHER_UNAVAILABLE',
+        weekday: 2,
+        start: 600,
+        end: 720,
+        requested: { start: 660, end: 690 },
+      },
+    ]);
+    expect(result).toEqual([
+      expect.objectContaining({ code: 'SLOT_TEACHER_UNAVAILABLE', start: '11:00', end: '11:30' }),
+    ]);
+  });
+
   it('périmètre complet : tout est restitué', async () => {
     const result = await named({ schoolIds: null });
     expect(result).toEqual([

@@ -1528,7 +1528,8 @@ export class SchoolTimetablesService {
     );
     return conflicts.map((c) => {
       const cls = c.classId ? visible.get(c.classId) : undefined;
-      const hidden = !!c.classId && !cls;
+      // Indisponibilité : sans classe ni établissement restitués, seule la plage demandée est rendue.
+      const hidden = (!!c.classId && !cls) || c.code === 'SLOT_TEACHER_UNAVAILABLE';
       return {
         code: c.code,
         slotId: hidden ? null : (c.slotId ?? null),

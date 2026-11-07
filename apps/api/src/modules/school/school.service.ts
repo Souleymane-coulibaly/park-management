@@ -836,6 +836,21 @@ export class SchoolService {
    * Écriture refusée sur un établissement seulement sous contrat suspendu ou expiré (contrats multiples) :
    * message explicite plutôt qu'introuvable, si l'établissement appartient au client et au périmètre du rôle.
    */
+  /**
+   * Écriture sur une donnée d'un établissement donné (site, fiche de responsable partagée…), lorsque la
+   * route l'atteint par un autre chemin que son établissement : le contrat de CET établissement doit être
+   * actif, jamais celui d'un autre établissement du client.
+   */
+  assertContractWritable(ctx: SchoolContext, schoolId: string) {
+    const access = ctx.contract ? schoolAccessIn(ctx.contract, schoolId) : ctx.access;
+    if (access !== 'full') {
+      throw new ForbiddenException({
+        code: 'CONTRACT_READ_ONLY',
+        message: 'Le contrat de cet établissement ne permet plus que la consultation et l’export.',
+      });
+    }
+  }
+
   private async assertNotReadOnlySchool(ctx: SchoolContext, id: string) {
     if (!ctx.writeNarrowed || !ctx.contract) return;
     if (schoolAccessIn(ctx.contract, id) !== 'read_only') return;

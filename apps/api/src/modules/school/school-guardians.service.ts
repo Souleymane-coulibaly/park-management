@@ -199,6 +199,9 @@ export class SchoolGuardiansService {
   async update(ctx: SchoolContext, id: string, dto: UpdateGuardianDto) {
     const guardian = await this.db.$transaction(async (tx) => {
       const current = await this.lockInScope(tx, ctx, id);
+      // Fiche visible par un enfant d'un autre établissement : sa modification exige le contrat actif de
+      // l'établissement de la fiche, jamais celui de l'établissement de l'enfant.
+      this.school.assertContractWritable(ctx, current.schoolId);
       return tx.schoolGuardian.update({
         where: { id },
         data: {
