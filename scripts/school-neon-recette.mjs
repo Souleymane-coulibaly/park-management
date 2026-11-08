@@ -29,7 +29,8 @@ function refuse(message) {
   process.exit(1);
 }
 
-if (process.env.CI || process.env.GITHUB_ACTIONS) {
+// Présence seule, même vide (CI="") : un environnement d’intégration continue est toujours refusé.
+if (process.env.CI !== undefined || process.env.GITHUB_ACTIONS !== undefined) {
   refuse(
     'la recette Neon ne s’exécute jamais en CI (la CI utilise des bases PostgreSQL jetables).',
   );
@@ -46,6 +47,19 @@ if (!expectedEndpoint || !expectedDatabase) {
     'RECETTE_EXPECTED_ENDPOINT et RECETTE_EXPECTED_DATABASE sont obligatoires (identité attendue).',
   );
 }
+
+/**
+ * Valide une URL de base AVANT tout usage : une URL invalide est refusée par un message générique qui
+ * nomme seulement la variable — jamais l’exception, dont l’entrée contient l’URL complète (mot de passe).
+ */
+function assertValidUrl(name, value) {
+  try {
+    new URL(value);
+  } catch {
+    refuse(`la variable ${name} contient une URL de base invalide.`);
+  }
+}
+assertValidUrl('TEST_DATABASE_URL', suiteUrl);
 
 let target;
 try {
@@ -72,18 +86,18 @@ if (!isLocalDatabase(suiteUrl)) {
 
 // Bases configurées pour l'application (apps/api/.env lu sans injection, et environnement courant).
 const apiEnv = existsSync('apps/api/.env') ? dotenv.parse(readFileSync('apps/api/.env')) : {};
-const configured = [
-  apiEnv.DATABASE_URL,
-  apiEnv.DIRECT_URL,
-  apiEnv.SCHOOL_DATABASE_URL,
-  apiEnv.SCHOOL_DIRECT_URL,
-  process.env.DATABASE_URL,
-  process.env.DIRECT_URL,
-  process.env.SCHOOL_DATABASE_URL,
-  process.env.SCHOOL_DIRECT_URL,
-]
-  .filter(Boolean)
-  .map((u) => databaseIdentity(u));
+const configuredEntries = [
+  ['DATABASE_URL (apps/api/.env)', apiEnv.DATABASE_URL],
+  ['DIRECT_URL (apps/api/.env)', apiEnv.DIRECT_URL],
+  ['SCHOOL_DATABASE_URL (apps/api/.env)', apiEnv.SCHOOL_DATABASE_URL],
+  ['SCHOOL_DIRECT_URL (apps/api/.env)', apiEnv.SCHOOL_DIRECT_URL],
+  ['DATABASE_URL', process.env.DATABASE_URL],
+  ['DIRECT_URL', process.env.DIRECT_URL],
+  ['SCHOOL_DATABASE_URL', process.env.SCHOOL_DATABASE_URL],
+  ['SCHOOL_DIRECT_URL', process.env.SCHOOL_DIRECT_URL],
+].filter(([, u]) => Boolean(u));
+for (const [name, u] of configuredEntries) assertValidUrl(name, u);
+const configured = configuredEntries.map(([, u]) => databaseIdentity(u));
 if (configured.includes(databaseIdentity(schoolUrl))) {
   refuse('la base School de test désigne une base configurée pour l’application.');
 }

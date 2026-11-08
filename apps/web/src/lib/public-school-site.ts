@@ -69,7 +69,8 @@ const SCHOOL_SITEMAP_TIMEOUT_MS = 5_000;
 /**
  * Entrées School du plan du site, sans cache (une dépublication ou une résiliation retire aussitôt les
  * pages). `null` si l'API ne répond pas (erreur réseau, délai dépassé, réponse illisible) : l'appelant
- * sert alors le reste du plan au lieu d'échouer en entier. Réponse non OK (School désactivé…) : aucune entrée.
+ * sert alors le reste du plan au lieu d'échouer en entier. Erreur transitoire (5xx, 429) : également
+ * `null` — jamais un plan vide servi en 200. Autre réponse non OK (School désactivé…) : aucune entrée.
  */
 export async function fetchSchoolSitemap(
   host: string,
@@ -83,6 +84,7 @@ export async function fetchSchoolSitemap(
         signal: AbortSignal.timeout(SCHOOL_SITEMAP_TIMEOUT_MS),
       },
     );
+    if (res.status >= 500 || res.status === 429) return null;
     return res.ok ? await res.json() : [];
   } catch {
     return null;
