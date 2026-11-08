@@ -20,6 +20,7 @@
     "test": "pnpm -r run test",
     "test:integration": "node scripts/run-with-log.mjs integration pnpm --filter @ocall/api run test:integration",
     "test:e2e": "node scripts/run-with-log.mjs e2e playwright test",
+    "school:recette:neon": "node scripts/school-neon-recette.mjs",
     "db:generate": "pnpm --filter @ocall/database run generate",
     "db:check": "pnpm --filter @ocall/database run check",
     "db:migrate:check": "pnpm --filter @ocall/database run migrate:check",

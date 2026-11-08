@@ -12,6 +12,7 @@ import { AuditService } from '../../common/audit/audit.service';
 import type { AuthContext } from '../../common/auth-context';
 import type { RequestMeta } from '../../common/request-meta';
 import { PasswordService } from '../../common/security/password.service';
+import { PortalAccounts } from '../../common/security/portal-accounts';
 import { SessionService } from '../../common/security/session.service';
 import { generateToken, hashToken } from '../../common/security/tokens';
 import { OrganizationProvisioningService } from '../organizations/organization-provisioning.service';
@@ -39,6 +40,7 @@ export class AuthService {
     private readonly provisioning: OrganizationProvisioningService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Inject(PASSWORD_RESET_NOTIFIER) private readonly notifier: PasswordResetNotifier,
+    private readonly portals: PortalAccounts,
   ) {}
 
   /** Inscription publique : crée l'organisation, son propriétaire et ouvre une session. */
@@ -122,19 +124,20 @@ export class AuthService {
         include: { organization: { select: { status: true } } },
         orderBy: { createdAt: 'asc' },
       });
-      if (!membership)
+      // Sans adhésion : seul un compte de portail actif (parents, Sprint 6) peut ouvrir une session.
+      if (!membership && !(await this.portals.kindOf(user.id)))
         throw new ForbiddenException({
           code: 'ACCOUNT_DISABLED',
           message: 'Ce compte est désactivé.',
         });
-      if (membership.organization.status !== 'ACTIVE') {
+      if (membership && membership.organization.status !== 'ACTIVE') {
         throw new ForbiddenException({
           code: 'ORGANIZATION_SUSPENDED',
           message: 'Cette organisation est suspendue.',
         });
       }
-      membershipId = membership.id;
-      organizationId = membership.organizationId;
+      membershipId = membership?.id ?? null;
+      organizationId = membership?.organizationId ?? null;
     }
 
     await this.prisma.user.update({

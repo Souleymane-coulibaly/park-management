@@ -50,7 +50,9 @@ export async function checkConnectivity(): Promise<void> {
       cache: 'no-store',
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     });
-    recordProbe(res.status < 500);
+    // Une sonde partie AVANT une coupure peut aboutir après : son succès ne doit pas effacer la coupure
+    // signalée entre-temps par le navigateur (l'indicateur resterait masqué jusqu'à la sonde suivante).
+    recordProbe(navigator.onLine && res.status < 500);
   } catch {
     recordProbe(false);
   } finally {

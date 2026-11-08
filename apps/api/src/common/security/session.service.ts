@@ -4,6 +4,7 @@ import { APP_CONFIG, type AppConfig } from '../../config/app-config';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { AuthContext } from '../auth-context';
 import type { RequestMeta } from '../request-meta';
+import { PortalAccounts } from './portal-accounts';
 import { platformRoleRequiresMfa } from '@ocall/shared';
 import { generateToken, hashToken } from './tokens';
 
@@ -17,6 +18,7 @@ export class SessionService {
   constructor(
     private readonly prisma: PrismaService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    private readonly portals: PortalAccounts,
   ) {}
 
   get ttlMs(): number {
@@ -68,12 +70,15 @@ export class SessionService {
     const partner = user.partner;
     // Un compte partenaire est exclusif : jamais membre d'une organisation ni compte interne.
     if (partner && (membership || user.platformRole)) return null;
+    let portal: AuthContext['portal'] = null;
     if (membership) {
       if (!membership.isActive || membership.organization.status !== 'ACTIVE') return null;
     } else if (partner) {
       if (partner.status === 'SUSPENDED') return null;
     } else if (!user.platformRole) {
-      return null;
+      // Compte de portail (parents) : accepté seulement tant que son module le déclare actif.
+      portal = await this.portals.kindOf(user.id);
+      if (!portal) return null;
     }
 
     if (Date.now() - session.lastSeenAt.getTime() > TOUCH_INTERVAL_MS) {
@@ -115,6 +120,7 @@ export class SessionService {
               status: partner.status,
             }
           : null,
+      portal,
       membership: membership
         ? {
             id: membership.id,

@@ -2,14 +2,19 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Menu, X } from 'lucide-react';
-import { Logo } from '@/components/brand/logo';
-import { ButtonLink } from '@/components/ui/button';
+import { SuiteLogo } from '@/components/brand/suite-logo';
+import { TRIAL_DAYS, TRIAL_HREF } from '@/lib/suite-landing';
 
+/**
+ * Navigation du site commercial : pas de lien vers des tarifs globaux (les tarifs appartiennent à la
+ * page de chaque logiciel), uniquement des pages et ancres existantes.
+ */
 const LINKS = [
+  { href: '/#logiciels', label: 'Nos logiciels' },
   { href: '/solutions', label: 'Nos solutions' },
-  { href: '/tarifs', label: 'Tarifs' },
+  { href: '/#ia', label: 'IA Ocall' },
   { href: '/a-propos', label: 'À propos' },
   { href: '/contact', label: 'Contact' },
 ];
@@ -18,13 +23,21 @@ const LINKS = [
 export function SiteHeader() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
-  const active = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  const active = (href: string) =>
+    !href.includes('#') && (pathname === href || pathname.startsWith(`${href}/`));
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open]);
 
   return (
-    <header className="sticky top-0 z-30 border-b border-line/60 bg-ivory/90 backdrop-blur">
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
-        <Link href="/" aria-label="Ocall Suite — accueil">
-          <Logo product="Suite" />
+    <header className="sticky top-0 z-30 border-b border-suite-ink/5 bg-suite-ivory/90 backdrop-blur">
+      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-4 px-4 sm:px-6">
+        <Link href="/" aria-label="Ocall Suite — accueil" className="shrink-0">
+          <SuiteLogo />
         </Link>
         <nav className="hidden items-center gap-1 lg:flex" aria-label="Navigation principale">
           {LINKS.map((l) => (
@@ -32,23 +45,29 @@ export function SiteHeader() {
               key={l.href}
               href={l.href}
               aria-current={active(l.href) ? 'page' : undefined}
-              className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${active(l.href) ? 'text-forest' : 'text-charcoal-soft hover:text-charcoal'}`}
+              className={`rounded-lg px-3 py-2 text-sm font-medium transition-colors ${active(l.href) ? 'text-suite-green' : 'text-suite-ink-soft hover:text-suite-ink'}`}
             >
               {l.label}
             </Link>
           ))}
         </nav>
         <div className="hidden items-center gap-2 lg:flex">
-          <ButtonLink href="/connexion" variant="ghost" size="sm">
-            Connexion
-          </ButtonLink>
-          <ButtonLink href="/demo" size="sm">
-            Demander une démo
-          </ButtonLink>
+          <Link
+            href="/connexion"
+            className="rounded-xl border-2 border-suite-green px-4 py-2 text-sm font-semibold text-suite-green transition hover:bg-suite-green-soft"
+          >
+            Se connecter
+          </Link>
+          <Link
+            href={TRIAL_HREF}
+            className="rounded-xl bg-suite-gold px-4 py-2.5 text-sm font-semibold text-suite-ink shadow-sm transition hover:brightness-95"
+          >
+            Essai gratuit {TRIAL_DAYS} jours
+          </Link>
         </div>
         <button
           type="button"
-          className="rounded-lg p-2 text-charcoal lg:hidden"
+          className="rounded-lg p-2 text-suite-ink lg:hidden"
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
           aria-controls="mobile-menu"
@@ -60,7 +79,7 @@ export function SiteHeader() {
       {open && (
         <nav
           id="mobile-menu"
-          className="border-t border-line/60 bg-ivory px-4 pb-4 pt-2 lg:hidden"
+          className="border-t border-suite-ink/5 bg-suite-ivory px-4 pb-4 pt-2 lg:hidden"
           aria-label="Navigation mobile"
         >
           {LINKS.map((l) => (
@@ -68,16 +87,26 @@ export function SiteHeader() {
               key={l.href}
               href={l.href}
               onClick={() => setOpen(false)}
-              className="block rounded-lg px-3 py-2.5 font-medium"
+              className="block rounded-lg px-3 py-2.5 font-medium text-suite-ink"
             >
               {l.label}
             </Link>
           ))}
           <div className="mt-3 grid grid-cols-2 gap-2">
-            <ButtonLink href="/connexion" variant="secondary">
-              Connexion
-            </ButtonLink>
-            <ButtonLink href="/demo">Démo</ButtonLink>
+            <Link
+              href="/connexion"
+              onClick={() => setOpen(false)}
+              className="rounded-xl border-2 border-suite-green px-3 py-2.5 text-center text-sm font-semibold text-suite-green"
+            >
+              Se connecter
+            </Link>
+            <Link
+              href={TRIAL_HREF}
+              onClick={() => setOpen(false)}
+              className="rounded-xl bg-suite-gold px-3 py-2.5 text-center text-sm font-semibold text-suite-ink"
+            >
+              Essai gratuit
+            </Link>
           </div>
         </nav>
       )}

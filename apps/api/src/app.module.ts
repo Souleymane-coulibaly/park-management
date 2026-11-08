@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD } from '@nestjs/core';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
+import { VisitorAwareThrottlerGuard } from './common/visitor-throttler.guard';
 import { APP_CONFIG, type AppConfig } from './config/app-config';
 import { ConfigModule } from './config/config.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -15,6 +16,7 @@ import { OriginGuard } from './common/guards/origin.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
 import { HttpExceptionFilter } from './common/http-exception.filter';
 import { throttlerOptions } from './common/throttling';
+import { AiCoreModule } from './ai-core/ai-core.module';
 import { AiModule } from './modules/ai/ai.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { PublicSitesModule } from './modules/public-sites/public-sites.module';
@@ -78,6 +80,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     CrmModule,
     LoyaltyModule,
     PlanningModule,
+    AiCoreModule,
     AiModule,
     AnalyticsModule,
     PublicSitesModule,
@@ -91,7 +94,8 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
   controllers: [HealthController],
   providers: [
     // Ordre d'exécution : anti-rejeu, origine (CSRF), authentification, puis RBAC.
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    // Limitation par IP ; IP du visiteur pour les lectures authentifiées du serveur web (sites School).
+    { provide: APP_GUARD, useClass: VisitorAwareThrottlerGuard },
     { provide: APP_GUARD, useClass: OriginGuard },
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },

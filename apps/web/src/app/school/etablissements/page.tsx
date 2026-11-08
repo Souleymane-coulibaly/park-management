@@ -20,12 +20,12 @@ import { type ApiError, api } from '@/lib/api';
 export default function EtablissementsPage() {
   return (
     <SchoolPage title="schools.title" description="schools.desc" needsSchool={false}>
-      {({ context, canWrite, reloadContext }) => (
+      {(page) => (
         <Schools
-          schools={context.schools}
-          canCreate={canWrite('school.schools.manage')}
-          canSetLocale={canWrite('school.structure.manage')}
-          reload={reloadContext}
+          schools={page.context.schools}
+          canCreate={page.forSchool(null).canWrite('school.schools.manage')}
+          canSetLocale={(id) => page.forSchool(id).canWrite('school.structure.manage')}
+          reload={page.reloadContext}
         />
       )}
     </SchoolPage>
@@ -40,7 +40,7 @@ function Schools({
 }: {
   schools: SchoolSummary[];
   canCreate: boolean;
-  canSetLocale: boolean;
+  canSetLocale: (schoolId: string) => boolean;
   reload: () => void;
 }) {
   const { t, labels } = useSchoolText();
@@ -62,7 +62,7 @@ function Schools({
                   {labels.locale[s.defaultLocale]}
                 </span>
               </div>
-              {canSetLocale && <LocaleSetting school={s} onDone={reload} />}
+              {canSetLocale(s.id) && <LocaleSetting school={s} onDone={reload} />}
             </li>
           ))}
         </ul>

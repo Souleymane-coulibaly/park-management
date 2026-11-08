@@ -1,3 +1,5 @@
+import { databaseIdentity } from './migration-safety';
+
 /**
  * Garde-fou des tests automatisés : les tests d'intégration et E2E créent puis suppriment
  * des données. Ils ne s’exécutent QUE sur une base dédiée (`TEST_DATABASE_URL`, branche Neon
@@ -8,7 +10,7 @@ export interface TestDatabase {
   directUrl: string;
 }
 
-const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
 /** Identité d'une base : hôte sans le suffixe « -pooler » de Neon, et nom de la base. */
 function identity(url: string): { host: string; database: string } {
@@ -52,6 +54,52 @@ export const TEST_MARKER_QUERY = `SELECT "value" FROM "${TEST_MARKER_TABLE}" WHE
 
 export function isLocalDatabase(url: string): boolean {
   return LOCAL_HOSTS.has(identity(url).host);
+}
+
+/** Déclaration explicite d'une base locale éphémère partagée avec l'application (conteneur de CI). */
+export const EPHEMERAL_OPT_IN = 'OCALL_TEST_EPHEMERAL_DATABASE';
+
+/** Dérogation explicite, par exécution, pour une base distante marquée « test » (recette autorisée). */
+export const REMOTE_TEST_OPT_IN = 'OCALL_TEST_ALLOW_MARKED_REMOTE';
+
+/**
+ * Protection bloquante des tests d'intégration : ils ne s'exécutent que sur des bases PostgreSQL locales
+ * jetables. Refus si une base de test est distante (sauf dérogation explicite, et le marqueur « test »
+ * reste alors exigé), si elle désigne une base configurée pour l'application (développement ou
+ * production : `DATABASE_URL`, `DIRECT_URL`, `SCHOOL_DATABASE_URL`), ou en environnement de production.
+ */
+export function assertDisposableTestDatabases(
+  urls: readonly (string | undefined)[],
+  env: NodeJS.ProcessEnv = process.env,
+): void {
+  if (env.NODE_ENV === 'production' || env.RAILWAY_ENVIRONMENT_NAME === 'production') {
+    throw new Error('Refus : aucun test d’intégration en environnement de production.');
+  }
+  // Identité canonique (alias locaux, port effectif, nom décodé) : une même base, écrite autrement,
+  // reste la même base.
+  const configured = new Set(
+    [env.DATABASE_URL, env.DIRECT_URL, env.SCHOOL_DATABASE_URL]
+      .filter((u): u is string => Boolean(u))
+      .map((u) => databaseIdentity(u)),
+  );
+  for (const url of urls) {
+    if (!url) continue;
+    const test = identity(url);
+    // Seul cas admis : base locale DÉCLARÉE jetable par le pipeline qui la crée et la détruit (conteneur
+    // de service). `CI=true` ne prouve rien (un runner auto-hébergé peut viser une base persistante).
+    const ciEphemeral = env[EPHEMERAL_OPT_IN] === '1' && LOCAL_HOSTS.has(test.host);
+    if (!ciEphemeral && configured.has(databaseIdentity(url))) {
+      throw new Error(
+        'Refus : une base de test désigne une base configurée pour l’application (développement ou production).',
+      );
+    }
+    if (!LOCAL_HOSTS.has(test.host) && env[REMOTE_TEST_OPT_IN] !== '1') {
+      throw new Error(
+        'Refus : les tests d’intégration exigent une base PostgreSQL locale jetable. Une base distante ' +
+          `marquée « test » n’est acceptée qu’avec ${REMOTE_TEST_OPT_IN}=1, pour une exécution autorisée.`,
+      );
+    }
+  }
 }
 
 export async function assertTestDatabaseMarker(

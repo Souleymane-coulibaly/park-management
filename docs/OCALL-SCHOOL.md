@@ -1,4 +1,4 @@
-# Ocall School : Sprint 1
+# Ocall School
 
 Ocall School est un produit d'Ocall Suite, vendu **uniquement sur contrat B2B** : aucun tarif public,
 aucune offre à prix fixe. Ce sprint livre le socle : contrats, portail, structure pédagogique et rôles.
@@ -93,7 +93,8 @@ tout établissement créé sans précision est en Français. L'arabe est un choi
 
 `GradingPolicyVersion` : barème, moyenne de passage, décimales, règle des ex æquo, affichage des rangs.
 Ajout seul : chaque modification crée une version, pour que les futurs bulletins restent reproductibles.
-**Les moteurs de calcul ne sont pas livrés à ce sprint** : ces règles sont enregistrées, pas appliquées.
+Le moteur de calcul est livré au Sprint 4 (section 10) ; la règle facultative `absences` (écartées ou zéro)
+s’ajoute au JSON des versions, sans migration.
 
 ## 6. Déploiement
 
@@ -138,8 +139,32 @@ pas touché et aucune donnée n'est supprimée.
 TEST_DATABASE_URL=… TEST_SCHOOL_DATABASE_URL=… pnpm --filter @ocall/api exec jest --runInBand school-sprint1
 ```
 
-Une base School distante doit porter le marqueur de test (`pnpm db:school:mark-test`). La variable est
-`SCHOOL_TEST_DATABASE_URL`. Le workflow manuel `School Neon test` lit le secret GitHub du même nom.
+Tests d'intégration et E2E : bases PostgreSQL **locales jetables** uniquement (Suite et School distinctes).
+La même garde (`assertDisposableTestDatabases`) protège les tests d'intégration et, depuis la consolidation
+de `main`, les E2E. Elle s'applique aux bases Suite et School, au chargement de la configuration Playwright
+et avant chaque nettoyage.
+
+**CI** : `ci.yml` et le workflow manuel `School tests (base jetable)` utilisent des conteneurs PostgreSQL
+détruits avec le job. **La CI n'utilise jamais Neon** : aucun secret de base, aucune dérogation distante.
+
+**Recette sur la base Neon School `test`, en local uniquement**, avec vérification explicite de l'identité :
+
+```
+RECETTE_EXPECTED_ENDPOINT=ep-xxxx RECETTE_EXPECTED_DATABASE=neondb \
+SCHOOL_TEST_DATABASE_URL=… TEST_DATABASE_URL=postgresql://…@127.0.0.1:…/… \
+pnpm school:recette:neon            # ou : pnpm school:recette:neon -- school-sprint10
+```
+
+Le script refuse de s'exécuter :
+
+- en CI ;
+- si l'hôte ou le nom de la base ne correspondent pas à l'identité attendue ;
+- si la base est configurée pour l'application (développement ou production) ;
+- si la base Suite de test n'est pas locale ;
+- si le marqueur « test » est absent (`pnpm db:school:mark-test`).
+
+Il n'affiche jamais d'URL complète. La dérogation `OCALL_TEST_ALLOW_MARKED_REMOTE=1` n'est transmise qu'à
+cette exécution.
 
 ## 8. Sprint 2 : dossiers élèves
 
@@ -321,19 +346,717 @@ L'enseignant voit « Mes classes » (`GET teaching/mine`) et la fiche de ses seu
 pédagogique, historique), `/school/matieres` (catalogue, niveaux, activation), `/school/mes-classes`. Tous
 suivent la langue de l'établissement (Sprint 3A) ; une fiche de classe suit celle de la classe.
 
-## 10. Limites actuelles
+## 10. Sprint 4 : évaluations, notes, bulletins, mémorisation du Coran
 
+### Audit de l'existant
+
+Réutilisé tel quel : `AcademicPeriod` (création au Sprint 1 ; modification et suppression ajoutées),
+`GradingPolicyVersion` (barème, décimales, moyenne de passage, ex æquo, classement, versions en ajout seul ;
+réglage facultatif `absences` ajouté au JSON, sans migration), coefficients de `Subject` et `SubjectLevel`,
+affectations 3B (droits des enseignants), inscriptions validées (élèves d'une classe), journal des décisions.
+Rien n'existait pour les évaluations, les notes, les moyennes, les bulletins ni la mémorisation.
+
+### Modèles et migration
+
+Migration additive `20261107000000_evaluations_notes_bulletins_coran` : trois énumérations, huit tables,
+deux index uniques composés sur des tables existantes (`AcademicPeriod`, `Subject`), toujours satisfaits.
+`SchoolEvaluation`, `SchoolGrade`, `SchoolGradeEvent` (journal en ajout seul), `SchoolAppreciation`,
+`SchoolReportComment`, `SchoolResultValidation`, `SchoolQuranSettings`, `SchoolQuranProgress`,
+`SchoolQuranEvaluation`. Clés étrangères composées : PostgreSQL refuse une période d'une autre année, une
+matière d'un autre établissement, un groupe d'une autre classe. Contraintes écrites à la main : une note porte
+une valeur si et seulement si elle est « notée » (absence et dispense ne sont jamais un zéro), barème et
+coefficient positifs, sourate de 1 à 114, une seule validation active par classe et période (index partiel).
+Vérifiée par `prisma migrate diff` (différence vide) sur une base jetable. Non appliquée sur Neon.
+
+### Règles de calcul (`packages/shared/src/school-assessment.ts`)
+
+Moteur pur, partagé, testé à l'unité ; la version de règles appliquée est la plus récente entrée en vigueur à
+la fin de la période.
+
+- Moyenne de matière : notes ramenées au barème de l'établissement, pondérées par le coefficient de chaque
+  évaluation. Dispense et note non saisie écartées ; absence écartée (par défaut) ou comptée zéro selon la
+  règle `absences`. Une évaluation de groupe ne concerne que ses élèves.
+- Moyenne générale : moyennes de matière **arrondies** (celles du bulletin, pour qu'une famille puisse la
+  recalculer), pondérées par le coefficient de la matière au niveau (à défaut, celui de la matière) ; une
+  matière de coefficient 0 n'y entre pas.
+- Classement (si activé) : sur la moyenne arrondie, sans les matières exclues du classement ; ex æquo
+  `SHARED` (1, 1, 3) ou `DENSE` (1, 1, 2) ; un élève sans moyenne n'est pas classé.
+- Arrondi au plus proche, la moitié vers le haut, sans l'erreur binaire (1,005 → 1,01).
+
+### Notes, validation et verrouillage
+
+- Saisie individuelle ou en tableau (`PUT evaluations/:id/grades`) : seules les lignes réellement modifiées
+  sont écrites, chacune avec sa trace (avant, après, auteur, motif facultatif) dans la même transaction.
+  Une évaluation qui a reçu une note, même effacée depuis, ne se supprime plus ; un barème ne descend pas sous
+  une note saisie ; une période ne se raccourcit pas en laissant des évaluations dehors.
+- Validation par la direction : résultats calculés sous verrou, figés avec leurs règles dans la validation
+  (une nouvelle version des règles ne les change plus), décision tracée et publiée au journal Suite. Notes,
+  évaluations et appréciations des enseignants sont alors refusées (409 `RESULTS_VALIDATED`) ; l'appréciation
+  générale de la direction reste possible. Réouverture motivée : la validation reste dans l'historique, le
+  motif ne sort pas dans le journal.
+- Verrous, dans cet ordre : établissement (partagé, contre la clôture d'année), verrou consultatif de la
+  classe et de la période (sérialise toute écriture de résultats avec la validation), affectations de
+  l'enseignant (partagé : une fin d'affectation attend la saisie en cours), puis la ligne visée, bornée à
+  l'organisation. Lectures : contrôle et restitution dans un même instantané.
+
+### Durcissement (audit Codex du Sprint 4)
+
+- Ordre des verrous de toute écriture de résultats, aligné sur celui du module : établissement (partagé),
+  élèves visés (partagé, bornés à l’établissement de la classe ; étranger = 404), classe (partagé), année
+  (`FOR KEY SHARE`), verrou consultatif, affectations (partagé), période (partagé), ligne visée. Un transfert,
+  une sortie, un changement de classe ou de groupe et une fin d’affectation attendent la saisie en cours ;
+  aucune clé étrangère ne peut former de cycle. Une période se modifie sous verrou exclusif.
+- Vue de l’enseignant recalculée sur ses seules affectations : élèves, évaluations couvertes (une
+  affectation de groupe ne couvre que les évaluations du groupe), agrégats et appréciations.
+- Bulletins validés : élèves, effectif et rang figés par la validation, même après un changement de classe.
+- Mémorisation : élève et établissement relus dans l’instantané des données restituées ; numéro d’ordre
+  attribué sous verrou de l’élève pour départager deux évaluations du même jour.
+- Arrondi exact (mantisse et exposant séparés puis décalage décimal, jamais `NaN`), DTO de création strict,
+  404 pour toute ressource étrangère (historique d’une note, validations, saisies).
+- Passe 2 : historique d’une note contrôlé dans l’instantané (périmètre, inscription et groupe actuel de
+  l’élève) ; vue de l’enseignant d’une feuille validée calculée avec les règles et coefficients figés ;
+  appréciation générale possible pour un élève figé ; élèves autorisés par matière dans le formulaire des
+  appréciations ; vue coranique de classe limitée aux élèves encore rattachés à l’établissement ; classes de
+  l’élève verrouillées en partage avant une évaluation coranique (un changement de groupe attend).
+- Passe 3 : la validation verrouille en partage les élèves de la classe avant de calculer (une sortie en cours
+  attend : l’état figé est celui d’avant ou d’après) ; règles de classement entièrement validées avant
+  enregistrement (booléen, liste d’identifiants de matières de l’établissement) et lues avec tolérance ;
+  brouillons d’appréciations des autres matières conservés après un enregistrement.
+- Passe 4 : un élève entré dans la classe pendant la prise des verrous fait recommencer la validation (trois
+  essais, puis 409 `RESULTS_BUSY`), sans jamais verrouiller un élève après la classe ; identifiants de
+  matières exclues normalisés en minuscules ; saisies faites pendant un envoi conservées (notes,
+  appréciations, commentaires).
+- Passe 5 : clé du verrou consultatif construite sur les identifiants en minuscules (un UUID écrit en
+  majuscules ne contourne plus la sérialisation) ; une traduction arabe masquée (établissement en Français)
+  n’est ni écrasée ni supprimée par une modification du texte français.
+- Passe 6 : la validation fige aussi les groupes de chaque élève ; la vue de l’enseignant d’une feuille
+  validée se recalcule sur ces élèves et groupes figés (un retrait de groupe ultérieur ne change rien).
+- Preuves : 32 tests d’intégration sur PostgreSQL réel (attente d’un transfert, deux validations
+  simultanées, note et validation simultanées, évaluation coranique pendant un changement de groupe, verrou
+  étranger jamais attendu, validation pendant une sortie d’élève) et 16 mutations, toutes détectées. La
+  reprise d’une validation sur changement d’effectif n’a pas de test d’entrelacement déterministe.
+
+### Bulletins PDF
+
+Générés à la demande par l'API (`pdfkit`, sans navigateur), derrière la garde et la permission
+`school.report_cards`, jamais stockés : aucune adresse directe n'existe ; réponse `Cache-Control: no-store`,
+pièce jointe, chaque édition journalisée. Un élève ou toute la classe (une page par élève). Contenu :
+établissement, élève, classe et année, matières, coefficients, moyennes de l'élève et de la classe, moyenne
+générale, rang si activé, appréciations des enseignants et de la direction, date d'édition ; « Provisoire »
+avant validation. Français, Arabe (mise en page de droite à gauche, le français en repli d'un libellé sans
+traduction) et Bilingue (une langue par ligne). Aucun champ arabe exigé. Polices embarquées
+(`apps/api/assets/fonts`, Noto Sans et Noto Naskh Arabic, licence OFL jointe) ; ordre visuel du texte arabe
+par `school-rtl-text.ts` (version réduite de l'algorithme bidirectionnel Unicode, testée).
+
+### Mémorisation du Coran (module facultatif)
+
+- Actif seulement pour un établissement en **Bilingue** dont la direction l'a activé, avec la matière dont les
+  enseignants saisissent la mémorisation. Ailleurs, toutes les routes de données répondent 404 ; désactiver ou
+  changer de langue masque le module sans rien supprimer.
+- Catalogue de référence des 114 sourates (numéro, nom arabe, translittération, nombre de versets), généré
+  depuis les métadonnées Tanzil (CC BY 3.0) et vérifié par les tests (6 236 versets).
+- Suivi par élève et par sourate : Non commencée, En cours, Mémorisée, À réviser ; dates de mémorisation et
+  de dernière révision recalculées depuis tout l'historique, quel que soit l'ordre de saisie. Historique en
+  ajout seul (une erreur se corrige par une nouvelle évaluation).
+- Saisie par l'enseignant affecté à la matière Coran de la classe (ou du groupe) de l'élève ; consultation
+  par la direction ; chaque consultation et chaque évaluation journalisées ; aucun export. Données séparées
+  des notes : elles n'entrent dans aucune moyenne.
+- Lecture seule préparée pour le futur portail parents : `quranSurahStates` (statuts et dates, sans remarque
+  ni évaluateur). Aucune route parent n'est ouverte.
+
+### Droits
+
+| Permission                                                                 | Rôles                                                 |
+| -------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `school.assessment.read` (évaluations, notes, moyennes)                    | Direction, secrétariat, enseignant (ses affectations) |
+| `school.assessment.manage` (évaluations, notes, appréciations)             | Direction, enseignant (ses affectations)              |
+| `school.results.validate` (validation, réouverture, appréciation générale) | Direction                                             |
+| `school.report_cards` (moyennes générales, classements, bulletins PDF)     | Direction, secrétariat                                |
+| `school.quran.settings` (activation du module)                             | Direction                                             |
+| `school.quran.read` (progression)                                          | Direction, enseignant (matière Coran)                 |
+| `school.quran.manage` (évaluation de mémorisation)                         | Enseignant (matière Coran)                            |
+
+L'enseignant ne voit que les matières de ses affectations, sans moyenne générale ni rang. Une évaluation de
+toute la classe exige une affectation à toute la classe ; un enseignant de groupe n'évalue que son groupe. La
+fin d'une affectation retire ces droits à la requête suivante.
+
+### API (`/api/v1/school`)
+
+`GET periods`, `PATCH|DELETE periods/:id` ; `GET|POST evaluations`, `GET|PATCH|DELETE evaluations/:id`,
+`PUT evaluations/:id/grades`, `GET evaluations/:id/grades/:studentId/history` ; `GET results`,
+`PUT results/appreciations`, `GET|PUT results/comments`, `GET results/validations`, `POST results/validate`,
+`POST results/unlock` ; `GET report-cards`, `GET report-cards/pdf` ; `GET|PUT quran/settings`,
+`GET quran/surahs`, `GET quran/classes/:id`, `GET quran/students/:id`, `POST quran/students/:id/evaluations`.
+
+### Écrans
+
+`/school/periodes`, `/school/evaluations`, `/school/evaluations/[id]` (saisie en tableau, journal),
+`/school/resultats` (moyennes, validation, appréciations), `/school/classements`, `/school/bulletins`
+(appréciation de la direction, PDF), `/school/coran` (activation, progression de la classe),
+`/school/coran/eleves/[id]` (114 sourates, saisie, historique). Le réglage des absences est ajouté à
+`/school/notation`. Tous suivent la langue de l'établissement ; le menu général Ocall Suite est inchangé.
+
+## 11. Sprint 5 : gestion financière, frais et encaissements
+
+### Audit de l'existant
+
+Aucun modèle financier dans Ocall School. Ceux d'Ocall Park (ventes, paiements, factures) vivent dans la
+base Suite et ne sont pas réutilisés : aucune dépendance fonctionnelle à Park. Réutilisé : compteur
+atomique `SchoolNumberCounter` (numéros de reçus), journal des décisions, moteur PDF du Sprint 4 (mis en
+commun dans `school-pdf.ts`, sans duplication), exports CSV / XLSX du Sprint 2 (créneaux, plafond).
+
+### Modèles et migration
+
+Migration additive `20261108000000_finances_frais_encaissements` : huit énumérations, neuf tables
+(`SchoolFinanceSettings`, `SchoolFee`, `SchoolFeeInstallment`, `SchoolFeeEvent`, `SchoolCharge`,
+`SchoolChargeAdjustment`, `SchoolBenefit`, `SchoolPayment`, `SchoolPaymentAllocation`), aucune table
+existante modifiée. Contraintes écrites à la main : montants entiers bornés, devise sur trois lettres,
+réduction entre zéro et le montant, **jamais de trop-perçu** (payé ≤ dû), contrepassation liée à son
+encaissement, et un index partiel qui interdit d'encaisser deux fois la même référence de transaction
+(par établissement et par moyen) tant que l'encaissement reste confirmé. Migration additive
+`20261108010000_recu_identite_figee` : colonne `SchoolPayment.receiptSnapshot` (identité du reçu figée),
+obligatoire pour tout encaissement (CHECK). Vérifiées par `prisma migrate diff` (différence vide).
+
+### Règles (`packages/shared/src/school-finance.ts`)
+
+- **Montants exacts** : entiers en unités mineures de la devise de l'établissement (XOF par défaut ;
+  décimales selon ISO 4217), jamais de nombre à virgule. Saisie convertie sans arrondi ; partage exact
+  d'un total en échéances (la somme vaut toujours le total). Montant unitaire et total dû par élève et
+  par année bornés à 1 000 000 000 unités mineures (`AMOUNT_TOO_LARGE`, `TOTAL_TOO_LARGE`) : soldes,
+  contraintes SQL et reçus restent dans la plage des entiers.
+- **Frais** : inscription, réinscription, scolarité, cantine, transport, examen, divers ; par
+  établissement et année, éventuellement un niveau ou une classe ; montant, devise, date d'application,
+  obligatoire ou facultatif, activation, **historique** de chaque modification (avant, après, auteur,
+  échéancier saisi et échéances calculées compris). Un frais ne se facture qu'à partir de sa date
+  d'application (`FEE_NOT_YET_EFFECTIVE` avant).
+- **Non-rétroactivité** : chaque échéance copie libellé, date et montant à sa génération ; un nouveau
+  montant ne vaut que pour les échéances générées ensuite. L'échéancier d'un frais déjà facturé garde
+  son type et son nombre d'échéances.
+- **Échéanciers** : annuel, mensuel, trimestriel, personnalisé (somme contrôlée). Génération par élève
+  (inscription validée dans le périmètre du frais) ; **jamais deux fois** (unicité élève, frais, rang) ;
+  frais facultatif pour les seuls élèves désignés. Élèves verrouillés en exclusif, dans l'ordre de leurs
+  identifiants et dans l'établissement du frais, éligibilité relue sous ces verrous : un transfert ou un
+  changement de classe simultané n'est jamais facturé sur l'ancienne situation, deux générations se
+  suivent élève par élève (cumul jamais dépassé, aucune attente croisée).
+- **Statuts** : à venir, partiellement payé, payé, en retard (date limite dépassée et un reste), selon la
+  date du jour dans le fuseau de l'établissement. Ajustements signés, motivés, tracés ; jamais sous le
+  montant déjà payé. Ajustement d'une échéance et retrait d'un avantage : droit sur l'établissement de
+  l'écriture, possibles après un transfert de l'élève.
+- **Avantages** : réduction fixe (par échéance), en pourcentage, bourse partielle, exonération totale,
+  réduction familiale ; limités à un frais, une catégorie ou tous. Justifiés, accordés par la direction,
+  tracés (décision publiée) ; recalculés sur les échéances de l'année ; refusés s'ils créaient un
+  trop-perçu. Ils apparaissent distinctement des encaissements.
+
+### Encaissements, reçus et annulations
+
+- **Caisse** : espèces, virement, mobile money **déclaré** (jamais présenté comme vérifié par
+  l'opérateur, mention sur le reçu) ; paiement partiel ou couvrant plusieurs échéances (affectation
+  explicite, ou de la plus ancienne à la plus récente). Référence obligatoire hors espèces.
+- **Anti-doublon** : clé d'idempotence par formulaire (une soumission répétée renvoie le même
+  encaissement ; la même clé avec une autre demande, comparée par empreinte complète, répond
+  `IDEMPOTENCY_MISMATCH`), référence unique par moyen (index de la base), alerte sur un encaissement semblable de
+  moins de deux minutes, à confirmer explicitement.
+- **Atomicité** : encaissement, affectations et soldes dans une transaction, sous le verrou exclusif de
+  l'élève (deux caisses simultanées pour un même élève se suivent) puis de ses échéances ; numéro de
+  reçu par compteur atomique (`PRÉFIXE-AAAA-000001`). Droit de caisse relu sous le verrou de
+  l'établissement : une autorisation du secrétariat retirée pendant l'attente n'est jamais utilisée.
+  Chaque encaissement écrit sa décision (`school.payment_recorded`) dans sa transaction, publiée au
+  journal Suite avec reprise.
+- **Reçu PDF** à la demande (garde, permission, aucune adresse directe, `no-store`, journalisé) :
+  établissement, numéro, date, élève, classe et année, frais réglés, montant, moyen, référence, solde
+  restant figé à l'encaissement, mention de vérification. Français, Arabe (RTL) ou Bilingue. Un reçu
+  réédité reste identique au reçu remis : établissement, coordonnées, langue, fuseau, identité de l'élève
+  et année sont figés à l'encaissement ; seul le statut d'annulation est courant. Pagination explicite :
+  numéro du reçu, en-tête du tableau, filigrane et pied de page répétés ; total et mentions jamais
+  coupés ; chaque texte tient sur une ligne logique (retours à la ligne aplatis) et un mot plus large
+  que sa colonne est découpé (aussi pour l'arabe, bulletins compris) ; la largeur réservée à chaque mot
+  est celle de son dessin, ponctuation détachée comprise.
+- **Annulation** : réservée à la direction, motivée ; contrepassation (écriture négative sur les mêmes
+  échéances), encaissement initial conservé au statut annulé avec son reçu. Jamais de suppression ni de
+  modification directe ; correction par une nouvelle opération (la référence redevient utilisable).
+  Le droit suit l'établissement de l'encaissement : il reste annulable après un transfert de l'élève.
+
+### Tableau de bord, impayés, exports
+
+Attendu (dû après réductions et ajustements), encaissé, solde, réductions, échéances en retard, élèves en
+impayé, encaissements par mois et par moyen (nets des contrepassations), répartition par niveau et classe
+; filtres année, classe, type de frais, période. Impayés triés par retard. Exports CSV et XLSX (impayés,
+encaissements) : permission, créneaux et plafond partagés avec les exports élèves, journalisation, en-têtes
+dans la langue de l'établissement. Les filtres classe et type de frais s'appliquent aussi à l'export des
+encaissements : un encaissement est retenu s'il touche une échéance du type filtré, pour un élève inscrit
+dans la classe filtrée, et il est exporté pour son montant total. Attendu, encaissé et solde décrivent la
+situation de l'année à ce jour (attendu = encaissé + solde) ; avec un filtre de dates, un indicateur
+distinct « encaissé sur la période » (affectations datées, contrepassations comprises, aussi par classe)
+s'y ajoute, avec une note explicative. Historique des encaissements et reçus paginé par 100 dans un ordre
+total (date, création, identifiant) ; les reçus sont filtrés par la base avant la pagination. Les lignes
+d'un reçu suivent un ordre stable (date limite, rang). Les jours filtrés (historique, tableau de bord,
+export) et les mois des encaissements s'entendent dans le fuseau de l'établissement, comme les dates des
+reçus ; un jour commence à son premier instant local, même quand un changement d'heure supprime minuit.
+L'historique est recréé après une annulation : aucune page chargée auparavant ne s'y mêle. En caisse, un
+montant d'affectation renseigné mais invalide bloque l'encaissement. Dans les exports, les montants sont des nombres (signés pour les contrepassations), jamais du
+texte. Les impayés sont agrégés par la base
+(une ligne par élève) et l'export borné avant construction ; limiteur dédié aux exports (30 par
+10 minutes et par IP). Écrans des réductions et des impayés :
+aucun montant ni aucune saisie avant le chargement de la devise réelle de l'établissement.
+
+### Droits
+
+| Permission                                                           | Rôles                                                            |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `school.finance.read` (situation, échéances, paiements, reçus)       | Direction, comptabilité, secrétariat                             |
+| `school.finance.settings` (réglages, frais, échéanciers, génération) | Direction                                                        |
+| `school.finance.collect` (encaissement)                              | Direction, comptabilité ; secrétariat si la direction l'autorise |
+| `school.finance.benefits` (avantages, ajustements)                   | Direction                                                        |
+| `school.finance.cancel` (annulation, contrepassation)                | Direction                                                        |
+| `school.finance.reports` (tableau de bord, impayés, exports)         | Direction, comptabilité                                          |
+
+Enseignants et surveillance : aucun accès financier. Parents : vue en lecture seule préparée
+(`guardianChargeView`, sans agent ni motif interne) ; aucune route parent ouverte.
+
+### API (`/api/v1/school/finance`)
+
+`GET|PUT settings` ; `GET|POST fees`, `GET|PATCH fees/:id`, `GET fees/:id/history`,
+`POST fees/:id/generate` ; `GET students/:id` ; `POST charges/:id/adjust` ; `GET|POST benefits`,
+`POST benefits/:id/revoke` ; `GET|POST payments` (liste : `{ items, nextCursor }`, paramètres
+`cursor` et `receipts`), `GET payments/:id`, `POST payments/:id/cancel`,
+`GET payments/:id/receipt` ; `GET dashboard`, `GET unpaid`, `GET export` ; `GET leavers` (élèves
+sortis qui doivent encore une échéance de l'année dans l'établissement, recherche `q` par nom ou
+matricule, 50 au plus avec `truncated` invitant à affiner ; proposés à la caisse et à la situation).
+
+### Écrans
+
+`/school/finances` (tableau de bord), `/school/finances/parametres`, `/school/finances/frais`,
+`/school/finances/echeanciers`, `/school/finances/eleves`, `/school/finances/caisse`,
+`/school/finances/paiements`, `/school/finances/recus`, `/school/finances/impayes`,
+`/school/finances/reductions`. Ordinateur et tablette ; langue de l'établissement ; menu Ocall Park
+inchangé.
+
+## 12. Sprint 6 : portail parents, présences, communication et notifications
+
+### Audit de l'existant
+
+Réutilisé : authentification Suite (connexion, sessions, réinitialisation du mot de passe), liens
+responsables du Sprint 2 (`canViewSchoolInfo`, `canReceiveSms`, `portalUserId` déjà prévu), résultats figés
+des validations du Sprint 4 et moteur des bulletins PDF, situation financière et reçus du Sprint 5
+(`guardianChargeView`, `receiptSnapshot`), vue des 114 sourates (`quranSurahStates`), journal des décisions,
+Service Worker de la PWA. Absents au départ : compte parent (la connexion n'acceptait que membres, comptes
+internes et partenaires), présences, annonces, notifications, SMS, notion de « publié aux familles ».
+
+### Comptes parents
+
+- **Compte Suite sans adhésion**, déclaré au cœur de l'authentification par un registre de portails
+  (`PortalAccounts`) : le module School s'y inscrit au démarrage, le cœur ne dépend d'aucun module métier.
+  Aucune migration de la base Suite (Ocall Park). `/auth/me` renvoie `accountKind: 'guardian'` ; la connexion
+  mène à `/parents` ; aucune route du personnel n'est ouverte à ce compte, et inversement.
+- **Invitation** par l'établissement (`school.portal.manage`) : jeton haché, usage unique, 7 jours, révocable ;
+  une nouvelle invitation révoque la précédente (opérations sérialisées sur la fiche responsable, même ordre
+  de verrouillage que l'activation et les révocations). Le lien n'est affiché qu'une fois au personnel et peut partir
+  par SMS (adresse publique `SCHOOL_PORTAL_BASE_URL`). Refusée si le responsable n'est autorisé à suivre aucun
+  enfant (`NO_AUTHORIZED_CHILD`).
+- **Activation** publique (`/parents/activation`, limitée en débit) : vérification sans consommation, puis
+  consommation sous verrou ; création du compte (identifiant de l'organisation) ou, pour un compte existant,
+  nouveau mot de passe et sessions fermées. Échec de la partie School : le compte Suite créé est désactivé.
+  L'activation est journalisée dans la transaction School puis publiée au journal Suite (reprise en cas
+  d'échec) : une erreur de journalisation ne désactive jamais un compte activé.
+- **Enfants visibles** : uniquement les liens que l'établissement a autorisés (`canViewSchoolInfo`), élève du
+  même établissement que la fiche, hors transfert, organisation non suspendue dans Ocall Suite, contrat
+  School encore actif et couvrant l'établissement (lecture seule : aucune soumission). Un parent ne rattache jamais seul un élève. Plusieurs enfants par compte, plusieurs comptes par
+  enfant.
+- **Révocation** : retrait du rattachement (lien du Sprint 2) ou de l'accès (`portalUserId` retiré ; le compte
+  de l'organisation est révoqué quand il ne suit plus aucune fiche). Effet à la requête suivante : la session
+  relit le compte à chaque requête.
+
+### Présences
+
+- Appel par classe, date et séance (`JOURNEE` par défaut, code court sinon) ; **jamais deux appels pour une
+  même séance** (unicité en base, création sous verrou). Date ni future (fuseau de l'établissement) ni hors de
+  l'année ; année clôturée refusée.
+- Enregistrement collectif ou individuel ; **correction motivée** obligatoire pour un relevé existant
+  (`CORRECTION_REASON_REQUIRED`) ; historique en ajout seul (saisie et corrections, auteur, motif, valeurs
+  avant et après du statut, des minutes de retard et de la note). L'écran d'appel renvoie les notes existantes
+  et envoie une grande classe par lots de 200. Un élève relevé puis sorti de la classe reste affiché et
+  corrigeable ; une nouvelle saisie exige l'effectif actuel (pas d'effectif reconstitué à une date passée).
+- L'enseignant ne fait l'appel et ne consulte que **ses classes** (affectation revérifiée et tenue sous verrou
+  pendant l'enregistrement) ; l'historique d'un élève ne lui montre que les relevés de ses classes, sans les
+  justificatifs. Surveillant, secrétariat et direction dans leur périmètre (l'historique d'un élève transféré
+  exclut les relevés et justificatifs des établissements hors périmètre). Statistiques par élève et par
+  classe (un retard compte comme une présence), suivi des retards ; statistiques individuelles agrégées sur
+  toute la période, la liste affichée étant limitée ; les statistiques de classe incluent les élèves sortis (`truncated`, signalé aux parents).
+- **Justificatifs** : motif transmis par le parent (en attente) ou saisi par l'établissement (accepté) ; un mois
+  au plus, au plus un mois à l'avance. Accepté, il justifie les absences relevées sur sa période et celles
+  saisies ensuite, **dans son établissement seulement** (après un transfert, jamais celles du nouvel
+  établissement) ; l'appel et l'acceptation prennent un même verrou par élève (ordre trié), sans fenêtre.
+
+### Résultats, bulletins, finances et Coran pour les parents
+
+- **Publication aux familles** (`school.results.publish`, direction) des résultats validés d'une classe pour une
+  période, liée à cette validation : rouverts, ils disparaissent du portail jusqu'à une nouvelle validation et
+  publication. Les parents voient moyennes, notes des évaluations de la période publiée, rang si
+  l'établissement l'affiche, et le bulletin PDF de leur enfant seulement (jamais un brouillon ni des notes non
+  validées). Publication, validation et notes sont lues dans un même instantané.
+- **Finances** en lecture seule : échéances (sans motif interne), paiements, reçus PDF, soldes ; aucun paiement
+  en ligne ni encaissement.
+- **Coran** : seulement si le module est actif pour l'établissement (sinon introuvable) ; progression, 114
+  sourates, évaluations, et observations des enseignants **uniquement celles qu'ils ont autorisées**
+  (`remarkShared`, nouvelle case à la saisie).
+
+### Annonces, notifications et SMS
+
+- **Annonces** : brouillon, publication, archivage, expiration facultative, historique. Publics : tout
+  l'établissement, des classes, des élèves, des responsables choisis ; l'enseignant (`school.announcements.class`)
+  ne publie que pour ses classes, revérifiées à la publication. Contenu, public et cibles relus sous le
+  verrou du brouillon au moment de publier. Les parents ne voient que ce qui vise leurs enfants (50 par page).
+- **Notifications internes** : nouvelle annonce, absence, retard, bulletin publié, nouvelle échéance, échéance
+  impayée (contrôle horaire, parcours par curseur, échéance relue sous verrou, notification et SMS d'une échéance écrits ensemble).
+  Destinataires : responsables et élèves de l'établissement du fait seulement. Les notifications de nouvelles échéances sont écrites dans
+  la transaction de génération. Une seule notification par fait et par compte (clé du fait unique) ; non
+  lues, lecture, tout marquer lu, pagination, lien vers la page concernée ; limitées aux enfants autorisés aujourd'hui (une notification d'annonce reste
+  consultable tant que l'annonce vise encore l'un d'eux).
+- **SMS** : désactivés par défaut, activés par la direction. File d'attente en base, envoi hors transaction,
+  tentatives bornées (5, aussi en base) à délai croissant ; bail expiré après la dernière tentative : échec
+  définitif, jamais une tentative de plus ; destinataire relu avant l'envoi (lien retiré, SMS refusés ou désactivés, numéro changé : message annulé) ; échec définitif conservé, historique aux numéros masqués (filtre par statut, pagination). Textes
+  courts sans note, montant ni motif (prénom et date au plus). Fournisseur par adaptateur
+  (`SCHOOL_SMS_PROVIDER`, clé `SCHOOL_SMS_API_KEY` lue dans l'environnement, jamais dans le code) : seul le
+  fournisseur **simulé** est livré, aucun SMS réel n'est envoyé.
+
+### Modèles et migration
+
+Migration additive `20261109000000_portail_parents_presences_communication` : 13 tables (`SchoolPortalAccount`,
+`SchoolGuardianInvitation`, `SchoolAttendanceSession`, `SchoolAttendanceRecord`, `SchoolAttendanceEvent`,
+`SchoolAbsenceJustification`, `SchoolResultPublication`, `SchoolAnnouncement`, `SchoolAnnouncementTarget`,
+`SchoolAnnouncementEvent`, `SchoolNotification`, `SchoolSmsSettings`, `SchoolSmsMessage`) et la colonne
+`SchoolQuranEvaluation.remarkShared`. Contraintes écrites à la main : format de séance, retard réservé au
+statut « en retard », période de justificatif, une seule publication active par classe et période, une cible
+par destinataire, tentatives SMS bornées. Vérifiée par `prisma migrate diff` (différence vide).
+
+### Droits
+
+| Permission                                          | Rôles                                                          |
+| --------------------------------------------------- | -------------------------------------------------------------- |
+| `school.portal.manage` (invitations, accès)         | Direction, secrétariat                                         |
+| `school.results.publish`                            | Direction                                                      |
+| `school.attendance.read` / `school.attendance.take` | Direction, secrétariat, surveillant ; enseignant (ses classes) |
+| `school.attendance.justify`                         | Direction, secrétariat, surveillant                            |
+| `school.announcements.manage`                       | Direction, secrétariat                                         |
+| `school.announcements.class`                        | Direction, secrétariat ; enseignant (ses classes)              |
+| `school.sms.manage`                                 | Direction                                                      |
+
+Parents : consultation des enfants autorisés, motif d'absence, annonces et notifications, sur leurs seules
+routes (`/api/v1/school/portal`).
+
+### API
+
+Établissement : `GET guardians/:id/portal`, `POST guardians/:id/portal/invitations`,
+`POST guardians/:id/portal/invitations/:id/revoke`, `POST guardians/:id/portal/revoke` ;
+`GET|PUT attendance/sheet`, `GET attendance/records/:id/history`, `GET attendance/students/:id`,
+`GET attendance/stats`, `GET|POST attendance/justifications`, `POST attendance/justifications/:id/review` ;
+`GET|POST results/publications`, `POST results/publications/:id/withdraw` ; `GET|POST announcements`,
+`GET|PUT announcements/:id`, `POST announcements/:id/publish|archive` ; `GET|PUT sms/settings`,
+`GET sms/messages`. Public : `POST portal/activation/check`, `POST portal/activation`. Parents :
+`GET portal/dashboard`, `GET portal/children`, `GET portal/children/:id/attendance`,
+`POST portal/children/:id/justifications`, `GET portal/children/:id/results`,
+`GET portal/children/:id/report-cards/:publicationId`, `GET portal/children/:id/finance`,
+`GET portal/children/:id/payments/:id/receipt`, `GET portal/children/:id/quran`, `GET portal/announcements`,
+`GET portal/notifications`, `POST portal/notifications/:id/read`, `POST portal/notifications/read-all`.
+
+### Écrans
+
+Parents (`/parents`, PWA installable, manifeste propre, langue de l'établissement de l'enfant, arabe de
+droite à gauche) : activation, tableau de bord, mes enfants, présences et absences (motif), résultats,
+bulletins, situation financière, mémorisation du Coran, annonces, notifications, profil ; connexion par
+`/connexion`. Établissement : `/school/portail-parents`, `/school/presences`, `/school/presences/justificatifs`,
+`/school/communication` (annonces, SMS), `/school/publications`.
+
+## 13. Sprint 7 : emplois du temps, salles, calendrier scolaire et examens
+
+### Audit de l'existant
+
+Réutilisé : années et périodes (`SchoolYear`, `AcademicPeriod`), classes et groupes, matières et horaire
+indicatif par niveau, affectations d'enseignement du Sprint 3B (seule source « enseignant × classe ×
+matière »), évaluations du Sprint 4 (seule source des notes), fuseau et langue de l'établissement, portail
+parents et centre de notifications du Sprint 6, journal des décisions. Absents au départ : salles, emplois
+du temps, calendrier d'événements, horaires d'examens, indisponibilités. Aucun compte élève : les élèves
+consultent par le portail parents. Le centre de notifications reste celui des familles.
+
+### Choix validés
+
+1. **Semaine type versionnée** : une version par classe et par période de validité, brouillon puis
+   publication ; annulation ponctuelle d'un cours par exception datée.
+2. **Examens** : programmation dans une table liée à l'évaluation du Sprint 4 (aucun second système de notes).
+3. **Indisponibilités** : fermetures du calendrier (vacances, fériés, journées pédagogiques) et
+   indisponibilités hebdomadaires de chaque enseignant.
+4. **Notifications** : familles par le centre existant ; enseignants par le fil des changements publiés.
+
+### Emplois du temps
+
+- Version : classe, validité dans l'année (année non clôturée), libellé, copie d'une version de la classe
+  (semaine type) ; un seul brouillon par classe (index partiel). Suppression d'un brouillon seulement.
+- Créneau : jour ISO (lundi à dimanche, chaque établissement choisit ses jours), début et fin (fin après le
+  début, minuit accepté), cours (matière, enseignant, groupe et salle facultatifs) ou pause (récréation,
+  déjeuner), contrainte SQL comprise. L'enseignant d'un cours doit avoir une affectation active pour la
+  matière dans la classe (ou le groupe).
+- **Conflits refusés** à la création, à la modification et à la publication : chevauchement dans la classe
+  (deux groupes différents peuvent avoir cours en même temps), même enseignant dans une autre classe (y
+  compris d'un autre établissement du groupe), même salle, indisponibilité de l'enseignant, affectation
+  terminée. Chaque refus détaille les créneaux en cause (jour, heures, classe) en français ou en arabe.
+- Vérification sans publier, puis **publication par la direction** (`school.planning.publish`) : tout est
+  revérifié sous verrou ; les versions publiées de la classe qui la recouvrent sont raccourcies (ou
+  archivées si elles commencent après elle) ; une version qui la dépasserait par la fin est refusée.
+- Une version publiée reste modifiable (créneau ajouté, modifié, supprimé) avec les mêmes contrôles ; les
+  familles sont notifiées. Archivage d'une version publiée. Historique en ajout seul (création, créneaux,
+  publication, raccourcissement, archivage, annulations).
+- **Concurrence** : toute écriture du planning (créneaux, publication, indisponibilités, examens,
+  événements) prend un verrou consultatif par organisation : deux écritures incompatibles se suivent, la
+  seconde voit la première.
+
+### Vues
+
+Semaine (lundi à dimanche, navigation) d'une classe, d'un enseignant (planning personnel, examens
+surveillés, fil des changements publiés des 30 derniers jours) et d'une salle (occupation). Chaque jour :
+la version publiée valable ce jour-là, cours annulés (motif), jours de fermeture applicables à la classe,
+examens publiés.
+
+### Salles
+
+Nom (unique dans l'établissement), nom arabe, capacité, activation ; jamais supprimées. Facultatives : un
+établissement peut n'en gérer aucune.
+
+### Calendrier scolaire
+
+Année et périodes affichées depuis le Sprint 3A ; événements propres à chaque établissement (aucun
+calendrier national supposé) : vacances, jours fériés, journées pédagogiques, sessions d'examens, réunions
+parents-enseignants, sorties, événements de l'établissement. Titre (et arabe), période, horaires
+facultatifs, public (établissement, classes, groupes), visibilité (personnel, ou personnel et familles),
+brouillon, publication, annulation. Un événement important visible des familles les notifie. Les fermetures
+publiées suspendent les cours ces jours-là et refusent un examen. Vue mensuelle (grille sur grand écran,
+liste sur mobile).
+
+### Examens
+
+Programmation d'une évaluation du Sprint 4 : date (dans l'année, hors fermeture de la classe), heure, durée
+(5 minutes à 8 heures), salle et surveillant facultatifs ; conflits refusés avec un autre examen de la même
+classe (groupes distincts exceptés), de la même salle ou du même surveillant. Publiée, elle apparaît dans
+les semaines et notifie les familles ; un changement d'horaire publié et une annulation les notifient
+aussi. Les notes restent saisies dans l'évaluation.
+
+### Portail parents
+
+Emploi du temps de l'enfant (sa classe, ses groupes seulement, cours annulés, jours sans cours, examens
+publiés) et calendrier des familles (événements publiés visibles des familles visant l'établissement, la
+classe ou un groupe de l'enfant). Notifications : emploi du temps publié ou modifié, cours annulé, examen
+publié, déplacé ou annulé, événement important ; une par fait et par enfant.
+
+### Droits
+
+| Permission                | Rôles                                                                   |
+| ------------------------- | ----------------------------------------------------------------------- |
+| `school.planning.read`    | Tout le personnel ; l'enseignant, ses classes et son planning           |
+| `school.planning.manage`  | Direction, secrétariat (brouillons, créneaux, salles, indisponibilités) |
+| `school.planning.publish` | Direction                                                               |
+| `school.calendar.manage`  | Direction, secrétariat                                                  |
+| `school.exams.manage`     | Direction, secrétariat                                                  |
+
+### Modèles et migration
+
+Migration additive `20261110000000_planning_emplois_du_temps_calendrier` : 9 tables (`SchoolRoom`,
+`SchoolTimetable`, `SchoolTimetableSlot`, `SchoolTimetableEvent`, `SchoolLessonException`,
+`SchoolTeacherUnavailability`, `SchoolCalendarEvent`, `SchoolCalendarEventTarget`, `SchoolExamSchedule`),
+6 énumérations, 4 nouveaux types de notification. Contraintes écrites à la main : validité ordonnée, un
+brouillon par classe, heures des créneaux et des indisponibilités, cours complet ou pause sans ressource,
+capacité positive, période et horaires des événements, une cible par ligne, horaires et durée des examens.
+Différence avec le schéma vérifiée vide. Index par établissement, classe, enseignant, salle et période.
+
+### API
+
+Personnel : `GET|POST rooms`, `PATCH rooms/:id`, `GET rooms/:id/week` ; `GET|POST timetables`,
+`GET|PATCH|DELETE timetables/:id`, `POST timetables/:id/slots`, `PUT|DELETE timetables/:id/slots/:slotId`,
+`POST timetables/:id/check|publish|archive`, `POST timetable-slots/:id/cancellations`,
+`DELETE timetable-slots/:id/cancellations/:date` ; `GET planning/class-week`, `GET planning/teacher-week` ;
+`GET|POST teacher-unavailability`, `DELETE teacher-unavailability/:id` ; `GET calendar`,
+`GET|PUT calendar/events/:id`, `POST calendar/events`, `POST calendar/events/:id/publish|cancel` ;
+`GET|POST exams`, `PUT exams/:id`, `POST exams/:id/publish|cancel`. Parents :
+`GET portal/children/:id/planning`, `GET portal/calendar`.
+
+### Écrans
+
+Personnel : `/school/emplois-du-temps` (semaine publiée, versions, créneaux, conflits, publication,
+historique, annulation d'un cours, indisponibilités), `/school/mon-planning`, `/school/calendrier`,
+`/school/examens`, `/school/salles`. Parents : `/parents/enfants/[id]/planning`, `/parents/calendrier`.
+Français et arabe (RTL), un seul jeu de composants.
+
+## 13 bis. Sprint 8 : reporting consolidé, exports, historique (phase 1)
+
+Un seul point de calcul, `SchoolReportingService`, réutilisé par les écrans, les exports et, en phase 3, les
+outils d'Ocall School AI : aucun second système de reporting.
+
+- **Direction** : élèves actifs (inscriptions validées de l'année), classes, enseignants en poste
+  (affectations actives), répartition par classe, assiduité, résultats de la dernière période commencée,
+  et pour les rôles qui ont les rapports financiers : facturé, encaissé, reste dû, échu impayé.
+- **Pédagogie** : par classe et période, moyenne, réussite, répartition des moyennes générales (cinq
+  tranches du barème), tendance ; matières de l'établissement (moyenne des moyennes de classe) ; moyennes
+  calculées par le moteur du Sprint 4 (`compute`, résultats figés si validés). Moins de 3 élèves notés :
+  « effectif insuffisant ». Une tendance décrit une série agrégée, jamais un élève.
+- **Assiduité** : agrégats par classe, mois et statut calculés par la base, sans nom d'élève.
+- **Finances** : tableau de bord du Sprint 5 (frais scolaires, jamais les abonnements SaaS).
+- **Exports** PDF (socle PDF des bulletins, arabe de droite à gauche), XLSX (une feuille par section) et
+  CSV : nom de l'école, titre, période, filtres ; créneaux d'export partagés, plafond de lignes,
+  journalisation `school.report_exported` sans contenu.
+- **Vues enregistrées** (`SchoolReportView`) : rapport et filtres connus seulement, propres à l'utilisateur,
+  50 au plus.
+- **Historique des opérations sensibles** : journal d'audit « school.* » du client, paginé ; réservé à la
+  direction du groupe (il couvre tous les établissements).
+
+Permissions : `school.reports.read` et `school.reports.export` (direction), `school.audit.read` (direction
+du groupe) ; le financier exige `school.finance.reports`, vérifié aussi dans le service.
+
+API (`/api/v1/school/reports`) : `GET overview|pedagogy|attendance|finance` (filtres `schoolYearId`,
+`classId`, `periodId`, `from`, `to`), `GET export?kind&format`, `GET|POST views`, `DELETE views/:id`,
+`GET audit?action&from&to&page`. Écrans : `/school/rapports` (onglets, filtres, exports, vues),
+`/school/historique`. Migration additive `20261111000000_reporting_vues_enregistrees`.
+
+Tests d'intégration : uniquement sur des bases PostgreSQL locales jetables ; `createTestApp` refuse toute
+base distante (sauf dérogation explicite `OCALL_TEST_ALLOW_MARKED_REMOTE=1`, marqueur « test » exigé), toute
+base configurée pour l'application et l'environnement de production (`assertDisposableTestDatabases`).
+
+## 13 ter. Sprint 8 : Ocall School AI (phase 3)
+
+Trois modules sur **Ocall AI Core** (`docs/OCALL-AI-CORE.md`), le moteur IA commun d'Ocall Suite. School
+inscrit son application `school` : consommation dans la base School, prompts versionnés `school.*`,
+scénarios du fournisseur simulé. Aucun microservice, aucune écriture dans les données scolaires.
+
+- **A. Copilote de direction** (`school.ai.copilot`, direction) : questions en langage naturel. Le modèle
+  ne choisit que parmi cinq lectures du reporting du Sprint 8 (`school_overview`, `results_by_period`,
+  `compare_periods`, `attendance_summary`, `finance_summary`, ce dernier avec `school.finance.reports`),
+  aux arguments stricts. L'établissement et l'année viennent de la session. Aucun SQL. Une réponse qui
+  cite un chiffre absent des résultats est écartée (nombres décimaux comparés à la française). La période,
+  les filtres et les sources sont affichés ; les données indisponibles sont signalées. L'historique est
+  propre à son auteur : 40 messages par conversation, 50 conversations par utilisateur, conservation
+  réglable (30 jours par défaut, purge à la consultation et à la modification du réglage).
+- **B. Assistant pédagogique** (`school.ai.teaching`, enseignants et direction) : fiche de cours, plan de
+  leçon, exercices, QCM, devoir, corrigé, activité ; classe, matière, sujet, objectifs, difficulté, langue
+  (français ou arabe). Le contenu est structuré en sections propres à chaque type, revalidé par le serveur,
+  modifiable, et chaque section peut être régénérée. Il est enregistré comme brouillon de son auteur. Seul
+  l'auteur le valide, et un contenu validé ne se modifie plus. Le PDF n'est produit que pour un contenu
+  validé. L'enseignant est limité à ses affectations actives. Aucune note ni évaluation n'est lue ni
+  modifiée.
+- **C. Analyse scolaire** (`school.ai.analysis`, direction) : indicateurs déterministes calculés par le
+  serveur à partir des rapports du Sprint 8 :
+  - évolution des moyennes par classe et matière ;
+  - comparaison des deux dernières périodes ;
+  - fréquence des absences ;
+  - tendances ;
+  - indicateurs d'accompagnement de classes ou de matières (moyenne en baisse, réussite sous 50 %, absences
+    au-dessus de 15 % sur au moins 10 relevés), jamais d'élève.
+
+  Les données insuffisantes sont signalées. L'IA ne rédige qu'une synthèse de ces indicateurs, sans aucune
+  donnée nominative ; une synthèse qui cite un chiffre absent est remplacée.
+
+**Réglages par établissement** (`school.ai.manage`, direction) :
+
+- IA désactivée par défaut, à activer après vérification des garanties du fournisseur ;
+- chaque module peut être coupé séparément ;
+- plafond mensuel d'appels (300 par défaut), seuil d'alerte, conservation des conversations ;
+- consultation de la consommation et du coût estimé.
+
+**Codes d'erreur :**
+
+| Code                                                        | Statut    | Cas                                       |
+| ----------------------------------------------------------- | --------- | ----------------------------------------- |
+| `AI_SCHOOL_DISABLED`                                        | 403       | IA non activée pour l'établissement       |
+| `AI_FEATURE_DISABLED`                                       | 403       | module coupé par la direction             |
+| `AI_QUOTA_EXCEEDED`                                         | 429       | plafond mensuel atteint                   |
+| `AI_TOO_MANY_REQUESTS`                                      | 429       | limitation de débit du cœur               |
+| `AI_NO_ACTIVE_YEAR`                                         | 422       | aucune année scolaire en cours            |
+| codes du fournisseur (`AI_UNAVAILABLE`, `AI_TIMEOUT`, etc.) | 502 à 504 | message « Vous pouvez continuer sans IA » |
+
+**API** (`/api/v1/school/ai`) :
+
+- `GET status`, `GET|PUT settings`, `GET usage`, `POST purge` ;
+- `POST copilot/ask`, `GET copilot/conversations`, `GET|DELETE copilot/conversations/:id` ;
+- `GET|POST teaching/contents`, `GET|PUT teaching/contents/:id`,
+  `POST teaching/contents/:id/sections/:key/regenerate`, `POST teaching/contents/:id/validate|archive`,
+  `GET teaching/contents/:id/pdf` ;
+- `GET analysis`, `POST analysis/summary`.
+
+**Écran** `/school/ia` : espaces Direction, Enseignants, Analyses et Réglages selon le rôle ; états de
+chargement, d'erreur, de désactivation et de quota épuisé.
+
+**Migration additive** `20261112000000_ocall_school_ai` : `SchoolAiSettings`, `SchoolAiUsage`,
+`SchoolAiConversation`, `SchoolAiMessage`, `SchoolAiDocument`, avec leurs contraintes.
+
+### Modèle de quotas et estimation des coûts
+
+Chaque appel IA compte une unité dans le plafond mensuel de l'établissement, y compris en cas d'échec, comme
+pour Park. Pour le copilote, une question vaut un appel, quel que soit le nombre de tours d'outils.
+
+Le coût est estimé par appel à partir des jetons rapportés par le fournisseur (`estimateAiCostMicroUsd`,
+taux indicatif `AI_USD_XOF_RATE`). Il est affiché à titre indicatif et ne crée aucune facturation SaaS.
+
+Ordres de grandeur avec un modèle de la famille GPT-5 :
+
+| Module              | Jetons par appel (entrée, sortie)  | Coût indicatif                         |
+| ------------------- | ---------------------------------- | -------------------------------------- |
+| Copilote            | environ 4 000 à 8 000 et 300 à 600 | quelques dizaines de FCFA par question |
+| Contenu pédagogique | environ 1 000 et 1 500 à 3 000     |                                        |
+| Synthèse d'analyse  | environ 3 000 et 500               |                                        |
+
+Un établissement au plafond par défaut (300 appels) reste dans un budget mensuel de l'ordre de quelques
+milliers de FCFA. Ces chiffres sont à confirmer par la consommation réelle relevée dans les réglages.
+
+### Exploitation
+
+1. **Activer sur la plateforme :** `AI_PROVIDER=openai`, `OPENAI_API_KEY` (secret Railway, jamais dans
+   Git), `AI_REAL_CALLS_ENABLED=true`. Facultatif : `OPENAI_MODEL_SCHOOL_COPILOT`,
+   `OPENAI_MODEL_SCHOOL_TEACHING` et `OPENAI_MODEL_SCHOOL_ANALYSIS`. Faire cette activation seulement
+   après vérification des garanties contractuelles et de protection des données du fournisseur.
+2. **Activer par établissement :** Ocall School AI, puis Réglages, puis activer. Ajuster ensuite le plafond
+   et la conservation.
+3. **Suivre :** consommation et coût estimé dans les Réglages ; alerte de seuil journalisée
+   (`school.ai_quota_alert`) ; journal technique `OcallAiCore` pour les erreurs du fournisseur (sans
+   contenu).
+4. **Couper :** décocher l'activation de l'établissement (effet immédiat), ou revenir à `AI_PROVIDER=none`
+   (toutes applications).
+
+## 14. Limites actuelles
+
+- Réserves P3 de l'audit du Sprint 6 (non bloquantes) : reprise de l'écran d'appel quand la réponse du
+  premier lot se perd, liste des justificatifs limitée à 200 sans pagination, saisie modifiée pendant l'envoi
+  des lots non envoyée.
+- Appel : pas d'effectif reconstitué à une date passée ; une saisie rétroactive utilise l'effectif actuel.
 - Un employé Park existant ne peut pas encore recevoir de rôle School : il faut un compte dédié.
-- Pas d'emploi du temps ni de volume horaire contrôlé : l'horaire par niveau est indicatif.
+- L'horaire hebdomadaire par niveau reste indicatif : l'emploi du temps ne contrôle pas le volume horaire.
+- Planning : pas de remplacement ponctuel d'un enseignant ni de déplacement d'un cours à une date (seule
+  l'annulation datée existe) ; pas de génération automatique d'emploi du temps ; un brouillon d'une autre
+  classe n'est comparé qu'à sa publication.
+- Écrans : une fin de créneau ou d'indisponibilité à minuit (`24:00`, acceptée par l'API) n'est pas
+  saisissable dans les champs horaires du navigateur (réserve P3 de l'audit du Sprint 7).
+- Archivage manuel d'une version publiée encore applicable, sans remplacement : ses cours disparaissent des
+  vues sans notification aux familles ni fait dans le fil des enseignants (réserve P3 de l'audit du
+  Sprint 7 ; le remplacement par une nouvelle version publiée, lui, est notifié).
+- Fil des enseignants : un enseignant dont tous les cours disparaissent d'une classe lors du remplacement
+  par une nouvelle version publiée n'y voit pas ce remplacement (son planning, lui, est à jour ; les
+  familles sont notifiées) — réserve P3 de l'audit du Sprint 7.
+- Ocall School AI : aucun appel réel n'a été fait (tests et preuves avec le fournisseur simulé). La qualité
+  des réponses du modèle réel reste à évaluer avant activation. Le contrôle des chiffres vérifie les nombres
+  cités, pas la justesse du raisonnement ; la synthèse reste une aide à relire. La limitation de débit est
+  en mémoire, par instance d'API. Les contenus pédagogiques sont personnels : il n'y a pas de partage entre
+  enseignants. L'historique des opérations sensibles n'est pas filtrable par établissement.
+- Examens : le surveillant n'est pas comparé à ses propres cours. La programmation fixe la date de
+  l'évaluation (dans sa période, tant que les résultats ne sont pas validés).
 - L'enseignant d'un groupe voit la liste restreinte de toute la classe (choix validé au cadrage).
-- Pas de logo, de notes, de bulletins ni de SMS. Modèles de documents personnalisés non livrés.
-- Portail parents non livré : seul le contrôle des enfants autorisés est préparé.
+- Pas de logo. Modèles de documents personnalisés non livrés : le bulletin a une mise en page unique.
+- SMS : seul le fournisseur simulé est livré (aucun envoi réel) ; un fournisseur réel s'ajoute par un
+  adaptateur. Pas de réinitialisation du mot de passe par SMS : un parent sans e-mail reçoit une nouvelle
+  invitation de l'établissement.
+- Un membre du personnel qui est aussi parent utilise un compte distinct pour le portail.
+- Le module coranique reste disponible aux seuls établissements en Bilingue (règle du Sprint 4), pour le
+  personnel comme pour les parents.
 - Aucun antivirus : un contrôle du type réel et du contenu actif des PDF, et un téléchargement en pièce
   jointe uniquement. Un PDF à flux compressé peut masquer du contenu actif.
 - Pas de purge automatique des documents : les durées légales de conservation restent à fixer par pays.
 - Les documents School ne sont pas comptés dans le quota de stockage de l'organisation.
 - Import synchrone, limité à 1 000 lignes par fichier.
-- Pas de PWA School : le Service Worker reste limité à `/app`.
+- PWA : espace client (`/app`) et portail parents (`/parents`) ; les écrans School du personnel n’en sont pas.
 - Messages de validation détaillés de l'API (champs refusés) et erreurs ligne par ligne de l'import
   restent en français, y compris pour un établissement en Arabe.
 - Les dates de contrat s'apprécient en UTC.
@@ -343,3 +1066,31 @@ suivent la langue de l'établissement (Sprint 3A) ; une fiche de classe suit cel
   états proches lors d'une modification simultanée, sans exposer de données hors périmètre.
 - « Mes classes » et la garde d'accès n'ont pas de test d'entrelacement dédié : leur fenêtre (requêtes
   internes de Prisma) est supprimée par construction (instantané, instruction unique).
+- Bulletins : générés à la demande, jamais archivés ; un bulletin réédité après une correction des noms
+  reflète les noms actuels (les résultats, eux, restent figés par la validation). Pas de moyenne annuelle ni
+  de récapitulatif sur plusieurs périodes. Édition de toute une classe synchrone.
+- Un élève sorti de la classe après la validation n’apparaît plus dans ses bulletins (liste des élèves =
+  inscriptions validées dans la classe).
+- Ordre du texte arabe dans les PDF : version réduite de l’algorithme bidirectionnel, suffisante pour des
+  noms, libellés et appréciations ; un texte qui mêle longuement arabe et latin peut être mal ordonné.
+- Mémorisation du Coran : données d’enseignement religieux de mineurs (RGPD article 9 et lois équivalentes) ;
+  validation juridique et information des familles requises avant toute vraie donnée. Pas de suivi verset par
+  verset, d’analyse audio ni d’évaluation automatique (hors périmètre du Sprint 4).
+- Le lien de menu « Mémorisation du Coran » reste visible (menu School statique) ; hors module actif, la page
+  répond « introuvable » aux rôles autres que la direction.
+- Finances : pas d’intégration Wave, Orange Money ni paiement en ligne (hors périmètre) ; un mobile money
+  reste déclaré. Pas de comptabilité générale ni de clôture de caisse journalière. Une seule devise par
+  établissement, verrouillée dès qu’un frais ou une réduction fixe existe (même retirée). Pas d’avoir ni
+  de trop-perçu : un excédent n’est jamais encaissé.
+- La caisse n’est proposée qu’à qui peut encaisser (comptabilité, direction, secrétariat autorisé) ; un
+  élève sorti sans transfert y reste accessible tant qu’il a des échéances dans l’établissement.
+- Un élève transféré dans un autre établissement ne peut plus être encaissé par l’ancien (arriérés) ; ses
+  encaissements passés y restent consultables et annulables.
+- Pas de versions tarifaires : un frais porte un seul montant à la fois ; un tarif dont la date
+  d’application est future ne se génère qu’à partir de cette date (créer un frais distinct pour un
+  changement programmé).
+- La réduction fixe s’applique à chaque échéance concernée ; un taux s’arrondit à l’unité inférieure.
+- Montants : stockés et échangés par l’API métier en unités mineures de la devise. Les exports
+  financiers du Sprint 5 (impayés, encaissements) restent en unités mineures. Les exports du reporting
+  du Sprint 8 et les données remises au copilote IA sont convertis dans l’unité de la devise
+  (`toMajorUnits`), à côté du code de la devise.

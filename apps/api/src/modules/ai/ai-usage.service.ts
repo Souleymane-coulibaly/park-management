@@ -1,40 +1,23 @@
-import {
-  ConflictException,
-  ForbiddenException,
-  HttpException,
-  HttpStatus,
-  Inject,
-  Injectable,
-  ServiceUnavailableException,
-} from '@nestjs/common';
+import { ConflictException, Injectable, type OnModuleInit } from '@nestjs/common';
 import { Prisma } from '@ocall/database';
-import {
-  AI_FEATURES,
-  type AiFeature,
-  addDays,
-  estimateAiCostMicroUsd,
-  localMoment,
-  microUsdToXof,
-  zonedMidnight,
-} from '@ocall/shared';
+import { AI_FEATURES, type AiFeature, addDays, microUsdToXof } from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
 import type { TenantContext } from '../../common/auth-context';
 import { organizationQuotas } from '../../common/quotas';
-import { APP_CONFIG, type AppConfig } from '../../config/app-config';
+import { AiGatewayService } from '../../ai-core/ai-gateway.service';
+import type { AiPrompt } from '../../ai-core/ai-prompts';
+import type { AiProvider, AiResult } from '../../ai-core/ai-provider';
+import { registerAiSimulation } from '../../ai-core/providers/simulated.provider';
+import { PARK_AI_SIMULATION } from './park-ai-simulation';
 import {
-  AI_PROVIDER,
-  type AiProvider,
-  AiProviderError,
-  type AiResult,
-} from './providers/ai-provider';
-
-const ENABLED_FIELD: Record<AiFeature, keyof AiSettingsRow> = {
-  CATALOG_IMPORT: 'catalogImportEnabled',
-  TICKET_IMPORT: 'ticketImportEnabled',
-  COPILOT: 'copilotEnabled',
-  VOICE_ORDER: 'voiceOrderEnabled',
-};
+  ENABLED_FIELD,
+  PARK_AI_APPLICATION,
+  ParkAiUsageStore,
+  SETTINGS_SELECT,
+  effectiveLimit,
+  monthStart,
+} from './park-ai-usage.store';
 
 export interface AiSettingsRow {
   catalogImportEnabled: boolean;
@@ -46,55 +29,37 @@ export interface AiSettingsRow {
   retentionDays: number;
 }
 
-const SETTINGS_SELECT = {
-  catalogImportEnabled: true,
-  ticketImportEnabled: true,
-  copilotEnabled: true,
-  voiceOrderEnabled: true,
-  monthlyCallLimit: true,
-  alertPercent: true,
-  retentionDays: true,
-} satisfies Prisma.AiSettingsSelect;
-
-const PROVIDER_ERROR_STATUS: Record<AiProviderError['code'], HttpStatus> = {
-  AI_UNAVAILABLE: HttpStatus.SERVICE_UNAVAILABLE,
-  AI_TIMEOUT: HttpStatus.GATEWAY_TIMEOUT,
-  AI_RATE_LIMITED: HttpStatus.SERVICE_UNAVAILABLE,
-  AI_INVALID_OUTPUT: HttpStatus.BAD_GATEWAY,
-  AI_REFUSED: HttpStatus.UNPROCESSABLE_ENTITY,
-};
-
 /**
- * Point de passage obligé de tout appel IA : fonctionnalité activée, fournisseur configuré,
- * quota réservé AVANT l'appel (sous verrou, pour que des appels simultanés ne dépassent pas le
- * plafond), consommation et coût ESTIMÉ enregistrés après. Aucun contenu n'est journalisé.
+ * IA d'Ocall Park sur Ocall AI Core : réglages, état, consommation et rétention de l'organisation ;
+ * chaque appel passe par l'orchestrateur commun (limitation de débit, quota réservé sous verrou par le
+ * stockage Park, consommation, coût ESTIMÉ, version du prompt, journal technique des erreurs). Aucun
+ * contenu n'est journalisé. Les contrats d'API du Sprint 8 sont inchangés.
  */
 @Injectable()
-export class AiUsageService {
+export class AiUsageService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
-    @Inject(APP_CONFIG) private readonly config: AppConfig,
-    @Inject(AI_PROVIDER) private readonly provider: AiProvider | null,
+    private readonly gateway: AiGatewayService,
+    private readonly store: ParkAiUsageStore,
   ) {}
+
+  onModuleInit() {
+    this.gateway.registerApplication(PARK_AI_APPLICATION, this.store);
+    registerAiSimulation(PARK_AI_SIMULATION);
+  }
 
   /** Fournisseur actif, ou erreur claire : l'application reste utilisable sans IA. */
   requireProvider(): AiProvider {
-    if (!this.provider) {
-      throw new ServiceUnavailableException({
-        code: 'AI_NOT_CONFIGURED',
-        message: "L'IA n'est pas activée sur cette plateforme. Vous pouvez continuer sans IA.",
-      });
-    }
-    return this.provider;
+    return this.gateway.requireProvider();
   }
 
   model(feature: AiFeature): string {
-    return this.provider?.name === 'simulated' ? 'simulated' : this.config.ai.models[feature];
+    return this.gateway.model(feature);
   }
 
   transcribeModel(): string {
-    return this.provider?.name === 'simulated' ? 'simulated' : this.config.ai.transcribeModel;
+    return this.gateway.transcribeModel();
   }
 
   async settings(organizationId: string): Promise<AiSettingsRow> {
@@ -125,16 +90,6 @@ export class AiUsageService {
       organizationQuotas(this.prisma, organizationId),
     ]);
     return { ...settings, platformLimit: quotas.aiMonthlyCalls };
-  }
-
-  /** Plafond réellement appliqué : le plus bas entre celui de l'organisation et celui d'Ocall. */
-  private async effectiveLimit(
-    db: PrismaService | Prisma.TransactionClient,
-    organizationId: string,
-    organizationLimit: number,
-  ): Promise<number> {
-    const quotas = await organizationQuotas(db, organizationId);
-    return Math.min(organizationLimit, quotas.aiMonthlyCalls);
   }
 
   async updateSettings(auth: TenantContext, dto: Partial<AiSettingsRow>) {
@@ -170,25 +125,20 @@ export class AiUsageService {
     });
   }
 
-  /** Début du mois civil en cours, dans le fuseau de l'organisation. */
-  private monthStart(timezone: string): Date {
-    const today = localMoment(new Date(), timezone).date;
-    return zonedMidnight(`${today.slice(0, 8)}01`, timezone);
-  }
-
   /** État de l'IA pour l'organisation : fonctionnalités, consommation du mois, alerte. */
   async status(auth: TenantContext) {
     const organizationId = auth.membership.organizationId;
     const settings = await this.settings(organizationId);
     const used = await this.prisma.aiUsage.count({
-      where: { organizationId, createdAt: { gte: this.monthStart(auth.membership.timezone) } },
+      where: { organizationId, createdAt: { gte: monthStart(auth.membership.timezone) } },
     });
-    const limit = await this.effectiveLimit(this.prisma, organizationId, settings.monthlyCallLimit);
+    const limit = await effectiveLimit(this.prisma, organizationId, settings.monthlyCallLimit);
+    const configured = this.gateway.configured;
     return {
-      configured: this.provider !== null,
-      simulated: this.provider?.name === 'simulated',
+      configured,
+      simulated: this.gateway.providerName === 'simulated',
       features: Object.fromEntries(
-        AI_FEATURES.map((f) => [f, this.provider !== null && Boolean(settings[ENABLED_FIELD[f]])]),
+        AI_FEATURES.map((f) => [f, configured && Boolean(settings[ENABLED_FIELD[f]])]),
       ) as Record<AiFeature, boolean>,
       usage: {
         used,
@@ -202,7 +152,7 @@ export class AiUsageService {
   /** Consommation détaillée du mois : appels, jetons, coût ESTIMÉ par fonctionnalité et établissement. */
   async usageReport(auth: TenantContext) {
     const organizationId = auth.membership.organizationId;
-    const since = this.monthStart(auth.membership.timezone);
+    const since = monthStart(auth.membership.timezone);
     const rows = await this.prisma.aiUsage.groupBy({
       by: ['feature', 'establishmentId', 'status'],
       where: { organizationId, createdAt: { gte: since } },
@@ -218,8 +168,9 @@ export class AiUsageService {
       where: {
         organizationId,
         createdAt: { gte: since },
-        status: 'SUCCEEDED',
         estimatedCostMicroUsd: null,
+        // Coût inconnu : appels réussis, et appels échoués qui ont consommé des jetons.
+        OR: [{ status: 'SUCCEEDED' }, { inputTokens: { gt: 0 } }, { outputTokens: { gt: 0 } }],
       },
     });
     const establishments = await this.prisma.establishment.findMany({
@@ -227,10 +178,10 @@ export class AiUsageService {
       select: { id: true, name: true },
     });
     const names = new Map(establishments.map((e) => [e.id, e.name]));
-    const rate = this.config.ai.usdXofRate;
+    const rate = this.gateway.usdXofRate;
     return {
       since,
-      provider: this.provider?.name ?? null,
+      provider: this.gateway.providerName,
       usdXofRate: rate,
       costIsEstimate: true,
       unestimatedCalls: unestimated,
@@ -250,8 +201,8 @@ export class AiUsageService {
   }
 
   /**
-   * Exécute un appel IA en respectant fonctionnalité, quota et journalisation. `call` reçoit le
-   * fournisseur et le modèle ; ses erreurs sont traduites en messages compréhensibles.
+   * Exécute un appel IA de Park par Ocall AI Core : contexte construit depuis la session (application,
+   * organisation, établissement contrôlé par l'appelant, utilisateur, rôle, fonctionnalité).
    */
   async run<T>(
     auth: TenantContext,
@@ -259,109 +210,22 @@ export class AiUsageService {
     establishmentId: string | null,
     model: string,
     call: (provider: AiProvider) => Promise<AiResult<T>>,
+    prompt: AiPrompt | null = null,
   ): Promise<T> {
-    const provider = this.requireProvider();
-    const usageId = await this.reserve(auth, feature, establishmentId, provider.name, model);
-    const started = Date.now();
-    try {
-      const result = await call(provider);
-      await this.prisma.aiUsage.update({
-        where: { id: usageId },
-        data: {
-          status: 'SUCCEEDED',
-          inputTokens: result.usage.inputTokens,
-          cachedInputTokens: result.usage.cachedInputTokens,
-          outputTokens: result.usage.outputTokens,
-          audioSeconds: result.usage.audioSeconds ?? null,
-          estimatedCostMicroUsd:
-            provider.name === 'simulated' ? 0 : estimateAiCostMicroUsd(model, result.usage),
-          latencyMs: Date.now() - started,
-        },
-      });
-      return result.value;
-    } catch (error) {
-      const code = error instanceof AiProviderError ? error.code : 'AI_INTERNAL_ERROR';
-      await this.prisma.aiUsage.update({
-        where: { id: usageId },
-        data: { status: 'FAILED', errorCode: code, latencyMs: Date.now() - started },
-      });
-      if (error instanceof AiProviderError) {
-        throw new HttpException(
-          { code: error.code, message: `${error.message} Vous pouvez continuer sans IA.` },
-          PROVIDER_ERROR_STATUS[error.code],
-        );
-      }
-      throw error;
-    }
-  }
-
-  /** Vérifie la fonctionnalité puis réserve un appel sur le quota du mois, sous verrou. */
-  private async reserve(
-    auth: TenantContext,
-    feature: AiFeature,
-    establishmentId: string | null,
-    provider: string,
-    model: string,
-  ): Promise<string> {
-    const organizationId = auth.membership.organizationId;
-    return this.prisma.$transaction(async (tx) => {
-      await tx.aiSettings.createMany({ data: [{ organizationId }], skipDuplicates: true });
-      // Sérialise les réservations d'une organisation : le comptage puis l'insertion sont atomiques.
-      await tx.$queryRaw`SELECT "organizationId" FROM "AiSettings" WHERE "organizationId" = ${organizationId}::uuid FOR UPDATE`;
-      const settings = await tx.aiSettings.findUniqueOrThrow({
-        where: { organizationId },
-        select: SETTINGS_SELECT,
-      });
-      if (!settings[ENABLED_FIELD[feature]]) {
-        throw new ForbiddenException({
-          code: 'AI_FEATURE_DISABLED',
-          message:
-            'Cette fonctionnalité IA est désactivée par votre administrateur. Vous pouvez continuer sans IA.',
-        });
-      }
-      const used = await tx.aiUsage.count({
-        where: { organizationId, createdAt: { gte: this.monthStart(auth.membership.timezone) } },
-      });
-      const limit = await this.effectiveLimit(tx, organizationId, settings.monthlyCallLimit);
-      if (used >= limit) {
-        throw new HttpException(
-          {
-            code: 'AI_QUOTA_EXCEEDED',
-            message:
-              'Le plafond mensuel d’appels IA est atteint. Votre administrateur peut le relever ; ' +
-              'vous pouvez continuer sans IA.',
-          },
-          HttpStatus.TOO_MANY_REQUESTS,
-        );
-      }
-      const usage = await tx.aiUsage.create({
-        data: {
-          organizationId,
-          establishmentId,
-          membershipId: auth.membership.id,
-          feature,
-          provider,
-          model,
-        },
-        select: { id: true },
-      });
-      // Alerte de dépassement : journalisée une fois, au franchissement du seuil.
-      const threshold = Math.ceil((limit * settings.alertPercent) / 100);
-      if (used + 1 === threshold) {
-        await this.audit.record(
-          {
-            organizationId,
-            actorUserId: auth.user.id,
-            action: 'ai.quota_alert',
-            targetType: 'AiSettings',
-            targetId: organizationId,
-            metadata: { used: used + 1, limit },
-          },
-          tx,
-        );
-      }
-      return usage.id;
-    });
+    return this.gateway.run(
+      {
+        application: PARK_AI_APPLICATION,
+        organizationId: auth.membership.organizationId,
+        establishmentId,
+        actorUserId: auth.user.id,
+        actorRef: auth.membership.id,
+        role: auth.membership.role,
+        operation: feature,
+        timezone: auth.membership.timezone,
+      },
+      { model, prompt },
+      call,
+    );
   }
 
   /** Date d'échéance de conservation d'un résultat créé maintenant. */

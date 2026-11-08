@@ -19,6 +19,24 @@
   --surface: 255 255 255;
   --line: 226 218 203;
   --muted: 101 116 110;
+
+  /* Identité Ocall Suite (site commercial uniquement). Contrastes WCAG mesurés sur l'ivoire #FFF9F0 :
+     vert 6,3:1 (texte et CTA, ivoire sur vert idem), bordeaux 8,9:1, terre cuite 4,0:1 (grands
+     titres seulement ; texte courant : --suite-clay-text 5,9:1), or 1,9:1 (jamais en texte : fonds
+     et accents, texte encre dessus 7,9:1), encre 15,1:1, encre douce 8,1:1. */
+  --suite-green: 8 107 58; /* #086B3A vert profond : navigation, confiance, CTA principaux */
+  --suite-green-dark: 5 77 41;
+  --suite-green-soft: 226 242 232;
+  --suite-gold: 242 170 0; /* #F2AA00 or : accents, mise en valeur */
+  --suite-gold-soft: 253 240 204;
+  --suite-clay: 217 75 32; /* #D94B20 terre cuite : innovation, grands titres */
+  --suite-clay-text: 176 56 20;
+  --suite-clay-soft: 251 228 219;
+  --suite-wine: 139 23 37; /* #8B1725 bordeaux : sécurité, contraste */
+  --suite-wine-soft: 246 225 228;
+  --suite-ivory: 255 249 240; /* #FFF9F0 ivoire : fond principal */
+  --suite-ink: 29 36 32;
+  --suite-ink-soft: 70 79 74;
 }
 
 @layer base {
@@ -45,6 +63,36 @@
   }
   .pattern-bogolan {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 40 40'%3E%3Cg fill='%23F6F0E5' fill-opacity='0.07'%3E%3Cpath d='M0 0h8v8H0zM20 20h8v8h-8z'/%3E%3Ccircle cx='32' cy='8' r='2.5'/%3E%3Ccircle cx='12' cy='30' r='2.5'/%3E%3C/g%3E%3C/svg%3E");
+  }
+  /* Ocall Suite : losanges kente or très atténués (hero), et frise de séparation. */
+  .suite-pattern {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='56' viewBox='0 0 56 56'%3E%3Cg fill='none' stroke='%23F2AA00' stroke-opacity='0.18' stroke-width='1.4'%3E%3Cpath d='M0 28 14 14 28 28 14 42Z'/%3E%3Cpath d='M28 28 42 14 56 28 42 42Z'/%3E%3C/g%3E%3Cg fill='%23D94B20' fill-opacity='0.12'%3E%3Ccircle cx='14' cy='28' r='2'/%3E%3Ccircle cx='42' cy='28' r='2'/%3E%3C/g%3E%3C/svg%3E");
+  }
+  .suite-frieze {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='36' height='10' viewBox='0 0 36 10'%3E%3Cpath d='M0 10 6 0 12 10Z' fill='%23086B3A'/%3E%3Cpath d='M12 10 18 0 24 10Z' fill='%23F2AA00'/%3E%3Cpath d='M24 10 30 0 36 10Z' fill='%23D94B20'/%3E%3C/svg%3E");
+    background-repeat: repeat-x;
+    background-size: 36px 10px;
+  }
+  .suite-pattern-dark {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='48' viewBox='0 0 48 48'%3E%3Cg fill='none' stroke='%23FFF9F0' stroke-opacity='0.06' stroke-width='1.4'%3E%3Cpath d='M0 24 12 12 24 24 12 36Z'/%3E%3Cpath d='M24 24 36 12 48 24 36 36Z'/%3E%3C/g%3E%3C/svg%3E");
+  }
+}
+
+/* Ocall Suite : apparition progressive (titre, cartes) au défilement. L'état initial n'est masqué
+   que si JavaScript est actif (classe posée par le composant Reveal) ; aucune animation si
+   l'utilisateur préfère réduire les animations. */
+@media (prefers-reduced-motion: no-preference) {
+  .suite-reveal {
+    opacity: 0;
+    transform: translateY(18px);
+    transition:
+      opacity 0.7s ease-out,
+      transform 0.7s cubic-bezier(0.2, 0.7, 0.2, 1);
+    transition-delay: var(--reveal-delay, 0ms);
+  }
+  .suite-reveal.is-visible {
+    opacity: 1;
+    transform: none;
   }
 }
 
@@ -73,6 +121,19 @@
   from {
     opacity: 0;
     transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Ocall Suite : entrée du hero (titre, CTA, cartes), seulement si les animations sont acceptées
+   (utilisée avec le préfixe motion-safe:). */
+@keyframes suite-rise {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
   }
   to {
     opacity: 1;

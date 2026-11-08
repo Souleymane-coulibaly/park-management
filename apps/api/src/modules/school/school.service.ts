@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   Logger,
@@ -14,6 +15,7 @@ import {
   type SchoolLocale,
   schoolShowsArabic,
   validateGradingRules,
+  schoolAccessIn,
 } from '@ocall/shared';
 
 const ARABIC_KEYS = new Set(['nameAr', 'labelAr', 'lastNameAr', 'firstNameAr']);
@@ -82,6 +84,8 @@ export class SchoolService {
         type: true,
         defaultLocale: true,
         isActive: true,
+        // Fuseau : la date du jour d'un écran (appel des élèves) est celle de l'établissement.
+        timezone: true,
       },
     });
     return {
@@ -89,7 +93,11 @@ export class SchoolService {
       access: ctx.access,
       modules: ctx.modules,
       limits: ctx.limits,
-      schools,
+      // Accès de chaque établissement selon les contrats qui le couvrent (écriture ou lecture seule).
+      schools: schools.map((school) => ({
+        ...school,
+        contractAccess: ctx.contract ? schoolAccessIn(ctx.contract, school.id) : ctx.access,
+      })),
     };
   }
 
@@ -677,6 +685,24 @@ export class SchoolService {
         details: errors,
       });
     }
+    // Matières exclues du classement : toutes de cet établissement (Sprint 4).
+    // Identifiants enregistrés en minuscules : le moteur les compare à ceux que restitue PostgreSQL.
+    const excluded = [
+      ...new Set((dto.rules.ranking.excludedSubjectIds ?? []).map((id) => id.toLowerCase())),
+    ];
+    dto.rules.ranking.excludedSubjectIds = excluded;
+    if (excluded.length > 0) {
+      const known = await this.db.subject.count({
+        where: { organizationId: ctx.organizationId, schoolId: dto.schoolId, id: { in: excluded } },
+      });
+      if (known !== excluded.length) {
+        throw new BadRequestException({
+          code: 'INVALID_GRADING_RULES',
+          message: 'Règles de notation invalides.',
+          details: ['Une matière exclue du classement n’appartient pas à cet établissement.'],
+        });
+      }
+    }
     const policy = await this.db.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "School" WHERE id = ${dto.schoolId}::uuid FOR UPDATE`;
       const last = await tx.gradingPolicyVersion.aggregate({
@@ -750,6 +776,41 @@ export class SchoolService {
     return rows.map((r) => r.classId);
   }
 
+  /**
+   * Verrou du planning d'une organisation (Sprint 7), pris en premier par toute écriture qui peut créer un
+   * conflit : créneaux, publication, indisponibilités, examens, fermetures. Par organisation, car un
+   * enseignant peut enseigner dans plusieurs établissements du groupe : deux écritures incompatibles se
+   * suivent, la seconde voit la première.
+   */
+  async lockPlanning(tx: Prisma.TransactionClient, organizationId: string): Promise<void> {
+    const key = `school-planning:${organizationId.toLowerCase()}`;
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))`;
+  }
+
+  /**
+   * Vrai si toutes ces classes sont encore confiées à l'enseignant (année non clôturée), lu dans la
+   * transaction qui écrit. Les liens sont verrouillés en partage jusqu'au commit : la fin d'une
+   * affectation, qui les supprime, attend l'écriture, et une fin déjà validée les a retirés. Toujours vrai
+   * pour les rôles qui ne sont pas limités à leurs classes.
+   */
+  async holdsClasses(
+    tx: Prisma.TransactionClient,
+    ctx: SchoolContext,
+    classIds: string[],
+  ): Promise<boolean> {
+    if (!isLimitedToOwnClasses(ctx.role)) return true;
+    const ids = [...new Set(classIds)];
+    if (!ctx.memberId || ids.length === 0) return false;
+    const own = await tx.$queryRaw<{ classId: string }[]>`
+      SELECT ct."classId" FROM "SchoolClassTeacher" ct
+      JOIN "SchoolClass" c ON c.id = ct."classId"
+      JOIN "SchoolYear" y ON y.id = c."schoolYearId"
+      WHERE ct."organizationId" = ${ctx.organizationId}::uuid AND ct."memberId" = ${ctx.memberId}::uuid
+        AND ct."classId" = ANY(${ids}::uuid[]) AND y.status <> 'CLOSED'
+      FOR SHARE OF ct`;
+    return new Set(own.map((r) => r.classId)).size === ids.length;
+  }
+
   schoolWhere(ctx: SchoolContext): Prisma.SchoolWhereInput {
     return {
       organizationId: ctx.organizationId,
@@ -765,9 +826,45 @@ export class SchoolService {
     });
     // Le filtre ctx.schoolIds n'est pas écrasé : un identifiant hors périmètre reste introuvable.
     if (!school || (ctx.schoolIds && !ctx.schoolIds.includes(id))) {
+      await this.assertNotReadOnlySchool(ctx, id);
       throw new NotFoundException(NOT_FOUND);
     }
     return { defaultLocale: school.defaultLocale };
+  }
+
+  /**
+   * Écriture refusée sur un établissement seulement sous contrat suspendu ou expiré (contrats multiples) :
+   * message explicite plutôt qu'introuvable, si l'établissement appartient au client et au périmètre du rôle.
+   */
+  /**
+   * Écriture sur une donnée d'un établissement donné (site, fiche de responsable partagée…), lorsque la
+   * route l'atteint par un autre chemin que son établissement : le contrat de CET établissement doit être
+   * actif, jamais celui d'un autre établissement du client.
+   */
+  assertContractWritable(ctx: SchoolContext, schoolId: string) {
+    const access = ctx.contract ? schoolAccessIn(ctx.contract, schoolId) : ctx.access;
+    if (access !== 'full') {
+      throw new ForbiddenException({
+        code: 'CONTRACT_READ_ONLY',
+        message: 'Le contrat de cet établissement ne permet plus que la consultation et l’export.',
+      });
+    }
+  }
+
+  private async assertNotReadOnlySchool(ctx: SchoolContext, id: string) {
+    if (!ctx.writeNarrowed || !ctx.contract) return;
+    if (schoolAccessIn(ctx.contract, id) !== 'read_only') return;
+    // Périmètre de lecture de l'utilisateur (rôle ∩ contrats) vérifié explicitement : un établissement
+    // hors de son affectation reste introuvable (aucune révélation d'existence ni d'état du contrat).
+    if (ctx.readSchoolIds && !ctx.readSchoolIds.includes(id)) return;
+    const exists = await this.db.school.count({
+      where: { organizationId: ctx.organizationId, id },
+    });
+    if (exists === 0) return;
+    throw new ForbiddenException({
+      code: 'CONTRACT_READ_ONLY',
+      message: 'Le contrat de cet établissement ne permet plus que la consultation et l’export.',
+    });
   }
 
   async findYear(ctx: SchoolContext, id: string) {

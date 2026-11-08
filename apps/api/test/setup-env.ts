@@ -5,6 +5,8 @@ import { config } from 'dotenv';
 
 // Les tests d'intégration utilisent la base de développement de apps/api/.env.
 config();
+// Environnement d'origine gardé pour la garde des bases de test (production refusée) avant son écrasement.
+process.env.OCALL_ORIGINAL_NODE_ENV = process.env.NODE_ENV ?? '';
 process.env.NODE_ENV = 'test';
 process.env.SWAGGER_ENABLED = 'false';
 // Limites relâchées : les tests créent de nombreux comptes depuis la même IP.

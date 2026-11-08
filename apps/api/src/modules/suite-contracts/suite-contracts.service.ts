@@ -8,10 +8,10 @@ import { Prisma } from '@ocall/database';
 import {
   SCHOOL_PRODUCT_CODE,
   type AuthProductApp,
-  type ProductAccess,
   type SuiteContractStatus,
   activitiesOf,
-  bestContract,
+  type ResolvedProductEntitlement,
+  resolveProductEntitlement,
   canTransitionContract,
   isValidDateRange,
 } from '@ocall/shared';
@@ -48,21 +48,12 @@ const SELECT = {
 
 const NOT_FOUND = { code: 'CONTRACT_NOT_FOUND', message: 'Contrat introuvable.' };
 
-export interface ProductEntitlement {
-  access: ProductAccess;
-  contractId: string | null;
-  modules: string[];
-  limits: { maxSchools?: number };
-  coveredSchoolIds: string[];
-}
-
-const NO_ENTITLEMENT: ProductEntitlement = {
-  access: 'none',
-  contractId: null,
-  modules: [],
-  limits: {},
-  coveredSchoolIds: [],
-};
+/**
+ * Droits d'un client sur un produit, résolus sur TOUS ses contrats (voir resolveProductEntitlement) :
+ * accès le plus large, périmètres de lecture et d'écriture par établissement (null = tous),
+ * union des modules, limite d'établissements la plus favorable.
+ */
+export type ProductEntitlement = ResolvedProductEntitlement;
 
 const toDate = (day: string) => new Date(`${day}T00:00:00.000Z`);
 
@@ -84,7 +75,6 @@ export class SuiteContractsService {
     const contracts = await this.prisma.suiteContract.findMany({
       where: { organizationId, product: { code: productCode } },
       select: {
-        id: true,
         status: true,
         startsOn: true,
         endsOn: true,
@@ -93,15 +83,56 @@ export class SuiteContractsService {
         coveredSchoolIds: true,
       },
     });
-    const best = bestContract(contracts);
-    if (!best) return NO_ENTITLEMENT;
-    return {
-      access: best.access,
-      contractId: best.contract.id,
-      modules: best.contract.modules,
-      limits: best.contract.limits as ProductEntitlement['limits'],
-      coveredSchoolIds: best.contract.coveredSchoolIds,
-    };
+    // Tous les contrats valides comptent, jamais un seul retenu selon l'ordre de la base.
+    return resolveProductEntitlement(
+      contracts.map((c) => ({
+        ...c,
+        limits: (c.limits ?? {}) as { maxSchools?: number },
+      })),
+    );
+  }
+
+  /**
+   * Contrats d'un client pour un produit qui couvrent un établissement (couverture vide = tous), avec
+   * la date EFFECTIVE de passage en lecture seule : la plus ancienne entre le dernier changement vers le
+   * statut actuel et le lendemain de l'échéance déjà dépassée (une expiration administrative tardive ne
+   * redémarre pas le maintien). Sert au maintien temporaire des sites publiés (Sprint 10 School).
+   */
+  async contractWindows(
+    organizationId: string,
+    productCode: string,
+    schoolId: string,
+  ): Promise<
+    { status: SuiteContractStatus; startsOn: Date; endsOn: Date; readOnlySince: Date | null }[]
+  > {
+    const contracts = await this.prisma.suiteContract.findMany({
+      where: { organizationId, product: { code: productCode } },
+      select: {
+        status: true,
+        startsOn: true,
+        endsOn: true,
+        updatedAt: true,
+        coveredSchoolIds: true,
+        events: {
+          where: { toStatus: { in: ['SUSPENDED', 'EXPIRED', 'TERMINATED'] } },
+          orderBy: { createdAt: 'desc' },
+          take: 5,
+          select: { toStatus: true, createdAt: true },
+        },
+      },
+    });
+    const DAY_MS = 86_400_000;
+    return contracts
+      .filter((c) => c.coveredSchoolIds.length === 0 || c.coveredSchoolIds.includes(schoolId))
+      .map((c) => {
+        let readOnlySince: Date | null = null;
+        if (c.status !== 'ACTIVE' && c.status !== 'DRAFT') {
+          const changed = c.events.find((e) => e.toStatus === c.status)?.createdAt ?? c.updatedAt;
+          const afterEnd = new Date(c.endsOn.getTime() + DAY_MS);
+          readOnlySince = afterEnd < changed ? afterEnd : changed;
+        }
+        return { status: c.status, startsOn: c.startsOn, endsOn: c.endsOn, readOnlySince };
+      });
   }
 
   /** Applications du portail Ocall Suite accessibles à ce membre, décidées par le serveur. */

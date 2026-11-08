@@ -592,7 +592,7 @@ export class SchoolImportsService {
       rows: table.rows.length,
       ...(q.classId ? { classId: q.classId } : {}),
     });
-    return this.file(table, q.format, q.classId ? 'liste-de-classe' : 'eleves');
+    return this.exportFile(table, q.format, q.classId ? 'liste-de-classe' : 'eleves');
   }
 
   async exportGuardians(ctx: SchoolContext, q: ExportQueryDto) {
@@ -644,7 +644,7 @@ export class SchoolImportsService {
       rows: table.rows.length,
       ...(q.classId ? { classId: q.classId } : {}),
     });
-    return this.file(table, q.format, q.classId ? 'responsables-de-classe' : 'responsables');
+    return this.exportFile(table, q.format, q.classId ? 'responsables-de-classe' : 'responsables');
   }
 
   /** Plafond de lignes, modifiable par les tests seulement pour éviter d'en créer des milliers. */
@@ -652,7 +652,8 @@ export class SchoolImportsService {
   private exportsRunning = 0;
 
   /** Borne la mémoire de l'API partagée : peu d'exports à la fois, chacun d'un volume plafonné. */
-  private async exportSlot<T>(build: () => Promise<T>): Promise<T> {
+  /** Partagé avec les exports financiers (Sprint 5). */
+  async exportSlot<T>(build: () => Promise<T>): Promise<T> {
     if (this.exportsRunning >= EXPORT_SLOTS) {
       throw new HttpException(
         {
@@ -670,7 +671,7 @@ export class SchoolImportsService {
     }
   }
 
-  private assertExportSize(rows: number) {
+  assertExportSize(rows: number) {
     if (rows > this.exportMaxRows) {
       throw new UnprocessableEntityException({
         code: 'EXPORT_TOO_LARGE',
@@ -679,7 +680,7 @@ export class SchoolImportsService {
     }
   }
 
-  private async file(table: TableExport, format: 'csv' | 'xlsx' | undefined, name: string) {
+  async exportFile(table: TableExport, format: 'csv' | 'xlsx' | undefined, name: string) {
     if (format === 'xlsx') {
       return {
         body: await toXlsx(table, name),

@@ -39,7 +39,11 @@ function watchInstalling(worker: ServiceWorker | null) {
 }
 
 /** Enregistre le Service Worker de l'espace client et écoute la proposition d'installation. */
-export function startPwa(): void {
+/**
+ * Démarre la PWA. `scope` : `/app` pour Ocall Park ; `/parents` pour le portail parents d'Ocall School
+ * (Sprint 6), installable depuis le navigateur avec son propre manifeste.
+ */
+export function startPwa(scope: '/app' | '/parents' = '/app'): void {
   if (started) return;
   started = true;
   window.addEventListener('beforeinstallprompt', (event) => {
@@ -56,7 +60,7 @@ export function startPwa(): void {
     if (reloadOnChange) window.location.reload();
   });
   void navigator.serviceWorker
-    .register('/sw.js', { scope: '/app' })
+    .register('/sw.js', { scope })
     .then((reg) => {
       registration = reg;
       if (reg.waiting && navigator.serviceWorker.controller) patch({ updateReady: true });

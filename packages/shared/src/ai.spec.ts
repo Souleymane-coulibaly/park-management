@@ -125,6 +125,13 @@ describe('IA — chiffres cités par le copilote', () => {
     );
     expect(numbersAreGrounded('Vous avez fait 15 000 FCFA.', data)).toBe(false);
   });
+
+  it('chiffres arabes et persans contrôlés comme les chiffres latins', () => {
+    const data = '{"students":12,"average":11,33}';
+    expect(numbersAreGrounded('عدد التلاميذ ١٢ والمعدل ١١٫٣٣', data)).toBe(true);
+    expect(numbersAreGrounded('عدد التلاميذ ٩٩٩', data)).toBe(false);
+    expect(numbersAreGrounded('۹۹۹ élèves', data)).toBe(false);
+  });
 });
 
 describe('IA — droits', () => {

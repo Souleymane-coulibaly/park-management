@@ -300,7 +300,14 @@ export function matchProductName<T extends { name: string }>(
 
 /** Nombres présents dans un texte (« 12 500 », « 12.500 », « 3,5 » → 12500, 12500, 3.5). */
 export function extractNumbers(text: string): number[] {
-  const matches = text.match(/\d+(?:[  .]\d{3})*(?:,\d+)?/g) ?? [];
+  // Chiffres arabes (٠-٩) et persans (۰-۹), séparateurs arabes (٫ décimal, ٬ milliers) : ramenés à
+  // l'écriture latine avant comparaison, sinon un nombre écrit ainsi échapperait au contrôle.
+  const latin = text
+    .replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0))
+    .replace(/٫/g, ',')
+    .replace(/٬/g, ' ');
+  const matches = latin.match(/\d+(?:[  .]\d{3})*(?:,\d+)?/g) ?? [];
   return matches.map((m) => Number(m.replace(/[  .]/g, '').replace(',', '.')));
 }
 

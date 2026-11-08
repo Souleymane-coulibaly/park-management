@@ -1,13 +1,44 @@
 import { defineConfig, devices } from '@playwright/test';
+import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { parse } from 'dotenv';
 import { resolveTestDatabase } from '@ocall/database';
+import {
+  assertE2eDatabases,
+  assertSchoolTestDatabase,
+  resolveSchoolTestDatabase,
+} from './e2e/school-database';
 
 // Base de TEST obligatoire (branche Neon `test` ou base éphémère de CI) : la configuration échoue
 // plutôt que de lancer les tests sur la base de développement. apps/api/.env est lu sans être injecté
 // dans process.env, pour ne pas transmettre NODE_ENV=development au serveur Next.js de production.
 const apiEnv = existsSync('apps/api/.env') ? parse(readFileSync('apps/api/.env')) : {};
 const testDb = resolveTestDatabase({ ...apiEnv, ...process.env });
+// Régénération des sites vitrines (API → frontend) : secret aléatoire propre à chaque exécution,
+// jamais écrit dans le dépôt. Sans elle, une page dépubliée reste servie depuis le cache de Next.js.
+const revalidateSecret = randomBytes(24).toString('hex');
+// Sites des établissements (Sprint 10) : sous-domaines locaux `<slug>.ecoles.localhost`, que Chromium
+// résout vers 127.0.0.1 sans DNS. Aucun DNS ni certificat réel n'est testé ici.
+const SCHOOL_SITES_ENV = {
+  SCHOOL_SITES_BASE_DOMAIN: 'ecoles.localhost',
+  SCHOOL_SITES_SUBDOMAINS_ENABLED: 'true',
+};
+// Ocall School : activé seulement avec une base School de test dédiée (TEST_SCHOOL_DATABASE_URL),
+// distincte de la base Suite ; sinon les specs School sont ignorées (hors CI, où elles sont exigées).
+const schoolDb = resolveSchoolTestDatabase({ ...apiEnv, ...process.env }, testDb.databaseUrl);
+// Bases Suite et School locales jetables (garde des tests d'intégration), puis marqueur : AVANT toute
+// connexion et AVANT le démarrage des serveurs (dont les traitements School de fond).
+assertE2eDatabases({ ...apiEnv, ...process.env }, testDb, schoolDb);
+if (schoolDb) assertSchoolTestDatabase(schoolDb);
+const schoolEnv: Record<string, string> = schoolDb
+  ? {
+      SCHOOL_ENABLED: 'true',
+      SCHOOL_DATABASE_URL: schoolDb.url,
+      // Clé de chiffrement aléatoire, propre à l'exécution : les données fictives ne lui survivent pas.
+      SCHOOL_DATA_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
+      ...SCHOOL_SITES_ENV,
+    }
+  : { SCHOOL_ENABLED: 'false' };
 
 /**
  * Tests E2E : l'API (port 4000) et le frontend (port 3000) doivent être construits au préalable
@@ -47,6 +78,13 @@ export default defineConfig({
         AI_REAL_CALLS_ENABLED: 'false',
         SITES_DOMAIN_VERIFIER: 'simulated',
         MEDIA_STORAGE: 'local',
+        // Une même IP enchaîne des dizaines d'inscriptions et de connexions : limite relevée pour le
+        // seul serveur de test, comme pour les tests d'intégration (setup-env.ts). Sans cela, les tests
+        // de fin de suite reçoivent 429 « Trop de requêtes » à l'inscription.
+        LOGIN_THROTTLE_LIMIT: '10000',
+        SITES_REVALIDATE_URL: 'http://localhost:3000/api/site-revalidate',
+        SITES_REVALIDATE_SECRET: revalidateSecret,
+        ...schoolEnv,
       },
       reuseExistingServer: false,
       timeout: 120_000,
@@ -55,6 +93,7 @@ export default defineConfig({
       command: 'npx next start -p 3000',
       cwd: 'apps/web',
       url: 'http://localhost:3000',
+      env: { SITES_REVALIDATE_SECRET: revalidateSecret, ...SCHOOL_SITES_ENV },
       reuseExistingServer: false,
       timeout: 120_000,
     },

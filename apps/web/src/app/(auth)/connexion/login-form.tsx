@@ -13,6 +13,8 @@ import type { Me } from '@/lib/types';
 /** Destination après connexion : changement de mot de passe imposé, espace Super Admin ou espace client. */
 export function destinationFor(me: Me, requested: string | null): string {
   if (me.user.mustChangePassword) return '/changer-mot-de-passe';
+  // Responsable d'élève : portail parents d'Ocall School, quel que soit le lien demandé.
+  if (me.accountKind === 'guardian') return '/parents';
   if (me.accountKind !== 'member') {
     // Comptes internes Ocall et partenaires : second facteur avant leur espace.
     if (me.mfa.required && !me.mfa.verified) return '/double-authentification';
@@ -49,8 +51,10 @@ export function LoginForm() {
 
   return (
     <div>
-      <h1 className="text-3xl font-bold">Connexion</h1>
-      <p className="mt-2 text-muted">Accédez à l’espace de gestion de votre établissement.</p>
+      <h1 className="text-3xl font-bold text-suite-ink">Connexion</h1>
+      <p className="mt-2 text-muted">
+        Accédez à vos logiciels Ocall : School, Park et votre espace de gestion.
+      </p>
       <form onSubmit={onSubmit} className="mt-8 space-y-5" noValidate>
         {params.get('expire') && !error && (
           <Alert tone="info">Votre session a expiré. Reconnectez-vous.</Alert>
@@ -78,7 +82,7 @@ export function LoginForm() {
         <div className="flex justify-end">
           <Link
             href="/mot-de-passe-oublie"
-            className="text-sm font-medium text-forest hover:underline"
+            className="text-sm font-medium text-suite-green hover:underline"
           >
             Mot de passe oublié ?
           </Link>
@@ -96,7 +100,7 @@ export function LoginForm() {
       </form>
       <p className="mt-8 text-center text-sm text-muted">
         Nouvel établissement ?{' '}
-        <Link href="/inscription" className="font-semibold text-forest hover:underline">
+        <Link href="/inscription" className="font-semibold text-suite-green hover:underline">
           Créer une organisation
         </Link>
       </p>

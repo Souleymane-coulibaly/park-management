@@ -15,19 +15,23 @@ Le français est la seule langue visée ; aucune autre langue n'est annoncée sa
 
 ## 2. Architecture
 
+Depuis le Sprint 8 d'Ocall School, le moteur technique est **Ocall AI Core** (`apps/api/src/ai-core/`,
+voir `docs/OCALL-AI-CORE.md`), commun à toutes les applications. Park n'y garde que son domaine :
+
 ```
+apps/api/src/ai-core/            moteur commun : fournisseurs, prompts versionnés, orchestrateur, outils, débit
 apps/api/src/modules/ai/
-  providers/ai-provider.ts       interface AiProvider (extractFromDocument, structureText, runWithTools, transcribe)
-  providers/openai.provider.ts   OpenAI : API Responses + transcription audio
-  providers/simulated.provider.ts fournisseur simulé (développement, tests ; interdit en production)
-  ai-usage.service.ts            point de passage obligé : activation, quota sous verrou, consommation, purge
+  park-ai-usage.store.ts         stockage Park de la consommation (AiSettings, AiUsage, quota de l'offre)
+  park-ai-simulation.ts          scénarios Park du fournisseur simulé (copilote, commande vocale)
+  ai-usage.service.ts            réglages, état, consommation, rétention ; appels via l'orchestrateur commun
   imports/                       import de carte (restaurant) et de grille tarifaire (parc)
-  copilot/                       copilote : registre fermé de fonctions analytiques en lecture seule
+  copilot/                       copilote : registre fermé de 12 fonctions analytiques en lecture seule
   voice/                         commande vocale : transcription → panier proposé → confirmation
 ```
 
 - Les règles métier ne dépendent que de `AiProvider` : changer de fournisseur ne réécrit aucune règle.
-- Tout appel passe par `AiUsageService.run()` : fonctionnalité activée, quota réservé **avant** l'appel
+- Tout appel passe par `AiUsageService.run()`, puis par l'orchestrateur d'Ocall AI Core : limitation de
+  débit, fonctionnalité activée, quota réservé **avant** l'appel
   (verrou sur la ligne `AiSettings` : des appels simultanés ne dépassent pas le plafond), consommation
   et coût estimé enregistrés ensuite, erreurs traduites en messages clairs (« Vous pouvez continuer sans IA »).
 - Réutilisation : publication via `CatalogService` et `TicketCategoriesService`, commande via

@@ -109,6 +109,76 @@ export const SchoolPermission = {
   TEACHING_READ: 'school.teaching.read',
   /** Affecter, remplacer ou terminer une affectation d'enseignement. */
   TEACHING_MANAGE: 'school.teaching.manage',
+  /** Évaluations, notes et moyennes (Sprint 4) ; l'enseignant, seulement pour ses affectations. */
+  ASSESSMENT_READ: 'school.assessment.read',
+  /** Créer des évaluations, saisir les notes et les appréciations ; l'enseignant, ses affectations. */
+  ASSESSMENT_MANAGE: 'school.assessment.manage',
+  /** Valider ou rouvrir les résultats d'une classe, rédiger l'appréciation générale. */
+  RESULTS_VALIDATE: 'school.results.validate',
+  /** Moyennes générales, classements et bulletins PDF de toute la classe. */
+  REPORT_CARDS: 'school.report_cards',
+  /** Activer ou désactiver le module « Mémorisation du Coran ». */
+  QURAN_SETTINGS: 'school.quran.settings',
+  /** Consulter la mémorisation ; l'enseignant, seulement pour la matière Coran de ses classes. */
+  QURAN_READ: 'school.quran.read',
+  /** Enregistrer une évaluation de mémorisation : l'enseignant affecté à la matière Coran. */
+  QURAN_MANAGE: 'school.quran.manage',
+  /** Situation financière des élèves, échéances, encaissements et reçus (Sprint 5). */
+  FINANCE_READ: 'school.finance.read',
+  /** Réglages financiers, catalogue des frais, échéanciers et génération des échéances. */
+  FINANCE_SETTINGS: 'school.finance.settings',
+  /** Enregistrer un encaissement en caisse. Le secrétariat seulement si la direction l'autorise. */
+  FINANCE_COLLECT: 'school.finance.collect',
+  /** Accorder ou retirer une réduction, une bourse ou une exonération ; ajuster une échéance. */
+  FINANCE_BENEFITS: 'school.finance.benefits',
+  /** Annuler un encaissement confirmé (contrepassation motivée). */
+  FINANCE_CANCEL: 'school.finance.cancel',
+  /** Tableau de bord financier, impayés et exports. */
+  FINANCE_REPORTS: 'school.finance.reports',
+  /** Portail parents (Sprint 6) : inviter un responsable, révoquer son accès. */
+  PORTAL_MANAGE: 'school.portal.manage',
+  /** Publier aux familles (ou retirer) les résultats validés d'une classe pour une période. */
+  RESULTS_PUBLISH: 'school.results.publish',
+  /** Consulter les présences ; l'enseignant, seulement pour ses classes. */
+  ATTENDANCE_READ: 'school.attendance.read',
+  /** Faire l'appel et le corriger (motif obligatoire) ; l'enseignant, seulement pour ses classes. */
+  ATTENDANCE_TAKE: 'school.attendance.take',
+  /** Enregistrer et examiner les justificatifs d'absence. */
+  ATTENDANCE_JUSTIFY: 'school.attendance.justify',
+  /** Annonces à tout l'établissement, une classe, des élèves ou des responsables choisis. */
+  ANNOUNCEMENTS_MANAGE: 'school.announcements.manage',
+  /** Annonces aux familles ; sans ANNOUNCEMENTS_MANAGE, limitées aux classes de l'enseignant. */
+  ANNOUNCEMENTS_CLASS: 'school.announcements.class',
+  /** Réglages et historique des SMS de l'établissement. */
+  SMS_MANAGE: 'school.sms.manage',
+  /** Emplois du temps, salles, calendrier et examens publiés (Sprint 7) ; l'enseignant, ses classes. */
+  PLANNING_READ: 'school.planning.read',
+  /** Préparer les emplois du temps (brouillons, créneaux), salles, indisponibilités, annulations. */
+  PLANNING_MANAGE: 'school.planning.manage',
+  /** Publier un emploi du temps (le rendre visible et applicable). */
+  PLANNING_PUBLISH: 'school.planning.publish',
+  /** Événements du calendrier scolaire (vacances, fériés, réunions, sorties…). */
+  CALENDAR_MANAGE: 'school.calendar.manage',
+  /** Programmer et publier les examens (date, heure, durée, salle, surveillant). */
+  EXAMS_MANAGE: 'school.exams.manage',
+  /** Tableau de bord de direction, rapports pédagogiques et d'assiduité (Sprint 8). */
+  REPORTS_READ: 'school.reports.read',
+  /** Exporter les rapports (PDF, XLSX, CSV) ; journalisé. Le financier exige aussi FINANCE_REPORTS. */
+  REPORTS_EXPORT: 'school.reports.export',
+  /** Historique des opérations sensibles du client : direction du groupe seulement (tous établissements). */
+  AUDIT_READ: 'school.audit.read',
+  /** Ocall School AI (Sprint 8) : copilote de direction, en lecture seule sur les rapports autorisés. */
+  AI_COPILOT: 'school.ai.copilot',
+  /** Assistant pédagogique : contenus générés, validés par l'enseignant avant toute diffusion. */
+  AI_TEACHING: 'school.ai.teaching',
+  /** Analyse scolaire : indicateurs calculés par le serveur, synthèse rédigée par l'IA. */
+  AI_ANALYSIS: 'school.ai.analysis',
+  /** Activer l'IA par établissement, quotas, conservation des conversations, consommation. */
+  AI_MANAGE: 'school.ai.manage',
+  /** Site vitrine public de l'établissement (Sprint 10) : contenus, médias, actualités, liens. */
+  SITE_MANAGE: 'school.site.manage',
+  /** Publier, dépublier ou activer le site vitrine ; retirer immédiatement une photo publiée. */
+  SITE_PUBLISH: 'school.site.publish',
 } as const;
 export type SchoolPermission = (typeof SchoolPermission)[keyof typeof SchoolPermission];
 
@@ -138,14 +208,61 @@ const DIRECTION: readonly SchoolPermission[] = [
   SP.DOCUMENTS_DELETE,
   SP.TEACHING_READ,
   SP.TEACHING_MANAGE,
+  SP.ASSESSMENT_READ,
+  SP.ASSESSMENT_MANAGE,
+  SP.RESULTS_VALIDATE,
+  SP.REPORT_CARDS,
+  SP.QURAN_SETTINGS,
+  SP.QURAN_READ,
+  SP.FINANCE_READ,
+  SP.FINANCE_SETTINGS,
+  SP.FINANCE_COLLECT,
+  SP.FINANCE_BENEFITS,
+  SP.FINANCE_CANCEL,
+  SP.FINANCE_REPORTS,
+  SP.PORTAL_MANAGE,
+  SP.RESULTS_PUBLISH,
+  SP.ATTENDANCE_READ,
+  SP.ATTENDANCE_TAKE,
+  SP.ATTENDANCE_JUSTIFY,
+  SP.ANNOUNCEMENTS_MANAGE,
+  SP.ANNOUNCEMENTS_CLASS,
+  SP.SMS_MANAGE,
+  SP.PLANNING_READ,
+  SP.PLANNING_MANAGE,
+  SP.PLANNING_PUBLISH,
+  SP.CALENDAR_MANAGE,
+  SP.EXAMS_MANAGE,
+  SP.REPORTS_READ,
+  SP.REPORTS_EXPORT,
+  SP.AI_COPILOT,
+  SP.AI_TEACHING,
+  SP.AI_ANALYSIS,
+  SP.AI_MANAGE,
+  SP.SITE_MANAGE,
+  SP.SITE_PUBLISH,
 ];
 
 /**
  * Matrice appliquée par l'API. Le secrétariat prépare, la direction valide ; enseignant, surveillant et
- * comptable n'ont que la liste restreinte, et l'enseignant seulement pour ses classes.
+ * comptable n'ont que la liste restreinte, et l'enseignant seulement pour ses classes. Notes : la
+ * direction gère et valide, le secrétariat consulte et édite les bulletins, l'enseignant saisit pour ses
+ * affectations. Mémorisation : l'enseignant de la matière Coran saisit, la direction consulte.
+ * Finances : la direction configure, accorde, annule et suit ; la comptabilité encaisse et suit ; le
+ * secrétariat consulte, et encaisse seulement si la direction l'a autorisé ; l'enseignant n'y a pas accès.
+ * Portail parents, présences, communication (Sprint 6) : la direction gère tout et publie les résultats ;
+ * le secrétariat invite les responsables, gère absences, justificatifs et annonces ; le surveillant fait
+ * l'appel et examine les justificatifs ; l'enseignant fait l'appel et publie des annonces pour ses classes.
+ * Planning (Sprint 7) : le secrétariat prépare emplois du temps, salles, calendrier et examens, la direction
+ * publie les emplois du temps ; tout le personnel consulte, l'enseignant seulement ses classes.
+ * Reporting et IA (Sprint 8) : la direction consulte et exporte les rapports et utilise le copilote et
+ * l'analyse ; l'historique des opérations sensibles, qui couvre tout le client, est réservé à la direction
+ * du groupe ; l'enseignant dispose de l'assistant pédagogique pour ses classes.
+ * Site vitrine (Sprint 10) : le secrétariat prépare contenus, médias, actualités et liens ; la direction
+ * publie, dépublie et peut retirer immédiatement une photo publiée.
  */
 export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermission[]> = {
-  GROUP_DIRECTOR: [...DIRECTION, SP.SCHOOLS_MANAGE],
+  GROUP_DIRECTOR: [...DIRECTION, SP.SCHOOLS_MANAGE, SP.AUDIT_READ],
   SCHOOL_DIRECTOR: DIRECTION,
   SECRETARY: [
     SP.STRUCTURE_READ,
@@ -161,10 +278,51 @@ export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermissi
     SP.DOCUMENTS_READ,
     SP.DOCUMENTS_MANAGE,
     SP.TEACHING_READ,
+    SP.ASSESSMENT_READ,
+    SP.REPORT_CARDS,
+    SP.FINANCE_READ,
+    SP.PORTAL_MANAGE,
+    SP.ATTENDANCE_READ,
+    SP.ATTENDANCE_TAKE,
+    SP.ATTENDANCE_JUSTIFY,
+    SP.ANNOUNCEMENTS_MANAGE,
+    SP.ANNOUNCEMENTS_CLASS,
+    SP.PLANNING_READ,
+    SP.PLANNING_MANAGE,
+    SP.CALENDAR_MANAGE,
+    SP.EXAMS_MANAGE,
+    SP.SITE_MANAGE,
   ],
-  TEACHER: [SP.STRUCTURE_READ, SP.STUDENTS_READ],
-  SUPERVISOR: [SP.STRUCTURE_READ, SP.STUDENTS_READ, SP.TEACHING_READ],
-  ACCOUNTANT: [SP.STRUCTURE_READ, SP.STUDENTS_READ],
+  TEACHER: [
+    SP.STRUCTURE_READ,
+    SP.STUDENTS_READ,
+    SP.ASSESSMENT_READ,
+    SP.ASSESSMENT_MANAGE,
+    SP.QURAN_READ,
+    SP.QURAN_MANAGE,
+    SP.ATTENDANCE_READ,
+    SP.ATTENDANCE_TAKE,
+    SP.ANNOUNCEMENTS_CLASS,
+    SP.PLANNING_READ,
+    SP.AI_TEACHING,
+  ],
+  SUPERVISOR: [
+    SP.STRUCTURE_READ,
+    SP.STUDENTS_READ,
+    SP.TEACHING_READ,
+    SP.ATTENDANCE_READ,
+    SP.ATTENDANCE_TAKE,
+    SP.ATTENDANCE_JUSTIFY,
+    SP.PLANNING_READ,
+  ],
+  ACCOUNTANT: [
+    SP.STRUCTURE_READ,
+    SP.STUDENTS_READ,
+    SP.FINANCE_READ,
+    SP.FINANCE_COLLECT,
+    SP.FINANCE_REPORTS,
+    SP.PLANNING_READ,
+  ],
 };
 
 export function hasSchoolPermission(role: SchoolRole, permission: SchoolPermission): boolean {
@@ -193,9 +351,13 @@ export function assignableSchoolRoles(actor: SchoolRole): readonly SchoolRole[] 
 export const SCHOOL_TIE_RULES = ['SHARED', 'DENSE'] as const;
 export type SchoolTieRule = (typeof SCHOOL_TIE_RULES)[number];
 
+/** Absence non justifiée : écartée du calcul (par défaut) ou comptée zéro. Une dispense est toujours écartée. */
+export const SCHOOL_ABSENCE_RULES = ['EXCLUDED', 'ZERO'] as const;
+export type SchoolAbsenceRule = (typeof SCHOOL_ABSENCE_RULES)[number];
+
 /**
- * Règles de calcul d'un établissement. Chaque modification crée une nouvelle version : un bulletin déjà
- * publié garde les règles avec lesquelles il a été calculé. Les moteurs arrivent aux sprints suivants.
+ * Règles de calcul d'un établissement. Chaque modification crée une nouvelle version : des résultats
+ * validés gardent les règles avec lesquelles ils ont été calculés. Moteur : `computeClassResults`.
  */
 export interface SchoolGradingRules {
   /** Note maximale, ex. 20. */
@@ -210,6 +372,8 @@ export interface SchoolGradingRules {
     ties: SchoolTieRule;
     excludedSubjectIds: string[];
   };
+  /** Absent des versions antérieures au Sprint 4 : « EXCLUDED » s'applique alors. */
+  absences?: SchoolAbsenceRule;
 }
 
 export const DEFAULT_SCHOOL_GRADING_RULES: SchoolGradingRules = {
@@ -217,7 +381,10 @@ export const DEFAULT_SCHOOL_GRADING_RULES: SchoolGradingRules = {
   passMark: 10,
   decimals: 2,
   ranking: { enabled: true, ties: 'SHARED', excludedSubjectIds: [] },
+  absences: 'EXCLUDED',
 };
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Messages d'erreur des règles ; vide si elles sont valides. */
 export function validateGradingRules(rules: SchoolGradingRules): string[] {
@@ -233,6 +400,21 @@ export function validateGradingRules(rules: SchoolGradingRules): string[] {
   }
   if (!SCHOOL_TIE_RULES.includes(rules.ranking?.ties)) {
     errors.push('La règle des ex æquo est invalide.');
+  }
+  if (typeof rules.ranking?.enabled !== 'boolean') {
+    errors.push('L’activation du classement doit être un booléen.');
+  }
+  const excluded: unknown = rules.ranking?.excludedSubjectIds;
+  if (
+    excluded !== undefined &&
+    (!Array.isArray(excluded) ||
+      excluded.length > 200 ||
+      excluded.some((id) => typeof id !== 'string' || !UUID.test(id)))
+  ) {
+    errors.push('Les matières exclues du classement doivent être une liste d’identifiants.');
+  }
+  if (rules.absences !== undefined && !SCHOOL_ABSENCE_RULES.includes(rules.absences)) {
+    errors.push('La règle des absences est invalide.');
   }
   return errors;
 }

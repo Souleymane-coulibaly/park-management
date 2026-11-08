@@ -82,3 +82,81 @@ export function bestContract<T extends ContractWindow>(
   }
   return best;
 }
+
+/** Contrat d'un produit couvrant des établissements (couverture vide = tous ceux du client). */
+export interface CoveringContract extends ContractWindow {
+  modules: readonly string[];
+  limits: { maxSchools?: number } | null | undefined;
+  coveredSchoolIds: readonly string[];
+}
+
+/**
+ * Droits d'un client sur un produit couvert par PLUSIEURS contrats (renouvellement, avenant, contrats
+ * par établissement), sans jamais retenir arbitrairement un seul contrat :
+ * - `access` : le plus large parmi tous les contrats (porte d'entrée du produit) ;
+ * - `readSchoolIds` : établissements couverts par au moins un contrat actif ou en lecture seule ;
+ * - `writeSchoolIds` : établissements couverts par au moins un contrat ACTIF (écriture) ;
+ *   `null` = tous les établissements du client (un contrat sans couverture précise), `[]` = aucun ;
+ * - `modules` : union des modules des contrats actifs ou en lecture seule ;
+ * - `limits.maxSchools` : la plus favorable parmi les contrats actifs (aucune limite si l'un n'en fixe
+ *   pas, sinon la plus grande ; jamais de cumul).
+ * Indépendant de l'ordre des contrats.
+ */
+export interface ResolvedProductEntitlement {
+  access: ProductAccess;
+  readSchoolIds: string[] | null;
+  writeSchoolIds: string[] | null;
+  modules: string[];
+  limits: { maxSchools?: number };
+}
+
+export function resolveProductEntitlement(
+  contracts: readonly CoveringContract[],
+  now: Date = new Date(),
+): ResolvedProductEntitlement {
+  const rank: Record<ProductAccess, number> = { full: 2, read_only: 1, none: 0 };
+  let access: ProductAccess = 'none';
+  const read = new Set<string>();
+  const write = new Set<string>();
+  let readAll = false;
+  let writeAll = false;
+  const modules = new Set<string>();
+  let maxSchools: number | undefined;
+  let unlimited = false;
+  let anyFull = false;
+  for (const c of contracts) {
+    const a = contractAccess(c, now);
+    if (a === 'none') continue;
+    if (rank[a] > rank[access]) access = a;
+    for (const m of c.modules) modules.add(m);
+    const all = c.coveredSchoolIds.length === 0;
+    if (all) readAll = true;
+    else for (const id of c.coveredSchoolIds) read.add(id);
+    if (a === 'full') {
+      anyFull = true;
+      if (all) writeAll = true;
+      else for (const id of c.coveredSchoolIds) write.add(id);
+      const limit = c.limits?.maxSchools;
+      if (limit === undefined || limit === null) unlimited = true;
+      else maxSchools = Math.max(maxSchools ?? 0, limit);
+    }
+  }
+  return {
+    access,
+    readSchoolIds: readAll ? null : [...read].sort(),
+    writeSchoolIds: writeAll ? null : [...write].sort(),
+    modules: [...modules].sort(),
+    limits: anyFull && !unlimited && maxSchools !== undefined ? { maxSchools } : {},
+  };
+}
+
+/** Accès d'un établissement donné : écriture, lecture seule ou aucun (périmètre nul = tous). */
+export function schoolAccessIn(
+  entitlement: Pick<ResolvedProductEntitlement, 'readSchoolIds' | 'writeSchoolIds'>,
+  schoolId: string,
+): ProductAccess {
+  const inScope = (scope: string[] | null) => scope === null || scope.includes(schoolId);
+  if (inScope(entitlement.writeSchoolIds)) return 'full';
+  if (inScope(entitlement.readSchoolIds)) return 'read_only';
+  return 'none';
+}

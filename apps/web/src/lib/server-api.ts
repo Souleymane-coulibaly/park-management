@@ -23,12 +23,16 @@ export async function getSession(): Promise<Me | null> {
 
 /** Exige une session de membre d'organisation ; le changement de mot de passe initial est imposé. */
 /** Espace d'accueil selon le type de compte (Sprint 12B). */
-export function homeFor(me: Pick<Me, 'accountKind'>): '/app' | '/admin' | '/partenaire' {
+export function homeFor(
+  me: Pick<Me, 'accountKind'>,
+): '/app' | '/admin' | '/partenaire' | '/parents' {
   return me.accountKind === 'partner'
     ? '/partenaire'
     : me.accountKind === 'internal'
       ? '/admin'
-      : '/app';
+      : me.accountKind === 'guardian'
+        ? '/parents'
+        : '/app';
 }
 
 export async function requireMemberSession(): Promise<Me> {
@@ -47,6 +51,15 @@ export async function requirePartnerSession(): Promise<Me> {
   if (me.user.mustChangePassword) redirect('/changer-mot-de-passe');
   if (me.accountKind !== 'partner') redirect(homeFor(me));
   if (me.mfa.required && !me.mfa.verified) redirect('/double-authentification');
+  return me;
+}
+
+/** Portail parents d'Ocall School (Sprint 6) : compte de responsable, mot de passe défini. */
+export async function requireGuardianSession(): Promise<Me> {
+  const me = await getSession();
+  if (!me) redirect('/connexion');
+  if (me.user.mustChangePassword) redirect('/changer-mot-de-passe');
+  if (me.accountKind !== 'guardian') redirect(homeFor(me));
   return me;
 }
 

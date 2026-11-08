@@ -25,6 +25,7 @@ import { SchoolPrismaService } from './school-prisma.service';
 
 const SCHOOL_PERMISSION = 'schoolPermission';
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+const ALLOWED_IN_READ_ONLY = 'schoolAllowedInReadOnly';
 
 /** Contexte d'une requête School : seule source fiable du client, du rôle et des établissements. */
 export interface SchoolContext {
@@ -36,8 +37,18 @@ export interface SchoolContext {
   role: SchoolRole;
   /** Ligne School du compte ; null pour le propriétaire, direction du groupe d'office. */
   memberId: string | null;
-  /** Établissements accessibles ; null = tous ceux du client. */
+  /**
+   * Établissements accessibles POUR CETTE REQUÊTE ; null = tous ceux du client. Une écriture ne voit
+   * que les établissements couverts par un contrat actif ; une lecture (ou une action protectrice),
+   * ceux couverts par un contrat actif ou en lecture seule.
+   */
   schoolIds: string[] | null;
+  /** Périmètres du contrat : lecture et écriture (null = tous les établissements du client). */
+  contract?: { readSchoolIds: string[] | null; writeSchoolIds: string[] | null };
+  /** Requête d'écriture dont le périmètre a été restreint aux établissements sous contrat actif. */
+  writeNarrowed?: boolean;
+  /** Périmètre de LECTURE de l'utilisateur (rôle ∩ contrats), même pour une écriture ; null = tous. */
+  readSchoolIds?: string[] | null;
 }
 
 type SchoolRequest = Request & { school?: SchoolContext };
@@ -45,16 +56,22 @@ type SchoolRequest = Request & { school?: SchoolContext };
 export const RequireSchoolPermission = (permission: SchoolPermission) =>
   SetMetadata(SCHOOL_PERMISSION, permission);
 
+/**
+ * Écriture PROTECTRICE permise en lecture seule (contrat suspendu ou expiré) : retirer une photo publiée
+ * ou dépublier le site ne fait que réduire ce qui est exposé. Aucune création ni publication.
+ */
+export const AllowInReadOnly = () => SetMetadata(ALLOWED_IN_READ_ONLY, true);
+
 export const CurrentSchool = createParamDecorator((_data: unknown, ctx: ExecutionContext) => {
   return ctx.switchToHttp().getRequest<SchoolRequest>().school as SchoolContext;
 });
 
-/** Intersection du périmètre du rôle et de la couverture du contrat. */
+/** Intersection du périmètre du rôle et de la couverture des contrats (null = tous). */
 export function resolveSchoolIds(
   assigned: string[] | null,
-  covered: readonly string[],
+  covered: readonly string[] | null,
 ): string[] | null {
-  if (covered.length === 0) return assigned;
+  if (covered === null) return assigned;
   return assigned ? assigned.filter((id) => covered.includes(id)) : [...covered];
 }
 
@@ -89,7 +106,12 @@ export class SchoolAccessGuard implements CanActivate {
       });
     }
     // Contrat suspendu ou expiré : consultation et export uniquement, aucune donnée n'est supprimée.
-    if (entitlement.access === 'read_only' && !SAFE_METHODS.has(req.method)) {
+    const protective = this.reflector.getAllAndOverride<boolean | undefined>(ALLOWED_IN_READ_ONLY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    const write = !SAFE_METHODS.has(req.method) && !protective;
+    if (entitlement.access === 'read_only' && write) {
       throw new ForbiddenException({
         code: 'CONTRACT_READ_ONLY',
         message: 'Votre contrat ne permet plus que la consultation et l’export des données.',
@@ -112,15 +134,28 @@ export class SchoolAccessGuard implements CanActivate {
     const assigned = hasAllSchoolsScope(role)
       ? null
       : (member?.assignments ?? []).map((a) => a.schoolId);
+    // Périmètre par établissement, sur TOUS les contrats : une écriture ne voit que les établissements
+    // couverts par un contrat actif (un établissement seulement sous contrat suspendu ou expiré reste
+    // en lecture seule) ; une lecture, tous ceux couverts par un contrat actif ou en lecture seule.
+    const contract = {
+      readSchoolIds: entitlement.readSchoolIds,
+      writeSchoolIds: entitlement.writeSchoolIds,
+    };
     req.school = {
       organizationId,
       userId: auth.user.id,
-      access: entitlement.access,
+      access: write ? 'full' : entitlement.access,
       modules: entitlement.modules,
       limits: entitlement.limits,
       role,
       memberId: member?.id ?? null,
-      schoolIds: resolveSchoolIds(assigned, entitlement.coveredSchoolIds),
+      schoolIds: resolveSchoolIds(
+        assigned,
+        write ? entitlement.writeSchoolIds : entitlement.readSchoolIds,
+      ),
+      contract,
+      writeNarrowed: write,
+      readSchoolIds: resolveSchoolIds(assigned, entitlement.readSchoolIds),
     };
     return true;
   }
