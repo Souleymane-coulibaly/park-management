@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Inter, Outfit } from 'next/font/google';
 import type { ReactNode } from 'react';
+import { isIndexingBlocked } from '@/lib/indexing';
 import './globals.css';
 
 const body = Inter({ subsets: ['latin'], variable: '--font-body', display: 'swap' });
@@ -14,6 +15,8 @@ export const metadata: Metadata = {
   description:
     'Ocall Park est le logiciel de gestion des parcs aquatiques, espaces de loisirs et restaurants en Afrique : établissements, équipes, rôles et abonnement en FCFA.',
   applicationName: 'Ocall Park',
+  // Préproduction : balise robots en plus de l'en-tête X-Robots-Tag (voir lib/indexing.ts).
+  ...(isIndexingBlocked() ? { robots: { index: false, follow: false } } : {}),
   manifest: '/manifest.webmanifest',
   icons: { apple: '/icons/apple-touch-icon.png' },
   // iPhone : installation par « Sur l'écran d'accueil », écrans de lancement par format d'appareil.

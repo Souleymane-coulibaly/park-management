@@ -25,8 +25,21 @@ test.describe('Sprint 12A — site Ocall Suite', () => {
       .click();
     await expect(page.getByText('Disponible', { exact: true }).first()).toBeVisible();
 
+    // Statuts de l'accueil : School en préproduction, Facture et Stock bientôt disponibles.
+    await page.goto('/');
+    const card = (name: string) => page.locator('#logiciels article').filter({ hasText: name });
+    await expect(card('Ocall School')).toContainText('En préproduction');
+    await expect(card('Ocall Facture')).toContainText('Bientôt disponible');
+    await expect(card('Ocall Stock')).toContainText('Bientôt disponible');
+
+    // Connexion : titre Ocall Suite, plus « Connexion · Ocall Park ».
+    await page.goto('/connexion');
+    await expect(page).toHaveTitle('Connexion · Ocall Suite');
+
+    // Statut d'Ocall School harmonisé avec l'accueil : « En préproduction », jamais « Bientôt disponible ».
     await page.goto('/solutions/ocall-school');
-    await expect(page.getByText('Bientôt disponible').first()).toBeVisible();
+    await expect(page.getByText('En préproduction').first()).toBeVisible();
+    await expect(page.getByRole('main').getByText('Bientôt disponible')).toHaveCount(0);
     // Aucun tarif scolaire publié (le pied de page commun mentionne la devise).
     await expect(page.getByRole('main').getByText(/FCFA/)).toHaveCount(0);
     await expect(page.getByRole('link', { name: 'Être informé du lancement' })).toBeVisible();
