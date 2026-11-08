@@ -1,4 +1,5 @@
 import type { NextConfig } from 'next';
+import { NOINDEX_DIRECTIVE, isIndexingBlocked } from './src/lib/indexing';
 
 /**
  * URL interne de l'API. Sur Railway : URL du réseau privé du service API
@@ -41,6 +42,9 @@ const nextConfig: NextConfig = {
           // jamais à un tiers. Valeur globale : une navigation interne conserve la politique de la page
           // d'arrivée (connexion). `microphone=()` interdisait le micro partout, commande vocale comprise.
           { key: 'Permissions-Policy', value: 'camera=(self), microphone=(self), geolocation=()' },
+          // Préproduction seulement (voir src/lib/indexing.ts) : l'en-tête couvre aussi les pages qui
+          // déclarent `index: true` (sites vitrines) — le moteur applique la directive la plus stricte.
+          ...(isIndexingBlocked() ? [{ key: 'X-Robots-Tag', value: NOINDEX_DIRECTIVE }] : []),
         ],
       },
       {

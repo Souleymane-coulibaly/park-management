@@ -5,7 +5,7 @@ import { SiteHeader } from '@/components/public/site-header';
 
 const SITE_URL = process.env.SUITE_PUBLIC_URL ?? 'http://localhost:3000';
 const DESCRIPTION =
-  'Ocall Suite : des logiciels de gestion en ligne pour les entreprises africaines — parcs aquatiques, restaurants, et bientôt écoles, cliniques, RH, solaire et documents.';
+  'Ocall Suite : des logiciels de gestion en ligne pour les établissements et entreprises africains — Ocall Park (parcs, restaurants, loisirs), Ocall School (établissements scolaires), et bientôt la facturation et les stocks.';
 
 /**
  * Site commercial Ocall Suite. Ces métadonnées ne concernent que ce groupe de pages : les sites

@@ -1,7 +1,18 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { GraduationCap, ShieldCheck, Sparkles, Ticket } from 'lucide-react';
 import { SuiteLogo } from '@/components/brand/suite-logo';
+
+/**
+ * Titres Ocall Suite pour les écrans d'authentification communs (« Connexion · Ocall Suite ») ;
+ * le titre racine « Ocall Park » reste celui des espaces Park, et School garde les siens.
+ */
+export const metadata: Metadata = {
+  title: { template: '%s · Ocall Suite', default: 'Ocall Suite' },
+  description:
+    'Connectez-vous à vos logiciels Ocall Suite — Ocall School, Ocall Park — avec un seul compte, en toute sécurité.',
+};
 
 /**
  * Écrans d'authentification (connexion, mot de passe, double authentification, inscription), communs à

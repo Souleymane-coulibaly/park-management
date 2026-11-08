@@ -10,6 +10,7 @@ import {
   Waves,
 } from 'lucide-react';
 import { connection } from 'next/server';
+import { PRODUCT_STATUS_LABEL, SUITE_PRODUCTS } from './suite-landing';
 
 /** Produit du catalogue public, tel que renvoyé par l'API (statut décidé par le serveur). */
 export interface PublicProduct {
@@ -24,6 +25,20 @@ export interface PublicProduct {
   appUrl: string | null;
   availableAt: string | null;
   plans: { name: string; monthlyPrice: number; setupFee: number; currency: string }[];
+  /** Produit en préproduction (non souscriptible), présenté comme sur la page d’accueil. */
+  preproduction?: boolean;
+}
+
+/**
+ * Harmonise le statut public avec la page d’accueil (`SUITE_PRODUCTS`) : un produit « bientôt
+ * disponible » côté serveur mais en préproduction côté Ocall Suite (Ocall School) s’affiche
+ * « En préproduction ». Présentation seulement : statut serveur, souscription et tarifs inchangés ;
+ * dès que le serveur le passe en pilote ou commercialisé, c’est son statut qui s’affiche.
+ */
+export function withSuiteStage(p: PublicProduct): PublicProduct {
+  const stage = SUITE_PRODUCTS.find((s) => s.slug === p.slug)?.status;
+  if (p.status !== 'COMING_SOON' || stage !== 'preproduction') return p;
+  return { ...p, statusLabel: PRODUCT_STATUS_LABEL.preproduction, preproduction: true };
 }
 
 const API = () => process.env.API_URL ?? 'http://localhost:4000';
@@ -44,7 +59,7 @@ export async function loadCatalog(): Promise<PublicProduct[] | null> {
   let catalog: PublicProduct[] | null = null;
   try {
     const res = await fetch(`${API()}/api/v1/public/suite/products`, { next: { revalidate: 300 } });
-    if (res.ok) catalog = (await res.json()) as PublicProduct[];
+    if (res.ok) catalog = ((await res.json()) as PublicProduct[]).map(withSuiteStage);
   } catch {
     catalog = null;
   }
@@ -60,7 +75,7 @@ export async function loadProduct(slug: string): Promise<PublicProduct | null | 
       next: { revalidate: 300 },
     });
     if (res.status === 404) product = null;
-    else if (res.ok) product = (await res.json()) as PublicProduct;
+    else if (res.ok) product = withSuiteStage((await res.json()) as PublicProduct);
   } catch {
     product = 'unavailable';
   }

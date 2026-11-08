@@ -93,13 +93,12 @@ export default async function SolutionPage({ params }: Props) {
       <section className="mx-auto max-w-6xl px-4 py-14 sm:px-6">
         {!live && (
           <div className="mb-8">
-            <Alert
-              tone="info"
-              title={p.status === 'PILOT' ? 'Solution en pilote' : 'Bientôt disponible'}
-            >
+            <Alert tone="info" title={p.status === 'PILOT' ? 'Solution en pilote' : p.statusLabel}>
               {p.status === 'PILOT'
                 ? 'Cette solution est testée avec des clients pilotes. Contactez-nous pour en savoir plus.'
-                : 'Cette solution est en préparation : elle ne peut pas encore être souscrite. Aucune date de lancement n’est annoncée pour le moment.'}
+                : p.preproduction
+                  ? 'Cette solution est en préproduction : elle ne peut pas encore être souscrite. Aucune date de lancement n’est annoncée pour le moment.'
+                  : 'Cette solution est en préparation : elle ne peut pas encore être souscrite. Aucune date de lancement n’est annoncée pour le moment.'}
               {p.availableAt && ` Disponibilité prévue : ${p.availableAt}.`}
             </Alert>
           </div>
