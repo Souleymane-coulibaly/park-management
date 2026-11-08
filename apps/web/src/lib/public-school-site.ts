@@ -63,13 +63,30 @@ export async function fetchSchoolNews(
   return res.json();
 }
 
+/** Délai maximal de la contribution School au plan du site : au-delà, elle est considérée indisponible. */
+const SCHOOL_SITEMAP_TIMEOUT_MS = 5_000;
+
+/**
+ * Entrées School du plan du site, sans cache (une dépublication ou une résiliation retire aussitôt les
+ * pages). `null` si l'API ne répond pas (erreur réseau, délai dépassé, réponse illisible) : l'appelant
+ * sert alors le reste du plan au lieu d'échouer en entier. Erreur transitoire (5xx, 429) : également
+ * `null` — jamais un plan vide servi en 200. Autre réponse non OK (School désactivé…) : aucune entrée.
+ */
 export async function fetchSchoolSitemap(
   host: string,
-): Promise<{ url: string; lastModified: string | null }[]> {
-  const res = await fetch(
-    `${API_URL}/api/v1/public/school-sites/sitemap?host=${encodeURIComponent(host)}`,
-    // Sans cache : une dépublication ou une résiliation retire aussitôt les pages du plan.
-    { cache: 'no-store', headers: await visitorHeaders() },
-  );
-  return res.ok ? res.json() : [];
+): Promise<{ url: string; lastModified: string | null }[] | null> {
+  try {
+    const res = await fetch(
+      `${API_URL}/api/v1/public/school-sites/sitemap?host=${encodeURIComponent(host)}`,
+      {
+        cache: 'no-store',
+        headers: await visitorHeaders(),
+        signal: AbortSignal.timeout(SCHOOL_SITEMAP_TIMEOUT_MS),
+      },
+    );
+    if (res.status >= 500 || res.status === 429) return null;
+    return res.ok ? await res.json() : [];
+  } catch {
+    return null;
+  }
 }

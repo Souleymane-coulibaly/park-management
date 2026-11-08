@@ -1,5 +1,27 @@
 import { execFileSync } from 'node:child_process';
-import { PrismaClient, databaseIdentity, isLocalDatabase } from '@ocall/database';
+import {
+  PrismaClient,
+  type TestDatabase,
+  assertDisposableTestDatabases,
+  databaseIdentity,
+  isLocalDatabase,
+} from '@ocall/database';
+
+/**
+ * Garde commune des E2E, identique à celle des tests d'intégration : bases Suite ET School locales
+ * jetables, jamais une base configurée pour l'application, jamais en production. Une base distante
+ * marquée « test » n'est admise qu'avec la dérogation explicite `OCALL_TEST_ALLOW_MARKED_REMOTE=1`
+ * (recette locale autorisée, jamais en CI), le marqueur restant alors exigé. Appelée AVANT toute
+ * connexion : au chargement de la configuration Playwright, au setup, au teardown et avant chaque
+ * opération destructive.
+ */
+export function assertE2eDatabases(
+  env: NodeJS.ProcessEnv,
+  suite: TestDatabase,
+  school: SchoolTestDatabase | null,
+): void {
+  assertDisposableTestDatabases([suite.databaseUrl, suite.directUrl, school?.url], env);
+}
 
 /**
  * Base Ocall School des tests E2E : `TEST_SCHOOL_DATABASE_URL` (ou `SCHOOL_TEST_DATABASE_URL`, comme les
@@ -47,6 +69,8 @@ export function resolveSchoolTestDatabase(
  * démarrage des serveurs ; le setup et chaque opération destructive la rappellent.
  */
 export function assertSchoolTestDatabase(target: SchoolTestDatabase): void {
+  // Base distante refusée sans dérogation explicite, avant toute connexion (marqueur compris).
+  assertDisposableTestDatabases([target.url]);
   if (target.ephemeral) return;
   const probe = [
     "const { PrismaClient, TEST_MARKER_QUERY } = require('@ocall/database');",

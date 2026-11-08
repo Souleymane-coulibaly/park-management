@@ -139,8 +139,32 @@ pas touché et aucune donnée n'est supprimée.
 TEST_DATABASE_URL=… TEST_SCHOOL_DATABASE_URL=… pnpm --filter @ocall/api exec jest --runInBand school-sprint1
 ```
 
-Une base School distante doit porter le marqueur de test (`pnpm db:school:mark-test`). La variable est
-`SCHOOL_TEST_DATABASE_URL`. Le workflow manuel `School Neon test` lit le secret GitHub du même nom.
+Tests d'intégration et E2E : bases PostgreSQL **locales jetables** uniquement (Suite et School distinctes).
+La même garde (`assertDisposableTestDatabases`) protège les tests d'intégration et, depuis la consolidation
+de `main`, les E2E. Elle s'applique aux bases Suite et School, au chargement de la configuration Playwright
+et avant chaque nettoyage.
+
+**CI** : `ci.yml` et le workflow manuel `School tests (base jetable)` utilisent des conteneurs PostgreSQL
+détruits avec le job. **La CI n'utilise jamais Neon** : aucun secret de base, aucune dérogation distante.
+
+**Recette sur la base Neon School `test`, en local uniquement**, avec vérification explicite de l'identité :
+
+```
+RECETTE_EXPECTED_ENDPOINT=ep-xxxx RECETTE_EXPECTED_DATABASE=neondb \
+SCHOOL_TEST_DATABASE_URL=… TEST_DATABASE_URL=postgresql://…@127.0.0.1:…/… \
+pnpm school:recette:neon            # ou : pnpm school:recette:neon -- school-sprint10
+```
+
+Le script refuse de s'exécuter :
+
+- en CI ;
+- si l'hôte ou le nom de la base ne correspondent pas à l'identité attendue ;
+- si la base est configurée pour l'application (développement ou production) ;
+- si la base Suite de test n'est pas locale ;
+- si le marqueur « test » est absent (`pnpm db:school:mark-test`).
+
+Il n'affiche jamais d'URL complète. La dérogation `OCALL_TEST_ALLOW_MARKED_REMOTE=1` n'est transmise qu'à
+cette exécution.
 
 ## 8. Sprint 2 : dossiers élèves
 

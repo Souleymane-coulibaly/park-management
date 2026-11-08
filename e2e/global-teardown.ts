@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { parse } from 'dotenv';
 import { PrismaClient, resolveTestDatabase } from '@ocall/database';
 import {
+  assertE2eDatabases,
   purgeSchoolOrganizations,
   resolveSchoolTestDatabase,
   schoolPortalUserIds,
@@ -12,6 +13,12 @@ import { E2E_SUFFIX } from './support';
 export default async function globalTeardown(): Promise<void> {
   const apiEnv = existsSync('apps/api/.env') ? parse(readFileSync('apps/api/.env')) : {};
   const testDb = resolveTestDatabase({ ...apiEnv, ...process.env });
+  // Aucune suppression sur une base refusée, même si le setup a échoué avant (teardown exécuté).
+  assertE2eDatabases(
+    { ...apiEnv, ...process.env },
+    testDb,
+    resolveSchoolTestDatabase({ ...apiEnv, ...process.env }, testDb.databaseUrl),
+  );
   const prisma = new PrismaClient({ datasourceUrl: testDb.databaseUrl });
   try {
     const orgs = await prisma.organization.findMany({
