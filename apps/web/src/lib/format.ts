@@ -1,3 +1,5 @@
+import type { SaasProductStatus } from '@ocall/shared';
+
 const dateFormatter = new Intl.DateTimeFormat('fr-FR', {
   day: '2-digit',
   month: 'short',
@@ -126,12 +128,13 @@ export const actionLabel = (action: string) => ACTION_LABELS[action] ?? action;
 
 /** Couleur d'un statut commercial de produit (Sprint 12A). */
 export const PRODUCT_STATUS_TONE: Record<
-  'PLANNED' | 'COMING_SOON' | 'PILOT' | 'ACTIVE' | 'SUSPENDED' | 'RETIRED',
+  SaasProductStatus,
   'forest' | 'savanna' | 'terracotta' | 'neutral'
 > = {
   PLANNED: 'neutral',
   COMING_SOON: 'savanna',
   PILOT: 'savanna',
+  PREPRODUCTION: 'savanna',
   ACTIVE: 'forest',
   SUSPENDED: 'terracotta',
   RETIRED: 'neutral',

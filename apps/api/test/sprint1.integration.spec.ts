@@ -40,7 +40,7 @@ describe('Sprint 1 — socle SaaS (intégration)', () => {
   });
 
   describe("création d'organisation", () => {
-    it("crée l'organisation, le propriétaire, un établissement et un abonnement non activé", async () => {
+    it("crée l'organisation, le propriétaire, un établissement et un abonnement en essai gratuit", async () => {
       const me = await parkA.agent.get('/api/v1/auth/me').expect(200);
       expect(me.body.role).toBe('OWNER');
       expect(me.body.organization.businessType).toBe('PARK');
@@ -48,8 +48,9 @@ describe('Sprint 1 — socle SaaS (intégration)', () => {
       expect(me.body.user.loginId).toMatch(/^[A-Z0-9]+-0001$/);
 
       const sub = await parkA.agent.get('/api/v1/subscription').expect(200);
-      expect(sub.body.status).toBe('NOT_ACTIVATED');
-      expect(sub.body.plan.businessType).toBe('PARK');
+      // Socle S1 : Ocall Park est une seule application ; l'essai de 14 jours démarre à l'inscription.
+      expect(sub.body.status).toBe('TRIALING');
+      expect(sub.body.plan).toMatchObject({ monthlyPrice: 50000, setupFee: 200000 });
       expect(sub.body.events[0].type).toBe('CREATED');
     });
 
@@ -84,15 +85,17 @@ describe('Sprint 1 — socle SaaS (intégration)', () => {
       expect(res.body.code).toBe('WEAK_PASSWORD');
     });
 
-    it('les prix des offres viennent de la base', async () => {
+    it('les prix des offres viennent de la base (grille unifiée S1)', async () => {
       const plans = await agent(app).get('/api/v1/plans').expect(200);
-      const prices = Object.fromEntries(
-        plans.body.map((p: { businessType: string; monthlyPrice: number }) => [
-          p.businessType,
+      expect(
+        plans.body.map((p: { includesShowcase: boolean; monthlyPrice: number }) => [
+          p.includesShowcase,
           p.monthlyPrice,
         ]),
-      );
-      expect(Object.keys(prices).sort()).toEqual(['PARK', 'PARK_RESTAURANT', 'RESTAURANT']);
+      ).toEqual([
+        [false, 50000],
+        [true, 65000],
+      ]);
     });
   });
 
@@ -349,7 +352,7 @@ describe('Sprint 1 — socle SaaS (intégration)', () => {
   });
 
   describe('métier', () => {
-    it('PARK → PARK_RESTAURANT : données conservées, offre et navigation mises à jour', async () => {
+    it('PARK → PARK_RESTAURANT : données conservées, navigation mise à jour, offre inchangée (S1)', async () => {
       const before = (await parkA.agent.get('/api/v1/establishments').expect(200)).body.length;
       const res = await parkA.agent
         .post('/api/v1/organization/business-type')
@@ -360,9 +363,10 @@ describe('Sprint 1 — socle SaaS (intégration)', () => {
         before,
       );
 
+      // Socle S1 (D2) : une seule application Park pour tous les métiers — ni l'offre ni le tarif ne changent.
       const sub = await parkA.agent.get('/api/v1/subscription').expect(200);
-      expect(sub.body.plan.businessType).toBe('PARK_RESTAURANT');
-      expect(sub.body.events[0].type).toBe('PLAN_CHANGED');
+      expect(sub.body.plan).toMatchObject({ monthlyPrice: 50000, includesShowcase: false });
+      expect(sub.body.events.some((e: { type: string }) => e.type === 'PLAN_CHANGED')).toBe(false);
 
       const me = await parkA.agent.get('/api/v1/auth/me').expect(200);
       const keys = me.body.navigation.map((n: { key: string }) => n.key);

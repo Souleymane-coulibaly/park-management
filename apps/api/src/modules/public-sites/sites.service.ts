@@ -26,8 +26,10 @@ import {
   slugify,
   validateSiteContent,
   withContentDefaults,
+  PARK_APP_PRODUCT_CODES,
 } from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
+import { assertShowcaseAllowed } from '../../common/showcase';
 import { AuditService } from '../../common/audit/audit.service';
 import type { TenantContext } from '../../common/auth-context';
 import { establishmentScope } from '../../common/tenant-scope';
@@ -533,6 +535,11 @@ export class SitesService {
 
   async publish(tenant: TenantContext, siteId: string) {
     const site = await this.findSite(tenant, siteId);
+    await assertShowcaseAllowed(
+      this.prisma,
+      tenant.membership.organizationId,
+      PARK_APP_PRODUCT_CODES,
+    );
     const warnings = await this.prisma.$transaction(async (tx) => {
       const built = await this.buildPublished(tx, site, (m) => publicMediaUrl(m.storageKey));
       const now = new Date(built.published.publishedAt);

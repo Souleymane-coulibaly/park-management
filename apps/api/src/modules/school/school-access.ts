@@ -11,6 +11,8 @@ import {
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import {
+  type ContractLimits,
+  type ContractTier,
   SCHOOL_PRODUCT_CODE,
   type ProductAccess,
   type SchoolPermission,
@@ -33,7 +35,10 @@ export interface SchoolContext {
   userId: string;
   access: ProductAccess;
   modules: string[];
-  limits: { maxSchools?: number };
+  /** Limites du contrat (socle S1 : élèves, IA et SMS de l'offre gratuite). */
+  limits: Omit<ContractLimits, 'tier'>;
+  /** Nature du droit (payant, essai, gratuit) ; null sans contrat actif. */
+  tier?: ContractTier | null;
   role: SchoolRole;
   /** Ligne School du compte ; null pour le propriétaire, direction du groupe d'office. */
   memberId: string | null;
@@ -147,6 +152,7 @@ export class SchoolAccessGuard implements CanActivate {
       access: write ? 'full' : entitlement.access,
       modules: entitlement.modules,
       limits: entitlement.limits,
+      tier: entitlement.tier,
       role,
       memberId: member?.id ?? null,
       schoolIds: resolveSchoolIds(

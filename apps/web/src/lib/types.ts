@@ -126,6 +126,10 @@ export interface Plan {
   setupFee: number;
   currency: string;
   isActive?: boolean;
+  /** Offre avec site vitrine (socle S1). */
+  includesShowcase?: boolean;
+  trialDays?: number;
+  product?: { code: string; name: string; slug: string };
   /** Quotas de l'offre (Sprint 11B), renvoyés à l'administration. */
   aiMonthlyCallQuota?: number;
   storageQuotaMb?: number;

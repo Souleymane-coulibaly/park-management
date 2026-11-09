@@ -11,6 +11,7 @@ import {
   type SignedUpOwner,
   cleanup,
   createTestApp,
+  grantShowcasePlan,
   internalAccount,
   login,
   signup,
@@ -66,6 +67,8 @@ describe('Sprint 10 — sites vitrines (intégration)', () => {
     verifier = app.get(DOMAIN_VERIFIER);
     duo = await signup(app, 's10d', 'PARK_RESTAURANT');
     other = await signup(app, 's10o', 'RESTAURANT');
+    // Socle S1 (D5) : publication réservée à l'offre « avec vitrine ».
+    await grantShowcasePlan(prisma, duo.organizationId);
     estD = (await duo.agent.get(api('/establishments')).expect(200)).body[0].id;
     estO = (await other.agent.get(api('/establishments')).expect(200)).body[0].id;
     admin = await employee(duo, 'ADMIN', [estD]);
@@ -346,16 +349,18 @@ describe('Sprint 10 — sites vitrines (intégration)', () => {
     expect(ms).toBeLessThan(1_500);
   });
 
-  it('tarifs SaaS : frais de mise en service exposés sur la page Tarifs', async () => {
+  it('tarifs SaaS (socle S1) : grille unifiée Ocall Park, mise en service exposée sur la page Tarifs', async () => {
     const plans = (await publicGet('/plans').expect(200)).body as {
-      businessType: string;
+      product: { code: string };
+      includesShowcase: boolean;
       monthlyPrice: number;
       setupFee: number;
     }[];
-    expect(plans.map((p) => [p.businessType, p.monthlyPrice, p.setupFee]).sort()).toEqual([
-      ['PARK', 15000, 250000],
-      ['PARK_RESTAURANT', 25000, 350000],
-      ['RESTAURANT', 15000, 250000],
+    expect(
+      plans.map((p) => [p.product.code, p.includesShowcase, p.monthlyPrice, p.setupFee]),
+    ).toEqual([
+      ['OCALL_PARK', false, 50000, 200000],
+      ['OCALL_PARK', true, 65000, 200000],
     ]);
   });
 });

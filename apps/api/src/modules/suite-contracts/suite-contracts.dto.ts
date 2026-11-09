@@ -3,6 +3,7 @@ import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsEmail,
   IsIn,
   IsInt,
@@ -17,6 +18,8 @@ import {
   ValidateNested,
 } from 'class-validator';
 import {
+  CONTRACT_TIERS,
+  type ContractTier,
   SUITE_CONTRACT_STATUSES,
   SUPPORTED_COUNTRIES,
   type SuiteContractStatus,
@@ -32,6 +35,35 @@ export class ContractLimitsDto {
   @Min(1)
   @Max(1000)
   maxSchools?: number;
+
+  @ApiPropertyOptional({ description: 'Élèves actifs maximum (offre Ocall School Free : 50).' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(1_000_000)
+  maxStudents?: number;
+
+  @ApiPropertyOptional({
+    description: 'Requêtes IA par mois et par établissement (School Free : 20).',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100_000)
+  aiMonthlyCallsPerSchool?: number;
+
+  @ApiPropertyOptional({ description: 'Envoi de SMS autorisé (false pour l’offre gratuite).' })
+  @IsOptional()
+  @IsBoolean()
+  sms?: boolean;
+
+  @ApiPropertyOptional({
+    enum: CONTRACT_TIERS,
+    description: 'Payant (défaut), essai ou offre gratuite.',
+  })
+  @IsOptional()
+  @IsIn(CONTRACT_TIERS)
+  tier?: ContractTier;
 }
 
 export class ContractTermsDto {

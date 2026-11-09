@@ -645,9 +645,10 @@ describe('Sprint 8 — IA (intégration, fournisseur simulé)', () => {
         alert: true,
       });
       // Désactivation individuelle d'une fonctionnalité.
+      // Retour au plafond de l’offre Ocall Park (socle S1 : 150 requêtes IA par mois et par organisation).
       await resto.agent
         .put(api('/ai/settings'))
-        .send({ monthlyCallLimit: 500, copilotEnabled: false })
+        .send({ monthlyCallLimit: 150, copilotEnabled: false })
         .expect(200);
       const disabled = await ask(
         resto.agent,

@@ -1,6 +1,7 @@
 import { ConflictException } from '@nestjs/common';
 import type { Prisma } from '@ocall/database';
 import { addDays, isProductBillable, zonedMidnight } from '@ocall/shared';
+import { markSetupFeePaid } from './setup-fee';
 
 /**
  * Règles communes de facturation des abonnements SaaS (Sprint 12A), utilisées par la validation
@@ -37,6 +38,7 @@ export async function markInvoicePaidIfSettled(
     where: { id: invoiceId, status: 'ISSUED' },
     data: { status: 'PAID', paidAt },
   });
+  if (paid.count === 1) await markSetupFeePaid(tx, invoiceId, paidAt);
   return paid.count === 1;
 }
 

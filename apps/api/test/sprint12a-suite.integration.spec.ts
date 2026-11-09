@@ -104,11 +104,18 @@ describe('Sprint 12A — Ocall Suite, règlements et paiement en ligne (intégra
       const bySlug = (slug: string) => list.find((p) => p.slug === slug);
       expect(bySlug('ocall-park')).toMatchObject({ status: 'ACTIVE', statusLabel: 'Disponible' });
       expect(bySlug('ocall-park')!.plans[0]).toMatchObject({
-        monthlyPrice: 15000,
-        setupFee: 250000,
+        monthlyPrice: 50000,
+        setupFee: 200000,
+      });
+      // Socle S1 (D1) : School en préproduction, sans tarif public ni souscription par le client.
+      expect(bySlug('ocall-school')).toMatchObject({
+        status: 'PREPRODUCTION',
+        statusLabel: 'En préproduction',
+        plans: [],
       });
       for (const slug of [
-        'ocall-school',
+        'ocall-facture',
+        'ocall-stock',
         'ocall-clinic',
         'ocall-rh',
         'ocall-solar',
@@ -127,16 +134,19 @@ describe('Sprint 12A — Ocall Suite, règlements et paiement en ligne (intégra
       expect(clinic.subscribable).toBe(false);
     });
 
-    it('tarifs Ocall Park publiés exacts (250 000 / 15 000, 250 000 / 15 000, 350 000 / 25 000)', async () => {
+    it('tarifs Ocall Park publiés exacts (grille S1 : 50 000 sans vitrine, 65 000 avec, 200 000 de mise en service)', async () => {
       const plans = (await park.agent.get(api('/plans')).expect(200)).body as {
-        businessType: string;
+        includesShowcase: boolean;
         monthlyPrice: number;
         setupFee: number;
+        trialDays: number;
+        product: { code: string };
       }[];
-      const by = (t: string) => plans.find((p) => p.businessType === t);
-      expect(by('RESTAURANT')).toMatchObject({ monthlyPrice: 15000, setupFee: 250000 });
-      expect(by('PARK')).toMatchObject({ monthlyPrice: 15000, setupFee: 250000 });
-      expect(by('PARK_RESTAURANT')).toMatchObject({ monthlyPrice: 25000, setupFee: 350000 });
+      expect(plans).toHaveLength(2);
+      const by = (showcase: boolean) => plans.find((p) => p.includesShowcase === showcase);
+      expect(by(false)).toMatchObject({ monthlyPrice: 50000, setupFee: 200000, trialDays: 14 });
+      expect(by(true)).toMatchObject({ monthlyPrice: 65000, setupFee: 200000, trialDays: 14 });
+      expect(new Set(plans.map((p) => p.product.code))).toEqual(new Set(['OCALL_PARK']));
     });
 
     it('démonstration : enregistrée sans abonnement ; anti-spam silencieux ; consultation interne', async () => {
@@ -187,10 +197,10 @@ describe('Sprint 12A — Ocall Suite, règlements et paiement en ligne (intégra
   describe('catalogue : commercialisation contrôlée par le serveur', () => {
     it('produit « bientôt disponible » non souscriptible ; produit sans offre jamais créé commercialisé', async () => {
       const products = (await owner.agent.get(api('/platform/products')).expect(200)).body;
-      const school = products.find((p: { code: string }) => p.code === 'OCALL_SCHOOL');
+      const clinic = products.find((p: { code: string }) => p.code === 'OCALL_CLINIC');
       const res = await billing.agent
         .post(api(`/platform/organizations/${park.organizationId}/subscriptions`))
-        .send({ productId: school.id, planId: randomUUID() });
+        .send({ productId: clinic.id, planId: randomUUID() });
       expect(res.status).toBe(409);
       expect(res.body.code).toBe('PRODUCT_NOT_AVAILABLE');
       const direct = await owner.agent
@@ -211,7 +221,7 @@ describe('Sprint 12A — Ocall Suite, règlements et paiement en ligne (intégra
       const sub = await subscriptionOf(park.organizationId, 'OCALL_PARK');
       expect(sub.activationMode).toBe('ADMIN_APPROVAL');
       invoice = await issue(sub.id, 1);
-      expect(invoice.total).toBe(15000);
+      expect(invoice.total).toBe(50000);
       const cash = (amount: number, receiptReference?: string) =>
         declare(billing, park.organizationId, invoice.id, {
           method: 'CASH',
@@ -223,10 +233,10 @@ describe('Sprint 12A — Ocall Suite, règlements et paiement en ligne (intégra
       p1 = (await cash(5000, `R-${RUN}-1`).expect(201)).body;
       expect(p1.receiptNumber).toMatch(/^REC-\d{4}-\d{5}$/);
       expect((await cash(1000, `R-${RUN}-1`).expect(409)).body.code).toBe('RECEIPT_DUPLICATE');
-      expect((await cash(10001, `R-${RUN}-2`).expect(409)).body.code).toBe(
+      expect((await cash(45001, `R-${RUN}-2`).expect(409)).body.code).toBe(
         'PAYMENT_EXCEEDS_REMAINING',
       );
-      p2 = (await cash(10000, `R-${RUN}-2`).expect(201)).body;
+      p2 = (await cash(45000, `R-${RUN}-2`).expect(201)).body;
       expect((await cash(1, `R-${RUN}-3`).expect(409)).body.code).toBe('INVOICE_FULLY_COVERED');
       // Une déclaration n'est pas un encaissement et n'active rien.
       const sub2 = await subscriptionOf(park.organizationId, 'OCALL_PARK');
@@ -269,7 +279,8 @@ describe('Sprint 12A — Ocall Suite, règlements et paiement en ligne (intégra
       ).body;
       expect(refused).toMatchObject({ status: 'CONFIRMED', activationStatus: 'REFUSED' });
       const sub = await subscriptionOf(park.organizationId, 'OCALL_PARK');
-      expect(sub.status).toBe('NOT_ACTIVATED');
+      // Jamais activé : retour à l'essai gratuit (socle S1).
+      expect(sub.status).toBe('TRIALING');
       const dash = (await owner.agent.get(api('/platform/commercial')).expect(200)).body;
       expect(dash.collected.cash).toBeGreaterThanOrEqual(15000);
 
@@ -317,7 +328,7 @@ describe('Sprint 12A — Ocall Suite, règlements et paiement en ligne (intégra
         await auditor.agent.get(api('/platform/cash-remittances/reconciliation')).expect(200)
       ).body;
       const mine = rows.find((r: { collectorId: string }) => r.collectorId === billing.id);
-      expect(mine).toMatchObject({ remittedConfirmed: 5000, refunded: 10000, toRemit: 0 });
+      expect(mine).toMatchObject({ remittedConfirmed: 5000, refunded: 45000, toRemit: 0 });
     });
 
     it('annulation par le déclarant avant confirmation', async () => {
@@ -562,7 +573,7 @@ describe('Sprint 12A — Ocall Suite, règlements et paiement en ligne (intégra
       resto.agent.post(api(`/online-payments/simulated/${reference}/complete`)).send(body);
 
     it('factures visibles par leur seule organisation ; paiement initié avec une référence persistante', async () => {
-      const sub = await subscriptionOf(resto.organizationId, 'OCALL_RESTAURANT');
+      const sub = await subscriptionOf(resto.organizationId, 'OCALL_PARK');
       invoice = await issue(sub.id, 1);
       const list = (await resto.agent.get(api('/billing/invoices')).expect(200)).body;
       const mine = list.find((i: { id: string }) => i.id === invoice.id);
@@ -640,7 +651,7 @@ describe('Sprint 12A — Ocall Suite, règlements et paiement en ligne (intégra
         method: 'CINETPAY_CARD',
         amount: invoice.total,
       });
-      const sub = await subscriptionOf(resto.organizationId, 'OCALL_RESTAURANT');
+      const sub = await subscriptionOf(resto.organizationId, 'OCALL_PARK');
       expect(sub.status).toBe('PENDING_ACTIVATION'); // ADMIN_APPROVAL par défaut
       await initiate(resto, invoice.id).expect(409); // facture payée
 
@@ -659,9 +670,7 @@ describe('Sprint 12A — Ocall Suite, règlements et paiement en ligne (intégra
       await billing2.agent
         .post(api(`/platform/subscription-payments/${payments[0]!.id}/approve-activation`))
         .expect(200);
-      expect((await subscriptionOf(resto.organizationId, 'OCALL_RESTAURANT')).status).toBe(
-        'ACTIVE',
-      );
+      expect((await subscriptionOf(resto.organizationId, 'OCALL_PARK')).status).toBe('ACTIVE');
     });
   });
 

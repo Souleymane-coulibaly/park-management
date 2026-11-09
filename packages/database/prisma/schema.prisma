@@ -55,6 +55,8 @@ enum SubscriptionStatus {
   SUSPENDED
   /// Payé en ligne, activation en attente de l'approbation d'Ocall (mode ADMIN_APPROVAL).
   PENDING_ACTIVATION
+  /// Essai gratuit en cours (socle S1) ; échéance dans ProductTrial, essai échu calculé.
+  TRIALING
 }
 
 /// Activation après un paiement en ligne vérifié (Sprint 12A) : automatique, ou soumise à
@@ -90,6 +92,9 @@ model Organization {
   status                 OrganizationStatus @default(ACTIVE)
   /// Dérogations du Super Admin aux quotas de l'offre (Sprint 11B) ; null = quota de l'offre.
   aiMonthlyQuotaOverride Int?
+  /// Organisation antérieure au socle S1 (site publié ou abonnement existant) : droit de publication
+  /// d'un site vitrine conservé sans offre vitrine (D5, aucune restriction rétroactive).
+  showcaseGrandfathered  Boolean            @default(false)
   storageQuotaMbOverride Int?
   /// Compteur des identifiants employés, incrémenté de façon atomique.
   employeeSeq            Int                @default(0)
@@ -101,6 +106,9 @@ model Organization {
   assignments          EstablishmentAssignment[]
   subscriptions        Subscription[]
   suiteContracts       SuiteContract[]
+  productTrials        ProductTrial[]
+  productSetupFees     ProductSetupFee[]
+  activationRequests   ActivationRequest[]
   invoices             Invoice[]
   subscriptionPayments SubscriptionPayment[]
   publicSites          PublicSite[]
@@ -371,6 +379,10 @@ model SubscriptionPlan {
   storageQuotaMb     Int            @default(1024)
   /// Activation après paiement en ligne vérifié (Sprint 12A). Défaut : approbation d'Ocall.
   activationMode     ActivationMode @default(ADMIN_APPROVAL)
+  /// Offre avec site vitrine (socle S1) : seule une telle offre permet de publier un site.
+  includesShowcase   Boolean        @default(false)
+  /// Durée de l'essai gratuit de l'application (jours, socle S1).
+  trialDays          Int            @default(14)
   isActive           Boolean        @default(true)
   createdAt          DateTime       @default(now())
   updatedAt          DateTime       @updatedAt
@@ -1936,6 +1948,8 @@ enum SaasProductStatus {
   PLANNED
   COMING_SOON
   PILOT
+  /// En préproduction (socle S1) : essai et activation par Ocall seulement.
+  PREPRODUCTION
   ACTIVE
   SUSPENDED
   RETIRED
@@ -1966,14 +1980,17 @@ model SaasProduct {
   createdAt   DateTime          @default(now())
   updatedAt   DateTime          @updatedAt
 
-  plans          SubscriptionPlan[]
-  subscriptions  Subscription[]
-  suiteContracts SuiteContract[]
-  supportTickets SupportTicket[]
-  invoices       Invoice[]
-  demoRequests   DemoRequest[]
-  prospects      Prospect[]
-  commissions    Commission[]
+  plans              SubscriptionPlan[]
+  subscriptions      Subscription[]
+  trials             ProductTrial[]
+  setupFees          ProductSetupFee[]
+  activationRequests ActivationRequest[]
+  suiteContracts     SuiteContract[]
+  supportTickets     SupportTicket[]
+  invoices           Invoice[]
+  demoRequests       DemoRequest[]
+  prospects          Prospect[]
+  commissions        Commission[]
 }
 
 enum InvoiceStatus {
@@ -2564,4 +2581,85 @@ model SuiteContractEvent {
   contract SuiteContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
 
   @@index([contractId, createdAt])
+}
+
+/// Essai gratuit d'une application (socle S1) : une seule fois par organisation et application. La
+/// ligne n'est jamais supprimée ni réinitialisée (changement d'utilisateur, résiliation, nouvel
+/// abonnement). Dates calculées par le serveur en UTC ; aucune route ne permet de les modifier.
+model ProductTrial {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  productId       String   @db.Uuid
+  startedAt       DateTime
+  endsAt          DateTime
+  /// Auteur : membre du client (application disponible) ou compte Ocall (préproduction, pilote).
+  startedByUserId String?  @db.Uuid
+  startedByOcall  Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  product      SaasProduct  @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, productId])
+  @@index([endsAt])
+}
+
+enum SetupFeeStatus {
+  DUE
+  INVOICED
+  PAID
+  WAIVED
+}
+
+/// Frais de mise en service d'un couple organisation/application (socle S1) : facturés une seule fois,
+/// jamais au renouvellement ni au passage à l'offre avec vitrine. WAIVED : non dus (offre gratuite).
+model ProductSetupFee {
+  id             String         @id @default(uuid()) @db.Uuid
+  organizationId String         @db.Uuid
+  productId      String         @db.Uuid
+  /// Montant figé (XOF) au moment de la facturation.
+  amount         Int
+  status         SetupFeeStatus @default(DUE)
+  invoiceId      String?        @db.Uuid
+  invoicedAt     DateTime?
+  paidAt         DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  product      SaasProduct  @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([organizationId, productId])
+  @@index([status])
+}
+
+enum ActivationRequestStatus {
+  PENDING
+  HANDLED
+  CANCELLED
+}
+
+/// Demande d'activation payante d'une application par un client (socle S1). Le paiement reste hors
+/// plateforme : Ocall vérifie le règlement, l'enregistre et active l'abonnement, puis clôt la demande.
+/// Au plus une demande en attente par organisation et application (index unique partiel, migration).
+model ActivationRequest {
+  id                String                  @id @default(uuid()) @db.Uuid
+  organizationId    String                  @db.Uuid
+  productId         String                  @db.Uuid
+  planId            String                  @db.Uuid
+  /// Montants affichés au client au moment de la demande (indicatifs ; la facture fait foi).
+  quotedSetupFee    Int
+  quotedMonthly     Int
+  requestedByUserId String                  @db.Uuid
+  status            ActivationRequestStatus @default(PENDING)
+  handledByUserId   String?                 @db.Uuid
+  handledAt         DateTime?
+  note              String?
+  createdAt         DateTime                @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  product      SaasProduct  @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([status, createdAt])
+  @@index([organizationId, productId])
 }

@@ -14,6 +14,7 @@ import {
 } from '@ocall/shared';
 import type { SchoolContext } from './school-access';
 import { SchoolPrismaService } from './school-prisma.service';
+import { assertStudentCapacity } from './school-free-limits';
 import type {
   ChangeClassDto,
   CreateEnrollmentDto,
@@ -300,6 +301,8 @@ export class SchoolEnrollmentsService {
       enrollment.classId,
       'Validation de l’inscription',
     );
+    // Offre gratuite (socle S1) : une réactivation compte dans le plafond d'élèves actifs.
+    await assertStudentCapacity(tx, ctx, { reactivatedStudentId: enrollment.studentId });
     await tx.schoolStudent.update({
       where: { id: enrollment.studentId },
       data: { status: 'ENROLLED' },
@@ -477,6 +480,7 @@ export class SchoolEnrollmentsService {
               if (count === 0) throw this.changed();
             }
           }
+          await assertStudentCapacity(tx, ctx, { reactivatedStudentId: studentId });
           await tx.schoolStudent.update({
             where: { id: studentId },
             data: {
@@ -853,6 +857,7 @@ export class SchoolEnrollmentsService {
         year: { status: { not: 'CLOSED' } },
       },
     });
+    await assertStudentCapacity(tx, ctx, { reactivatedStudentId: studentId });
     await tx.schoolStudent.update({
       where: { id: studentId },
       data: { status: validated > 0 ? 'ENROLLED' : 'REGISTERED' },

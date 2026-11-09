@@ -287,12 +287,12 @@ describe('Sprint 12B — portail partenaires et commissions (intégration)', () 
   });
 
   it('7-10. commissions : mise en service 15 %, mensualités 10 % dans les 12 mois, jamais sur impayé', async () => {
-    // Mise en service + 1 mois : 250 000 + 15 000.
+    // Mise en service + 1 mois (grille S1) : 200 000 + 50 000.
     const inv = await invoice(clientA.organizationId, [
       { kind: 'SETUP' },
       { kind: 'MONTHLY', months: 1 },
     ]);
-    expect(inv.total).toBe(265_000);
+    expect(inv.total).toBe(250_000);
     // 14. Déclaration non confirmée : aucune commission.
     const declared = (
       await billing.agent
@@ -316,8 +316,8 @@ describe('Sprint 12B — portail partenaires et commissions (intégration)', () 
       .expect(200);
     const c = await commissionsOf(declared.id);
     expect(c.map((x) => [x.kind, x.baseAmount, x.rateBps, x.amount, x.status])).toEqual([
-      ['SETUP', 250_000, 1500, 37_500, 'ACCRUED'],
-      ['MONTHLY', 15_000, 1000, 1_500, 'ACCRUED'],
+      ['SETUP', 200_000, 1500, 30_000, 'ACCRUED'],
+      ['MONTHLY', 50_000, 1000, 5_000, 'ACCRUED'],
     ]);
     // Nouvelle confirmation impossible ; aucune commission en double.
     await billing2.agent
@@ -325,11 +325,11 @@ describe('Sprint 12B — portail partenaires et commissions (intégration)', () 
       .expect(409);
     expect(await commissionsOf(declared.id)).toHaveLength(2);
 
-    // Mensualités suivantes : 10 % de 30 000.
+    // Mensualités suivantes : 10 % de 100 000.
     const inv2 = await invoice(clientA.organizationId, [{ kind: 'MONTHLY', months: 2 }]);
     expect(
       (await commissionsOf(await paid(clientA.organizationId, inv2))).map((x) => x.amount),
-    ).toEqual([3_000]);
+    ).toEqual([10_000]);
 
     // Hors fenêtre (première activation il y a 13 mois) : plus de commission sur les mensualités.
     const sub = await subscriptionOf(clientA.organizationId);
@@ -343,7 +343,7 @@ describe('Sprint 12B — portail partenaires et commissions (intégration)', () 
     await prisma.subscription.update({ where: { id: sub.id }, data: { startedAt: original } });
 
     const portal = (await p1.agent.get(api('/partner/commissions')).expect(200)).body;
-    expect(portal.reduce((t: number, x: { amount: number }) => t + x.amount, 0)).toBe(42_000);
+    expect(portal.reduce((t: number, x: { amount: number }) => t + x.amount, 0)).toBe(45_000);
     expect((await p2.agent.get(api('/partner/commissions')).expect(200)).body).toHaveLength(0);
   });
 
@@ -374,7 +374,7 @@ describe('Sprint 12B — portail partenaires et commissions (intégration)', () 
         })
         .expect(201)
     ).body;
-    expect(payout.total).toBe(42_000);
+    expect(payout.total).toBe(45_000);
     expect(payout.number).toMatch(/^VER-\d{4}-\d{5}$/);
     await billing.agent.post(api(`/platform/commission-payouts/${payout.id}/confirm`)).expect(403);
     await billing2.agent.post(api(`/platform/commission-payouts/${payout.id}/confirm`)).expect(200);
@@ -393,7 +393,7 @@ describe('Sprint 12B — portail partenaires et commissions (intégration)', () 
     const adjustment = await prisma.commission.findFirstOrThrow({
       where: { subscriptionPaymentId: setupCommission.subscriptionPaymentId, kind: 'ADJUSTMENT' },
     });
-    expect(adjustment.amount).toBe(-39_000); // 37 500 + 1 500 déjà versés
+    expect(adjustment.amount).toBe(-35_000); // 30 000 + 5 000 déjà versés
   });
 
   it('remboursement d’une commission non versée : annulée', async () => {
@@ -498,7 +498,7 @@ describe('Sprint 12B — portail partenaires et commissions (intégration)', () 
     const report = (await owner.agent.get(api('/platform/partner-reports')).expect(200)).body;
     const r1 = report.find((r: { id: string }) => r.id === p1.partnerId);
     expect(r1).toMatchObject({ status: 'SUSPENDED', clients: 1 });
-    expect(r1.commissions.paid).toBe(39_000 + 3_000);
+    expect(r1.commissions.paid).toBe(35_000 + 10_000);
     expect(ruleId).toBeTruthy();
   });
 });

@@ -20,6 +20,8 @@ import type { AuthContext, TenantContext } from '../../common/auth-context';
 import { PasswordService } from '../../common/security/password.service';
 import { generateTemporaryPassword } from '../../common/security/tokens';
 import { PrismaService } from '../../prisma/prisma.service';
+import { loadParkAccess } from '../../common/park-access';
+import { assertShowcaseAllowed } from '../../common/showcase';
 import { OrganizationProvisioningService } from '../organizations/organization-provisioning.service';
 import type {
   ContractTermsDto,
@@ -135,6 +137,11 @@ export class SuiteContractsService {
       });
   }
 
+  /** Option vitrine (socle S1, D5) : refus de publication sans offre « avec vitrine ». */
+  assertShowcase(organizationId: string, productCodes: readonly string[]) {
+    return assertShowcaseAllowed(this.prisma, organizationId, productCodes);
+  }
+
   /** Applications du portail Ocall Suite accessibles à ce membre, décidées par le serveur. */
   async apps(auth: TenantContext, schoolEnabled: boolean): Promise<AuthProductApp[]> {
     const apps: AuthProductApp[] = [];
@@ -142,7 +149,10 @@ export class SuiteContractsService {
       activitiesOf(auth.membership.businessType).length > 0 &&
       auth.membership.role !== 'PRODUCT_USER'
     ) {
-      apps.push({ code: 'OCALL_PARK', name: 'Ocall Park', href: '/app', access: 'full' });
+      // Accès décidé par l'abonnement et l'essai (socle S1, D3) : lecture seule à l'expiration.
+      const access = await loadParkAccess(this.prisma, auth.membership.organizationId);
+      if (access !== 'none')
+        apps.push({ code: 'OCALL_PARK', name: 'Ocall Park', href: '/app', access });
     }
     if (schoolEnabled) {
       const school = await this.entitlement(auth.membership.organizationId, SCHOOL_PRODUCT_CODE);

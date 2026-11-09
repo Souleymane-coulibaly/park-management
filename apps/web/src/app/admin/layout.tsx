@@ -36,6 +36,12 @@ const NAV: (NavItem & { permission: PlatformPermission | null })[] = [
     permission: 'platform.orgs.read',
   },
   {
+    key: 'platform-suite-commercial',
+    label: 'Essais et activations',
+    href: '/admin/essais-activations',
+    permission: 'platform.billing.read',
+  },
+  {
     key: 'platform-subscriptions',
     label: 'Abonnements et offres',
     href: '/admin/abonnements',

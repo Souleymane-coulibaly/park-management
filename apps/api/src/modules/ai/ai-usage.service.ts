@@ -89,7 +89,14 @@ export class AiUsageService implements OnModuleInit {
       this.settings(organizationId),
       organizationQuotas(this.prisma, organizationId),
     ]);
-    return { ...settings, platformLimit: quotas.aiMonthlyCalls };
+    // Plafond présenté = plafond réellement appliqué (min du réglage et de l'offre) : un réglage
+    // antérieur ou par défaut supérieur à l'offre (ex. 500 face aux 150 de la grille S1) reste
+    // enregistrable tel qu'affiché, au lieu de bloquer tout le formulaire.
+    return {
+      ...settings,
+      monthlyCallLimit: Math.min(settings.monthlyCallLimit, quotas.aiMonthlyCalls),
+      platformLimit: quotas.aiMonthlyCalls,
+    };
   }
 
   async updateSettings(auth: TenantContext, dto: Partial<AiSettingsRow>) {

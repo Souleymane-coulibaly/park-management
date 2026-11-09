@@ -1,4 +1,5 @@
 import {
+  ForbiddenException,
   Inject,
   Injectable,
   Logger,
@@ -7,6 +8,7 @@ import {
 } from '@nestjs/common';
 import type { Prisma } from '@ocall/school-database';
 import {
+  SCHOOL_PRODUCT_CODE,
   SCHOOL_SMS_MAX_ATTEMPTS,
   type SchoolSmsKind,
   type SchoolSmsStatus,
@@ -18,6 +20,7 @@ import type { SchoolContext } from './school-access';
 import { SchoolPrismaService } from './school-prisma.service';
 import { SCHOOL_SMS_PROVIDER, type SmsProvider, SmsProviderError } from './school-sms.provider';
 import { SchoolService } from './school.service';
+import { SuiteContractsService } from '../suite-contracts/suite-contracts.service';
 
 type Db = SchoolPrismaService | Prisma.TransactionClient;
 
@@ -54,6 +57,7 @@ export class SchoolSmsService implements OnModuleInit, OnModuleDestroy {
     private readonly school: SchoolService,
     @Inject(SCHOOL_SMS_PROVIDER) private readonly provider: SmsProvider,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    private readonly contracts: SuiteContractsService,
   ) {}
 
   onModuleInit() {
@@ -75,6 +79,14 @@ export class SchoolSmsService implements OnModuleInit, OnModuleDestroy {
 
   async updateSettings(ctx: SchoolContext, schoolId: string, enabled: boolean) {
     await this.school.assertSchool(ctx, schoolId);
+    // Offre Ocall School Free (socle S1) : aucun SMS inclus (crédits SMS prévus au Sprint S2).
+    if (enabled && ctx.limits.sms === false) {
+      throw new ForbiddenException({
+        code: 'SCHOOL_FREE_SMS_NOT_INCLUDED',
+        message:
+          'Les SMS ne sont pas inclus dans l’offre gratuite Ocall School. Passez à l’offre payante pour les activer.',
+      });
+    }
     await this.db.$transaction(async (tx) => {
       await tx.schoolSmsSettings.upsert({
         where: { schoolId },
@@ -137,7 +149,17 @@ export class SchoolSmsService implements OnModuleInit, OnModuleDestroy {
         })
       ).map((s) => s.schoolId),
     );
-    const data = messages.filter((m) => enabled.has(m.schoolId) && m.phone.trim());
+    // Offre gratuite (socle S1) : aucun SMS, comme un établissement dont les SMS sont désactivés —
+    // les autres canaux (portail, notifications) ne sont pas affectés.
+    const orgIds = [...new Set(messages.map((m) => m.organizationId))];
+    const noSms = new Set<string>();
+    for (const orgId of orgIds) {
+      const entitlement = await this.contracts.entitlement(orgId, SCHOOL_PRODUCT_CODE);
+      if (entitlement.limits.sms === false) noSms.add(orgId);
+    }
+    const data = messages.filter(
+      (m) => enabled.has(m.schoolId) && !noSms.has(m.organizationId) && m.phone.trim(),
+    );
     if (data.length === 0) return 0;
     // Première tentative datée par l'application (UTC), comme toutes les suivantes.
     const now = new Date();

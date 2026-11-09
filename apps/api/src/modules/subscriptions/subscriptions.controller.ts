@@ -15,8 +15,8 @@ export class SubscriptionsController {
   @Get('plans')
   plans() {
     return this.prisma.subscriptionPlan.findMany({
-      // Page Tarifs : offres actives des produits Ocall Park commercialisés.
-      where: { isActive: true, businessType: { not: null }, product: { status: 'ACTIVE' } },
+      // Page Tarifs : grille unifiée (socle S1) des applications commercialisées et présentées.
+      where: { isActive: true, product: { status: 'ACTIVE', listed: true } },
       select: {
         id: true,
         businessType: true,
@@ -24,8 +24,11 @@ export class SubscriptionsController {
         monthlyPrice: true,
         setupFee: true,
         currency: true,
+        includesShowcase: true,
+        trialDays: true,
+        product: { select: { code: true, name: true, slug: true } },
       },
-      orderBy: { monthlyPrice: 'asc' },
+      orderBy: [{ product: { sortOrder: 'asc' } }, { monthlyPrice: 'asc' }],
     });
   }
 
@@ -40,7 +43,16 @@ export class SubscriptionsController {
         status: true,
         startedAt: true,
         expiresAt: true,
-        plan: { select: { name: true, businessType: true, monthlyPrice: true, currency: true } },
+        plan: {
+          select: {
+            name: true,
+            businessType: true,
+            monthlyPrice: true,
+            setupFee: true,
+            includesShowcase: true,
+            currency: true,
+          },
+        },
         events: {
           select: { type: true, fromStatus: true, toStatus: true, reason: true, createdAt: true },
           orderBy: { createdAt: 'desc' },
