@@ -338,15 +338,15 @@ export class SuiteCommercialService {
         hasPermission(auth.membership.role, 'subscription.pay') &&
         (status === 'ACTIVE' || status === 'PREPRODUCTION') &&
         !pendingRequest &&
-        sub?.status !== 'CANCELED';
+        sub?.status !== 'CANCELED' &&
+        // Suspendu (essai compris) : aucune demande, comme le refuse l'API.
+        sub?.status !== 'SUSPENDED';
       // Abonnement déjà payé une fois : renouvellement (tarif contractuel) ou changement d'offre ;
-      // sinon activation. Un abonnement suspendu se règle avec Ocall.
+      // sinon activation. Un abonnement suspendu se règle avec Ocall (exclu de canRequest).
       const requestKinds: SuiteRequestKind[] = !canRequest
         ? []
         : sub?.startedAt
-          ? sub.status === 'SUSPENDED'
-            ? []
-            : ['RENEWAL', ...(p.plans.length > 1 ? (['PLAN_CHANGE'] as const) : [])]
+          ? ['RENEWAL', ...(p.plans.length > 1 ? (['PLAN_CHANGE'] as const) : [])]
           : ['ACTIVATION'];
       out.push({
         code: p.code,

@@ -427,6 +427,34 @@ describe('Ocall Suite S2 : notifications, échéances et renouvellements (intég
       }
     });
 
+    it('essai suspendu (jamais payé) : aucune demande proposée ni acceptée', async () => {
+      const sub = await subOf(parkB.organizationId);
+      expect(sub.status).toBe('TRIALING');
+      await owner.agent
+        .post(api(`/platform/subscriptions/${sub.id}/suspend`))
+        .send({ reason: 'Essai : suspension' })
+        .expect(200);
+      try {
+        const overview = (
+          (await parkB.agent.get(api('/suite/overview')).expect(200)).body as {
+            code: string;
+            requestKinds: string[];
+            canRequestActivation: boolean;
+          }[]
+        ).find((a) => a.code === 'OCALL_PARK')!;
+        expect(overview).toMatchObject({ requestKinds: [], canRequestActivation: false });
+        const res = await parkB.agent
+          .post(api('/suite/apps/OCALL_PARK/activation-request'))
+          .send({ planId: sub.planId });
+        expect(res.body.code).toBe('SUBSCRIPTION_SUSPENDED');
+      } finally {
+        await owner.agent
+          .post(api(`/platform/subscriptions/${sub.id}/reactivate`))
+          .send({ reason: 'Essai : fin' })
+          .expect(200);
+      }
+    });
+
     it('changement d’offre : autre offre au tarif en vigueur ; refus motivé visible du client', async () => {
       const sub = await subOf(parkA.organizationId);
       const same = await parkA.agent

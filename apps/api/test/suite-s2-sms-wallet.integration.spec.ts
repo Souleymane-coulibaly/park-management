@@ -363,6 +363,40 @@ schoolSuite('Ocall School S2 : portefeuille SMS prépayé (intégration)', () =>
       }
     });
 
+    it('contrat suspendu (aucun contrat actif) : SMS non inclus, envoi annulé, recharge non validée', async () => {
+      const pending = (await requestTopUp(b, 100).expect(201)).body;
+      const m = await queue(b, '+221 77 700 00 01', 'Contrat suspendu');
+      await prisma.suiteContract.update({
+        where: { id: b.contractId },
+        data: { status: 'SUSPENDED' },
+      });
+      try {
+        // Lecture seule : l'établissement reste consultable, sans droit aux SMS.
+        expect((await wallet(b)).included).toBe(false);
+        await setBalance(b, 10);
+        await sms.processDue(later());
+        expect(await message(m.id)).toMatchObject({
+          status: 'CANCELLED',
+          lastError: 'SMS_NOT_IN_CONTRACT',
+        });
+        const approve = await owner.agent
+          .post(api(`/platform/school-sms/top-ups/${pending.id}/approve`))
+          .send({ paymentReference: 'VIR-0003' });
+        expect(approve.status).toBe(409);
+        expect(approve.body.code).toBe('SCHOOL_FREE_SMS_NOT_INCLUDED');
+      } finally {
+        await prisma.suiteContract.update({
+          where: { id: b.contractId },
+          data: { status: 'ACTIVE' },
+        });
+        await setBalance(b, 0);
+        await owner.agent
+          .post(api(`/platform/school-sms/top-ups/${pending.id}/reject`))
+          .send({ note: 'Contrat suspendu' })
+          .expect(200);
+      }
+    });
+
     it('offre sans SMS (gratuite) : recharge refusée', async () => {
       const contract = await prisma.suiteContract.findUniqueOrThrow({
         where: { id: b.contractId },

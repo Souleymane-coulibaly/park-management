@@ -310,6 +310,20 @@ passe, et chaque correctif est couvert par un test.
 | P2  | Formulaire de demande conservant l'offre d'un autre type                                                                                 | Formulaire réinitialisé à chaque type                                                                                                                  |
 | P2  | Historiques au-delà de 50 lignes inaccessibles                                                                                           | Pagination par curseur : registre (établissement et Super Admin), recharges                                                                            |
 
+**Vérification Codex ciblée** des 9 correctifs, au commit `0e270e5` :
+
+- 7 correctifs sont confirmés, dont les deux P0, P1-3 et le correctif de concurrence des rappels
+  (P2-7). Ce dernier a été vérifié par raisonnement : même verrou de ligne que l'activation, le
+  renouvellement et la suspension, comparaison d'échéance cohérente, pas d'interblocage.
+- 2 correctifs sont partiels, et complétés depuis :
+  - P1-4 : sans contrat actif (suspendu, expiré), l'établissement gardait le droit aux SMS. Le droit
+    exige désormais un accès complet, et le réglage d'activation des SMS est lui aussi calculé par
+    établissement.
+  - P2-6 : le portail proposait une activation pour un essai suspendu. Il ne propose plus aucune
+    demande sur un abonnement suspendu.
+
+Chaque correctif complémentaire a son test, et sa mutation est détectée.
+
 ### Risques résiduels et limites
 
 1. **Fournisseur réel absent.** La politique de facturation (succès consommé, échec rendu) devra être

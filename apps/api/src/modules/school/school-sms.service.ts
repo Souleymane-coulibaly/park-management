@@ -87,7 +87,11 @@ export class SchoolSmsService implements OnModuleInit, OnModuleDestroy {
   async updateSettings(ctx: SchoolContext, schoolId: string, enabled: boolean) {
     await this.school.assertSchool(ctx, schoolId);
     // Offre Ocall School Free (socle S1) : aucun SMS inclus (crédits SMS prévus au Sprint S2).
-    if (enabled && ctx.limits.sms === false) {
+    // Droit calculé pour CET établissement (le contrat payant d'un autre établissement ne compte pas).
+    if (
+      enabled &&
+      !(await this.contracts.smsAllowedSchools(ctx.organizationId, [schoolId])).has(schoolId)
+    ) {
       throw new ForbiddenException({
         code: 'SCHOOL_FREE_SMS_NOT_INCLUDED',
         message:

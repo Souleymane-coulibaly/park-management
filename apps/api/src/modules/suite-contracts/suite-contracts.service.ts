@@ -119,7 +119,8 @@ export class SuiteContractsService {
       const resolved = resolveProductEntitlement(
         covering.map((c) => ({ ...c, limits: (c.limits ?? {}) as { maxSchools?: number } })),
       );
-      if (resolved.limits.sms !== false) allowed.add(schoolId);
+      // Accès complet requis : sans contrat actif (suspendu, expiré, résilié), aucun SMS.
+      if (resolved.access === 'full' && resolved.limits.sms !== false) allowed.add(schoolId);
     }
     return allowed;
   }
