@@ -5,6 +5,10 @@ import { Percent } from 'lucide-react';
 import {
   COMMISSION_KIND_LABELS,
   COMMISSION_STATUS_LABELS,
+  PARTNER_TYPES,
+  PARTNER_TYPE_LABELS,
+  PROPOSED_COMMISSION_PRESETS,
+  type PartnerType,
   PAYOUT_STATUS_LABELS,
   type CommissionKind,
   type CommissionStatus,
@@ -28,9 +32,17 @@ interface RuleRow {
   name: string;
   setupRateBps: number;
   monthlyRateBps: number;
-  monthlyWindowMonths: number;
+  monthlyWindowMonths: number | null;
+  partnerType: PartnerType | null;
   isActive: boolean;
   validatedAt: string | null;
+}
+interface PayoutRequestRow {
+  id: string;
+  amount: number;
+  note: string | null;
+  createdAt: string;
+  partner: { id: string; code: string; companyName: string };
 }
 interface CommissionRow {
   id: string;
@@ -40,6 +52,7 @@ interface CommissionRow {
   rateBps: number;
   amount: number;
   status: CommissionStatus;
+  payableFrom: string | null;
   createdAt: string;
   subscriptionPaymentId: string | null;
   partner: { code: string; companyName: string };
@@ -55,7 +68,8 @@ interface PayoutRow {
   paidAt: string;
   status: keyof typeof PAYOUT_STATUS_LABELS;
   recordedById: string;
-  partner: { code: string; companyName: string };
+  partner: { id?: string; code: string; companyName: string };
+  partnerId?: string;
   _count: { commissions: number };
 }
 
@@ -72,8 +86,28 @@ export default function AdminCommissionsPage() {
   const rules = useApi<RuleRow[]>(canPartners ? '/platform/commission-rules' : null);
   const commissions = useApi<CommissionRow[]>(canValidate ? '/platform/commissions' : null);
   const payouts = useApi<PayoutRow[]>(canPayouts ? '/platform/commission-payouts' : null);
+  const requests = useApi<PayoutRequestRow[]>(
+    canPayouts ? '/platform/partner-payout-requests?status=PENDING' : null,
+  );
   const [selected, setSelected] = useState<string[]>([]);
-  const [rule, setRule] = useState({ name: '', setupRate: '15', monthlyRate: '10', window: '12' });
+  // Aucune valeur par défaut : un barème se saisit (ou se pré-remplit) puis se valide explicitement.
+  const [rule, setRule] = useState({
+    name: '',
+    setupRate: '',
+    monthlyRate: '',
+    window: '',
+    partnerType: '' as PartnerType | '',
+  });
+  const preset = (type: PartnerType) => {
+    const p = PROPOSED_COMMISSION_PRESETS[type];
+    setRule({
+      name: p.name,
+      setupRate: String(p.setupRateBps / 100),
+      monthlyRate: String(p.monthlyRateBps / 100),
+      window: p.monthlyWindowMonths === null ? '' : String(p.monthlyWindowMonths),
+      partnerType: type,
+    });
+  };
   const [payout, setPayout] = useState({
     method: 'Virement',
     reference: '',
@@ -91,6 +125,7 @@ export default function AdminCommissionsPage() {
       rules.reload();
       commissions.reload();
       payouts.reload();
+      requests.reload();
     } catch (e) {
       setError(e as ApiError);
     }
@@ -104,7 +139,9 @@ export default function AdminCommissionsPage() {
         name: rule.name,
         setupRateBps: Math.round(Number(rule.setupRate) * 100),
         monthlyRateBps: Math.round(Number(rule.monthlyRate) * 100),
-        monthlyWindowMonths: Number(rule.window),
+        // Vide : mensualités commissionnées jusqu'à la fin du contrat client.
+        monthlyWindowMonths: rule.window.trim() ? Number(rule.window) : null,
+        ...(rule.partnerType ? { partnerType: rule.partnerType } : {}),
       },
       'Règle créée : inactive jusqu’à la validation du propriétaire.',
     );
@@ -140,13 +177,28 @@ export default function AdminCommissionsPage() {
             description="Taux jamais inscrits dans le code. Une règle ne s’applique qu’après validation par le propriétaire."
           />
           {rules.state === 'success' && rules.data.length > 0 && (
-            <Table head={['Règle', 'Mise en service', 'Mensualités', 'Fenêtre', 'Statut', '']}>
+            <Table
+              head={[
+                'Règle',
+                'Partenaires',
+                'Setup (une fois)',
+                'Mensualités',
+                'Durée',
+                'Statut',
+                '',
+              ]}
+            >
               {rules.data.map((r) => (
                 <tr key={r.id}>
                   <Td className="font-medium">{r.name}</Td>
+                  <Td>{r.partnerType ? PARTNER_TYPE_LABELS[r.partnerType] : 'Tous'}</Td>
                   <Td>{formatRateBps(r.setupRateBps)}</Td>
                   <Td>{formatRateBps(r.monthlyRateBps)}</Td>
-                  <Td>{r.monthlyWindowMonths} mois</Td>
+                  <Td>
+                    {r.monthlyWindowMonths === null
+                      ? 'Jusqu’à la fin du contrat'
+                      : `${r.monthlyWindowMonths} mois`}
+                  </Td>
                   <Td>
                     <Badge tone={r.isActive ? 'forest' : 'savanna'}>
                       {r.isActive ? `Active depuis le ${formatDate(r.validatedAt)}` : 'Inactive'}
@@ -186,9 +238,17 @@ export default function AdminCommissionsPage() {
               ))}
             </Table>
           )}
+          <div className="flex flex-wrap items-center gap-2 px-5 pt-4 text-sm sm:px-6">
+            <span className="text-muted">Pré-remplir avec le barème proposé (non validé) :</span>
+            {PARTNER_TYPES.map((t) => (
+              <Button key={t} size="sm" variant="ghost" type="button" onClick={() => preset(t)}>
+                {PARTNER_TYPE_LABELS[t]}
+              </Button>
+            ))}
+          </div>
           <form
             onSubmit={createRule}
-            className="grid gap-3 px-5 py-4 sm:grid-cols-5 sm:items-end sm:px-6"
+            className="grid gap-3 px-5 py-4 sm:grid-cols-3 lg:grid-cols-6 lg:items-end sm:px-6"
           >
             <InputField
               label="Nom"
@@ -215,14 +275,30 @@ export default function AdminCommissionsPage() {
               onChange={(e) => setRule({ ...rule, monthlyRate: e.target.value })}
             />
             <InputField
-              label="Fenêtre (mois)"
+              label="Durée (mois, vide = fin du contrat)"
               type="number"
-              min={0}
+              min={1}
               max={120}
               value={rule.window}
               onChange={(e) => setRule({ ...rule, window: e.target.value })}
             />
-            <Button type="submit">Créer la règle</Button>
+            <SelectField
+              label="Partenaires"
+              value={rule.partnerType}
+              onChange={(e) =>
+                setRule({ ...rule, partnerType: e.target.value as PartnerType | '' })
+              }
+              options={[
+                { value: '', label: 'Tous' },
+                ...PARTNER_TYPES.map((t) => ({ value: t, label: PARTNER_TYPE_LABELS[t] })),
+              ]}
+            />
+            <Button
+              type="submit"
+              disabled={!rule.name || rule.setupRate === '' || rule.monthlyRate === ''}
+            >
+              Créer la règle (inactive)
+            </Button>
           </form>
         </Card>
       )}
@@ -262,7 +338,17 @@ export default function AdminCommissionsPage() {
               />
             ) : (
               <Table
-                head={['', 'Partenaire', 'Client', 'Nature', 'Base', 'Taux', 'Montant', 'Statut']}
+                head={[
+                  '',
+                  'Partenaire',
+                  'Client',
+                  'Nature',
+                  'Base',
+                  'Taux',
+                  'Montant',
+                  'Règlement',
+                  'Statut',
+                ]}
               >
                 {rows.map((c) => (
                   <tr key={c.id}>
@@ -294,6 +380,7 @@ export default function AdminCommissionsPage() {
                     </Td>
                     <Td>{c.kind === 'ADJUSTMENT' ? '—' : formatRateBps(c.rateBps)}</Td>
                     <Td className="tabular-nums font-semibold">{formatXof(c.amount)}</Td>
+                    <Td>{c.status === 'REVERSED' ? '—' : formatDate(c.payableFrom)}</Td>
                     <Td>
                       {COMMISSION_STATUS_LABELS[c.status]}
                       {c.payout && (
@@ -405,6 +492,72 @@ export default function AdminCommissionsPage() {
                   </Td>
                 </tr>
               ))}
+            </Table>
+          )}
+        </Card>
+      )}
+      {canPayouts && requests.state === 'success' && (
+        <Card className="mt-6">
+          <CardHeader
+            title="Demandes de règlement des partenaires"
+            description="« Réglée » seulement avec un versement confirmé du même partenaire ; refus motivé sinon."
+          />
+          {requests.data.length === 0 ? (
+            <p className="px-6 py-4 text-sm text-muted">Aucune demande en attente.</p>
+          ) : (
+            <Table head={['Partenaire', 'Montant demandé', 'Demandée le', '']}>
+              {requests.data.map((r) => {
+                const confirmed =
+                  payouts.state === 'success'
+                    ? payouts.data.filter(
+                        (v) => v.status === 'CONFIRMED' && v.partner.code === r.partner.code,
+                      )
+                    : [];
+                return (
+                  <tr key={r.id}>
+                    <Td className="font-medium">
+                      {r.partner.companyName}
+                      {r.note && <span className="block text-xs text-muted">« {r.note} »</span>}
+                    </Td>
+                    <Td className="tabular-nums">{formatXof(r.amount)}</Td>
+                    <Td>{formatDate(r.createdAt)}</Td>
+                    <Td>
+                      <div className="flex flex-wrap gap-2">
+                        {confirmed.slice(0, 3).map((v) => (
+                          <Button
+                            key={v.id}
+                            size="sm"
+                            onClick={() =>
+                              run(
+                                `/platform/partner-payout-requests/${r.id}/decide`,
+                                { outcome: 'PROCESSED', payoutId: v.id },
+                                'Demande marquée réglée.',
+                              )
+                            }
+                          >
+                            Réglée par {v.number}
+                          </Button>
+                        ))}
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => {
+                            const note = window.prompt('Motif du refus');
+                            if (note && note.trim().length >= 3)
+                              void run(
+                                `/platform/partner-payout-requests/${r.id}/decide`,
+                                { outcome: 'REJECTED', note },
+                                'Demande refusée.',
+                              );
+                          }}
+                        >
+                          Refuser
+                        </Button>
+                      </div>
+                    </Td>
+                  </tr>
+                );
+              })}
             </Table>
           )}
         </Card>

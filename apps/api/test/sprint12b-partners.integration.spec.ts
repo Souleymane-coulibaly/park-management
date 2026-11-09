@@ -208,7 +208,7 @@ describe('Sprint 12B — portail partenaires et commissions (intégration)', () 
       .post(api(`/partner/prospects/${prospectA}/demo`))
       .send({ message: 'Demande de démo test' })
       .expect(404);
-    const list = (await p2.agent.get(api('/partner/prospects')).expect(200)).body;
+    const list = (await p2.agent.get(api('/partner/prospects')).expect(200)).body.items;
     expect(list.some((p: { id: string }) => p.id === prospectA)).toBe(false);
   });
 
@@ -220,13 +220,18 @@ describe('Sprint 12B — portail partenaires et commissions (intégration)', () 
           organizationId: clientA.organizationId,
           partnerId: p1.partnerId,
           prospectId: prospectA,
+          productCode: 'OCALL_PARK',
         })
         .expect(201)
     ).body;
     const a2 = (
       await owner.agent
         .post(api('/platform/attributions'))
-        .send({ organizationId: clientA.organizationId, partnerId: p2.partnerId })
+        .send({
+          organizationId: clientA.organizationId,
+          partnerId: p2.partnerId,
+          productCode: 'OCALL_PARK',
+        })
         .expect(201)
     ).body;
     // Aucune commission tant que rien n'est confirmé (et sans règle validée).
@@ -244,7 +249,11 @@ describe('Sprint 12B — portail partenaires et commissions (intégration)', () 
     const a3 = (
       await owner.agent
         .post(api('/platform/attributions'))
-        .send({ organizationId: clientA.organizationId, partnerId: p2.partnerId })
+        .send({
+          organizationId: clientA.organizationId,
+          partnerId: p2.partnerId,
+          productCode: 'OCALL_PARK',
+        })
         .expect(201)
     ).body;
     expect(
@@ -253,11 +262,16 @@ describe('Sprint 12B — portail partenaires et commissions (intégration)', () 
     ).toBe('ORGANIZATION_ALREADY_ATTRIBUTED');
     const clients = (await p1.agent.get(api('/partner/clients')).expect(200)).body;
     expect(clients).toHaveLength(1);
+    // Sprint S3 : par application (état, échéance, encaissé, primes) ; aucune donnée métier.
     expect(Object.keys(clients[0]).sort()).toEqual([
+      'applications',
       'attributedAt',
+      'attributionId',
       'collected',
+      'commissions',
       'name',
-      'products',
+      'organizationId',
+      'product',
     ]);
   });
 
@@ -362,6 +376,11 @@ describe('Sprint 12B — portail partenaires et commissions (intégration)', () 
         .expect(200)
     ).body;
     expect(v.validated).toBe(accrued.length);
+    // Sprint S3 : règlement à la fin du mois suivant l'encaissement — date atteinte (simulée).
+    await prisma.commission.updateMany({
+      where: { id: { in: accrued.map((c) => c.id) } },
+      data: { payableFrom: new Date(Date.now() - 86_400_000) },
+    });
     const payout = (
       await billing.agent
         .post(api('/platform/commission-payouts'))
@@ -432,7 +451,11 @@ describe('Sprint 12B — portail partenaires et commissions (intégration)', () 
     const att = (
       await owner.agent
         .post(api('/platform/attributions'))
-        .send({ organizationId: clientB.organizationId, partnerId: p2.partnerId })
+        .send({
+          organizationId: clientB.organizationId,
+          partnerId: p2.partnerId,
+          productCode: 'OCALL_PARK',
+        })
         .expect(201)
     ).body;
     await owner.agent.post(api(`/platform/attributions/${att.id}/confirm`)).expect(200);

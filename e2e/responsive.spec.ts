@@ -10,6 +10,7 @@ for (const path of [
   '/demo',
   '/a-propos',
   '/contact',
+  '/devenir-partenaire',
   '/mentions-legales',
   '/connexion',
   '/inscription',

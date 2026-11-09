@@ -1,9 +1,10 @@
 'use client';
 
 import { type FormEvent, useState } from 'react';
-import { Plus, UserPlus } from 'lucide-react';
+import { History, Plus, UserPlus } from 'lucide-react';
 import {
   PARTNER_SETTABLE_PROSPECT_STATUSES,
+  PROSPECT_PIPELINE,
   PROSPECT_STATUS_LABELS,
   type ProspectStatus,
 } from '@ocall/shared';
@@ -29,16 +30,54 @@ interface ProspectRow {
   city: string | null;
   status: ProspectStatus;
   notes: string | null;
+  sector: string | null;
+  nextFollowUpAt: string | null;
   protectedUntil: string;
   product: { slug: string; name: string } | null;
 }
+interface Page {
+  items: ProspectRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+interface ProspectEvent {
+  type: string;
+  fromStatus: ProspectStatus | null;
+  toStatus: ProspectStatus | null;
+  note: string | null;
+  createdAt: string;
+}
+const EVENT_LABELS: Record<string, string> = {
+  CREATED: 'Enregistré',
+  STAGE_CHANGED: 'Étape modifiée',
+  UPDATED: 'Mis à jour',
+  DEMO_REQUESTED: 'Démonstration demandée',
+  CONVERTED: 'Converti en client (Ocall)',
+};
 
 /**
  * Prospects du partenaire. Un prospect déjà suivi par un autre partenaire est refusé par le
  * serveur ; un prospect enregistré vous est réservé 90 jours (prolongeable par Ocall).
  */
 export default function PartnerProspectsPage() {
-  const prospects = useApi<ProspectRow[]>('/partner/prospects');
+  const [filters, setFilters] = useState({
+    q: '',
+    status: '',
+    followUpDue: false,
+    sort: 'createdAt',
+    page: 0,
+  });
+  const query = new URLSearchParams({
+    ...(filters.q.trim() ? { q: filters.q.trim() } : {}),
+    ...(filters.status ? { status: filters.status } : {}),
+    ...(filters.followUpDue ? { followUpDue: 'true' } : {}),
+    sort: filters.sort,
+    order: filters.sort === 'companyName' || filters.sort === 'nextFollowUpAt' ? 'asc' : 'desc',
+    page: String(filters.page),
+  }).toString();
+  const prospects = useApi<Page>(`/partner/prospects?${query}`);
+  const [historyFor, setHistoryFor] = useState<ProspectRow | null>(null);
   const [creating, setCreating] = useState(false);
   const [demoFor, setDemoFor] = useState<ProspectRow | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -74,25 +113,62 @@ export default function PartnerProspectsPage() {
       <ApiErrorAlert error={error} />
       <Card>
         <CardHeader title="Mes prospects" />
+        <div className="grid gap-3 border-b border-line/70 px-5 py-4 sm:grid-cols-2 lg:grid-cols-4">
+          <InputField
+            label="Rechercher"
+            placeholder="Entreprise, contact, ville, secteur"
+            value={filters.q}
+            onChange={(e) => setFilters({ ...filters, q: e.target.value, page: 0 })}
+          />
+          <SelectField
+            label="Étape"
+            value={filters.status}
+            onChange={(e) => setFilters({ ...filters, status: e.target.value, page: 0 })}
+            options={[
+              { value: '', label: 'Toutes' },
+              ...PROSPECT_PIPELINE.map((s) => ({ value: s, label: PROSPECT_STATUS_LABELS[s] })),
+            ]}
+          />
+          <SelectField
+            label="Trier par"
+            value={filters.sort}
+            onChange={(e) => setFilters({ ...filters, sort: e.target.value, page: 0 })}
+            options={[
+              { value: 'createdAt', label: 'Plus récents' },
+              { value: 'nextFollowUpAt', label: 'Prochaine relance' },
+              { value: 'updatedAt', label: 'Dernière mise à jour' },
+              { value: 'companyName', label: 'Nom' },
+            ]}
+          />
+          <label className="flex items-end gap-2 pb-2 text-sm">
+            <input
+              type="checkbox"
+              className="h-5 w-5 accent-forest"
+              checked={filters.followUpDue}
+              onChange={(e) => setFilters({ ...filters, followUpDue: e.target.checked, page: 0 })}
+            />
+            Relances dues
+          </label>
+        </div>
         {prospects.state === 'loading' && <LoadingState />}
         {prospects.state === 'error' && (
           <ErrorState error={prospects.error} onRetry={prospects.reload} />
         )}
         {prospects.state === 'success' &&
-          (prospects.data.length === 0 ? (
+          (prospects.data.items.length === 0 ? (
             <EmptyState
               icon={<UserPlus className="h-7 w-7" />}
               title="Aucun prospect"
-              description="Enregistrez votre premier prospect."
+              description="Aucun prospect ne correspond, ou enregistrez votre premier prospect."
             />
           ) : (
-            <Table head={['Entreprise', 'Contact', 'Produit', 'Réservé jusqu’au', 'Statut', '']}>
-              {prospects.data.map((p) => (
+            <Table head={['Entreprise', 'Contact', 'Produit', 'Prochaine relance', 'Étape', '']}>
+              {prospects.data.items.map((p) => (
                 <tr key={p.id}>
                   <Td className="font-medium">
                     {p.companyName}
                     <span className="block text-xs text-muted">
-                      {[p.city, p.country].filter(Boolean).join(', ')}
+                      {[p.sector, p.city, p.country].filter(Boolean).join(' · ')}
                     </span>
                   </Td>
                   <Td>
@@ -103,7 +179,12 @@ export default function PartnerProspectsPage() {
                     </span>
                   </Td>
                   <Td>{p.product?.name ?? '—'}</Td>
-                  <Td>{formatDate(p.protectedUntil)}</Td>
+                  <Td>
+                    {p.nextFollowUpAt ? formatDate(p.nextFollowUpAt) : '—'}
+                    <span className="block text-xs text-muted">
+                      réservé jusqu’au {formatDate(p.protectedUntil)}
+                    </span>
+                  </Td>
                   <Td>
                     {p.status === 'WON' ? (
                       <Badge tone="forest">{PROSPECT_STATUS_LABELS.WON}</Badge>
@@ -119,18 +200,52 @@ export default function PartnerProspectsPage() {
                       />
                     )}
                   </Td>
-                  <Td>
+                  <Td className="space-y-1">
                     {p.status !== 'WON' && p.status !== 'LOST' && (
                       <Button size="sm" variant="secondary" onClick={() => setDemoFor(p)}>
                         Demander une démo
                       </Button>
                     )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      icon={<History className="h-4 w-4" />}
+                      onClick={() => setHistoryFor(p)}
+                    >
+                      Historique
+                    </Button>
                   </Td>
                 </tr>
               ))}
             </Table>
           ))}
+        {prospects.state === 'success' && prospects.data.total > prospects.data.pageSize && (
+          <div className="flex items-center justify-between gap-2 px-5 py-3 text-sm">
+            <span className="text-muted">
+              {prospects.data.total} prospects · page {prospects.data.page + 1}
+            </span>
+            <span className="flex gap-2">
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={filters.page === 0}
+                onClick={() => setFilters({ ...filters, page: filters.page - 1 })}
+              >
+                Précédent
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={(filters.page + 1) * prospects.data.pageSize >= prospects.data.total}
+                onClick={() => setFilters({ ...filters, page: filters.page + 1 })}
+              >
+                Suivant
+              </Button>
+            </span>
+          </div>
+        )}
       </Card>
+      {historyFor && <HistoryDialog prospect={historyFor} onClose={() => setHistoryFor(null)} />}
       {creating && (
         <CreateProspectDialog
           onClose={() => setCreating(false)}
@@ -173,6 +288,8 @@ function CreateProspectDialog({
     city: '',
     product: '',
     notes: '',
+    sector: '',
+    nextFollowUpAt: '',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
@@ -193,6 +310,8 @@ function CreateProspectDialog({
           ...(form.city.trim() ? { city: form.city.trim() } : {}),
           ...(form.product ? { product: form.product } : {}),
           ...(form.notes.trim() ? { notes: form.notes.trim() } : {}),
+          ...(form.sector.trim() ? { sector: form.sector.trim() } : {}),
+          ...(form.nextFollowUpAt ? { nextFollowUpAt: form.nextFollowUpAt } : {}),
         },
       });
       onCreated();
@@ -247,6 +366,17 @@ function CreateProspectDialog({
             label="Ville"
             value={form.city}
             onChange={(e) => setForm({ ...form, city: e.target.value })}
+          />
+          <InputField
+            label="Secteur d’activité"
+            value={form.sector}
+            onChange={(e) => setForm({ ...form, sector: e.target.value })}
+          />
+          <InputField
+            label="Prochaine relance"
+            type="date"
+            value={form.nextFollowUpAt}
+            onChange={(e) => setForm({ ...form, nextFollowUpAt: e.target.value })}
           />
         </div>
         {products.state === 'success' && (
@@ -330,6 +460,34 @@ function DemoDialog({
           </Button>
         </div>
       </form>
+    </Dialog>
+  );
+}
+
+function HistoryDialog({ prospect, onClose }: { prospect: ProspectRow; onClose: () => void }) {
+  const events = useApi<ProspectEvent[]>(`/partner/prospects/${prospect.id}/history`);
+  return (
+    <Dialog open onClose={onClose} title={`Historique — ${prospect.companyName}`}>
+      {events.state === 'loading' && <LoadingState />}
+      {events.state === 'error' && <ErrorState error={events.error} onRetry={events.reload} />}
+      {events.state === 'success' && (
+        <ul className="space-y-2 text-sm" data-testid="prospect-history">
+          {events.data.map((e, i) => (
+            <li key={i} className="rounded-xl border border-line/70 px-3 py-2">
+              <span className="font-semibold">{EVENT_LABELS[e.type] ?? e.type}</span>
+              {e.toStatus && (
+                <span className="text-muted">
+                  {' '}
+                  — {e.fromStatus ? `${PROSPECT_STATUS_LABELS[e.fromStatus]} → ` : ''}
+                  {PROSPECT_STATUS_LABELS[e.toStatus]}
+                </span>
+              )}
+              <span className="block text-xs text-muted">{formatDate(e.createdAt)}</span>
+              {e.note && <span className="block">{e.note}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
     </Dialog>
   );
 }

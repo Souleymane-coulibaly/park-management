@@ -479,7 +479,30 @@ export class SuiteCommercialService {
     planId: string,
     kind: SuiteRequestKind = 'ACTIVATION',
   ) {
-    const organizationId = auth.membership.organizationId;
+    return this.createRequest({
+      organizationId: auth.membership.organizationId,
+      actorUserId: auth.user.id,
+      productCode,
+      planId,
+      kind,
+      partnerId: null,
+    });
+  }
+
+  /**
+   * Création d'une demande (activation, renouvellement, changement d'offre) pour une organisation :
+   * par un membre du client, ou par le revendeur attribué (Sprint S3, `partnerId`). Mêmes règles dans
+   * les deux cas ; le revendeur ne confirme ni paiement ni activation.
+   */
+  async createRequest(input: {
+    organizationId: string;
+    actorUserId: string;
+    productCode: string;
+    planId: string;
+    kind: SuiteRequestKind;
+    partnerId: string | null;
+  }) {
+    const { organizationId, productCode, planId, kind } = input;
     const product = await this.prisma.saasProduct.findUnique({
       where: { code: productCode },
       select: { id: true, code: true, name: true, status: true },
@@ -586,16 +609,18 @@ export class SuiteCommercialService {
             kind,
             quotedSetupFee: quote.setupFee,
             quotedMonthly: quote.monthlyPrice,
-            requestedByUserId: auth.user.id,
+            requestedByUserId: input.actorUserId,
+            partnerId: input.partnerId,
           },
           select: { id: true, status: true, kind: true, createdAt: true },
         });
         await this.audit.record(
           {
             organizationId,
-            actorUserId: auth.user.id,
-            action:
-              kind === 'RENEWAL'
+            actorUserId: input.actorUserId,
+            action: input.partnerId
+              ? 'partner.subscription_request_prepared'
+              : kind === 'RENEWAL'
                 ? 'suite.renewal_requested'
                 : kind === 'PLAN_CHANGE'
                   ? 'suite.plan_change_requested'

@@ -2,7 +2,13 @@
 
 import { type FormEvent, useState } from 'react';
 import { Handshake, Plus } from 'lucide-react';
-import { PARTNER_STATUS_LABELS, type PartnerStatus, formatXof } from '@ocall/shared';
+import {
+  PARTNER_STATUS_LABELS,
+  PARTNER_TYPES,
+  PARTNER_TYPE_LABELS,
+  type PartnerStatus,
+  formatXof,
+} from '@ocall/shared';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader } from '@/components/ui/card';
@@ -24,6 +30,9 @@ interface PartnerRow {
   country: string;
   territories: string[];
   status: PartnerStatus;
+  type: 'REFERRER' | 'RESELLER';
+  city: string | null;
+  terminationReason: string | null;
   cashCollectionEnabled: boolean;
   cashCollectionLimit: number;
   commissionRuleId: string | null;
@@ -46,6 +55,7 @@ const TONE: Record<PartnerStatus, 'savanna' | 'forest' | 'terracotta'> = {
   PENDING_VERIFICATION: 'savanna',
   ACTIVE: 'forest',
   SUSPENDED: 'terracotta',
+  TERMINATED: 'terracotta',
 };
 
 /**
@@ -56,16 +66,27 @@ export default function AdminPartnersPage() {
   const partners = useApi<PartnerRow[]>('/platform/partners');
   const report = useApi<ReportRow[]>('/platform/partner-reports');
   const rules = useApi<RuleRow[]>('/platform/commission-rules');
+  const network = useApi<{
+    partners: number;
+    byCountry: { country: string; partners: number; clients: number; commissions: number }[];
+    byProduct: { product: string; clients: number; collected: number; commissions: number }[];
+  }>('/platform/partner-stats');
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<PartnerRow | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
 
-  async function action(p: PartnerRow, kind: 'verify' | 'suspend' | 'reactivate') {
+  async function action(p: PartnerRow, kind: 'verify' | 'suspend' | 'reactivate' | 'terminate') {
     const reason =
       kind === 'verify'
         ? null
-        : window.prompt(kind === 'suspend' ? 'Motif de la suspension' : 'Motif de la réactivation');
+        : window.prompt(
+            kind === 'suspend'
+              ? 'Motif de la suspension'
+              : kind === 'terminate'
+                ? 'Motif de la résiliation (définitive ; commissions acquises conservées)'
+                : 'Motif de la réactivation',
+          );
     if (kind !== 'verify' && (!reason || reason.trim().length < 3)) return;
     setError(null);
     try {
@@ -78,7 +99,9 @@ export default function AdminPartnersPage() {
           ? `${p.companyName} vérifié.`
           : kind === 'suspend'
             ? `${p.companyName} suspendu : sessions fermées.`
-            : `${p.companyName} réactivé.`,
+            : kind === 'terminate'
+              ? `${p.companyName} résilié : sessions fermées, historique conservé.`
+              : `${p.companyName} réactivé.`,
       );
       partners.reload();
     } catch (e) {
@@ -93,7 +116,7 @@ export default function AdminPartnersPage() {
       <PageHeader
         eyebrow="Super Admin"
         title="Partenaires commerciaux"
-        description="Apporteurs d’affaires : aucun privilège d’administration. Ils ne voient que leurs prospects, leurs clients apportés (nom et montants) et leurs commissions."
+        description="Apporteurs d’affaires et revendeurs agréés : aucun privilège d’administration. Ils ne voient que leurs prospects, leurs clients attribués et leurs primes."
         action={
           <Button icon={<Plus className="h-4 w-4" />} onClick={() => setCreating(true)}>
             Inviter un partenaire
@@ -128,7 +151,11 @@ export default function AdminPartnersPage() {
                     <Td className="font-medium">
                       {p.companyName}
                       <span className="block text-xs text-muted">
-                        {p.code} · {p.contactName} · {p.user.email} · {p.phone}
+                        {PARTNER_TYPE_LABELS[p.type]} · {p.code}
+                      </span>
+                      <span className="block text-xs text-muted">
+                        {p.contactName} · {p.user.email} · {p.phone}
+                        {p.city ? ` · ${p.city}` : ''}
                       </span>
                       {p.territories.length > 0 && (
                         <span className="block text-xs text-muted">{p.territories.join(', ')}</span>
@@ -165,13 +192,18 @@ export default function AdminPartnersPage() {
                             Vérifier
                           </Button>
                         )}
-                        {p.status !== 'SUSPENDED' && (
+                        {p.status !== 'SUSPENDED' && p.status !== 'TERMINATED' && (
                           <Button
                             size="sm"
                             variant="secondary"
                             onClick={() => action(p, 'suspend')}
                           >
                             Suspendre
+                          </Button>
+                        )}
+                        {p.status !== 'TERMINATED' && (
+                          <Button size="sm" variant="ghost" onClick={() => action(p, 'terminate')}>
+                            Résilier
                           </Button>
                         )}
                         {p.status === 'SUSPENDED' && (
@@ -190,6 +222,36 @@ export default function AdminPartnersPage() {
             </Table>
           ))}
       </Card>
+      {network.state === 'success' && network.data.partners > 0 && (
+        <Card className="mt-6">
+          <CardHeader
+            title="Réseau Ocall Partner"
+            description="Données enregistrées uniquement : clients attribués confirmés, encaissements commissionnés et primes (hors annulations)."
+          />
+          <div className="grid gap-6 px-5 py-4 lg:grid-cols-2 sm:px-6">
+            <Table head={['Pays', 'Partenaires', 'Clients', 'Primes']}>
+              {network.data.byCountry.map((c) => (
+                <tr key={c.country}>
+                  <Td>{c.country}</Td>
+                  <Td className="tabular-nums">{c.partners}</Td>
+                  <Td className="tabular-nums">{c.clients}</Td>
+                  <Td className="tabular-nums">{formatXof(c.commissions)}</Td>
+                </tr>
+              ))}
+            </Table>
+            <Table head={['Application', 'Clients', 'Encaissé commissionné', 'Primes']}>
+              {network.data.byProduct.map((r) => (
+                <tr key={r.product}>
+                  <Td>{r.product}</Td>
+                  <Td className="tabular-nums">{r.clients}</Td>
+                  <Td className="tabular-nums">{formatXof(r.collected)}</Td>
+                  <Td className="tabular-nums">{formatXof(r.commissions)}</Td>
+                </tr>
+              ))}
+            </Table>
+          </div>
+        </Card>
+      )}
       {creating && (
         <CreatePartnerDialog
           onClose={() => setCreating(false)}
@@ -231,6 +293,7 @@ function CreatePartnerDialog({
     phone: '',
     country: 'Mali',
     territories: '',
+    type: 'REFERRER' as 'REFERRER' | 'RESELLER',
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
@@ -341,6 +404,12 @@ function CreatePartnerDialog({
             value={form.territories}
             onChange={(e) => setForm({ ...form, territories: e.target.value })}
           />
+          <SelectField
+            label="Type de partenariat"
+            value={form.type}
+            onChange={(e) => setForm({ ...form, type: e.target.value as 'REFERRER' | 'RESELLER' })}
+            options={PARTNER_TYPES.map((t) => ({ value: t, label: PARTNER_TYPE_LABELS[t] }))}
+          />
         </div>
         <ApiErrorAlert error={error} />
         <div className="flex justify-end gap-2">
@@ -369,6 +438,7 @@ function EditPartnerDialog({
 }) {
   const [form, setForm] = useState({
     territories: partner.territories.join(', '),
+    type: partner.type,
     cashCollectionEnabled: partner.cashCollectionEnabled,
     cashCollectionLimit: String(partner.cashCollectionLimit),
     commissionRuleId: partner.commissionRuleId ?? '',
@@ -388,6 +458,7 @@ function EditPartnerDialog({
             .split(',')
             .map((t) => t.trim())
             .filter(Boolean),
+          type: form.type,
           cashCollectionEnabled: form.cashCollectionEnabled,
           cashCollectionLimit: Number(form.cashCollectionLimit || 0),
           commissionRuleId: form.commissionRuleId || null,
@@ -413,6 +484,12 @@ function EditPartnerDialog({
           label="Territoires"
           value={form.territories}
           onChange={(e) => setForm({ ...form, territories: e.target.value })}
+        />
+        <SelectField
+          label="Type de partenariat"
+          value={form.type}
+          onChange={(e) => setForm({ ...form, type: e.target.value as 'REFERRER' | 'RESELLER' })}
+          options={PARTNER_TYPES.map((t) => ({ value: t, label: PARTNER_TYPE_LABELS[t] }))}
         />
         <SelectField
           label="Règle de commission"

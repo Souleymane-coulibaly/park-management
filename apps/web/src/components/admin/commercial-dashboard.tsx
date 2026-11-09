@@ -125,6 +125,17 @@ function DashboardContent({ d }: { d: Dashboard }) {
           accent="savanna"
         />
         <KpiCard
+          label="Candidatures partenaires"
+          value={d.partnerApplicationsPending}
+          hint={
+            <Link className="underline" href="/admin/partenaires/candidatures">
+              À examiner
+            </Link>
+          }
+          icon={<Inbox className="h-5 w-5" />}
+          accent={d.partnerApplicationsPending > 0 ? 'terracotta' : 'forest'}
+        />
+        <KpiCard
           label="Remboursé"
           value={<span className="text-xl sm:text-2xl">{formatXof(d.refunded)}</span>}
           hint="Remboursements enregistrés sur la période"

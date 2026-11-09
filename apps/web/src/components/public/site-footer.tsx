@@ -21,6 +21,7 @@ const COLUMNS = [
       { href: '/a-propos', label: 'À propos' },
       { href: '/contact', label: 'Contact' },
       { href: '/demo', label: 'Demander une démo' },
+      { href: '/devenir-partenaire', label: 'Devenir partenaire' },
       { href: '/connexion', label: 'Se connecter' },
     ],
   },

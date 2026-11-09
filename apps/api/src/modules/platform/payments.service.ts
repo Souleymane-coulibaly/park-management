@@ -23,7 +23,12 @@ import { AuditService } from '../../common/audit/audit.service';
 import type { AuthContext } from '../../common/auth-context';
 import { PLATFORM_TIMEZONE, nextPlatformSequence } from '../../common/platform-counter';
 import { extendSubscription, markInvoicePaidIfSettled } from '../../common/subscription-billing';
-import { accrueCommissions, reverseCommissions } from '../../common/commissions';
+import {
+  accrueCommissions,
+  attributionScope,
+  coveringAttributions,
+  reverseCommissions,
+} from '../../common/commissions';
 import type {
   DeclareRemittanceDto,
   DeclareSubscriptionPaymentDto,
@@ -188,7 +193,7 @@ export class SubscriptionPaymentsService {
             total: true,
             currency: true,
             subscriptionId: true,
-            subscription: { select: { planId: true } },
+            subscription: { select: { planId: true, productId: true } },
             payments: { select: { amount: true, status: true } },
           },
         });
@@ -239,7 +244,13 @@ export class SubscriptionPaymentsService {
         }
         const cash = dto.method === 'CASH';
         if (options.partnerId) {
-          await this.assertPartnerCollection(tx, options.partnerId, dto.organizationId, dto.amount);
+          await this.assertPartnerCollection(
+            tx,
+            options.partnerId,
+            dto.organizationId,
+            invoice.subscription.productId,
+            dto.amount,
+          );
         }
         let collectedById: string | null = null;
         let receiptNumber: string | null = null;
@@ -1072,6 +1083,7 @@ export class SubscriptionPaymentsService {
     tx: Tx,
     partnerId: string,
     organizationId: string,
+    productId: string,
     amount: number,
   ) {
     await tx.$queryRaw`SELECT "id" FROM "Partner" WHERE "id" = ${partnerId}::uuid FOR UPDATE`;
@@ -1085,8 +1097,16 @@ export class SubscriptionPaymentsService {
         message: 'Vous n’êtes pas habilité à encaisser des espèces.',
       });
     }
+    // Attribution de l'application facturée (famille Park comprise) ou antérieure « toutes
+    // applications » : jamais les factures d'une autre application de l'organisation.
+    const scope = await attributionScope(tx, productId);
     const attributed = await tx.attribution.count({
-      where: { partnerId, organizationId, status: 'CONFIRMED' },
+      where: {
+        partnerId,
+        organizationId,
+        status: 'CONFIRMED',
+        ...coveringAttributions(scope.productIds),
+      },
     });
     if (attributed === 0) {
       throw new ForbiddenException({

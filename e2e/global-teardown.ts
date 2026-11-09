@@ -50,11 +50,17 @@ export default async function globalTeardown(): Promise<void> {
       where: { email: { endsWith: E2E_INTERNAL_DOMAIN }, platformRole: { not: null } },
       select: { id: true },
     });
+    // Comptes partenaires créés par les E2E (Sprint S3) : domaine de test, sans adhésion.
+    const partnerUsers = await prisma.user.findMany({
+      where: { email: { endsWith: '@e2e.ocallpark.local' }, partner: { isNot: null } },
+      select: { id: true },
+    });
     const userIds = [
       ...new Set([
         ...members.map((m) => m.userId),
         ...portalUsers.filter((u) => !parentsWithMembership.has(u)),
         ...internals.map((u) => u.id),
+        ...partnerUsers.map((u) => u.id),
       ]),
     ];
     await prisma.auditLog.deleteMany({
@@ -66,6 +72,9 @@ export default async function globalTeardown(): Promise<void> {
     });
     await prisma.suiteContract.deleteMany({ where: { organizationId: { in: orgIds } } });
     await prisma.organization.deleteMany({ where: { id: { in: orgIds } } });
+    await prisma.partnerApplication.deleteMany({
+      where: { emailNormalized: { endsWith: '@e2e.ocallpark.local' } },
+    });
     await prisma.user.deleteMany({ where: { id: { in: userIds } } });
   } finally {
     await prisma.$disconnect();

@@ -55,6 +55,8 @@ export interface AppConfig {
   logFormat: 'json' | 'text';
   /** Sprint S2 : rappels d'échéance Ocall Suite (jours avant l'échéance, « 7,3,1 » par défaut). */
   suiteReminderOffsets: number[];
+  /** Sprint S3 : conservation des candidatures partenaires non retenues (mois), puis anonymisation. */
+  partnerApplicationRetentionMonths: number;
 }
 
 function storageSigningKey(env: NodeJS.ProcessEnv, nodeEnv: string): Buffer {
@@ -135,6 +137,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     sites: loadSitesConfig(env, nodeEnv),
     school: loadSchoolConfig(env),
     suiteReminderOffsets: parseReminderOffsets(env.SUITE_REMINDER_OFFSETS),
+    partnerApplicationRetentionMonths: int(env, 'PARTNER_APPLICATION_RETENTION_MONTHS', 24),
     mfaEncryptionKey: mfaKey(env, nodeEnv),
     storageSigningKey: storageSigningKey(env, nodeEnv),
     logFormat:

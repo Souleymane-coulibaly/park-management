@@ -779,6 +779,7 @@ export class SuiteService {
       pendingActivations,
       demoNew,
       demoReceived,
+      partnerApplicationsPending,
     ] = await Promise.all([
       this.prisma.organization.groupBy({ by: ['status'], where: orgWhere, _count: { _all: true } }),
       this.prisma.establishment.count({ where: { organization: orgWhere } }),
@@ -847,6 +848,8 @@ export class SuiteService {
           ...(filters.productCode ? { product: { code: filters.productCode } } : {}),
         },
       }),
+      // Sprint S3 : candidatures partenaires à examiner (signal du Super Admin).
+      this.prisma.partnerApplication.count({ where: { status: 'PENDING', anonymizedAt: null } }),
     ]);
     const suspended = await this.prisma.organization.count({
       where: { ...orgWhere, status: 'SUSPENDED' },
@@ -916,6 +919,7 @@ export class SuiteService {
       refunded: refunded._sum.amount ?? 0,
       pendingActivations,
       demoRequests: { new: demoNew, received: demoReceived },
+      partnerApplicationsPending,
       invoiced: invoiced._sum.total ?? 0,
       theoreticalMrr: active.reduce((t, s) => t + (s.agreedMonthlyPrice ?? s.plan.monthlyPrice), 0),
       unpaid: {

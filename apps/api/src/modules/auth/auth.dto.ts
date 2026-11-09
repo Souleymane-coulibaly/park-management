@@ -55,6 +55,14 @@ export class SignupDto {
   @IsString()
   @MaxLength(PASSWORD_MAX_LENGTH)
   password: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Code commercial d’un partenaire (lien parrainé, Sprint S3) : crée une attribution à confirmer par Ocall, jamais un droit sur l’organisation.',
+  })
+  @IsOptional()
+  @Matches(/^[A-Z0-9]{4,16}$/)
+  ref?: string;
 }
 
 export class LoginDto {

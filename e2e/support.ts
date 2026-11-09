@@ -12,9 +12,15 @@ export function uniqueEmail(label: string): string {
 
 export async function signupOrganization(
   page: Page,
-  opts: { metier: 'Parc' | 'Restaurant' | 'Parc + Restaurant'; orgName: string; email: string },
+  opts: {
+    metier: 'Parc' | 'Restaurant' | 'Parc + Restaurant';
+    orgName: string;
+    email: string;
+    /** Code de recommandation d'un partenaire (lien `/inscription?ref=CODE`). */
+    ref?: string;
+  },
 ) {
-  await page.goto('/inscription');
+  await page.goto(opts.ref ? `/inscription?ref=${opts.ref}` : '/inscription');
   await page.getByText(opts.metier, { exact: true }).click();
   await page.getByLabel('Nom commercial').fill(`${opts.orgName} ${E2E_SUFFIX}`);
   await page.getByLabel('Premier établissement').fill(`${opts.orgName} — Site principal`);

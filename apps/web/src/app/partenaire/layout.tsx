@@ -7,10 +7,11 @@ export const dynamic = 'force-dynamic';
 const NAV: NavItem[] = [
   { key: 'partner-dashboard', label: 'Tableau de bord', href: '/partenaire' },
   { key: 'partner-prospects', label: 'Prospects', href: '/partenaire/prospects' },
-  { key: 'partner-clients', label: 'Clients apportés', href: '/partenaire/clients' },
-  { key: 'partner-commissions', label: 'Commissions', href: '/partenaire/commissions' },
+  { key: 'partner-clients', label: 'Mes clients', href: '/partenaire/clients' },
+  { key: 'partner-commissions', label: 'Primes et règlements', href: '/partenaire/commissions' },
   { key: 'partner-cash', label: 'Espèces', href: '/partenaire/especes' },
   { key: 'partner-products', label: 'Produits et ressources', href: '/partenaire/produits' },
+  { key: 'partner-profile', label: 'Mon profil', href: '/partenaire/profil' },
 ];
 
 /**
