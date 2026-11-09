@@ -138,6 +138,7 @@ export const SAAS_PRODUCT_STATUSES = [
   'PLANNED',
   'COMING_SOON',
   'PILOT',
+  'PREPRODUCTION',
   'ACTIVE',
   'SUSPENDED',
   'RETIRED',
@@ -149,6 +150,7 @@ export const SAAS_PRODUCT_STATUS_LABELS: Record<SaasProductStatus, string> = {
   PLANNED: 'Planifié (non public)',
   COMING_SOON: 'Bientôt disponible',
   PILOT: 'Pilote (souscription par Ocall)',
+  PREPRODUCTION: 'Préproduction (essai et activation par Ocall)',
   ACTIVE: 'Commercialisé',
   SUSPENDED: 'Suspendu',
   RETIRED: 'Retiré',
@@ -158,6 +160,7 @@ export const SAAS_PRODUCT_STATUS_LABELS: Record<SaasProductStatus, string> = {
 export const PUBLIC_PRODUCT_STATUS_LABELS: Partial<Record<SaasProductStatus, string>> = {
   ACTIVE: 'Disponible',
   PILOT: 'En pilote',
+  PREPRODUCTION: 'En préproduction',
   COMING_SOON: 'Bientôt disponible',
 };
 export const isPublicProductStatus = (status: SaasProductStatus) =>
@@ -165,18 +168,21 @@ export const isPublicProductStatus = (status: SaasProductStatus) =>
 
 /**
  * Règle unique de commercialisation, appliquée par le serveur (souscription, facturation,
- * activation, tarifs publics). Seul ACTIVE est ouvert à tous ; PILOT seulement par Ocall ;
+ * activation, tarifs publics). Seul ACTIVE est ouvert à tous ; PILOT et PREPRODUCTION (Ocall School,
+ * décision S1 D1) seulement par Ocall ;
  * PLANNED, COMING_SOON, SUSPENDED et RETIRED ne sont jamais souscriptibles ni facturables.
  */
 export function canSubscribeToProduct(
   status: SaasProductStatus,
   by: 'customer' | 'ocall',
 ): boolean {
-  return status === 'ACTIVE' || (status === 'PILOT' && by === 'ocall');
+  return (
+    status === 'ACTIVE' || ((status === 'PILOT' || status === 'PREPRODUCTION') && by === 'ocall')
+  );
 }
-/** Facturation et activation d'un abonnement : produit commercialisé ou en pilote. */
+/** Facturation et activation d'un abonnement : produit commercialisé, en pilote ou en préproduction. */
 export const isProductBillable = (status: SaasProductStatus) =>
-  status === 'ACTIVE' || status === 'PILOT';
+  status === 'ACTIVE' || status === 'PILOT' || status === 'PREPRODUCTION';
 
 /** Identifiant public d'une page produit : minuscules, chiffres et tirets. */
 export const isProductSlug = (slug: string) =>

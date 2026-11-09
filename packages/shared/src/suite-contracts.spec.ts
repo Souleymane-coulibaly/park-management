@@ -90,6 +90,7 @@ describe('Contrats multiples d’un client', () => {
       writeSchoolIds: [],
       modules: [],
       limits: {},
+      tier: null,
     });
   });
 });

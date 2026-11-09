@@ -26,6 +26,7 @@ import {
 import { recordPriceChange } from '../../common/subscription-billing';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
+import { releaseSetupFee, reserveSetupFee } from '../../common/setup-fee';
 import type { AuthContext } from '../../common/auth-context';
 import { PasswordService } from '../../common/security/password.service';
 import { SessionService } from '../../common/security/session.service';
@@ -668,6 +669,16 @@ export class SuiteService {
         },
         select: { id: true, number: true, total: true },
       });
+      // Setup facturé une seule fois par organisation et application (socle S1).
+      const setupLine = computed.lines.find((l) => l.kind === 'SETUP');
+      if (setupLine) {
+        await reserveSetupFee(tx, {
+          organizationId: agreed.sub.organizationId,
+          productId: agreed.sub.productId,
+          amount: setupLine.amount,
+          invoiceId: invoice.id,
+        });
+      }
       await this.audit.record(
         {
           organizationId: null,
@@ -721,6 +732,7 @@ export class SuiteService {
         where: { id },
         data: { status: 'CANCELLED', cancelledAt: new Date(), cancelReason: reason },
       });
+      await releaseSetupFee(tx, id);
       await this.audit.record(
         {
           organizationId: null,

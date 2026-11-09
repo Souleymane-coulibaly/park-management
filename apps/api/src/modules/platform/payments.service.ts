@@ -699,14 +699,28 @@ export class SubscriptionPaymentsService {
         where: { id },
         select: {
           subscriptionId: true,
-          subscription: { select: { status: true, startedAt: true } },
+          subscription: {
+            select: { status: true, startedAt: true, organizationId: true, productId: true },
+          },
         },
       });
       const others = await tx.subscriptionPayment.count({
         where: { subscriptionId: p.subscriptionId, activationStatus: 'PENDING', id: { not: id } },
       });
       if (p.subscription.status === 'PENDING_ACTIVATION' && others === 0) {
-        const back = p.subscription.startedAt ? 'EXPIRED' : 'NOT_ACTIVATED';
+        // Jamais activé : retour à l'essai s'il en existe un (socle S1 ; l'essai échu reste calculé).
+        const trial = p.subscription.startedAt
+          ? null
+          : await tx.productTrial.findUnique({
+              where: {
+                organizationId_productId: {
+                  organizationId: p.subscription.organizationId,
+                  productId: p.subscription.productId,
+                },
+              },
+              select: { id: true },
+            });
+        const back = p.subscription.startedAt ? 'EXPIRED' : trial ? 'TRIALING' : 'NOT_ACTIVATED';
         await tx.subscription.update({ where: { id: p.subscriptionId }, data: { status: back } });
         await tx.subscriptionEvent.create({
           data: {

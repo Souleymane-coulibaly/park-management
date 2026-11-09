@@ -167,7 +167,7 @@ suite('Ocall School — Sprint 1 (intégration)', () => {
       expect(apps.body.map((a: { code: string }) => a.code)).toEqual(['OCALL_SCHOOL']);
     });
 
-    it('un client sur contrat n’a aucune activité Park ; aucune offre ni tarif School n’existe', async () => {
+    it('un client sur contrat n’a aucune activité Park ; School n’a que la grille S1, non souscriptible par le client', async () => {
       await clientA.agent.get('/api/v1/ticketing/establishments').expect(403);
       await clientA.agent.get('/api/v1/restaurant/tables').expect((res) => {
         expect([403, 404]).toContain(res.status);
@@ -178,10 +178,17 @@ suite('Ocall School — Sprint 1 (intégration)', () => {
       });
       expect(org.businessType).toBe('NONE');
       expect(org._count.subscriptions).toBe(0);
-      const plans = await prisma.subscriptionPlan.count({
+      // Socle S1 : grille unifiée (50 000 / 65 000 + 200 000) ; School en préproduction (D1).
+      const plans = await prisma.subscriptionPlan.findMany({
         where: { product: { code: 'OCALL_SCHOOL' } },
+        select: { monthlyPrice: true, setupFee: true, product: { select: { status: true } } },
+        orderBy: { monthlyPrice: 'asc' },
       });
-      expect(plans).toBe(0);
+      expect(plans.map((p) => [p.monthlyPrice, p.setupFee])).toEqual([
+        [50000, 200000],
+        [65000, 200000],
+      ]);
+      expect(plans[0]?.product?.status).toBe('PREPRODUCTION');
     });
 
     it('un client Park peut ajouter School, sans perdre Park', async () => {

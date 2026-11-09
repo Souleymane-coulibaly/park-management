@@ -1,4 +1,5 @@
 import { type Page, expect, test } from '@playwright/test';
+import { grantShowcasePlan } from './school-support';
 import { signupOrganization, uniqueEmail } from './support';
 
 /**
@@ -22,10 +23,11 @@ test.describe('Sprint 10 — site vitrine', () => {
     page,
     browser,
   }) => {
+    const ownerEmail = uniqueEmail('site');
     await signupOrganization(page, {
       metier: 'Restaurant',
       orgName: 'Maquis Vitrine',
-      email: uniqueEmail('site'),
+      email: ownerEmail,
     });
     const [establishment] = await (await page.request.get('/api/v1/establishments')).json();
     const category = await apiPost(page, '/catalog/categories', { name: 'Grillades' });
@@ -60,6 +62,12 @@ test.describe('Sprint 10 — site vitrine', () => {
     // Brouillon : la page publique n'existe pas encore.
     expect((await page.request.get(`/e/${slug}`)).status()).toBe(404);
 
+    // Socle S1 (D5) : sans l'offre « avec vitrine », publication refusée, brouillon conservé.
+    await page.getByRole('button', { name: 'Publier' }).click();
+    await expect(page.getByText(/nécessite l’offre « avec vitrine »/)).toBeVisible(NETWORK_WAIT);
+    await expect(page.getByText('Brouillon (jamais publié)')).toBeVisible();
+    // Changement d'offre par Ocall, puis publication acceptée.
+    await grantShowcasePlan(ownerEmail);
     await page.getByRole('button', { name: 'Publier' }).click();
     await expect(page.getByText('Site publié.')).toBeVisible(NETWORK_WAIT);
 

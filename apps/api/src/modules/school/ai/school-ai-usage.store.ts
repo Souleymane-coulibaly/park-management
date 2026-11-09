@@ -73,7 +73,21 @@ export class SchoolAiUsageStore implements AiUsageStore {
           createdAt: { gte: schoolMonthStart(ctx.timezone) },
         },
       });
-      if (used >= settings.monthlyCallLimit) {
+      const contractLimit = ctx.contractMonthlyLimit ?? null;
+      const limit =
+        contractLimit === null
+          ? settings.monthlyCallLimit
+          : Math.min(settings.monthlyCallLimit, contractLimit);
+      if (used >= limit) {
+        if (contractLimit !== null && used >= contractLimit) {
+          throw new HttpException(
+            {
+              code: 'SCHOOL_FREE_AI_LIMIT',
+              message: `Offre gratuite : ${contractLimit} requêtes IA par mois et par établissement. Passez à l’offre payante pour continuer ; vous pouvez continuer sans IA.`,
+            },
+            HttpStatus.TOO_MANY_REQUESTS,
+          );
+        }
         throw new HttpException(
           {
             code: 'AI_QUOTA_EXCEEDED',

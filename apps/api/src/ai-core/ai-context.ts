@@ -22,6 +22,11 @@ export interface AiCallContext {
   operation: string;
   /** Fuseau de l'organisation ou de l'établissement : période de quota (mois civil). */
   timezone: string;
+  /**
+   * Plafond mensuel imposé par le contrat (ex. offre Ocall School Free : 20 par établissement), en plus
+   * du réglage de l'application ; le plus restrictif s'applique. Absent = aucun plafond contractuel.
+   */
+  contractMonthlyLimit?: number | null;
 }
 
 export interface AiCallMeta {

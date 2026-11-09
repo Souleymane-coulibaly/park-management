@@ -1,10 +1,8 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
-import { BUSINESS_TYPE_LABELS, canChangeBusinessType, parkProductCode } from '@ocall/shared';
+import { BUSINESS_TYPE_LABELS, canChangeBusinessType } from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
-import { parkSubscriptionWhere } from '../../common/park-subscription';
 import { AuditService } from '../../common/audit/audit.service';
 import type { TenantContext } from '../../common/auth-context';
-import { recordPriceChange } from '../../common/subscription-billing';
 import type { ChangeBusinessTypeDto, UpdateOrganizationDto } from './organizations.dto';
 
 @Injectable()
@@ -74,60 +72,12 @@ export class OrganizationsService {
           message: `Évolution impossible de « ${BUSINESS_TYPE_LABELS[org.businessType]} » vers « ${BUSINESS_TYPE_LABELS[dto.businessType]} ».`,
         });
       }
-      const plan = await tx.subscriptionPlan.findFirstOrThrow({
-        where: { product: { code: parkProductCode(dto.businessType) }, isActive: true },
-        orderBy: { createdAt: 'asc' },
-      });
       await tx.organization.update({
         where: { id: organizationId },
         data: { businessType: dto.businessType },
       });
-
-      // L'abonnement Ocall Park change de produit et d'offre ; le tarif précédemment accepté est
-      // conservé dans l'historique et sera refigé à la prochaine facture ou activation.
-      const current = await tx.subscription.findFirst({
-        where: parkSubscriptionWhere(organizationId),
-      });
-      if (current) {
-        const product = await tx.saasProduct.findUniqueOrThrow({
-          where: { code: parkProductCode(dto.businessType) },
-          select: { id: true },
-        });
-        await tx.subscription.update({
-          where: { id: current.id },
-          data: {
-            planId: plan.id,
-            productId: product.id,
-            agreedSetupFee: null,
-            agreedMonthlyPrice: null,
-            agreedAt: null,
-            activationMode: plan.activationMode,
-          },
-        });
-        await recordPriceChange(tx, {
-          subscriptionId: current.id,
-          planId: plan.id,
-          setupFee: null,
-          monthlyPrice: null,
-          currency: plan.currency,
-          actorUserId: auth.user.id,
-          reason: `Changement de métier ${org.businessType} → ${dto.businessType}`,
-        });
-        await tx.subscriptionEvent.create({
-          data: {
-            subscriptionId: current.id,
-            type: 'PLAN_CHANGED',
-            fromPlanId: current.planId,
-            toPlanId: plan.id,
-            actorUserId: auth.user.id,
-            reason:
-              `Évolution du métier ${org.businessType} → ${dto.businessType}` +
-              (current.agreedMonthlyPrice !== null
-                ? ` (tarif accepté précédent : ${current.agreedSetupFee ?? 0} + ${current.agreedMonthlyPrice}/mois)`
-                : ''),
-          },
-        });
-      }
+      // Ocall Park est une seule application pour tous les métiers (socle S1, D2) : l'évolution du métier
+      // ne change ni l'abonnement, ni l'offre, ni le tarif accepté (aucune modification rétroactive).
       await this.audit.record(
         {
           organizationId,

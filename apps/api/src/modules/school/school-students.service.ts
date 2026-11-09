@@ -26,6 +26,7 @@ import { decryptSecret, encryptSecret } from '../../common/security/totp';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
 import type { SchoolContext } from './school-access';
 import { SchoolPrismaService } from './school-prisma.service';
+import { assertStudentCapacity } from './school-free-limits';
 import type {
   CorrectMatriculeDto,
   CreateStudentDto,
@@ -292,6 +293,8 @@ export class SchoolStudentsService {
         input.schoolId,
         input.matriculeYearNumber ?? new Date().getUTCFullYear(),
       ));
+    // Offre Ocall School Free (socle S1) : plafond d'élèves actifs, sous verrou par organisation.
+    await assertStudentCapacity(tx, ctx);
     const student = await tx.schoolStudent.create({
       data: {
         organizationId: ctx.organizationId,

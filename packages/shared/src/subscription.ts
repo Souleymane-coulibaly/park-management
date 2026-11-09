@@ -6,6 +6,8 @@ export const SubscriptionStatus = {
   CANCELED: 'CANCELED',
   SUSPENDED: 'SUSPENDED',
   PENDING_ACTIVATION: 'PENDING_ACTIVATION',
+  /** Essai gratuit en cours (socle S1) ; l'essai échu est calculé (voir suite-commercial). */
+  TRIALING: 'TRIALING',
 } as const;
 export type SubscriptionStatus = (typeof SubscriptionStatus)[keyof typeof SubscriptionStatus];
 
@@ -17,6 +19,7 @@ export const SUBSCRIPTION_STATUS_LABELS: Record<SubscriptionStatus, string> = {
   CANCELED: 'Résilié',
   SUSPENDED: 'Suspendu',
   PENDING_ACTIVATION: 'Payé, activation en attente',
+  TRIALING: 'Essai gratuit',
 };
 
 /**

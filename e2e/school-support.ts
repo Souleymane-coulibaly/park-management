@@ -57,7 +57,11 @@ export async function seedSchoolClient(
   const db = new PrismaClient({ datasourceUrl: testDb.databaseUrl });
   try {
     const product = await db.saasProduct.findUniqueOrThrow({ where: { code: 'OCALL_SCHOOL' } });
-    await db.organization.update({ where: { id: organizationId }, data: { businessType: 'NONE' } });
+    // Client School sur contrat, comme ceux antérieurs au socle S1 : droit de publication acquis (D5).
+    await db.organization.update({
+      where: { id: organizationId },
+      data: { businessType: 'NONE', showcaseGrandfathered: true },
+    });
     await db.suiteContract.create({
       data: {
         organizationId,
@@ -305,4 +309,28 @@ export async function expectNoOverflow(page: Page) {
   });
   expect(result).toEqual({ doc: expect.any(Number), count: 0 });
   expect(result.doc).toBeLessThanOrEqual(0);
+}
+
+/**
+ * Offre Ocall Park « avec vitrine » (socle S1, décision D5) posée sur la base de test pour le compte
+ * désigné par son e-mail : en exploitation, c'est un changement d'offre effectué par Ocall.
+ */
+export async function grantShowcasePlan(email: string): Promise<void> {
+  const db = new PrismaClient({ datasourceUrl: testDb.databaseUrl });
+  try {
+    const { organizationId } = await db.organizationMembership.findFirstOrThrow({
+      where: { user: { email } },
+      select: { organizationId: true },
+    });
+    const plan = await db.subscriptionPlan.findFirstOrThrow({
+      where: { product: { code: 'OCALL_PARK' }, isActive: true, includesShowcase: true },
+      select: { id: true },
+    });
+    await db.subscription.updateMany({
+      where: { organizationId, product: { code: 'OCALL_PARK' } },
+      data: { planId: plan.id },
+    });
+  } finally {
+    await db.$disconnect();
+  }
 }

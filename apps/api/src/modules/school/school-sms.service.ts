@@ -1,4 +1,5 @@
 import {
+  ForbiddenException,
   Inject,
   Injectable,
   Logger,
@@ -7,6 +8,7 @@ import {
 } from '@nestjs/common';
 import type { Prisma } from '@ocall/school-database';
 import {
+  SCHOOL_PRODUCT_CODE,
   SCHOOL_SMS_MAX_ATTEMPTS,
   type SchoolSmsKind,
   type SchoolSmsStatus,
@@ -18,6 +20,7 @@ import type { SchoolContext } from './school-access';
 import { SchoolPrismaService } from './school-prisma.service';
 import { SCHOOL_SMS_PROVIDER, type SmsProvider, SmsProviderError } from './school-sms.provider';
 import { SchoolService } from './school.service';
+import { SuiteContractsService } from '../suite-contracts/suite-contracts.service';
 
 type Db = SchoolPrismaService | Prisma.TransactionClient;
 
@@ -54,6 +57,7 @@ export class SchoolSmsService implements OnModuleInit, OnModuleDestroy {
     private readonly school: SchoolService,
     @Inject(SCHOOL_SMS_PROVIDER) private readonly provider: SmsProvider,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    private readonly contracts: SuiteContractsService,
   ) {}
 
   onModuleInit() {
@@ -75,6 +79,14 @@ export class SchoolSmsService implements OnModuleInit, OnModuleDestroy {
 
   async updateSettings(ctx: SchoolContext, schoolId: string, enabled: boolean) {
     await this.school.assertSchool(ctx, schoolId);
+    // Offre Ocall School Free (socle S1) : aucun SMS inclus (crédits SMS prévus au Sprint S2).
+    if (enabled && ctx.limits.sms === false) {
+      throw new ForbiddenException({
+        code: 'SCHOOL_FREE_SMS_NOT_INCLUDED',
+        message:
+          'Les SMS ne sont pas inclus dans l’offre gratuite Ocall School. Passez à l’offre payante pour les activer.',
+      });
+    }
     await this.db.$transaction(async (tx) => {
       await tx.schoolSmsSettings.upsert({
         where: { schoolId },
@@ -137,7 +149,17 @@ export class SchoolSmsService implements OnModuleInit, OnModuleDestroy {
         })
       ).map((s) => s.schoolId),
     );
-    const data = messages.filter((m) => enabled.has(m.schoolId) && m.phone.trim());
+    // Offre gratuite (socle S1) : aucun SMS, comme un établissement dont les SMS sont désactivés —
+    // les autres canaux (portail, notifications) ne sont pas affectés.
+    const orgIds = [...new Set(messages.map((m) => m.organizationId))];
+    const noSms = new Set<string>();
+    for (const orgId of orgIds) {
+      const entitlement = await this.contracts.entitlement(orgId, SCHOOL_PRODUCT_CODE);
+      if (entitlement.limits.sms === false) noSms.add(orgId);
+    }
+    const data = messages.filter(
+      (m) => enabled.has(m.schoolId) && !noSms.has(m.organizationId) && m.phone.trim(),
+    );
     if (data.length === 0) return 0;
     // Première tentative datée par l'application (UTC), comme toutes les suivantes.
     const now = new Date();
@@ -188,7 +210,22 @@ export class SchoolSmsService implements OnModuleInit, OnModuleDestroy {
           });
           result.cancelled += cancelled.length;
         }
-        const ids = rows.map((r) => r.id).filter((id) => !cancelled.includes(id));
+        // Droit contractuel relu au moment d'envoyer (socle S1) : un SMS mis en file sous contrat payant
+        // n'est jamais envoyé, ni retenté, après le retour à l'offre gratuite.
+        const notInContract = await this.outsideContract(
+          tx,
+          rows.map((r) => r.id).filter((id) => !cancelled.includes(id)),
+        );
+        if (notInContract.length > 0) {
+          await tx.schoolSmsMessage.updateMany({
+            where: { id: { in: notInContract } },
+            data: { status: 'CANCELLED', lastError: 'SMS_NOT_IN_CONTRACT' },
+          });
+          result.cancelled += notInContract.length;
+        }
+        const ids = rows
+          .map((r) => r.id)
+          .filter((id) => !cancelled.includes(id) && !notInContract.includes(id));
         if (ids.length === 0) return [];
         await tx.schoolSmsMessage.updateMany({
           where: { id: { in: ids } },
@@ -233,6 +270,21 @@ export class SchoolSmsService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`Envoi des SMS interrompu : ${(error as Error).name}`);
     }
     return result;
+  }
+
+  /** Messages d'organisations dont les contrats en vigueur interdisent les SMS (offre gratuite). */
+  private async outsideContract(tx: Prisma.TransactionClient, ids: string[]): Promise<string[]> {
+    if (ids.length === 0) return [];
+    const messages = await tx.schoolSmsMessage.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, organizationId: true },
+    });
+    const noSms = new Set<string>();
+    for (const orgId of new Set(messages.map((m) => m.organizationId))) {
+      const entitlement = await this.contracts.entitlement(orgId, SCHOOL_PRODUCT_CODE);
+      if (entitlement.limits.sms === false) noSms.add(orgId);
+    }
+    return messages.filter((m) => noSms.has(m.organizationId)).map((m) => m.id);
   }
 
   /**

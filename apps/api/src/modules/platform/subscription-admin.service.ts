@@ -92,14 +92,18 @@ export class SubscriptionAdminService implements OnModuleInit, OnModuleDestroy {
     return this.transition(
       auth,
       id,
-      ['ACTIVE', 'PAST_DUE', 'PENDING_ACTIVATION', 'NOT_ACTIVATED'],
+      ['ACTIVE', 'PAST_DUE', 'PENDING_ACTIVATION', 'NOT_ACTIVATED', 'TRIALING'],
       () => 'SUSPENDED',
       reason,
       'platform.subscription_suspended',
     );
   }
 
-  /** Réactivation d'un abonnement suspendu : actif si son échéance n'est pas passée, sinon expiré. */
+  /**
+   * Réactivation d'un abonnement suspendu : actif si son échéance n'est pas passée, sinon expiré.
+   * Jamais activé : retour à l'essai s'il en a consommé un (socle S1 ; l'échéance de l'essai reste
+   * calculée, donc un essai échu redevient lecture seule), jamais à l'accès complet historique.
+   */
   async reactivate(auth: AuthContext, id: string, reason: string) {
     return this.transition(
       auth,
@@ -110,7 +114,9 @@ export class SubscriptionAdminService implements OnModuleInit, OnModuleDestroy {
           ? 'ACTIVE'
           : s.startedAt
             ? 'EXPIRED'
-            : 'NOT_ACTIVATED',
+            : s.hasTrial
+              ? 'TRIALING'
+              : 'NOT_ACTIVATED',
       reason,
       'platform.subscription_reactivated',
     );
@@ -121,7 +127,15 @@ export class SubscriptionAdminService implements OnModuleInit, OnModuleDestroy {
     return this.transition(
       auth,
       id,
-      ['NOT_ACTIVATED', 'ACTIVE', 'PAST_DUE', 'EXPIRED', 'SUSPENDED', 'PENDING_ACTIVATION'],
+      [
+        'NOT_ACTIVATED',
+        'TRIALING',
+        'ACTIVE',
+        'PAST_DUE',
+        'EXPIRED',
+        'SUSPENDED',
+        'PENDING_ACTIVATION',
+      ],
       () => 'CANCELED',
       reason,
       'platform.subscription_canceled',
@@ -263,7 +277,7 @@ export class SubscriptionAdminService implements OnModuleInit, OnModuleDestroy {
     auth: AuthContext,
     id: string,
     from: readonly string[],
-    to: (s: { expiresAt: Date | null; startedAt: Date | null }) => string,
+    to: (s: { expiresAt: Date | null; startedAt: Date | null; hasTrial: boolean }) => string,
     reason: string,
     action: string,
   ) {
@@ -277,7 +291,16 @@ export class SubscriptionAdminService implements OnModuleInit, OnModuleDestroy {
           status: sub.status,
         });
       }
-      const target = to(sub) as 'ACTIVE';
+      const trial = await tx.productTrial.findUnique({
+        where: {
+          organizationId_productId: {
+            organizationId: sub.organizationId,
+            productId: sub.productId,
+          },
+        },
+        select: { id: true },
+      });
+      const target = to({ ...sub, hasTrial: trial !== null }) as 'ACTIVE';
       await tx.subscription.update({ where: { id }, data: { status: target } });
       await tx.subscriptionEvent.create({
         data: {

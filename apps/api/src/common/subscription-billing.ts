@@ -1,6 +1,7 @@
 import { ConflictException } from '@nestjs/common';
 import type { Prisma } from '@ocall/database';
-import { addDays, isProductBillable, zonedMidnight } from '@ocall/shared';
+import { SCHOOL_PRODUCT_CODE, addDays, isProductBillable, zonedMidnight } from '@ocall/shared';
+import { markSetupFeePaid } from './setup-fee';
 
 /**
  * Règles communes de facturation des abonnements SaaS (Sprint 12A), utilisées par la validation
@@ -37,6 +38,7 @@ export async function markInvoicePaidIfSettled(
     where: { id: invoiceId, status: 'ISSUED' },
     data: { status: 'PAID', paidAt },
   });
+  if (paid.count === 1) await markSetupFeePaid(tx, invoiceId, paidAt);
   return paid.count === 1;
 }
 
@@ -96,6 +98,9 @@ export async function extendSubscription(
       expiresAt: true,
       agreedMonthlyPrice: true,
       plan: { select: { setupFee: true, monthlyPrice: true, currency: true } },
+      organizationId: true,
+      productId: true,
+      product: { select: { code: true } },
       organization: { select: { timezone: true } },
     },
   });
@@ -144,7 +149,93 @@ export async function extendSubscription(
       },
     });
   }
+  if (s.product.code === SCHOOL_PRODUCT_CODE) {
+    await syncSchoolPaidContract(tx, {
+      subscriptionId: s.id,
+      organizationId: s.organizationId,
+      productId: s.productId,
+      expiresAt,
+      actorUserId: input.actorUserId,
+      reason: input.reason,
+    });
+  }
   return { status: 'ACTIVE', expiresAt: expiresAt.toISOString(), changed };
+}
+
+/**
+ * Ocall School : les droits sont calculés depuis les contrats (jamais depuis l'abonnement). Une
+ * activation ou prolongation payante ouvre donc, ou prolonge, le contrat payant de l'abonnement
+ * (référence ABO-…, sans limite : il prime sur l'essai et l'offre gratuite, qui restent intacts),
+ * jusqu'au dernier jour couvert par l'échéance. Jamais raccourci ; journalisé.
+ */
+async function syncSchoolPaidContract(
+  tx: Prisma.TransactionClient,
+  input: {
+    subscriptionId: string;
+    organizationId: string;
+    productId: string;
+    expiresAt: Date;
+    actorUserId: string | null;
+    reason: string;
+  },
+): Promise<void> {
+  if (!input.actorUserId) {
+    throw new ConflictException({
+      code: 'ACTIVATION_REQUIRES_OCALL',
+      message: 'Ocall School : l’activation payante est approuvée par Ocall.',
+    });
+  }
+  const reference = `ABO-${input.subscriptionId.slice(0, 8).toUpperCase()}`;
+  const endsOn = new Date(dateOnly(new Date(input.expiresAt.getTime() - 1)));
+  const existing = await tx.suiteContract.findUnique({
+    where: { reference },
+    select: { id: true, status: true, endsOn: true },
+  });
+  if (!existing) {
+    const created = await tx.suiteContract.create({
+      data: {
+        organizationId: input.organizationId,
+        productId: input.productId,
+        reference,
+        status: 'ACTIVE',
+        startsOn: new Date(dateOnly(new Date())),
+        endsOn,
+        modules: [],
+        limits: { tier: 'PAID' },
+        createdById: input.actorUserId,
+      },
+      select: { id: true },
+    });
+    await tx.suiteContractEvent.create({
+      data: {
+        contractId: created.id,
+        type: 'CREATED',
+        toStatus: 'ACTIVE',
+        toEndsOn: endsOn,
+        reason: input.reason,
+        actorUserId: input.actorUserId,
+      },
+    });
+    return;
+  }
+  const newEndsOn = existing.endsOn > endsOn ? existing.endsOn : endsOn;
+  if (existing.status === 'ACTIVE' && newEndsOn.getTime() === existing.endsOn.getTime()) return;
+  await tx.suiteContract.update({
+    where: { id: existing.id },
+    data: { status: 'ACTIVE', endsOn: newEndsOn },
+  });
+  await tx.suiteContractEvent.create({
+    data: {
+      contractId: existing.id,
+      type: 'RENEWED',
+      fromStatus: existing.status,
+      toStatus: 'ACTIVE',
+      fromEndsOn: existing.endsOn,
+      toEndsOn: newEndsOn,
+      reason: input.reason,
+      actorUserId: input.actorUserId,
+    },
+  });
 }
 
 /**

@@ -513,6 +513,7 @@ export class SchoolSitesService {
         message: 'Aucune publication sans contrat Ocall School valide.',
       });
     }
+    await this.contracts.assertShowcase(site.organizationId, [SCHOOL_PRODUCT_CODE]);
     const updated = await this.db.$transaction(async (tx) => {
       await this.lockSite(tx, site.id);
       const fresh = await this.findSite(ctx, siteId, tx);

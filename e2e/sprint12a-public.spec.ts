@@ -45,13 +45,16 @@ test.describe('Sprint 12A — site Ocall Suite', () => {
     await expect(page.getByRole('link', { name: 'Être informé du lancement' })).toBeVisible();
   });
 
-  test('tarifs Ocall Park exacts', async ({ page }) => {
+  test('tarifs Ocall Suite exacts (grille S1)', async ({ page }) => {
     await page.goto('/tarifs');
     const body = page.locator('main');
-    await expect(body).toContainText('250 000');
-    await expect(body).toContainText('350 000');
-    await expect(body).toContainText('15 000');
-    await expect(body).toContainText('25 000');
+    await expect(body).toContainText('50 000');
+    await expect(body).toContainText('65 000');
+    await expect(body).toContainText('200 000');
+    await expect(body).toContainText('Essai gratuit de 14 jours');
+    // Anciens tarifs par métier : plus proposés aux nouveaux clients.
+    await expect(body).not.toContainText('350 000');
+    await expect(body).not.toContainText('250 000');
   });
 
   test('demande de démonstration envoyée ; pages légales non indexées', async ({ page }) => {

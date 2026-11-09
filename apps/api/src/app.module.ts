@@ -14,6 +14,7 @@ import { CommonModule } from './common/common.module';
 import { AuthGuard } from './common/guards/auth.guard';
 import { OriginGuard } from './common/guards/origin.guard';
 import { PermissionsGuard } from './common/guards/permissions.guard';
+import { ParkReadOnlyGuard } from './common/guards/park-read-only.guard';
 import { HttpExceptionFilter } from './common/http-exception.filter';
 import { throttlerOptions } from './common/throttling';
 import { AiCoreModule } from './ai-core/ai-core.module';
@@ -43,6 +44,7 @@ import { RestaurantModule } from './modules/restaurant/restaurant.module';
 import { RolesModule } from './modules/roles/roles.module';
 import { SchoolModule } from './modules/school/school.module';
 import { SuiteContractsModule } from './modules/suite-contracts/suite-contracts.module';
+import { SuiteCommercialModule } from './modules/suite-commercial/suite-commercial.module';
 import { StockModule } from './modules/stock/stock.module';
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 import { TicketingModule } from './modules/ticketing/ticketing.module';
@@ -89,6 +91,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     CommercialModule,
     PartnersModule,
     SuiteContractsModule,
+    SuiteCommercialModule,
     SchoolModule,
   ],
   controllers: [HealthController],
@@ -99,6 +102,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     { provide: APP_GUARD, useClass: OriginGuard },
     { provide: APP_GUARD, useClass: AuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
+    { provide: APP_GUARD, useClass: ParkReadOnlyGuard },
     { provide: APP_FILTER, useClass: HttpExceptionFilter },
   ],
 })

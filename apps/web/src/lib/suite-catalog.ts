@@ -19,7 +19,7 @@ export interface PublicProduct {
   name: string;
   tagline: string;
   description: string;
-  status: 'ACTIVE' | 'PILOT' | 'COMING_SOON';
+  status: 'ACTIVE' | 'PILOT' | 'PREPRODUCTION' | 'COMING_SOON';
   statusLabel: string;
   subscribable: boolean;
   appUrl: string | null;
@@ -37,6 +37,8 @@ export interface PublicProduct {
  */
 export function withSuiteStage(p: PublicProduct): PublicProduct {
   const stage = SUITE_PRODUCTS.find((s) => s.slug === p.slug)?.status;
+  // Statut serveur « préproduction » (socle S1) : déjà le bon libellé.
+  if (p.status === 'PREPRODUCTION') return { ...p, preproduction: true };
   if (p.status !== 'COMING_SOON' || stage !== 'preproduction') return p;
   return { ...p, statusLabel: PRODUCT_STATUS_LABEL.preproduction, preproduction: true };
 }

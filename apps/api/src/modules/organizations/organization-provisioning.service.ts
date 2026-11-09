@@ -3,8 +3,10 @@ import type { Prisma } from '@ocall/database';
 import {
   type BusinessType,
   DEFAULT_TIMEZONE,
+  PARK_PRODUCT_CODE,
   SUPPORTED_COUNTRIES,
   parkProductCode,
+  trialEndsAt,
 } from '@ocall/shared';
 import { randomInt } from 'node:crypto';
 
@@ -49,10 +51,12 @@ export class OrganizationProvisioningService {
       });
     const timezone = input.timezone ?? country.timezone ?? DEFAULT_TIMEZONE;
 
-    // Offre active du produit Ocall Park correspondant au métier (la plus ancienne en cas de plusieurs).
+    // Ocall Park est une seule application pour tous les métiers (socle S1, D2) : offre « sans vitrine »
+    // en vigueur. Vérifie aussi que le métier relève bien de Park.
+    parkProductCode(input.businessType);
     const plan = await tx.subscriptionPlan.findFirst({
-      where: { product: { code: parkProductCode(input.businessType) }, isActive: true },
-      orderBy: { createdAt: 'asc' },
+      where: { product: { code: PARK_PRODUCT_CODE }, isActive: true },
+      orderBy: [{ includesShowcase: 'asc' }, { monthlyPrice: 'asc' }],
     });
     if (!plan)
       throw new NotFoundException({
@@ -96,17 +100,28 @@ export class OrganizationProvisioningService {
       data: { organizationId: organization.id, userId: user.id, role: 'OWNER' },
     });
 
-    // Abonnement au produit Ocall Park correspondant au métier (catalogue Ocall Suite).
+    // Abonnement Ocall Park : l'essai gratuit démarre à l'activation effective du compte (socle S1),
+    // une seule fois par organisation (unicité en base), dates calculées en UTC par le serveur.
     const product = await tx.saasProduct.findUniqueOrThrow({
-      where: { code: parkProductCode(input.businessType) },
+      where: { code: PARK_PRODUCT_CODE },
       select: { id: true },
+    });
+    const now = new Date();
+    await tx.productTrial.create({
+      data: {
+        organizationId: organization.id,
+        productId: product.id,
+        startedAt: now,
+        endsAt: trialEndsAt(now, plan.trialDays),
+        startedByUserId: user.id,
+      },
     });
     const subscription = await tx.subscription.create({
       data: {
         organizationId: organization.id,
         productId: product.id,
         planId: plan.id,
-        status: 'NOT_ACTIVATED',
+        status: 'TRIALING',
       },
     });
     await tx.subscriptionEvent.create({
@@ -114,8 +129,9 @@ export class OrganizationProvisioningService {
         subscriptionId: subscription.id,
         type: 'CREATED',
         toPlanId: plan.id,
-        toStatus: 'NOT_ACTIVATED',
+        toStatus: 'TRIALING',
         actorUserId: user.id,
+        reason: `Essai gratuit de ${plan.trialDays} jours.`,
       },
     });
 

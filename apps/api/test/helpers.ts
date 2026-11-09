@@ -301,3 +301,21 @@ export async function cleanup(prisma: PrismaService): Promise<void> {
   });
   await prisma.user.deleteMany({ where: { id: { in: userIds } } });
 }
+
+/**
+ * Socle S1 (D5) : passe l'abonnement Ocall Park de l'organisation à l'offre « avec vitrine », condition
+ * de publication d'un site pour un contrat conclu depuis S1 (changement d'offre direct, sans setup).
+ */
+export async function grantShowcasePlan(
+  prisma: PrismaService,
+  organizationId: string,
+): Promise<void> {
+  const plan = await prisma.subscriptionPlan.findFirstOrThrow({
+    where: { product: { code: 'OCALL_PARK' }, isActive: true, includesShowcase: true },
+    select: { id: true },
+  });
+  await prisma.subscription.updateMany({
+    where: { organizationId, product: { code: 'OCALL_PARK' } },
+    data: { planId: plan.id },
+  });
+}

@@ -104,6 +104,8 @@ export class SchoolAiService implements OnModuleInit {
         role: ctx.role,
         operation: feature,
         timezone: school.timezone,
+        // Offre Ocall School Free (socle S1) : plafond contractuel par établissement.
+        contractMonthlyLimit: ctx.limits.aiMonthlyCallsPerSchool ?? null,
       },
       { model, prompt },
       (provider) => call(provider, model),

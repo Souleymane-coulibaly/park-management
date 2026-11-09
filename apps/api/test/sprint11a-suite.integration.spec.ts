@@ -182,18 +182,19 @@ describe('Sprint 11A — Ocall Suite (intégration)', () => {
           'OCALL_SCHOOL',
         ]),
       );
-      expect(byCode('OCALL_SCHOOL').status).toBe('COMING_SOON');
+      // Socle S1 (D1) : School en préproduction — souscription par Ocall seulement, avec une offre réelle.
+      expect(byCode('OCALL_SCHOOL').status).toBe('PREPRODUCTION');
       const refused = await owner.agent
         .post(api(`/platform/organizations/${park.organizationId}/subscriptions`))
         .send({ productId: byCode('OCALL_SCHOOL').id, planId: randomUUID() });
-      expect(refused.status).toBe(409);
+      expect(refused.body.code).toBe('PLAN_INVALID');
       // Un seul produit de la famille Ocall Park par organisation.
-      const restaurant = await prisma.subscriptionPlan.findFirstOrThrow({
-        where: { product: { code: 'OCALL_RESTAURANT' } },
+      const parkPlan = await prisma.subscriptionPlan.findFirstOrThrow({
+        where: { product: { code: 'OCALL_PARK' }, isActive: true },
       });
       const parkFamily = await owner.agent
         .post(api(`/platform/organizations/${park.organizationId}/subscriptions`))
-        .send({ productId: byCode('OCALL_RESTAURANT').id, planId: restaurant.id });
+        .send({ productId: byCode('OCALL_PARK').id, planId: parkPlan.id });
       expect(parkFamily.body.code).toBe('PARK_PRODUCT_EXISTS');
     });
 

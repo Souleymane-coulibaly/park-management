@@ -52,3 +52,10 @@ export const AllowMfaPending = () => SetMetadata(ALLOW_MFA_PENDING, true);
 export const CurrentAuth = createParamDecorator((_data: unknown, ctx: ExecutionContext) => {
   return ctx.switchToHttp().getRequest<Request>().auth as AuthContext;
 });
+
+export const ALLOW_IN_PARK_READ_ONLY = 'allowInParkReadOnly';
+/**
+ * Route d'écriture autorisée même quand l'organisation est en lecture seule Ocall Park (essai ou
+ * abonnement échu, suspendu, résilié — socle S1, D3) : sécurité, administration nécessaire.
+ */
+export const AllowInParkReadOnly = () => SetMetadata(ALLOW_IN_PARK_READ_ONLY, true);

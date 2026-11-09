@@ -83,10 +83,41 @@ export function bestContract<T extends ContractWindow>(
   return best;
 }
 
+/**
+ * Limites d'un contrat. Absence d'une limite = aucune limite. Offre Ocall School Free (socle S1) :
+ * contrat actif sans échéance réelle avec `tier: 'FREE'`, `maxStudents: 50`,
+ * `aiMonthlyCallsPerSchool: 20` et `sms: false`.
+ */
+export interface ContractLimits {
+  maxSchools?: number;
+  /** Élèves actifs (inscrits ou scolarisés) par organisation. */
+  maxStudents?: number;
+  /** Requêtes IA par mois et par établissement. */
+  aiMonthlyCallsPerSchool?: number;
+  /** Envoi de SMS autorisé ; `false` = aucun SMS (offre gratuite, crédits SMS au Sprint S2). */
+  sms?: boolean;
+  /** Nature du contrat : payant (défaut), essai ou offre gratuite. */
+  tier?: ContractTier;
+}
+export const CONTRACT_TIERS = ['PAID', 'TRIAL', 'FREE'] as const;
+export type ContractTier = (typeof CONTRACT_TIERS)[number];
+export const CONTRACT_TIER_LABELS: Record<ContractTier, string> = {
+  PAID: 'Payant',
+  TRIAL: 'Essai gratuit',
+  FREE: 'Offre gratuite',
+};
+/** Limites de l'offre Ocall School Free (décision client du 07/11/2026). */
+export const SCHOOL_FREE_LIMITS = {
+  tier: 'FREE',
+  maxStudents: 50,
+  aiMonthlyCallsPerSchool: 20,
+  sms: false,
+} as const satisfies ContractLimits;
+
 /** Contrat d'un produit couvrant des établissements (couverture vide = tous ceux du client). */
 export interface CoveringContract extends ContractWindow {
   modules: readonly string[];
-  limits: { maxSchools?: number } | null | undefined;
+  limits: ContractLimits | null | undefined;
   coveredSchoolIds: readonly string[];
 }
 
@@ -98,8 +129,10 @@ export interface CoveringContract extends ContractWindow {
  * - `writeSchoolIds` : établissements couverts par au moins un contrat ACTIF (écriture) ;
  *   `null` = tous les établissements du client (un contrat sans couverture précise), `[]` = aucun ;
  * - `modules` : union des modules des contrats actifs ou en lecture seule ;
- * - `limits.maxSchools` : la plus favorable parmi les contrats actifs (aucune limite si l'un n'en fixe
- *   pas, sinon la plus grande ; jamais de cumul).
+ * - `limits` (`maxSchools`, `maxStudents`, `aiMonthlyCallsPerSchool`) : chacune la plus favorable
+ *   parmi les contrats actifs (aucune limite si l'un n'en fixe pas, sinon la plus grande ; jamais de
+ *   cumul) ; `sms` autorisé si un contrat actif ne l'interdit pas ;
+ * - `tier` : la nature la plus favorable parmi les contrats actifs (payant, puis essai, puis gratuit).
  * Indépendant de l'ordre des contrats.
  */
 export interface ResolvedProductEntitlement {
@@ -107,7 +140,9 @@ export interface ResolvedProductEntitlement {
   readSchoolIds: string[] | null;
   writeSchoolIds: string[] | null;
   modules: string[];
-  limits: { maxSchools?: number };
+  limits: Omit<ContractLimits, 'tier'>;
+  /** Nature du droit en écriture ; null sans contrat actif. */
+  tier: ContractTier | null;
 }
 
 export function resolveProductEntitlement(
@@ -121,9 +156,13 @@ export function resolveProductEntitlement(
   let readAll = false;
   let writeAll = false;
   const modules = new Set<string>();
-  let maxSchools: number | undefined;
-  let unlimited = false;
+  const NUMERIC = ['maxSchools', 'maxStudents', 'aiMonthlyCallsPerSchool'] as const;
+  const best: Partial<Record<(typeof NUMERIC)[number], number>> = {};
+  const unlimited = new Set<string>();
+  let smsAllowed = false;
   let anyFull = false;
+  const tierRank: Record<ContractTier, number> = { PAID: 3, TRIAL: 2, FREE: 1 };
+  let tier: ContractTier | null = null;
   for (const c of contracts) {
     const a = contractAccess(c, now);
     if (a === 'none') continue;
@@ -136,9 +175,14 @@ export function resolveProductEntitlement(
       anyFull = true;
       if (all) writeAll = true;
       else for (const id of c.coveredSchoolIds) write.add(id);
-      const limit = c.limits?.maxSchools;
-      if (limit === undefined || limit === null) unlimited = true;
-      else maxSchools = Math.max(maxSchools ?? 0, limit);
+      for (const key of NUMERIC) {
+        const limit = c.limits?.[key];
+        if (limit === undefined || limit === null) unlimited.add(key);
+        else best[key] = Math.max(best[key] ?? 0, limit);
+      }
+      if (c.limits?.sms !== false) smsAllowed = true;
+      const t = c.limits?.tier ?? 'PAID';
+      if (!tier || tierRank[t] > tierRank[tier]) tier = t;
     }
   }
   return {
@@ -146,8 +190,22 @@ export function resolveProductEntitlement(
     readSchoolIds: readAll ? null : [...read].sort(),
     writeSchoolIds: writeAll ? null : [...write].sort(),
     modules: [...modules].sort(),
-    limits: anyFull && !unlimited && maxSchools !== undefined ? { maxSchools } : {},
+    limits: anyFull ? resolvedLimits(best, unlimited, smsAllowed) : {},
+    tier,
   };
+}
+
+function resolvedLimits(
+  best: Partial<Record<'maxSchools' | 'maxStudents' | 'aiMonthlyCallsPerSchool', number>>,
+  unlimited: Set<string>,
+  smsAllowed: boolean,
+): Omit<ContractLimits, 'tier'> {
+  const out: Omit<ContractLimits, 'tier'> = {};
+  for (const [key, value] of Object.entries(best) as [keyof typeof best, number][]) {
+    if (!unlimited.has(key)) out[key] = value;
+  }
+  if (!smsAllowed) out.sms = false;
+  return out;
 }
 
 /** Accès d'un établissement donné : écriture, lecture seule ou aucun (périmètre nul = tous). */
