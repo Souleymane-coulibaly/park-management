@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import { SchoolPrismaService } from '../src/modules/school/school-prisma.service';
+import { SchoolSmsService } from '../src/modules/school/school-sms.service';
+import { SuiteContractsService } from '../src/modules/suite-contracts/suite-contracts.service';
+import { assertShowcaseAllowed } from '../src/common/showcase';
+import { extendSubscription } from '../src/common/subscription-billing';
 import { PrismaService } from '../src/prisma/prisma.service';
 import {
   type Agent,
@@ -143,12 +147,70 @@ describe('Socle commercial Ocall Suite S1 (intégration)', () => {
       });
       expect(contract.status).toBe('ACTIVE');
       expect(contract.limits).toMatchObject({ tier: 'TRIAL' });
+      // Dernier jour du contrat = jour de l'échéance de l'essai : accès jamais coupé avant l'instant annoncé.
+      const schoolTrial = await prisma.productTrial.findFirstOrThrow({
+        where: { organizationId: parkA.organizationId, product: { code: 'OCALL_SCHOOL' } },
+      });
+      expect(contract.endsOn.toISOString().slice(0, 10)).toBe(
+        schoolTrial.endsAt.toISOString().slice(0, 10),
+      );
+      expect(contract.endsOn.getTime() + DAY).toBeGreaterThan(schoolTrial.endsAt.getTime());
       // Essais indépendants : celui de School n'a pas touché celui de Park.
       expect((await subOf(parkA.organizationId)).status).toBe('TRIALING');
       const audit = await prisma.auditLog.count({
         where: { organizationId: parkA.organizationId, action: 'platform.trial_started' },
       });
       expect(audit).toBe(1);
+    });
+
+    it('activation payante School après l’essai : contrat payant ouvert, droits complets après l’échéance de l’essai', async () => {
+      const sub = await prisma.subscription.findFirstOrThrow({
+        where: { organizationId: parkA.organizationId, product: { code: 'OCALL_SCHOOL' } },
+      });
+      const today = new Date(new Date().toISOString().slice(0, 10));
+      await prisma.$transaction((tx) =>
+        extendSubscription(tx, {
+          subscriptionId: sub.id,
+          periodStart: today,
+          periodEnd: new Date(today.getTime() + 29 * DAY),
+          actorUserId: owner.id,
+          reason: 'Activation approuvée par Ocall (test).',
+        }),
+      );
+      const paid = await prisma.suiteContract.findFirstOrThrow({
+        where: { organizationId: parkA.organizationId, reference: { startsWith: 'ABO-' } },
+      });
+      expect(paid.status).toBe('ACTIVE');
+      expect(paid.limits).toMatchObject({ tier: 'PAID' });
+      expect(paid.endsOn.getTime()).toBeGreaterThanOrEqual(today.getTime() + 29 * DAY);
+      // Essai échu : l'accès School reste complet grâce au contrat payant, sans limite d'offre gratuite.
+      await prisma.suiteContract.updateMany({
+        where: { organizationId: parkA.organizationId, reference: { startsWith: 'ESSAI-' } },
+        data: { startsOn: new Date('2026-01-01'), endsOn: new Date('2026-01-14') },
+      });
+      const entitlement = await app
+        .get(SuiteContractsService)
+        .entitlement(parkA.organizationId, 'OCALL_SCHOOL');
+      expect(entitlement.access).toBe('full');
+      expect(entitlement.limits.maxStudents).toBeUndefined();
+      // Prolongation : même contrat, jamais raccourci, journalisé.
+      await prisma.$transaction((tx) =>
+        extendSubscription(tx, {
+          subscriptionId: sub.id,
+          periodStart: new Date(today.getTime() + 30 * DAY),
+          periodEnd: new Date(today.getTime() + 59 * DAY),
+          actorUserId: owner.id,
+          reason: 'Prolongation (test).',
+        }),
+      );
+      const contracts = await prisma.suiteContract.findMany({
+        where: { organizationId: parkA.organizationId, reference: { startsWith: 'ABO-' } },
+      });
+      expect(contracts).toHaveLength(1);
+      expect(contracts[0]!.endsOn.getTime()).toBeGreaterThanOrEqual(today.getTime() + 59 * DAY);
+      expect(
+        await prisma.suiteContractEvent.count({ where: { contractId: contracts[0]!.id } }),
+      ).toBe(2);
     });
 
     it('client : aucune route ne permet de modifier les dates d’essai ; un compte plateforme sans droit est refusé', async () => {
@@ -209,6 +271,44 @@ describe('Socle commercial Ocall Suite S1 (intégration)', () => {
         .send({ reason: 'Règlement reçu' })
         .expect(200);
       expect((await parkWrite(parkB.agent)).status).toBe(400);
+    });
+  });
+
+  describe('abonnement en essai : actions du Super Admin', () => {
+    it('suspension puis réactivation → retour à l’essai (jamais l’accès complet historique) ; résiliation possible', async () => {
+      const trialist = await signup(app, 's1susp', 'PARK');
+      const sub = await subOf(trialist.organizationId);
+      expect(sub.status).toBe('TRIALING');
+      await owner.agent
+        .post(api(`/platform/subscriptions/${sub.id}/suspend`))
+        .send({ reason: 'Contrôle' })
+        .expect(200);
+      expect((await parkWrite(trialist.agent)).body.code).toBe('PARK_READ_ONLY');
+      const back = await owner.agent
+        .post(api(`/platform/subscriptions/${sub.id}/reactivate`))
+        .send({ reason: 'Fin du contrôle' })
+        .expect(200);
+      expect(back.body.status).toBe('TRIALING');
+      expect((await parkWrite(trialist.agent)).status).toBe(400);
+      // Essai échu puis suspension et réactivation : toujours lecture seule (essai consommé).
+      await prisma.productTrial.updateMany({
+        where: { organizationId: trialist.organizationId },
+        data: { startedAt: new Date(Date.now() - 20 * DAY), endsAt: new Date(Date.now() - DAY) },
+      });
+      await owner.agent
+        .post(api(`/platform/subscriptions/${sub.id}/suspend`))
+        .send({ reason: 'Contrôle 2' })
+        .expect(200);
+      await owner.agent
+        .post(api(`/platform/subscriptions/${sub.id}/reactivate`))
+        .send({ reason: 'Fin du contrôle 2' })
+        .expect(200);
+      expect((await parkWrite(trialist.agent)).body.code).toBe('PARK_READ_ONLY');
+      const canceled = await owner.agent
+        .post(api(`/platform/subscriptions/${sub.id}/cancel`))
+        .send({ reason: 'Résiliation' })
+        .expect(200);
+      expect(canceled.body.status).toBe('CANCELED');
     });
   });
 
@@ -504,6 +604,7 @@ schoolSuite('Ocall School Free (intégration)', () => {
 
   afterAll(async () => {
     const where = { organizationId };
+    await db.schoolSmsMessage.deleteMany({ where });
     await db.schoolStudentEvent.deleteMany({ where });
     await db.schoolStudent.deleteMany({ where });
     await db.schoolNumberCounter.deleteMany({ where });
@@ -536,6 +637,23 @@ schoolSuite('Ocall School Free (intégration)', () => {
     await agent.get(api(`/school/students?schoolId=${schoolId}`)).expect(200);
   });
 
+  it('option vitrine (D5) : client Free conclu depuis S1, sans abonnement → publication refusée ; droits acquis → autorisée', async () => {
+    await expect(
+      assertShowcaseAllowed(prisma, organizationId, ['OCALL_SCHOOL']),
+    ).rejects.toMatchObject({ response: { code: 'SHOWCASE_OPTION_REQUIRED' } });
+    await prisma.organization.update({
+      where: { id: organizationId },
+      data: { showcaseGrandfathered: true },
+    });
+    await expect(
+      assertShowcaseAllowed(prisma, organizationId, ['OCALL_SCHOOL']),
+    ).resolves.toBeUndefined();
+    await prisma.organization.update({
+      where: { id: organizationId },
+      data: { showcaseGrandfathered: false },
+    });
+  });
+
   it('SMS non inclus : activation refusée ; aucune organisation voisine affectée', async () => {
     const res = await agent.put(api('/school/sms/settings')).send({ schoolId, enabled: true });
     expect(res.status).toBe(403);
@@ -559,12 +677,29 @@ schoolSuite('Ocall School Free (intégration)', () => {
       .expect(200);
     await student(schoolId).expect(201);
     await agent.put(api('/school/sms/settings')).send({ schoolId, enabled: true }).expect(200);
+    // SMS mis en file sous contrat payant, encore en attente au retour à l'offre gratuite.
+    const queued = await db.schoolSmsMessage.create({
+      data: {
+        organizationId,
+        schoolId,
+        phone: '+221770000000',
+        body: 'Message fictif',
+        kind: 'ABSENCE',
+        dedupeKey: `s1-free-${RUN}`,
+      },
+    });
     await platform.agent
       .post(api(`/platform/contracts/${paid.body.id}/status`))
       .send({ status: 'TERMINATED', reason: 'Fin de l’abonnement' })
       .expect(200);
     expect((await student(schoolId)).body.code).toBe('SCHOOL_FREE_STUDENT_LIMIT');
     expect(await db.schoolStudent.count({ where: { organizationId } })).toBe(4);
+    // Le droit SMS est relu à l'envoi : message annulé, jamais transmis au fournisseur.
+    await app.get(SchoolSmsService).processDue(new Date(Date.now() + 60_000));
+    const after = await db.schoolSmsMessage.findUniqueOrThrow({ where: { id: queued.id } });
+    expect(after.status).toBe('CANCELLED');
+    expect(after.lastError).toBe('SMS_NOT_IN_CONTRACT');
+    expect(after.sentAt).toBeNull();
     await agent.get(api(`/school/students?schoolId=${schoolId}`)).expect(200);
   });
 });

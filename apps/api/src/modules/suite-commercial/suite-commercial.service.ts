@@ -31,7 +31,6 @@ import { loadParkAccess } from '../../common/park-access';
 import { SuiteContractsService } from '../suite-contracts/suite-contracts.service';
 
 type Tx = Prisma.TransactionClient;
-const DAY_MS = 86_400_000;
 const APP_HREF: Record<string, string> = { OCALL_PARK: '/app', OCALL_SCHOOL: '/school' };
 
 const NOT_FOUND = { code: 'PRODUCT_NOT_FOUND', message: 'Application introuvable.' };
@@ -176,11 +175,12 @@ export class SuiteCommercialService {
       });
     }
     // Ocall School : l'accès passe par un contrat (périmètre) ; contrat d'essai jusqu'à la fin de
-    // l'essai, puis lecture seule automatique (aucune donnée supprimée).
+    // l'essai, puis lecture seule automatique (aucune donnée supprimée). Les contrats sont datés au
+    // jour (UTC, dernier jour entier) : le dernier jour est celui de l'échéance de l'essai, pour ne
+    // jamais couper l'accès avant l'instant annoncé (`ProductTrial.endsAt`).
     if (product.code === SCHOOL_PRODUCT_CODE) {
       if (!input.actorUserId)
         throw new ForbiddenException({ code: 'FORBIDDEN', message: 'Auteur requis.' });
-      const lastDay = new Date(endsAt.getTime() - DAY_MS);
       await tx.suiteContract.create({
         data: {
           organizationId: input.organizationId,
@@ -188,7 +188,7 @@ export class SuiteCommercialService {
           reference: `ESSAI-${subscriptionId.slice(0, 8).toUpperCase()}`,
           status: 'ACTIVE',
           startsOn: new Date(now.toISOString().slice(0, 10)),
-          endsOn: new Date(lastDay.toISOString().slice(0, 10)),
+          endsOn: new Date(endsAt.toISOString().slice(0, 10)),
           modules: [],
           limits: { tier: 'TRIAL' },
           createdById: input.actorUserId,

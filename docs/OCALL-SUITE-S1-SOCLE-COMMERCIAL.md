@@ -140,7 +140,8 @@ La page **Essais et activations** (`/admin/essais-activations`) regroupe trois �
 Les migrations sont les suivantes :
 
 - `20261114000000_suite_s1_socle_commercial` : structure ;
-- `20261114000100_suite_s1_grille_catalogue` : données idempotentes. Elle installe la nouvelle grille, désactive les anciennes offres et passe School en préproduction. Elle ajoute Facture et Stock et masque Restaurant ainsi que Parc + Restaurant, sans rien supprimer. Elle reprend l'antériorité vitrine et les setups déjà facturés ou dispensés.
+- `20261114000100_suite_s1_grille_catalogue` : données, appliquée une seule fois par Prisma (non rejouable à la main). Elle installe la nouvelle grille, désactive les anciennes offres et passe School en préproduction. Elle ajoute Facture et Stock et masque Restaurant ainsi que Parc + Restaurant, sans rien supprimer. Elle reprend l'antériorité vitrine et les setups déjà facturés ou dispensés.
+- `20261115000000_suite_s1_vitrine_contrats_anterieurs` (correctif d'audit) : droits acquis vitrine des organisations ayant un contrat antérieur au socle S1 ; rejouable sans effet.
 
 Aucun abonnement existant n'est modifié.
 
@@ -201,6 +202,17 @@ Aucun abonnement existant n'est modifié.
   - essai à l'inscription ;
   - School en préproduction ;
   - offre vitrine requise pour publier.
+
+### Correctifs de l'audit Codex (fin de sprint)
+
+| Point                                                    | Correction                                                                                                                                                                                                                                               |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1 — activation payante School sans effet sur les droits | Toute activation ou prolongation payante d'un abonnement Ocall School ouvre ou prolonge le contrat payant de l'abonnement (référence `ABO-…`, sans limite, jamais raccourci, journalisé). Il prime sur l'essai et l'offre gratuite, qui restent intacts. |
+| P1 — publication School sans offre vitrine               | L'absence d'abonnement n'accorde plus le droit de publier. Droits acquis : migration `20261115000000_suite_s1_vitrine_contrats_anterieurs` (organisations ayant un contrat antérieur au socle S1).                                                       |
+| P1 — essai ni suspendable ni résiliable                  | `TRIALING` ajouté aux transitions de suspension et de résiliation ; une réactivation revient à l'essai consommé (jamais à l'accès complet historique).                                                                                                   |
+| P2 — SMS en file après retour à l'offre gratuite         | Le droit SMS du contrat est relu à l'envoi : message annulé (`SMS_NOT_IN_CONTRACT`), jamais transmis ni retenté.                                                                                                                                         |
+| P2 — essai School coupé avant l'échéance                 | Dernier jour du contrat d'essai = jour de l'échéance de l'essai (contrats datés au jour) : l'accès n'est jamais coupé avant l'instant annoncé.                                                                                                           |
+| P2 — migration de données non rejouable                  | Non modifiée : déjà appliquée en préproduction (sa somme de contrôle est enregistrée) et Prisma n'applique une migration qu'une seule fois. Elle ne doit jamais être rejouée à la main. La migration corrective est, elle, rejouable sans effet.         |
 
 ### Limite connue
 

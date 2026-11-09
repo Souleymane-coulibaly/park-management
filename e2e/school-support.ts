@@ -57,7 +57,11 @@ export async function seedSchoolClient(
   const db = new PrismaClient({ datasourceUrl: testDb.databaseUrl });
   try {
     const product = await db.saasProduct.findUniqueOrThrow({ where: { code: 'OCALL_SCHOOL' } });
-    await db.organization.update({ where: { id: organizationId }, data: { businessType: 'NONE' } });
+    // Client School sur contrat, comme ceux antérieurs au socle S1 : droit de publication acquis (D5).
+    await db.organization.update({
+      where: { id: organizationId },
+      data: { businessType: 'NONE', showcaseGrandfathered: true },
+    });
     await db.suiteContract.create({
       data: {
         organizationId,

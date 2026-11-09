@@ -7,8 +7,10 @@ type Db = PrismaClient | Prisma.TransactionClient;
 /**
  * Option vitrine (socle S1, décision D5) : publier un site vitrine exige, pour un contrat conclu
  * depuis le socle S1, une offre « avec vitrine ». Sont préservés sans modification rétroactive :
- * - les organisations antérieures au socle S1 (site déjà publié ou abonnement existant) ;
- * - un produit encore géré sans abonnement commercial (contrat Ocall School antérieur au socle).
+ * - les organisations antérieures au socle S1 (site déjà publié, abonnement ou contrat existant),
+ *   marquées `showcaseGrandfathered` par les migrations du socle.
+ * L'absence d'abonnement n'accorde jamais ce droit : un client conclu depuis S1 sans offre « avec
+ * vitrine » (ex. contrat Ocall School Free) ne publie pas.
  * L'édition d'un brouillon reste toujours possible : seule la publication est contrôlée.
  */
 export async function assertShowcaseAllowed(
@@ -26,10 +28,9 @@ export async function assertShowcaseAllowed(
       select: { plan: { select: { includesShowcase: true } } },
     }),
   ]);
-  if (!sub) return;
   if (
     canPublishShowcase({
-      planIncludesShowcase: sub.plan.includesShowcase,
+      planIncludesShowcase: sub?.plan.includesShowcase ?? false,
       grandfathered: org.showcaseGrandfathered,
     })
   ) {

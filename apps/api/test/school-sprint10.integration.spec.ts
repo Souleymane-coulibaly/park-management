@@ -99,6 +99,11 @@ suite('Ocall School — Sprint 10, sites vitrines (intégration)', () => {
       .expect(201);
     organizations.push(res.body.contract.organizationId);
     contracts.set(label, res.body.contract.id);
+    // Clients du Sprint 10, antérieurs au socle S1 : droit de publication acquis (option vitrine, D5).
+    await prisma.organization.update({
+      where: { id: res.body.contract.organizationId },
+      data: { showcaseGrandfathered: true },
+    });
     await contractStatus(res.body.contract.id, 'ACTIVE');
     return connect(res.body.loginId, res.body.temporaryPassword);
   }

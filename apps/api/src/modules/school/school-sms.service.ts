@@ -210,7 +210,22 @@ export class SchoolSmsService implements OnModuleInit, OnModuleDestroy {
           });
           result.cancelled += cancelled.length;
         }
-        const ids = rows.map((r) => r.id).filter((id) => !cancelled.includes(id));
+        // Droit contractuel relu au moment d'envoyer (socle S1) : un SMS mis en file sous contrat payant
+        // n'est jamais envoyé, ni retenté, après le retour à l'offre gratuite.
+        const notInContract = await this.outsideContract(
+          tx,
+          rows.map((r) => r.id).filter((id) => !cancelled.includes(id)),
+        );
+        if (notInContract.length > 0) {
+          await tx.schoolSmsMessage.updateMany({
+            where: { id: { in: notInContract } },
+            data: { status: 'CANCELLED', lastError: 'SMS_NOT_IN_CONTRACT' },
+          });
+          result.cancelled += notInContract.length;
+        }
+        const ids = rows
+          .map((r) => r.id)
+          .filter((id) => !cancelled.includes(id) && !notInContract.includes(id));
         if (ids.length === 0) return [];
         await tx.schoolSmsMessage.updateMany({
           where: { id: { in: ids } },
@@ -255,6 +270,21 @@ export class SchoolSmsService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`Envoi des SMS interrompu : ${(error as Error).name}`);
     }
     return result;
+  }
+
+  /** Messages d'organisations dont les contrats en vigueur interdisent les SMS (offre gratuite). */
+  private async outsideContract(tx: Prisma.TransactionClient, ids: string[]): Promise<string[]> {
+    if (ids.length === 0) return [];
+    const messages = await tx.schoolSmsMessage.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, organizationId: true },
+    });
+    const noSms = new Set<string>();
+    for (const orgId of new Set(messages.map((m) => m.organizationId))) {
+      const entitlement = await this.contracts.entitlement(orgId, SCHOOL_PRODUCT_CODE);
+      if (entitlement.limits.sms === false) noSms.add(orgId);
+    }
+    return messages.filter((m) => noSms.has(m.organizationId)).map((m) => m.id);
   }
 
   /**
