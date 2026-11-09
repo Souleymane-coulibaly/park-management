@@ -5,10 +5,15 @@ import {
   SCHOOL_ANNOUNCEMENTS_PAGE,
   SCHOOL_ANNOUNCEMENT_AUDIENCES,
   SCHOOL_SMS_STATUSES,
+  SMS_TOPUP_MAX_CREDITS,
+  SMS_TOPUP_MIN_CREDITS,
   type SchoolAnnouncementAudience,
   type SchoolAnnouncementStatus,
   type SchoolSmsStatus,
+  type SchoolTextKey,
+  formatXof,
   hasSchoolPermission,
+  smsTopUpQuote,
 } from '@ocall/shared';
 import { toApiError, useSchoolText } from '@/components/school/school-language';
 import { SchoolPage, type SchoolPageApi } from '@/components/school/school-page';
@@ -21,6 +26,7 @@ import { InputField, SelectField } from '@/components/ui/field';
 import { Alert, ApiErrorAlert, ErrorState, LoadingState } from '@/components/ui/states';
 import { type ApiError, api } from '@/lib/api';
 import { useApi } from '@/lib/use-api';
+import { useCursorPages } from '@/lib/use-cursor-pages';
 
 interface AnnouncementRow {
   id: string;
@@ -49,6 +55,7 @@ interface SmsHistory {
     attempts: number;
     lastError: string | null;
     createdAt: string;
+    creditsReserved: number;
   }[];
   nextCursor: string | null;
 }
@@ -559,6 +566,7 @@ function Sms({ schoolId, canWrite }: { schoolId: string; canWrite: boolean }) {
             )}
           </div>
         )}
+        <SmsWallet schoolId={schoolId} canWrite={canWrite} />
         <h3 className="mt-3 text-sm font-semibold">{t('com.smsHistory')}</h3>
         <div className="max-w-xs">
           <SelectField
@@ -583,7 +591,8 @@ function Sms({ schoolId, canWrite }: { schoolId: string; canWrite: boolean }) {
                 <span dir="ltr">{m.phone}</span>
                 <span className="text-xs text-muted">
                   {date(m.createdAt)} · {t('com.attempts', { n: m.attempts })}
-                  {m.lastError ? ` · ${m.lastError}` : ''}
+                  {m.creditsReserved > 0 ? ` · ${t('com.credits', { n: m.creditsReserved })}` : ''}
+                  {m.lastError ? ` · ${smsErrorLabel(t, m.lastError)}` : ''}
                 </span>
                 <Badge
                   tone={
@@ -627,5 +636,278 @@ function Sms({ schoolId, canWrite }: { schoolId: string; canWrite: boolean }) {
         )}
       </CardBody>
     </Card>
+  );
+}
+
+type Translate = ReturnType<typeof useSchoolText>['t'];
+
+/** Motif lisible d'une annulation ou d'un échec (code technique conservé s'il est inconnu). */
+function smsErrorLabel(t: Translate, code: string): string {
+  const key = `com.smsError.${code}` as SchoolTextKey;
+  const label = t(key);
+  return label === key ? code : label;
+}
+
+interface SmsWalletView {
+  balance: number;
+  reserved: number;
+  consumed: number;
+  included: boolean;
+  tariff: {
+    creditPriceXof: number | null;
+    internationalAllowed: boolean;
+    internationalCreditsPerSegment: number | null;
+  } | null;
+  pendingRequest: { id: string; creditsRequested: number; quotedAmountXof: number | null } | null;
+}
+
+interface TopUpView {
+  id: string;
+  creditsRequested: number;
+  creditsGranted: number | null;
+  quotedAmountXof: number | null;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'CANCELLED';
+  handlingNote: string | null;
+  createdAt: string;
+}
+
+interface LedgerView {
+  items: {
+    id: string;
+    kind: 'TOPUP' | 'RESERVE' | 'CAPTURE' | 'RELEASE' | 'ADJUSTMENT';
+    availableDelta: number;
+    balanceAfter: number;
+    reason: string | null;
+    createdAt: string;
+  }[];
+  nextCursor: string | null;
+}
+
+/**
+ * Portefeuille SMS prépayé de l'établissement (Sprint S2) : solde, réservations et consommation, demande
+ * de recharge (paiement hors plateforme, crédit après validation d'Ocall), demandes et opérations.
+ */
+function SmsWallet({ schoolId, canWrite }: { schoolId: string; canWrite: boolean }) {
+  const { t, date } = useSchoolText();
+  const wallet = useApi<SmsWalletView>(`/school/sms/wallet?schoolId=${schoolId}`);
+  const topUps = useCursorPages<TopUpView>(`/school/sms/top-ups?schoolId=${schoolId}`);
+  const ledger = useCursorPages<LedgerView['items'][number]>(
+    `/school/sms/ledger?schoolId=${schoolId}`,
+  );
+  const [credits, setCredits] = useState(String(SMS_TOPUP_MIN_CREDITS * 10));
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const reloadAll = () => {
+    wallet.reload();
+    topUps.reload();
+    ledger.reload();
+  };
+
+  async function request() {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await api('/school/sms/top-ups', {
+        method: 'POST',
+        body: { schoolId, credits: Number(credits), note: note.trim() || null },
+      });
+      setNotice(t('com.topUpSent'));
+      setNote('');
+      reloadAll();
+    } catch (e) {
+      setError(toApiError(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancel(id: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/school/sms/top-ups/${id}/cancel`, { method: 'POST', body: { schoolId } });
+      reloadAll();
+    } catch (e) {
+      setError(toApiError(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (wallet.state === 'loading') return <LoadingState />;
+  if (wallet.state === 'error') return <ErrorState error={wallet.error} onRetry={wallet.reload} />;
+  const w = wallet.data;
+  const amount = Number(credits);
+  const valid =
+    Number.isInteger(amount) && amount >= SMS_TOPUP_MIN_CREDITS && amount <= SMS_TOPUP_MAX_CREDITS;
+  const quote = valid ? smsTopUpQuote(amount, w.tariff?.creditPriceXof ?? null) : null;
+
+  return (
+    <section
+      className="mt-4 space-y-3 rounded-xl border border-line/80 p-3"
+      data-testid="sms-wallet"
+    >
+      <h3 className="text-sm font-semibold">{t('com.wallet')}</h3>
+      <dl className="grid grid-cols-3 gap-2 text-center">
+        {[
+          { label: t('com.walletBalance'), value: w.balance, testId: 'sms-balance' },
+          { label: t('com.walletReserved'), value: w.reserved, testId: 'sms-reserved' },
+          { label: t('com.walletConsumed'), value: w.consumed, testId: 'sms-consumed' },
+        ].map((x) => (
+          <div key={x.testId} className="min-w-0 rounded-lg bg-savanna-light/40 p-2">
+            <dt className="text-xs text-muted">{x.label}</dt>
+            <dd className="font-display text-xl font-bold" data-testid={x.testId}>
+              {x.value}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      <p className="text-xs text-muted">
+        {t('com.walletUnit')}
+        {w.tariff?.internationalCreditsPerSegment
+          ? ` ${t('com.walletInternational', { n: w.tariff.internationalCreditsPerSegment })}`
+          : ''}
+      </p>
+      {!w.included && <Alert tone="info" title={t('com.walletNotIncluded')} />}
+      {w.included && w.balance === 0 && <Alert tone="error" title={t('com.walletEmpty')} />}
+      <ApiErrorAlert error={error} />
+      {notice && (
+        <p className="text-sm text-forest" role="status">
+          {notice}
+        </p>
+      )}
+      {w.pendingRequest ? (
+        <div
+          className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-savanna-light/40 p-2 text-sm"
+          data-testid="sms-topup-pending"
+        >
+          <span>
+            {t('com.topUpPending', { n: w.pendingRequest.creditsRequested })}
+            {w.pendingRequest.quotedAmountXof !== null
+              ? ` · ${t('com.topUpQuote', { amount: formatXof(w.pendingRequest.quotedAmountXof) })}`
+              : ''}
+          </span>
+          {canWrite && (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={busy}
+              onClick={() => void cancel(w.pendingRequest!.id)}
+            >
+              {t('com.topUpCancel')}
+            </Button>
+          )}
+        </div>
+      ) : (
+        w.included &&
+        canWrite && (
+          <form
+            className="grid gap-2 sm:grid-cols-[10rem_1fr_auto] sm:items-end"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void request();
+            }}
+            data-testid="sms-topup-form"
+          >
+            <InputField
+              label={t('com.topUpCredits')}
+              type="number"
+              min={SMS_TOPUP_MIN_CREDITS}
+              max={SMS_TOPUP_MAX_CREDITS}
+              step={1}
+              value={credits}
+              onChange={(e) => setCredits(e.target.value)}
+              required
+            />
+            <InputField
+              label={t('com.topUpNote')}
+              value={note}
+              maxLength={300}
+              onChange={(e) => setNote(e.target.value)}
+            />
+            <Button type="submit" size="sm" disabled={busy || !valid}>
+              {t('com.topUp')}
+            </Button>
+            <p className="text-xs text-muted sm:col-span-3">
+              {quote !== null
+                ? t('com.topUpQuote', { amount: formatXof(quote) })
+                : t('com.topUpNoPrice')}{' '}
+              {t('com.topUpOffline')}
+            </p>
+          </form>
+        )
+      )}
+      {topUps.state === 'ready' && topUps.items.length > 0 && (
+        <details>
+          <summary className="cursor-pointer text-sm font-semibold">{t('com.topUps')}</summary>
+          <ul className="mt-1 divide-y divide-line/70 text-sm" data-testid="sms-topups">
+            {topUps.items.map((r) => (
+              <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-1.5">
+                <span>
+                  {date(r.createdAt)} ·{' '}
+                  {t('com.credits', { n: r.creditsGranted ?? r.creditsRequested })}
+                  {r.status === 'REJECTED' && r.handlingNote ? ` · ${r.handlingNote}` : ''}
+                </span>
+                <Badge
+                  tone={
+                    r.status === 'APPROVED'
+                      ? 'forest'
+                      : r.status === 'REJECTED'
+                        ? 'terracotta'
+                        : r.status === 'PENDING'
+                          ? 'savanna'
+                          : 'neutral'
+                  }
+                >
+                  {t(`com.topUp.${r.status}`)}
+                </Badge>
+              </li>
+            ))}
+          </ul>
+          {topUps.hasMore && (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={topUps.busy}
+              onClick={() => void topUps.more()}
+            >
+              {t('common.next')}
+            </Button>
+          )}
+        </details>
+      )}
+      {ledger.state === 'ready' && ledger.items.length > 0 && (
+        <details>
+          <summary className="cursor-pointer text-sm font-semibold">{t('com.ledger')}</summary>
+          <ul className="mt-1 divide-y divide-line/70 text-sm" data-testid="sms-ledger">
+            {ledger.items.map((e) => (
+              <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 py-1.5">
+                <span>
+                  {date(e.createdAt)} · {t(`com.ledger.${e.kind}`)}
+                </span>
+                <span className="tabular-nums" dir="ltr">
+                  {e.availableDelta > 0 ? `+${e.availableDelta}` : e.availableDelta} →{' '}
+                  {e.balanceAfter}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {ledger.hasMore && (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={ledger.busy}
+              onClick={() => void ledger.more()}
+            >
+              {t('common.next')}
+            </Button>
+          )}
+        </details>
+      )}
+    </section>
   );
 }

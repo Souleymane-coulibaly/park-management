@@ -2,7 +2,13 @@
 
 import { useState } from 'react';
 import { Inbox, Receipt } from 'lucide-react';
-import { SETUP_FEE_STATUS_LABELS, type SetupFeeStatus, formatXof } from '@ocall/shared';
+import {
+  SETUP_FEE_STATUS_LABELS,
+  SUITE_REQUEST_KIND_LABELS,
+  type SetupFeeStatus,
+  type SuiteRequestKind,
+  formatXof,
+} from '@ocall/shared';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
@@ -41,6 +47,7 @@ interface SetupFee {
 }
 interface ActivationRequest {
   id: string;
+  kind: SuiteRequestKind;
   quotedSetupFee: number;
   quotedMonthly: number;
   createdAt: string;
@@ -192,7 +199,10 @@ function RequestRow({ request, onDone }: { request: ActivationRequest; onDone: (
         {request.organization.name}
         <span className="ml-1 text-xs text-muted">{request.organization.code}</span>
       </Td>
-      <Td>{request.product.name}</Td>
+      <Td>
+        {request.product.name}
+        <span className="block text-xs text-muted">{SUITE_REQUEST_KIND_LABELS[request.kind]}</span>
+      </Td>
       <Td>
         {formatXof(request.quotedSetupFee + request.quotedMonthly)}
         <span className="block text-xs text-muted">

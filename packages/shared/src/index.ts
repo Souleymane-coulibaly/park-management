@@ -30,3 +30,5 @@ export * from './school-planning';
 export * from './school-reporting';
 export * from './school-ai';
 export * from './school-site';
+export * from './suite-notifications';
+export * from './school-sms-billing';

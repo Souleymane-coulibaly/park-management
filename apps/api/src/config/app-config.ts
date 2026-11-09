@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import { parseReminderOffsets } from '@ocall/shared';
 import { type AiConfig, loadAiConfig } from '../ai-core/ai-core.config';
 import { type SchoolConfig, loadSchoolConfig } from '../modules/school/school.config';
 import { type SitesConfig, loadSitesConfig } from '../modules/public-sites/sites.config';
@@ -52,6 +53,8 @@ export interface AppConfig {
   storageSigningKey: Buffer;
   /** Format des journaux : json (production, par défaut) ou texte lisible (développement). */
   logFormat: 'json' | 'text';
+  /** Sprint S2 : rappels d'échéance Ocall Suite (jours avant l'échéance, « 7,3,1 » par défaut). */
+  suiteReminderOffsets: number[];
 }
 
 function storageSigningKey(env: NodeJS.ProcessEnv, nodeEnv: string): Buffer {
@@ -131,6 +134,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     onlinePayments: loadOnlinePaymentsConfig(env, nodeEnv),
     sites: loadSitesConfig(env, nodeEnv),
     school: loadSchoolConfig(env),
+    suiteReminderOffsets: parseReminderOffsets(env.SUITE_REMINDER_OFFSETS),
     mfaEncryptionKey: mfaKey(env, nodeEnv),
     storageSigningKey: storageSigningKey(env, nodeEnv),
     logFormat:

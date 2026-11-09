@@ -12,6 +12,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
 import type { AuthContext } from '../../common/auth-context';
 import { recordPriceChange } from '../../common/subscription-billing';
+import { notifyOrganization } from '../../common/suite-notify';
+import { PARK_APP_PRODUCT_CODES } from '@ocall/shared';
 
 type Tx = Prisma.TransactionClient;
 const EXPIRY_INTERVAL_MS = 60 * 60_000;
@@ -302,7 +304,8 @@ export class SubscriptionAdminService implements OnModuleInit, OnModuleDestroy {
       });
       const target = to({ ...sub, hasTrial: trial !== null }) as 'ACTIVE';
       await tx.subscription.update({ where: { id }, data: { status: target } });
-      await tx.subscriptionEvent.create({
+      const event = await tx.subscriptionEvent.create({
+        select: { id: true },
         data: {
           subscriptionId: id,
           type: 'STATUS_CHANGED',
@@ -323,6 +326,31 @@ export class SubscriptionAdminService implements OnModuleInit, OnModuleDestroy {
         },
         tx,
       );
+      // Sprint S2 : suspension et réactivation notifiées au client (la résiliation se traite avec lui).
+      const kind =
+        (target as string) === 'SUSPENDED'
+          ? 'SUSPENDED'
+          : sub.status === 'SUSPENDED'
+            ? 'REACTIVATED'
+            : null;
+      if (kind) {
+        const product = await tx.saasProduct.findUniqueOrThrow({
+          where: { id: sub.productId },
+          select: { code: true, name: true },
+        });
+        await notifyOrganization(tx, {
+          organizationId: sub.organizationId,
+          kind,
+          productCode: product.code,
+          params: {
+            // Motif interne non transmis : le client contacte Ocall.
+            productName: PARK_APP_PRODUCT_CODES.includes(product.code)
+              ? 'Ocall Park'
+              : product.name,
+          },
+          dedupeKey: `sub:${id}:event:${event.id}`,
+        });
+      }
       return { id, status: target };
     });
   }

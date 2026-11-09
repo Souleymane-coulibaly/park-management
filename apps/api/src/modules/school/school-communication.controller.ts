@@ -41,6 +41,9 @@ import {
 } from './school-portal.dto';
 import { SchoolPublicationsService } from './school-publications.service';
 import { SchoolSmsService } from './school-sms.service';
+import { SchoolSmsWalletService } from './school-sms-wallet.service';
+import { SmsLedgerQueryDto, SmsTopUpRequestDto } from './school-sms-wallet.dto';
+import { Throttle } from '@nestjs/throttler';
 
 const SP = SchoolPermission;
 
@@ -185,6 +188,7 @@ export class SchoolCommunicationController {
   constructor(
     private readonly announcements: SchoolAnnouncementsService,
     private readonly sms: SchoolSmsService,
+    private readonly wallet: SchoolSmsWalletService,
   ) {}
 
   @RequireSchoolPermission(SP.ANNOUNCEMENTS_CLASS)
@@ -245,5 +249,44 @@ export class SchoolCommunicationController {
   @Get('sms/messages')
   smsHistory(@CurrentSchool() ctx: SchoolContext, @Query() q: SmsHistoryQueryDto) {
     return this.sms.history(ctx, q.schoolId, q.status, q.cursor);
+  }
+
+  // ─── Sprint S2 : portefeuille SMS prépayé ───
+
+  @RequireSchoolPermission(SP.SMS_MANAGE)
+  @Get('sms/wallet')
+  smsWallet(@CurrentSchool() ctx: SchoolContext, @Query() q: SchoolIdQueryDto) {
+    return this.wallet.wallet(ctx, q.schoolId);
+  }
+
+  @RequireSchoolPermission(SP.SMS_MANAGE)
+  @Get('sms/ledger')
+  smsLedger(@CurrentSchool() ctx: SchoolContext, @Query() q: SmsLedgerQueryDto) {
+    return this.wallet.ledger(ctx, q.schoolId, q.cursor);
+  }
+
+  @RequireSchoolPermission(SP.SMS_MANAGE)
+  @Get('sms/top-ups')
+  smsTopUps(@CurrentSchool() ctx: SchoolContext, @Query() q: SmsLedgerQueryDto) {
+    return this.wallet.topUps(ctx, q.schoolId, q.cursor);
+  }
+
+  /** Demande de recharge (paiement hors plateforme, crédit après validation d'Ocall). */
+  @Throttle({ global: { ttl: 60_000, limit: 20 } })
+  @RequireSchoolPermission(SP.SMS_MANAGE)
+  @Post('sms/top-ups')
+  requestTopUp(@CurrentSchool() ctx: SchoolContext, @Body() dto: SmsTopUpRequestDto) {
+    return this.wallet.requestTopUp(ctx, dto.schoolId, dto.credits, dto.note);
+  }
+
+  @RequireSchoolPermission(SP.SMS_MANAGE)
+  @HttpCode(200)
+  @Post('sms/top-ups/:id/cancel')
+  cancelTopUp(
+    @CurrentSchool() ctx: SchoolContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SchoolIdQueryDto,
+  ) {
+    return this.wallet.cancelTopUp(ctx, dto.schoolId, id);
   }
 }

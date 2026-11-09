@@ -1,7 +1,14 @@
 import { ConflictException } from '@nestjs/common';
 import type { Prisma } from '@ocall/database';
-import { SCHOOL_PRODUCT_CODE, addDays, isProductBillable, zonedMidnight } from '@ocall/shared';
+import {
+  PARK_APP_PRODUCT_CODES,
+  SCHOOL_PRODUCT_CODE,
+  addDays,
+  isProductBillable,
+  zonedMidnight,
+} from '@ocall/shared';
 import { markSetupFeePaid } from './setup-fee';
+import { notifyOrganization } from './suite-notify';
 
 /**
  * Règles communes de facturation des abonnements SaaS (Sprint 12A), utilisées par la validation
@@ -100,7 +107,7 @@ export async function extendSubscription(
       plan: { select: { setupFee: true, monthlyPrice: true, currency: true } },
       organizationId: true,
       productId: true,
-      product: { select: { code: true } },
+      product: { select: { code: true, name: true } },
       organization: { select: { timezone: true } },
     },
   });
@@ -147,6 +154,19 @@ export async function extendSubscription(
         actorUserId: input.actorUserId,
         reason: input.reason,
       },
+    });
+    // Sprint S2 : le client est prévenu de l'activation ou de la prolongation (une fois par échéance).
+    await notifyOrganization(tx, {
+      organizationId: s.organizationId,
+      kind: 'ACTIVATION_CONFIRMED',
+      productCode: s.product.code,
+      params: {
+        productName: PARK_APP_PRODUCT_CODES.includes(s.product.code)
+          ? 'Ocall Park'
+          : s.product.name,
+        endsAt: expiresAt.toISOString(),
+      },
+      dedupeKey: `sub:${s.id}:active:${expiresAt.toISOString()}`,
     });
   }
   if (s.product.code === SCHOOL_PRODUCT_CODE) {

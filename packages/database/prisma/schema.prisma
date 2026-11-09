@@ -109,6 +109,7 @@ model Organization {
   productTrials        ProductTrial[]
   productSetupFees     ProductSetupFee[]
   activationRequests   ActivationRequest[]
+  suiteNotifications   SuiteNotification[]
   invoices             Invoice[]
   subscriptionPayments SubscriptionPayment[]
   publicSites          PublicSite[]
@@ -252,6 +253,8 @@ model User {
   supportTicketsAssigned         SupportTicket[]          @relation("SupportTicketAssignedTo")
   supportMessages                SupportMessage[]
   storedFiles                    StoredFile[]
+  /// Sprint S2 : notifications du portail Ocall Suite.
+  suiteNotifications             SuiteNotification[]
   /// Sprint 12A : remboursements saisis, paiements en ligne lancés, demandes de démo suivies.
   subscriptionPaymentsRefunded   SubscriptionPayment[]    @relation("SubscriptionPaymentRefundedBy")
   subscriptionActivationsDecided SubscriptionPayment[]    @relation("SubscriptionPaymentActivationDecidedBy")
@@ -425,6 +428,8 @@ model Subscription {
 
   @@unique([organizationId, productId])
   @@index([status])
+  /// Sprint S2 : détection des échéances.
+  @@index([expiresAt])
 }
 
 /// Historique des changements d'abonnement.
@@ -2633,6 +2638,12 @@ model ProductSetupFee {
   @@index([status])
 }
 
+enum ActivationRequestKind {
+  ACTIVATION
+  RENEWAL
+  PLAN_CHANGE
+}
+
 enum ActivationRequestStatus {
   PENDING
   HANDLED
@@ -2651,6 +2662,9 @@ model ActivationRequest {
   quotedSetupFee    Int
   quotedMonthly     Int
   requestedByUserId String                  @db.Uuid
+  /// Sprint S2 : activation, renouvellement ou changement d'offre (une seule demande en attente par
+  /// application, tous types confondus).
+  kind              ActivationRequestKind   @default(ACTIVATION)
   status            ActivationRequestStatus @default(PENDING)
   handledByUserId   String?                 @db.Uuid
   handledAt         DateTime?
@@ -2662,4 +2676,74 @@ model ActivationRequest {
 
   @@index([status, createdAt])
   @@index([organizationId, productId])
+}
+
+// ─── Sprint S2 : notifications du portail et traitements planifiés ───
+
+enum SuiteNotificationKind {
+  TRIAL_STARTED
+  TRIAL_ENDING
+  TRIAL_EXPIRED
+  SUBSCRIPTION_ENDING
+  SUBSCRIPTION_EXPIRED
+  REQUEST_RECEIVED
+  REQUEST_HANDLED
+  REQUEST_REFUSED
+  ACTIVATION_CONFIRMED
+  SUSPENDED
+  REACTIVATED
+  SMS_TOPUP_APPROVED
+  SMS_TOPUP_REJECTED
+}
+
+/// Notification du portail Ocall Suite, par destinataire (membres de l'organisation autorisés à voir
+/// l'abonnement). dedupeKey : un même fait n'est jamais notifié deux fois au même compte (rappels
+/// d'échéance rejoués, redémarrages, instances concurrentes).
+model SuiteNotification {
+  id             String                @id @default(uuid()) @db.Uuid
+  organizationId String                @db.Uuid
+  userId         String                @db.Uuid
+  kind           SuiteNotificationKind
+  productCode    String?
+  params         Json                  @default("{}")
+  href           String?
+  dedupeKey      String
+  readAt         DateTime?
+  createdAt      DateTime              @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, dedupeKey])
+  @@index([userId, readAt, createdAt])
+  @@index([organizationId, createdAt])
+}
+
+enum SuiteJobRunStatus {
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+/// Verrou d'un traitement planifié : une seule instance l'exécute à la fois (bail lockedUntil, repris
+/// après un arrêt brutal).
+model SuiteScheduledJob {
+  name        String   @id
+  lockedUntil DateTime @default(now())
+  lockedBy    String?
+  updatedAt   DateTime @updatedAt
+}
+
+/// Historique des exécutions d'un traitement planifié (statistiques, erreur sans donnée personnelle).
+model SuiteJobRun {
+  id         String            @id @default(uuid()) @db.Uuid
+  job        String
+  status     SuiteJobRunStatus @default(RUNNING)
+  trigger    String
+  stats      Json?
+  error      String?
+  startedAt  DateTime          @default(now())
+  finishedAt DateTime?
+
+  @@index([job, startedAt])
 }

@@ -42,6 +42,18 @@ const NAV: (NavItem & { permission: PlatformPermission | null })[] = [
     permission: 'platform.billing.read',
   },
   {
+    key: 'platform-renewals',
+    label: 'Échéances et renouvellements',
+    href: '/admin/echeances',
+    permission: 'platform.billing.read',
+  },
+  {
+    key: 'platform-school-sms',
+    label: 'Crédits SMS School',
+    href: '/admin/sms',
+    permission: 'platform.billing.read',
+  },
+  {
     key: 'platform-subscriptions',
     label: 'Abonnements et offres',
     href: '/admin/abonnements',

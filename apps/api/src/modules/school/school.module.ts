@@ -46,6 +46,8 @@ import { SchoolReportCardsService } from './school-report-cards.service';
 import { SchoolRoomsService } from './school-rooms.service';
 import { SCHOOL_SMS_PROVIDER, SimulatedSmsProvider } from './school-sms.provider';
 import { SchoolSmsService } from './school-sms.service';
+import { SchoolSmsWalletService } from './school-sms-wallet.service';
+import { SchoolSmsAdminController } from './school-sms-admin.controller';
 import { SchoolFilesController, SchoolStudentsController } from './school-students.controller';
 import { SchoolStudentsService } from './school-students.service';
 import { SchoolTeachingController } from './school-teaching.controller';
@@ -77,6 +79,7 @@ import { APP_CONFIG, type AppConfig } from '../../config/app-config';
     SchoolPortalAdminController,
     SchoolAttendanceController,
     SchoolCommunicationController,
+    SchoolSmsAdminController,
     SchoolPortalActivationController,
     SchoolPortalController,
     SchoolPlanningController,
@@ -106,6 +109,8 @@ import { APP_CONFIG, type AppConfig } from '../../config/app-config';
     // Seul le fournisseur simulé existe (configuration validée au démarrage) : aucun SMS réel.
     { provide: SCHOOL_SMS_PROVIDER, useClass: SimulatedSmsProvider },
     SchoolSmsService,
+    // Sprint S2 : portefeuille SMS prépayé (registre en ajout seul, recharges validées par Ocall).
+    SchoolSmsWalletService,
     SchoolNotificationsService,
     SchoolPortalAccountsService,
     SchoolPortalGuard,
