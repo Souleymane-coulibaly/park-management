@@ -42,6 +42,8 @@ export const AUDIT_TARGET_SCOPES: Readonly<Record<string, AuditTargetScope>> = {
   SchoolPayment: direct('schoolPayment'),
   SchoolRoom: direct('schoolRoom'),
   SchoolSite: direct('schoolSite'),
+  // Sprint S2 : demandes de recharge SMS, propres à un établissement.
+  SchoolSmsTopUpRequest: direct('schoolSmsTopUpRequest'),
   SchoolStudent: direct('schoolStudent'),
   SchoolTimetable: direct('schoolTimetable'),
   SchoolYear: direct('schoolYear'),
@@ -58,6 +60,13 @@ export const AUDIT_TARGET_SCOPES: Readonly<Record<string, AuditTargetScope>> = {
 
 /**
  * Types journalisés volontairement NON rattachables : un membre du personnel ou un compte utilisateur
- * peut relever de plusieurs établissements.
+ * peut relever de plusieurs établissements. Sprint S2 : le tarif SMS et les corrections de portefeuille
+ * sont des actions Ocall, journalisées sans organisation (jamais dans le journal d'un client ; le
+ * portefeuille a pour clé l'établissement, sans identifiant propre).
  */
-export const UNSCOPED_AUDIT_TARGETS: readonly string[] = ['SchoolMember', 'User'];
+export const UNSCOPED_AUDIT_TARGETS: readonly string[] = [
+  'SchoolMember',
+  'User',
+  'SchoolSmsTariff',
+  'SchoolSmsWallet',
+];

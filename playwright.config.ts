@@ -82,6 +82,9 @@ export default defineConfig({
         // seul serveur de test, comme pour les tests d'intégration (setup-env.ts). Sans cela, les tests
         // de fin de suite reçoivent 429 « Trop de requêtes » à l'inscription.
         LOGIN_THROTTLE_LIMIT: '10000',
+        // Double authentification des comptes internes (Super Admin, Sprint S2) : clé jetable générée à
+        // chaque lancement, jamais un secret du dépôt.
+        MFA_ENCRYPTION_KEY: randomBytes(32).toString('base64'),
         SITES_REVALIDATE_URL: 'http://localhost:3000/api/site-revalidate',
         SITES_REVALIDATE_SECRET: revalidateSecret,
         ...schoolEnv,

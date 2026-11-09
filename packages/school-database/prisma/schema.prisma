@@ -281,7 +281,8 @@ model School {
   finance       SchoolFinanceSettings?
   announcements SchoolAnnouncement[]
   sms           SchoolSmsSettings?
-  rooms         SchoolRoom[]
+  smsWallet     SchoolSmsWallet?
+  rooms        SchoolRoom[]
   events        SchoolCalendarEvent[]
   reportViews   SchoolReportView[]
   aiSettings    SchoolAiSettings?
@@ -1575,10 +1576,129 @@ model SchoolSmsMessage {
   providerMessageId String?
   createdAt         DateTime        @default(now())
   sentAt            DateTime?
+  /// Sprint S2 : unité de facturation calculée à la réservation (segments GSM-7/UCS-2, destination).
+  segments          Int?
+  encoding          String?
+  international     Boolean?
+  /// Crédits réservés sur le portefeuille de l'établissement, puis consommés ou libérés.
+  creditsReserved   Int                  @default(0)
+  creditState       SchoolSmsCreditState @default(NONE)
 
   @@unique([organizationId, dedupeKey])
   @@index([status, nextAttemptAt])
   @@index([organizationId, schoolId, createdAt])
+}
+
+// ─── Sprint S2 : portefeuille SMS prépayé ───
+
+/// État des crédits d'un message : aucun, réservés avant l'envoi, consommés (envoi accepté par le
+/// fournisseur) ou libérés (échec définitif, annulation).
+enum SchoolSmsCreditState {
+  NONE
+  RESERVED
+  CAPTURED
+  RELEASED
+}
+
+enum SchoolSmsLedgerKind {
+  /// Recharge validée par Ocall après vérification du paiement hors plateforme.
+  TOPUP
+  /// Crédits bloqués avant l'envoi d'un message.
+  RESERVE
+  /// Crédits réservés consommés : le fournisseur a accepté le message.
+  CAPTURE
+  /// Crédits réservés rendus au solde : échec définitif ou annulation.
+  RELEASE
+  /// Correction administrative motivée (positive ou négative), jamais silencieuse.
+  ADJUSTMENT
+}
+
+enum SchoolSmsTopUpStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+/// Portefeuille SMS d'un établissement : solde disponible et crédits réservés. Le solde n'est jamais
+/// modifié sans écriture correspondante dans le registre (SchoolSmsLedgerEntry) ; contraintes CHECK
+/// (migration) : jamais négatif.
+model SchoolSmsWallet {
+  schoolId       String   @id @db.Uuid
+  organizationId String   @db.Uuid
+  balance        Int      @default(0)
+  reserved       Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  school School @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, schoolId])
+}
+
+/// Registre des crédits SMS, en ajout seul (mise à jour refusée par un déclencheur, migration S2).
+/// availableDelta et reservedDelta : effet de l'écriture sur le solde disponible et sur les réservations.
+model SchoolSmsLedgerEntry {
+  id             String              @id @default(uuid()) @db.Uuid
+  organizationId String              @db.Uuid
+  schoolId       String              @db.Uuid
+  kind           SchoolSmsLedgerKind
+  availableDelta Int
+  reservedDelta  Int                 @default(0)
+  balanceAfter   Int
+  reservedAfter  Int
+  messageId      String?             @db.Uuid
+  topUpRequestId String?             @db.Uuid
+  actorUserId    String?             @db.Uuid
+  reason         String?
+  /// Une même opération n'est jamais appliquée deux fois (reserve:<message>, topup:<demande>…).
+  idempotencyKey String
+  createdAt      DateTime            @default(now())
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, schoolId, createdAt])
+  @@index([messageId])
+}
+
+/// Demande de recharge d'un établissement. Le paiement reste hors plateforme : Ocall vérifie le
+/// règlement puis valide (crédit du portefeuille) ou refuse. Une seule demande en attente par
+/// établissement (index unique partiel, migration S2).
+model SchoolSmsTopUpRequest {
+  id                String               @id @default(uuid()) @db.Uuid
+  organizationId    String               @db.Uuid
+  schoolId          String               @db.Uuid
+  creditsRequested  Int
+  /// Tarif en vigueur à la demande ; montant indicatif nul si aucun prix n'est publié.
+  tariffVersion     Int?
+  quotedAmountXof   Int?
+  requestNote       String?
+  requestedByUserId String               @db.Uuid
+  status            SchoolSmsTopUpStatus @default(PENDING)
+  creditsGranted    Int?
+  paymentReference  String?
+  handledByUserId   String?              @db.Uuid
+  handledAt         DateTime?
+  handlingNote      String?
+  createdAt         DateTime             @default(now())
+
+  @@index([status, createdAt])
+  @@index([organizationId, schoolId, createdAt])
+}
+
+/// Tarif SMS d'Ocall, versionné (historique conservé, jamais modifié). Aucun prix commercial n'est
+/// publié tant qu'Ocall n'a pas fixé creditPriceXof.
+model SchoolSmsTariff {
+  id                             String   @id @default(uuid()) @db.Uuid
+  version                        Int      @unique
+  /// Prix de vente d'un crédit (un segment national), en XOF ; nul = prix non publié.
+  creditPriceXof                 Int?
+  /// Coût fournisseur d'un segment, en XOF (interne, jamais montré aux établissements).
+  providerCostPerSegmentXof      Decimal? @db.Decimal(10, 2)
+  /// Crédits par segment vers l'international ; nul = envois internationaux refusés.
+  internationalCreditsPerSegment Int?
+  note                           String?
+  createdByUserId                String   @db.Uuid
+  createdAt                      DateTime @default(now())
 }
 
 // ─── Sprint 7 : emplois du temps, salles, calendrier scolaire, examens ───

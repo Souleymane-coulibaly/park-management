@@ -1,6 +1,7 @@
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { SchoolPrismaService } from '../src/modules/school/school-prisma.service';
+import { purgeSmsWallets } from './school-sms-support';
 import { PrismaService } from '../src/prisma/prisma.service';
 import {
   type Agent,
@@ -314,6 +315,7 @@ suite('Ocall School — Sprint 7, planning, calendrier et examens (intégration)
     await db.schoolRoom.deleteMany({ where });
     await db.schoolNotification.deleteMany({ where });
     await db.schoolSmsMessage.deleteMany({ where });
+    await purgeSmsWallets(db, where);
     await db.schoolGuardianInvitation.deleteMany({ where });
     await db.schoolPortalAccount.deleteMany({ where });
     await db.schoolGradeEvent.deleteMany({ where });

@@ -45,6 +45,7 @@ import { RolesModule } from './modules/roles/roles.module';
 import { SchoolModule } from './modules/school/school.module';
 import { SuiteContractsModule } from './modules/suite-contracts/suite-contracts.module';
 import { SuiteCommercialModule } from './modules/suite-commercial/suite-commercial.module';
+import { SuiteNotificationsModule } from './modules/suite-notifications/suite-notifications.module';
 import { StockModule } from './modules/stock/stock.module';
 import { SubscriptionsModule } from './modules/subscriptions/subscriptions.module';
 import { TicketingModule } from './modules/ticketing/ticketing.module';
@@ -92,6 +93,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     PartnersModule,
     SuiteContractsModule,
     SuiteCommercialModule,
+    SuiteNotificationsModule,
     SchoolModule,
   ],
   controllers: [HealthController],

@@ -223,10 +223,15 @@ export interface SuitePortalApp {
   access: ProductAccess;
   subscription: {
     state: CommercialState;
+    /** Offre en vigueur (référence d'une demande de renouvellement). */
+    planId: string;
     planName: string;
+    /** Tarif contractuel figé (tarif historique), sinon tarif de l'offre. */
     monthlyPrice: number;
     includesShowcase: boolean;
     expiresAt: string | null;
+    /** Jours avant l'échéance payante (négatif si dépassée) ; nul sans échéance. */
+    daysRemaining: number | null;
   } | null;
   trial: { startedAt: string; endsAt: string; daysRemaining: number; active: boolean } | null;
   /** Le client peut démarrer lui-même un essai (application « Disponible », essai jamais utilisé). */
@@ -242,4 +247,8 @@ export interface SuitePortalApp {
     includesShowcase: boolean;
   }[];
   setupFeeStatus: SetupFeeStatus | null;
+  /** Sprint S2 : demande en attente (activation, renouvellement, changement d'offre). */
+  pendingRequest: { kind: 'ACTIVATION' | 'RENEWAL' | 'PLAN_CHANGE'; createdAt: string } | null;
+  /** Demandes que le client peut faire maintenant. */
+  requestKinds: ('ACTIVATION' | 'RENEWAL' | 'PLAN_CHANGE')[];
 }

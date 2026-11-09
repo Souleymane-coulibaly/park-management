@@ -7,7 +7,7 @@ import {
   resolveSchoolTestDatabase,
   schoolPortalUserIds,
 } from './school-database';
-import { E2E_SUFFIX } from './support';
+import { E2E_INTERNAL_DOMAIN, E2E_SUFFIX } from './support';
 
 /** Supprime, sur la base de TEST uniquement, les organisations et comptes créés par les tests E2E. */
 export default async function globalTeardown(): Promise<void> {
@@ -44,10 +44,17 @@ export default async function globalTeardown(): Promise<void> {
         })
       ).map((m) => m.userId),
     );
+    // Comptes internes Ocall créés par les E2E (Super Admin, Sprint S2) : sans adhésion, repérés par
+    // leur domaine de test dédié.
+    const internals = await prisma.user.findMany({
+      where: { email: { endsWith: E2E_INTERNAL_DOMAIN }, platformRole: { not: null } },
+      select: { id: true },
+    });
     const userIds = [
       ...new Set([
         ...members.map((m) => m.userId),
         ...portalUsers.filter((u) => !parentsWithMembership.has(u)),
+        ...internals.map((u) => u.id),
       ]),
     ];
     await prisma.auditLog.deleteMany({

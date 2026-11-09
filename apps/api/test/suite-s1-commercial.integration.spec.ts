@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
 import { SchoolPrismaService } from '../src/modules/school/school-prisma.service';
 import { SchoolSmsService } from '../src/modules/school/school-sms.service';
+import { purgeSmsWallets } from './school-sms-support';
 import { SuiteContractsService } from '../src/modules/suite-contracts/suite-contracts.service';
 import { assertShowcaseAllowed } from '../src/common/showcase';
 import { extendSubscription } from '../src/common/subscription-billing';
@@ -605,6 +606,7 @@ schoolSuite('Ocall School Free (intégration)', () => {
   afterAll(async () => {
     const where = { organizationId };
     await db.schoolSmsMessage.deleteMany({ where });
+    await purgeSmsWallets(db, where);
     await db.schoolStudentEvent.deleteMany({ where });
     await db.schoolStudent.deleteMany({ where });
     await db.schoolNumberCounter.deleteMany({ where });

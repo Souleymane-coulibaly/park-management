@@ -95,6 +95,37 @@ export class SuiteContractsService {
   }
 
   /**
+   * Sprint S2 : établissements dont les SMS sont permis, calculé à partir des seuls contrats qui
+   * couvrent chacun d'eux (couverture vide = tous) : le contrat payant d'un établissement ne lève jamais
+   * l'interdiction de l'offre gratuite d'un autre.
+   */
+  async smsAllowedSchools(organizationId: string, schoolIds: string[]): Promise<Set<string>> {
+    const contracts = await this.prisma.suiteContract.findMany({
+      where: { organizationId, product: { code: 'OCALL_SCHOOL' } },
+      select: {
+        status: true,
+        startsOn: true,
+        endsOn: true,
+        modules: true,
+        limits: true,
+        coveredSchoolIds: true,
+      },
+    });
+    const allowed = new Set<string>();
+    for (const schoolId of new Set(schoolIds)) {
+      const covering = contracts.filter(
+        (c) => c.coveredSchoolIds.length === 0 || c.coveredSchoolIds.includes(schoolId),
+      );
+      const resolved = resolveProductEntitlement(
+        covering.map((c) => ({ ...c, limits: (c.limits ?? {}) as { maxSchools?: number } })),
+      );
+      // Accès complet requis : sans contrat actif (suspendu, expiré, résilié), aucun SMS.
+      if (resolved.access === 'full' && resolved.limits.sms !== false) allowed.add(schoolId);
+    }
+    return allowed;
+  }
+
+  /**
    * Contrats d'un client pour un produit qui couvrent un établissement (couverture vide = tous), avec
    * la date EFFECTIVE de passage en lecture seule : la plus ancienne entre le dernier changement vers le
    * statut actuel et le lendemain de l'échéance déjà dépassée (une expiration administrative tardive ne

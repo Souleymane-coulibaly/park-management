@@ -3,6 +3,7 @@ import type { INestApplication } from '@nestjs/common';
 import request, { type Response } from 'supertest';
 import { SchoolNotificationsService } from '../src/modules/school/school-notifications.service';
 import { SchoolPrismaService } from '../src/modules/school/school-prisma.service';
+import { creditSmsWallet, purgeSmsWallets } from './school-sms-support';
 import {
   SCHOOL_SMS_PROVIDER,
   type SimulatedSmsProvider,
@@ -328,6 +329,7 @@ suite('Ocall School — Sprint 6, portail parents et communication (intégration
     await prisma.user.deleteMany({ where: { id: { in: portalUsers } } });
     await db.schoolNotification.deleteMany({ where });
     await db.schoolSmsMessage.deleteMany({ where });
+    await purgeSmsWallets(db, where);
     await db.schoolSmsSettings.deleteMany({ where });
     await db.schoolAnnouncementEvent.deleteMany({ where });
     await db.schoolAnnouncementTarget.deleteMany({ where });
@@ -870,6 +872,14 @@ suite('Ocall School — Sprint 6, portail parents et communication (intégration
   });
 
   describe('SMS simulés', () => {
+    // Sprint S2 : aucun SMS sans crédits prépayés ; les établissements des essais sont crédités.
+    beforeAll(async () => {
+      for (const s of [a1, a2, b1]) {
+        const school = await db.school.findUniqueOrThrow({ where: { id: s.schoolId } });
+        await creditSmsWallet(db, school.organizationId, s.schoolId, 10_000);
+      }
+    });
+
     it('désactivés par défaut ; activés : file, envoi simulé, historique masqué, texte sans donnée sensible', async () => {
       expect(await db.schoolSmsMessage.count({ where: { schoolId: a1.schoolId } })).toBe(0);
       await secretary.agent

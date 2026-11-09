@@ -35,6 +35,7 @@ import {
   Sparkles,
   Ticket,
   Users,
+  MessageSquare,
 } from 'lucide-react';
 
 const ICONS: Record<string, LucideIcon> = {
@@ -65,6 +66,8 @@ const ICONS: Record<string, LucideIcon> = {
   'platform-organizations': Building2,
   'platform-subscriptions': CreditCard,
   'platform-contracts': FileText,
+  'platform-renewals': CalendarClock,
+  'platform-school-sms': MessageSquare,
   'school-home': LayoutDashboard,
   'school-schools': Building2,
   'school-years': CalendarDays,

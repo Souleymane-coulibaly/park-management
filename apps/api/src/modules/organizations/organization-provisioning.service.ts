@@ -9,6 +9,7 @@ import {
   trialEndsAt,
 } from '@ocall/shared';
 import { randomInt } from 'node:crypto';
+import { notifyOrganization } from '../../common/suite-notify';
 
 export interface ProvisionOrganizationInput {
   organizationName: string;
@@ -107,12 +108,13 @@ export class OrganizationProvisioningService {
       select: { id: true },
     });
     const now = new Date();
+    const endsAt = trialEndsAt(now, plan.trialDays);
     await tx.productTrial.create({
       data: {
         organizationId: organization.id,
         productId: product.id,
         startedAt: now,
-        endsAt: trialEndsAt(now, plan.trialDays),
+        endsAt,
         startedByUserId: user.id,
       },
     });
@@ -133,6 +135,14 @@ export class OrganizationProvisioningService {
         actorUserId: user.id,
         reason: `Essai gratuit de ${plan.trialDays} jours.`,
       },
+    });
+    // Sprint S2 : le propriétaire est prévenu dans le portail Ocall Suite.
+    await notifyOrganization(tx, {
+      organizationId: organization.id,
+      kind: 'TRIAL_STARTED',
+      productCode: PARK_PRODUCT_CODE,
+      params: { productName: 'Ocall Park', endsAt: endsAt.toISOString() },
+      dedupeKey: `trial-start:${subscription.id}`,
     });
 
     return {

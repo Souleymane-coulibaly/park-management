@@ -3,6 +3,8 @@ import { type Page, expect } from '@playwright/test';
 /** Marqueur des données E2E : toutes les organisations créées se terminent par ce suffixe. */
 export const E2E_SUFFIX = 'E2E-OCP';
 export const PASSWORD = 'Bamako2026Secure';
+/** Domaine des comptes internes Ocall créés par les E2E (supprimés par global-teardown). */
+export const E2E_INTERNAL_DOMAIN = '@e2e-internal.ocallpark.local';
 
 export function uniqueEmail(label: string): string {
   return `${label}.${Date.now()}.${Math.floor(Math.random() * 1e6)}@e2e.ocallpark.local`;

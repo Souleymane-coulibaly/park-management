@@ -4,6 +4,7 @@ import { Transform } from 'class-transformer';
 import { IsIn, IsOptional, IsString, IsUUID, Length, Matches } from 'class-validator';
 import { type AuthContext, requireTenant } from '../../common/auth-context';
 import { CurrentAuth, RequirePermission, RequirePlatformPermission } from '../../common/decorators';
+import { SUITE_REQUEST_KINDS, type SuiteRequestKind } from '@ocall/shared';
 import { SuiteCommercialService } from './suite-commercial.service';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
@@ -13,6 +14,14 @@ export class ActivationRequestDto {
   @ApiProperty({ description: 'Offre choisie (avec ou sans vitrine).' })
   @IsUUID('4')
   planId: string;
+
+  @ApiPropertyOptional({
+    enum: SUITE_REQUEST_KINDS,
+    description: 'Activation (défaut), renouvellement ou changement d’offre (Sprint S2).',
+  })
+  @IsOptional()
+  @IsIn(SUITE_REQUEST_KINDS)
+  kind?: SuiteRequestKind;
 }
 
 export class PlatformTrialDto {
@@ -42,6 +51,21 @@ export class ActivationRequestQueryDto {
   @IsOptional()
   @IsIn(['PENDING', 'HANDLED', 'CANCELLED'])
   status?: 'PENDING' | 'HANDLED' | 'CANCELLED';
+
+  @ApiPropertyOptional({ enum: SUITE_REQUEST_KINDS })
+  @IsOptional()
+  @IsIn(SUITE_REQUEST_KINDS)
+  kind?: SuiteRequestKind;
+
+  @ApiPropertyOptional({ example: 'OCALL_SCHOOL' })
+  @IsOptional()
+  @Matches(PRODUCT_CODE)
+  productCode?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID('4')
+  organizationId?: string;
 }
 
 /**
@@ -81,7 +105,19 @@ export class SuiteCommercialController {
     @Param('code') code: string,
     @Body() dto: ActivationRequestDto,
   ) {
-    return this.commercial.requestActivation(requireTenant(auth), this.code(code), dto.planId);
+    return this.commercial.requestActivation(
+      requireTenant(auth),
+      this.code(code),
+      dto.planId,
+      dto.kind ?? 'ACTIVATION',
+    );
+  }
+
+  /** Historique des demandes (activation, renouvellement, changement d'offre) de l'application. */
+  @RequirePermission('subscription.read')
+  @Get('apps/:code/requests')
+  requests(@CurrentAuth() auth: AuthContext, @Param('code') code: string) {
+    return this.commercial.requests(requireTenant(auth), this.code(code));
   }
 
   private code(code: string): string {
@@ -118,7 +154,7 @@ export class SuiteCommercialAdminController {
   @RequirePlatformPermission('platform.billing.read')
   @Get('activation-requests')
   activationRequests(@Query() q: ActivationRequestQueryDto) {
-    return this.commercial.activationRequests(q.status);
+    return this.commercial.activationRequests(q.status, q);
   }
 
   @RequirePlatformPermission('platform.subscriptions.manage')

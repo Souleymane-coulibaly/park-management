@@ -8,11 +8,11 @@ import {
 } from '@nestjs/common';
 import type { Prisma } from '@ocall/school-database';
 import {
-  SCHOOL_PRODUCT_CODE,
   SCHOOL_SMS_MAX_ATTEMPTS,
   type SchoolSmsKind,
   type SchoolSmsStatus,
   maskPhone,
+  smsCost,
   smsRetryDelayMs,
 } from '@ocall/shared';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
@@ -20,6 +20,7 @@ import type { SchoolContext } from './school-access';
 import { SchoolPrismaService } from './school-prisma.service';
 import { SCHOOL_SMS_PROVIDER, type SmsProvider, SmsProviderError } from './school-sms.provider';
 import { SchoolService } from './school.service';
+import { applySmsLedger, settleSmsCredits } from './school-sms-ledger';
 import { SuiteContractsService } from '../suite-contracts/suite-contracts.service';
 
 type Db = SchoolPrismaService | Prisma.TransactionClient;
@@ -27,6 +28,12 @@ type Db = SchoolPrismaService | Prisma.TransactionClient;
 /** Bail d'un message en cours d'envoi : un autre traitement ne le reprend qu'après ce délai. */
 const LEASE_MS = 5 * 60_000;
 const POLL_MS = 30_000;
+/**
+ * Marqueur posé à la prise en charge d'un message, effacé quand le résultat du fournisseur est
+ * enregistré. Retrouvé après l'expiration du bail : le résultat de la dernière tentative est inconnu
+ * (arrêt brutal entre la prise en charge et l'enregistrement) → jamais renvoyé, crédits consommés.
+ */
+const SENDING = 'SENDING';
 const HISTORY_PAGE = 100;
 
 export interface SmsToSend {
@@ -80,7 +87,11 @@ export class SchoolSmsService implements OnModuleInit, OnModuleDestroy {
   async updateSettings(ctx: SchoolContext, schoolId: string, enabled: boolean) {
     await this.school.assertSchool(ctx, schoolId);
     // Offre Ocall School Free (socle S1) : aucun SMS inclus (crédits SMS prévus au Sprint S2).
-    if (enabled && ctx.limits.sms === false) {
+    // Droit calculé pour CET établissement (le contrat payant d'un autre établissement ne compte pas).
+    if (
+      enabled &&
+      !(await this.contracts.smsAllowedSchools(ctx.organizationId, [schoolId])).has(schoolId)
+    ) {
       throw new ForbiddenException({
         code: 'SCHOOL_FREE_SMS_NOT_INCLUDED',
         message:
@@ -123,6 +134,10 @@ export class SchoolSmsService implements OnModuleInit, OnModuleDestroy {
         lastError: true,
         createdAt: true,
         sentAt: true,
+        segments: true,
+        international: true,
+        creditsReserved: true,
+        creditState: true,
       },
     });
     const items = rows
@@ -150,15 +165,11 @@ export class SchoolSmsService implements OnModuleInit, OnModuleDestroy {
       ).map((s) => s.schoolId),
     );
     // Offre gratuite (socle S1) : aucun SMS, comme un établissement dont les SMS sont désactivés —
-    // les autres canaux (portail, notifications) ne sont pas affectés.
-    const orgIds = [...new Set(messages.map((m) => m.organizationId))];
-    const noSms = new Set<string>();
-    for (const orgId of orgIds) {
-      const entitlement = await this.contracts.entitlement(orgId, SCHOOL_PRODUCT_CODE);
-      if (entitlement.limits.sms === false) noSms.add(orgId);
-    }
+    // les autres canaux (portail, notifications) ne sont pas affectés. Droit calculé par établissement
+    // (Sprint S2) : le contrat payant d'un établissement ne vaut pas pour un autre.
+    const allowed = await this.smsAllowed(messages);
     const data = messages.filter(
-      (m) => enabled.has(m.schoolId) && !noSms.has(m.organizationId) && m.phone.trim(),
+      (m) => enabled.has(m.schoolId) && allowed.has(m.schoolId) && m.phone.trim(),
     );
     if (data.length === 0) return 0;
     // Première tentative datée par l'application (UTC), comme toutes les suivantes.
@@ -181,21 +192,43 @@ export class SchoolSmsService implements OnModuleInit, OnModuleDestroy {
       const claimed = await this.db.$transaction(async (tx) => {
         // Bail expiré après la dernière tentative autorisée (processus interrompu avant d'enregistrer le
         // résultat) : échec définitif, jamais une tentative de plus.
-        const exhausted = await tx.schoolSmsMessage.updateMany({
+        const exhausted = await tx.schoolSmsMessage.findMany({
           where: {
             status: 'PENDING',
             attempts: { gte: SCHOOL_SMS_MAX_ATTEMPTS },
             nextAttemptAt: { lte: now },
           },
-          data: { status: 'FAILED', lastError: 'ATTEMPTS_EXHAUSTED' },
+          select: { id: true, lastError: true },
         });
-        result.failed += exhausted.count;
-        const rows = await tx.$queryRaw<{ id: string }[]>`
-          SELECT id FROM "SchoolSmsMessage"
+        if (exhausted.length > 0) {
+          await this.closeUnknown(
+            tx,
+            exhausted.filter((m) => m.lastError === SENDING).map((m) => m.id),
+          );
+          const notSent = exhausted.filter((m) => m.lastError !== SENDING).map((m) => m.id);
+          if (notSent.length > 0) {
+            await tx.schoolSmsMessage.updateMany({
+              where: { id: { in: notSent }, status: 'PENDING' },
+              data: { status: 'FAILED', lastError: 'ATTEMPTS_EXHAUSTED' },
+            });
+            // Dernière tentative en échec connu, jamais acceptée : crédits rendus.
+            await settleSmsCredits(tx, notSent, 'RELEASE');
+          }
+          result.failed += exhausted.length;
+        }
+        const due = await tx.$queryRaw<{ id: string; lastError: string | null }[]>`
+          SELECT id, "lastError" FROM "SchoolSmsMessage"
           WHERE status = 'PENDING' AND attempts < ${SCHOOL_SMS_MAX_ATTEMPTS}
             -- Colonne sans fuseau, écrite en UTC : la comparaison ne dépend pas du fuseau de la session.
             AND "nextAttemptAt" <= (${now}::timestamptz AT TIME ZONE 'UTC')
           ORDER BY "nextAttemptAt", id LIMIT ${limit} FOR UPDATE SKIP LOCKED`;
+        if (due.length === 0) return [];
+        // Tentative précédente au résultat inconnu (bail expiré sans résultat enregistré) : peut-être
+        // acceptée par le fournisseur → jamais renvoyée (pas de doublon chez le parent), crédits consommés.
+        const unknown = due.filter((r) => r.lastError === SENDING).map((r) => r.id);
+        await this.closeUnknown(tx, unknown);
+        result.failed += unknown.length;
+        const rows = due.filter((r) => r.lastError !== SENDING);
         if (rows.length === 0) return [];
         // Destinataire relu au moment d'envoyer : lien retiré, SMS refusés ou désactivés, numéro changé ou
         // élève sorti de l'établissement → message annulé, jamais envoyé.
@@ -223,13 +256,23 @@ export class SchoolSmsService implements OnModuleInit, OnModuleDestroy {
           });
           result.cancelled += notInContract.length;
         }
-        const ids = rows
+        // Crédits réservés lors d'une tentative précédente en échec passager connu : rendus.
+        await settleSmsCredits(tx, [...cancelled, ...notInContract], 'RELEASE');
+        const eligible = rows
           .map((r) => r.id)
           .filter((id) => !cancelled.includes(id) && !notInContract.includes(id));
+        // Sprint S2 : crédits réservés avant tout envoi (une seule fois par message) ; solde insuffisant
+        // ou destination refusée → message annulé, jamais envoyé.
+        const refused = await this.reserveCredits(tx, eligible, result);
+        const ids = eligible.filter((id) => !refused.includes(id));
         if (ids.length === 0) return [];
         await tx.schoolSmsMessage.updateMany({
           where: { id: { in: ids } },
-          data: { nextAttemptAt: new Date(now.getTime() + LEASE_MS), attempts: { increment: 1 } },
+          data: {
+            nextAttemptAt: new Date(now.getTime() + LEASE_MS),
+            attempts: { increment: 1 },
+            lastError: SENDING,
+          },
         });
         return tx.schoolSmsMessage.findMany({
           where: { id: { in: ids } },
@@ -237,33 +280,62 @@ export class SchoolSmsService implements OnModuleInit, OnModuleDestroy {
         });
       });
       for (const m of claimed) {
+        let accepted: { id: string };
         try {
-          const sent = await this.provider.send(m.phone, m.body);
-          await this.db.schoolSmsMessage.update({
-            where: { id: m.id },
-            data: {
-              status: 'SENT',
-              sentAt: new Date(),
-              providerMessageId: sent.id,
-              lastError: null,
-            },
-          });
-          result.sent += 1;
+          accepted = await this.provider.send(m.phone, m.body);
         } catch (error) {
+          // Erreur du FOURNISSEUR seulement (jamais une erreur d'enregistrement) : échec définitif →
+          // message refusé, non facturé, crédits rendus ; échec passager → réservation conservée.
           const known = error instanceof SmsProviderError;
           const transient = known ? error.transient : true;
           const final = !transient || m.attempts >= SCHOOL_SMS_MAX_ATTEMPTS;
-          await this.db.schoolSmsMessage.update({
-            where: { id: m.id },
-            data: {
-              lastError: known ? error.code : 'PROVIDER_ERROR',
-              ...(final
-                ? { status: 'FAILED' }
-                : { nextAttemptAt: new Date(now.getTime() + smsRetryDelayMs(m.attempts)) }),
-            },
-          });
+          try {
+            await this.db.$transaction(async (tx) => {
+              await tx.schoolSmsMessage.update({
+                where: { id: m.id },
+                data: {
+                  lastError: known ? error.code : 'PROVIDER_ERROR',
+                  ...(final
+                    ? { status: 'FAILED' }
+                    : { nextAttemptAt: new Date(now.getTime() + smsRetryDelayMs(m.attempts)) }),
+                },
+              });
+              if (final) await settleSmsCredits(tx, [m.id], 'RELEASE');
+            });
+          } catch (persist) {
+            // Non enregistré : le marqueur reste, le message sera clos « résultat inconnu ».
+            this.logger.warn(`Résultat SMS non enregistré : ${(persist as Error).name}`);
+            continue;
+          }
           if (final) result.failed += 1;
           else result.retried += 1;
+          continue;
+        }
+        // Accepté par le fournisseur : état et consommation des crédits dans une même transaction,
+        // retentée une fois. Jamais de restitution ni de renvoi pour un message accepté.
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            await this.db.$transaction(async (tx) => {
+              await tx.schoolSmsMessage.update({
+                where: { id: m.id },
+                data: {
+                  status: 'SENT',
+                  sentAt: new Date(),
+                  providerMessageId: accepted.id,
+                  lastError: null,
+                },
+              });
+              await settleSmsCredits(tx, [m.id], 'CAPTURE');
+            });
+            result.sent += 1;
+            break;
+          } catch (persist) {
+            if (attempt === 1) {
+              this.logger.warn(
+                `Envoi SMS accepté mais non enregistré : ${(persist as Error).name}`,
+              );
+            }
+          }
         }
       }
     } catch (error) {
@@ -272,19 +344,112 @@ export class SchoolSmsService implements OnModuleInit, OnModuleDestroy {
     return result;
   }
 
-  /** Messages d'organisations dont les contrats en vigueur interdisent les SMS (offre gratuite). */
+  /**
+   * Réserve les crédits des messages qui n'en ont pas encore : segments (GSM-7/UCS-2, multipart) ×
+   * crédits par segment selon la destination et le tarif en vigueur. Retourne les messages refusés
+   * (annulés) : destination internationale non autorisée ou solde insuffisant.
+   */
+  private async reserveCredits(
+    tx: Prisma.TransactionClient,
+    ids: string[],
+    result: { cancelled: number },
+  ): Promise<string[]> {
+    if (ids.length === 0) return [];
+    const messages = await tx.schoolSmsMessage.findMany({
+      where: { id: { in: ids }, creditState: 'NONE' },
+      select: { id: true, organizationId: true, schoolId: true, phone: true, body: true },
+    });
+    if (messages.length === 0) return [];
+    const [schools, tariff] = await Promise.all([
+      tx.school.findMany({
+        where: { id: { in: [...new Set(messages.map((m) => m.schoolId))] } },
+        select: { id: true, countryCode: true },
+      }),
+      tx.schoolSmsTariff.findFirst({
+        orderBy: { version: 'desc' },
+        select: { internationalCreditsPerSegment: true },
+      }),
+    ]);
+    const country = new Map(schools.map((s) => [s.id, s.countryCode]));
+    const refused: string[] = [];
+    for (const m of messages) {
+      const cost = smsCost(m.body, m.phone, country.get(m.schoolId) ?? '', tariff);
+      const billing = {
+        segments: cost.segments,
+        encoding: cost.encoding,
+        international: cost.international,
+      };
+      let reason: string | null = null;
+      if (cost.credits === null) reason = 'SMS_DESTINATION_NOT_ALLOWED';
+      else {
+        const applied = await applySmsLedger(tx, {
+          organizationId: m.organizationId,
+          schoolId: m.schoolId,
+          kind: 'RESERVE',
+          availableDelta: -cost.credits,
+          reservedDelta: cost.credits,
+          idempotencyKey: `reserve:${m.id}`,
+          messageId: m.id,
+        });
+        if (applied.status === 'INSUFFICIENT') reason = 'SMS_INSUFFICIENT_CREDITS';
+        else {
+          await tx.schoolSmsMessage.update({
+            where: { id: m.id },
+            data: { ...billing, creditsReserved: cost.credits, creditState: 'RESERVED' },
+          });
+        }
+      }
+      if (reason) {
+        await tx.schoolSmsMessage.update({
+          where: { id: m.id },
+          data: { ...billing, status: 'CANCELLED', lastError: reason },
+        });
+        refused.push(m.id);
+        result.cancelled += 1;
+      }
+    }
+    return refused;
+  }
+
+  /**
+   * Messages d'établissements dont les contrats en vigueur interdisent les SMS (offre gratuite), droit
+   * calculé établissement par établissement.
+   */
   private async outsideContract(tx: Prisma.TransactionClient, ids: string[]): Promise<string[]> {
     if (ids.length === 0) return [];
     const messages = await tx.schoolSmsMessage.findMany({
       where: { id: { in: ids } },
-      select: { id: true, organizationId: true },
+      select: { id: true, organizationId: true, schoolId: true },
     });
-    const noSms = new Set<string>();
-    for (const orgId of new Set(messages.map((m) => m.organizationId))) {
-      const entitlement = await this.contracts.entitlement(orgId, SCHOOL_PRODUCT_CODE);
-      if (entitlement.limits.sms === false) noSms.add(orgId);
+    const allowed = await this.smsAllowed(messages);
+    return messages.filter((m) => !allowed.has(m.schoolId)).map((m) => m.id);
+  }
+
+  /** Établissements dont les SMS sont permis par les contrats qui les couvrent. */
+  private async smsAllowed(
+    rows: { organizationId: string; schoolId: string }[],
+  ): Promise<Set<string>> {
+    const allowed = new Set<string>();
+    const byOrg = new Map<string, string[]>();
+    for (const r of rows)
+      byOrg.set(r.organizationId, [...(byOrg.get(r.organizationId) ?? []), r.schoolId]);
+    for (const [orgId, schoolIds] of byOrg) {
+      for (const id of await this.contracts.smsAllowedSchools(orgId, schoolIds)) allowed.add(id);
     }
-    return messages.filter((m) => noSms.has(m.organizationId)).map((m) => m.id);
+    return allowed;
+  }
+
+  /**
+   * Messages dont la dernière tentative a un résultat inconnu : clos sans renvoi, crédits consommés
+   * (le fournisseur a pu accepter et facturer le message).
+   */
+  private async closeUnknown(tx: Prisma.TransactionClient, ids: string[]): Promise<void> {
+    if (ids.length === 0) return;
+    await tx.schoolSmsMessage.updateMany({
+      where: { id: { in: ids }, status: 'PENDING' },
+      data: { status: 'FAILED', lastError: 'OUTCOME_UNKNOWN' },
+    });
+    await settleSmsCredits(tx, ids, 'CAPTURE');
   }
 
   /**
