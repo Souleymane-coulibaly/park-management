@@ -23,14 +23,40 @@ export const FACTURE_PERMISSIONS = [
   'facture.settings.manage',
   'facture.members.read',
   'facture.members.manage',
+  'facture.clients.read',
+  'facture.clients.manage',
+  'facture.catalog.read',
+  'facture.catalog.manage',
+  /** Consulter les devis, pro forma, bons de commande et factures, et leurs PDF. */
+  'facture.documents.read',
+  /** Créer et modifier les brouillons, émettre, envoyer, convertir, annuler. */
+  'facture.documents.manage',
 ] as const;
 export type FacturePermission = (typeof FACTURE_PERMISSIONS)[number];
 
 const ROLE_PERMISSIONS: Record<FactureRole, readonly FacturePermission[]> = {
   MANAGER: FACTURE_PERMISSIONS,
-  SALES: ['facture.access', 'facture.members.read'],
-  ACCOUNTANT: ['facture.access', 'facture.members.read'],
-  TECHNICIAN: ['facture.access'],
+  SALES: [
+    'facture.access',
+    'facture.members.read',
+    'facture.clients.read',
+    'facture.clients.manage',
+    'facture.catalog.read',
+    'facture.catalog.manage',
+    'facture.documents.read',
+    'facture.documents.manage',
+  ],
+  ACCOUNTANT: [
+    'facture.access',
+    'facture.members.read',
+    'facture.clients.read',
+    'facture.clients.manage',
+    'facture.catalog.read',
+    'facture.documents.read',
+    'facture.documents.manage',
+  ],
+  // Le technicien consulte clients et catalogue (interventions, F3), jamais les documents commerciaux.
+  TECHNICIAN: ['facture.access', 'facture.clients.read', 'facture.catalog.read'],
 };
 
 export function hasFacturePermission(role: FactureRole, permission: FacturePermission): boolean {
@@ -106,8 +132,9 @@ export interface FactureLegalIdentity {
 }
 
 /**
- * Mentions du vendeur exigées avant l'émission d'une facture (Mali) : raison sociale, adresse, numéro
- * d'identification fiscale (NIF) et régime d'imposition. Renvoie les libellés manquants.
+ * Mentions du vendeur recommandées sur les documents (Mali) : raison sociale, adresse, numéro
+ * d'identification fiscale (NIF) et régime d'imposition. Renvoie les libellés manquants, signalés à
+ * l'utilisateur sans bloquer l'émission (décision du 10/11/2026 : NIF et adresse facultatifs).
  * À faire valider par un expert-comptable malien avant le sprint de facturation.
  */
 export function factureLegalMissing(identity: FactureLegalIdentity): string[] {
@@ -119,6 +146,23 @@ export function factureLegalMissing(identity: FactureLegalIdentity): string[] {
   if (blank(identity.taxRegime)) missing.push('Régime d’imposition');
   return missing;
 }
+
+/**
+ * Logos imprimés sur tous les documents : 3 en en-tête au plus (logo principal compris), 6 en bandeau au
+ * bas de chaque page (certifications, marques, partenaires).
+ */
+export const FACTURE_MAX_HEADER_LOGOS = 3;
+export const FACTURE_MAX_FOOTER_LOGOS = 6;
+/** Cachet ou signature de l'entreprise, imprimé dans la case « Le fournisseur ». */
+export const FACTURE_MAX_STAMPS = 1;
+export const FACTURE_LOGO_PLACEMENTS = ['HEADER', 'FOOTER', 'STAMP'] as const;
+export type FactureLogoPlacement = (typeof FACTURE_LOGO_PLACEMENTS)[number];
+
+export const FACTURE_LOGO_LIMITS: Record<FactureLogoPlacement, number> = {
+  HEADER: FACTURE_MAX_HEADER_LOGOS,
+  FOOTER: FACTURE_MAX_FOOTER_LOGOS,
+  STAMP: FACTURE_MAX_STAMPS,
+};
 
 /** NIF et RCCM : lettres, chiffres, tirets, points et barres obliques (formats variables). */
 export const FACTURE_REGISTRATION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ./-]{2,39}$/;

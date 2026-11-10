@@ -1,7 +1,9 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Param,
   ParseUUIDPipe,
   Patch,
@@ -25,7 +27,19 @@ import {
 } from './facture-access';
 import { FactureMembersService } from './facture-members.service';
 import { FACTURE_LOGO_MAX_BYTES, FactureService, type FactureUpload } from './facture.service';
-import { CreateFactureMemberDto, FactureSettingsDto, UpdateFactureMemberDto } from './facture.dto';
+import {
+  CreateFactureMemberDto,
+  FactureExtraLogoDto,
+  FactureSettingsDto,
+  UpdateFactureMemberDto,
+} from './facture.dto';
+
+const IMAGE_HEADERS = {
+  'Content-Type': 'image/png',
+  'Cache-Control': 'private, no-store',
+  'X-Content-Type-Options': 'nosniff',
+  'Content-Security-Policy': "default-src 'none'; sandbox",
+};
 
 const logoFile = FileInterceptor('file', {
   // Marge au-delà de la limite métier : le service renvoie un refus explicite plutôt qu'une erreur 413.
@@ -74,12 +88,43 @@ export class FactureController {
   @Get('settings/logo')
   async logo(@CurrentFacture() ctx: FactureContext, @Res({ passthrough: true }) res: Response) {
     const body = await this.facture.logo(ctx);
-    res.set({
-      'Content-Type': 'image/png',
-      'Cache-Control': 'private, no-store',
-      'X-Content-Type-Options': 'nosniff',
-      'Content-Security-Policy': "default-src 'none'; sandbox",
-    });
+    res.set(IMAGE_HEADERS);
+    return new StreamableFile(body);
+  }
+
+  @RequireFacturePermission('facture.access')
+  @Get('settings/logos')
+  listLogos(@CurrentFacture() ctx: FactureContext) {
+    return this.facture.listLogos(ctx);
+  }
+
+  @RequireFacturePermission('facture.settings.manage')
+  @UseInterceptors(logoFile)
+  @Post('settings/logos')
+  addLogo(
+    @CurrentFacture() ctx: FactureContext,
+    @UploadedFile() file: FactureUpload | undefined,
+    @Body() dto: FactureExtraLogoDto,
+  ) {
+    return this.facture.addLogo(ctx, file, dto.placement, dto.label ?? null);
+  }
+
+  @RequireFacturePermission('facture.settings.manage')
+  @HttpCode(204)
+  @Delete('settings/logos/:id')
+  async removeLogo(@CurrentFacture() ctx: FactureContext, @Param('id', ParseUUIDPipe) id: string) {
+    await this.facture.removeLogo(ctx, id);
+  }
+
+  @RequireFacturePermission('facture.access')
+  @Get('settings/logos/:id')
+  async extraLogo(
+    @CurrentFacture() ctx: FactureContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const body = await this.facture.extraLogo(ctx, id);
+    res.set(IMAGE_HEADERS);
     return new StreamableFile(body);
   }
 

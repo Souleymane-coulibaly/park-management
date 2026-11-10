@@ -4,3 +4,4 @@
  */
 export * from '.prisma/facture-client';
 export { PrismaClient as FacturePrismaClient } from '.prisma/facture-client';
+export { purgeFactureOrganizations } from './purge';

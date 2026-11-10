@@ -316,7 +316,7 @@ const enabled = Boolean(process.env.TEST_FACTURE_DATABASE_URL);
     expect(user.role).toBe('PRODUCT_USER');
     expect((await tech.agent.get(api('/facture/context')).expect(200)).body).toMatchObject({
       role: 'TECHNICIAN',
-      permissions: ['facture.access'],
+      permissions: ['facture.access', 'facture.clients.read', 'facture.catalog.read'],
     });
     await tech.agent.get(api('/facture/settings')).expect(200);
     await tech.agent.put(api('/facture/settings')).send(settings()).expect(403);

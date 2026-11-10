@@ -87,6 +87,21 @@ describe('MailService', () => {
       to: ['candidat@example.com'],
       subject: 'Sujet',
     });
+    const body = JSON.parse(calls[0]!.init.body as string);
+    expect(body.reply_to).toBeUndefined();
+    expect(body.attachments).toBeUndefined();
+    // Pièce jointe en base64 et adresse de réponse (devis envoyé par une entreprise via Ocall Facture).
+    await mail.send({
+      ...message,
+      replyTo: 'contact@entreprise.example',
+      attachments: [{ filename: 'DEV-2026-00001.pdf', content: Buffer.from('%PDF-1.7') }],
+    });
+    expect(JSON.parse(calls[1]!.init.body as string)).toMatchObject({
+      reply_to: 'contact@entreprise.example',
+      attachments: [
+        { filename: 'DEV-2026-00001.pdf', content: Buffer.from('%PDF-1.7').toString('base64') },
+      ],
+    });
     mail.fetchImpl = (async () => new Response('{}', { status: 422 })) as typeof fetch;
     expect(await mail.send(message)).toBe(false);
     mail.fetchImpl = (async () => {

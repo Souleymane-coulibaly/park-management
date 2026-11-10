@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 
 const NAV: NavItem[] = [
   { key: 'facture-home', label: 'Tableau de bord', href: '/facture' },
+  { key: 'facture-documents', label: 'Documents', href: '/facture/documents' },
+  { key: 'facture-clients', label: 'Clients', href: '/facture/clients' },
+  { key: 'facture-catalog', label: 'Catalogue', href: '/facture/catalogue' },
   { key: 'facture-settings', label: 'Entreprise et mentions', href: '/facture/parametres' },
   { key: 'facture-team', label: 'Équipe', href: '/facture/equipe' },
 ];

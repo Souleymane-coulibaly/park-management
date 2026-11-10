@@ -39,6 +39,7 @@ export function SimpleForm<T>({
   onDone,
   testId,
   sendEmpty = false,
+  numeric = [],
 }: {
   fields: SimpleField[];
   path: string;
@@ -49,6 +50,8 @@ export function SimpleForm<T>({
   testId?: string;
   /** Modification : un champ vidé est envoyé, pour effacer la valeur enregistrée. */
   sendEmpty?: boolean;
+  /** Champs (liste déroulante comprise) envoyés comme nombres. */
+  numeric?: readonly string[];
 }) {
   const [values, setValues] = useState<Values>(() => initial(fields));
   const [error, setError] = useState<ApiError | null>(null);
@@ -66,7 +69,12 @@ export function SimpleForm<T>({
       const value = values[f.name];
       if (value === undefined || (value === '' && !sendEmpty)) continue;
       // Un nombre vidé en modification efface la valeur (null), il ne devient pas zéro.
-      body[f.name] = f.type === 'number' ? (value === '' ? null : Number(value)) : value;
+      body[f.name] =
+        f.type === 'number' || numeric.includes(f.name)
+          ? value === ''
+            ? null
+            : Number(value)
+          : value;
     }
     try {
       const result = await api<T>(path, { method, body });

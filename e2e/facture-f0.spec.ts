@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { E2E_SUFFIX, signupOrganization, uniqueEmail } from './support';
-import { withTestDb } from './suite-support';
+import { TINY_PNG, startFactureTrial } from './facture-support';
+import { signupOrganization, uniqueEmail } from './support';
 
 /**
  * Ocall Facture — socle F0, parcours navigateur : essai ouvert, tuile au portail, identité légale du
@@ -13,35 +13,7 @@ test('Ocall Facture : essai, identité légale, logo, aperçu PDF et équipe', a
   test.setTimeout(180_000);
   const email = uniqueEmail('facture-f0');
   await signupOrganization(page, { metier: 'Parc', orgName: 'Froid Services', email });
-  // Essai ouvert par Ocall (le produit reste « à venir » au catalogue) : offre inactive dédiée.
-  await withTestDb(async (db) => {
-    const org = await db.organization.findFirstOrThrow({
-      where: { memberships: { some: { user: { email } } } },
-      select: { id: true },
-    });
-    const product = await db.saasProduct.findUniqueOrThrow({ where: { code: 'OCALL_FACTURE' } });
-    const plan = await db.subscriptionPlan.create({
-      data: {
-        productId: product.id,
-        name: `Facture E2E ${E2E_SUFFIX} ${Date.now()}`,
-        monthlyPrice: 50_000,
-        setupFee: 200_000,
-        isActive: false,
-      },
-    });
-    await db.productTrial.create({
-      data: {
-        organizationId: org.id,
-        productId: product.id,
-        startedAt: new Date(),
-        endsAt: new Date(Date.now() + 14 * 86_400_000),
-        startedByOcall: true,
-      },
-    });
-    await db.subscription.create({
-      data: { organizationId: org.id, productId: product.id, planId: plan.id, status: 'TRIALING' },
-    });
-  });
+  await startFactureTrial(email);
 
   // Portail : tuile Ocall Facture ouverte.
   await page.goto('/suite');
@@ -60,7 +32,7 @@ test('Ocall Facture : essai, identité légale, logo, aperçu PDF et équipe', a
   await expect(vat.locator('option')).toHaveCount(21);
   await form.getByLabel('Adresse').fill('Rue 310, ACI 2000');
   await form.getByLabel('Ville').fill('Bamako');
-  await form.getByLabel('Numéro d’identification fiscale (NIF)').fill('084123456A');
+  await form.getByLabel('Numéro d’identification fiscale (NIF, facultatif)').fill('084123456A');
   await form.getByLabel('Régime d’imposition').fill('Régime du réel normal');
   await vat.selectOption('0');
   await form.getByRole('button', { name: 'Enregistrer' }).click();
@@ -68,15 +40,11 @@ test('Ocall Facture : essai, identité légale, logo, aperçu PDF et équipe', a
   await expect(vat).toHaveValue('0');
 
   // Logo puis aperçu PDF de l'en-tête.
-  await page.locator('input[type="file"]').setInputFiles({
-    name: 'logo.png',
-    mimeType: 'image/png',
-    // PNG 1 × 1 valide.
-    buffer: Buffer.from(
-      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
-      'base64',
-    ),
-  });
+  // Logo principal (premier sélecteur de fichier, avant les logos par emplacement).
+  await page
+    .locator('input[type="file"]')
+    .first()
+    .setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: TINY_PNG });
   await expect(page.getByTestId('facture-logo')).toBeVisible();
   const pdf = await page.request.get('/api/v1/facture/settings/letterhead.pdf');
   expect(pdf.status()).toBe(200);

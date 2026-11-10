@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
 import { OrganizationsModule } from '../organizations/organizations.module';
 import { FactureAccessGuard } from './facture-access';
+import { FactureClientsService } from './facture-clients.service';
+import { FactureCommercialController } from './facture-commercial.controller';
+import { FactureDocumentsService } from './facture-documents.service';
 import { FactureMembersService } from './facture-members.service';
 import { FacturePrismaService } from './facture-prisma.service';
 import { FactureController } from './facture.controller';
@@ -12,7 +15,14 @@ import { FactureService } from './facture.service';
  */
 @Module({
   imports: [OrganizationsModule],
-  controllers: [FactureController],
-  providers: [FacturePrismaService, FactureAccessGuard, FactureService, FactureMembersService],
+  controllers: [FactureController, FactureCommercialController],
+  providers: [
+    FacturePrismaService,
+    FactureAccessGuard,
+    FactureService,
+    FactureMembersService,
+    FactureClientsService,
+    FactureDocumentsService,
+  ],
 })
 export class FactureModule {}

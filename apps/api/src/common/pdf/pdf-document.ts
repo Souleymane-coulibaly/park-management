@@ -19,6 +19,8 @@ export interface PdfMeta {
   creator: string;
   /** Polices supplémentaires : nom → fichier du dossier des polices. */
   extraFonts?: Record<string, string>;
+  /** Pages gardées en mémoire jusqu'à la fin : `draw` peut y revenir (ex. « page 2 / 3 »). */
+  bufferPages?: boolean;
 }
 
 /** Document A4 aux polices enregistrées ; `draw` le remplit, le contenu est rendu en mémoire. */
@@ -30,6 +32,7 @@ export function renderPdfDocument(
     size: 'A4',
     margin: PDF_PAGE.margin,
     autoFirstPage: false,
+    bufferPages: meta.bufferPages ?? false,
     info: { Title: meta.title, Creator: meta.creator, Producer: meta.creator },
   });
   doc.registerFont('sans', join(FONTS_DIR, 'NotoSans-Regular.ttf'));

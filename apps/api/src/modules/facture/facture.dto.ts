@@ -15,9 +15,11 @@ import {
   ValidateIf,
 } from 'class-validator';
 import {
+  FACTURE_LOGO_PLACEMENTS,
   FACTURE_REGISTRATION_PATTERN,
   FACTURE_ROLES,
   FACTURE_VAT_RATES,
+  type FactureLogoPlacement,
   type FactureRole,
 } from '@ocall/shared';
 
@@ -34,6 +36,13 @@ export class FactureSettingsDto {
   @Length(2, 160)
   legalName: string;
 
+  @ApiPropertyOptional({ description: 'Activité ou slogan, imprimé sous le nom de l’entreprise' })
+  @IsOptional()
+  @Transform(trimOrNull)
+  @IsString()
+  @MaxLength(160)
+  description?: string | null;
+
   @ApiPropertyOptional()
   @IsOptional()
   @Transform(trimOrNull)
@@ -41,17 +50,19 @@ export class FactureSettingsDto {
   @MaxLength(120)
   tradeName?: string | null;
 
-  @ApiProperty()
-  @Transform(trim)
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(trimOrNull)
   @IsString()
-  @Length(3, 240)
-  address: string;
+  @MaxLength(240)
+  address?: string | null;
 
-  @ApiProperty()
-  @Transform(trim)
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(trimOrNull)
   @IsString()
-  @Length(2, 80)
-  city: string;
+  @MaxLength(80)
+  city?: string | null;
 
   @ApiPropertyOptional({ description: 'Téléphone au format international (+223 …)' })
   @IsOptional()
@@ -113,6 +124,47 @@ export class FactureSettingsDto {
   @Min(0)
   @Max(365)
   paymentTermsDays: number;
+
+  @ApiPropertyOptional({ description: 'Couleur d’accent des documents PDF (#RRGGBB)' })
+  @IsOptional()
+  @Matches(/^#[0-9a-fA-F]{6}$/, { message: 'Couleur au format #RRGGBB.' })
+  accentColor?: string;
+
+  @ApiPropertyOptional({
+    minimum: 1,
+    maximum: 365,
+    description: 'Validité proposée d’un devis (jours)',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(365)
+  quoteValidityDays?: number;
+
+  @ApiPropertyOptional({ description: 'Conditions générales proposées sur les nouveaux documents' })
+  @IsOptional()
+  @Transform(trimOrNull)
+  @IsString()
+  @MaxLength(2000)
+  defaultTerms?: string | null;
+}
+
+/** Logo supplémentaire (envoi multipart : fichier `file`, libellé facultatif). */
+export class FactureExtraLogoDto {
+  @ApiProperty({
+    enum: FACTURE_LOGO_PLACEMENTS,
+    description: 'En-tête (3 au plus) ou bas de page (6)',
+  })
+  @IsIn(FACTURE_LOGO_PLACEMENTS)
+  placement: FactureLogoPlacement;
+
+  @ApiPropertyOptional({ description: 'Libellé (ex. « Certifié ISO 9001 »), non imprimé' })
+  @IsOptional()
+  @Transform(trimOrNull)
+  @ValidateIf((_, v) => v !== null)
+  @IsString()
+  @MaxLength(80)
+  label?: string | null;
 }
 
 export class CreateFactureMemberDto {

@@ -2,7 +2,13 @@
 
 import { type FormEvent, useEffect, useState } from 'react';
 import { FileText, ImageUp } from 'lucide-react';
-import { FACTURE_TAX_REGIME_SUGGESTIONS, FACTURE_VAT_RATES, formatVatRate } from '@ocall/shared';
+import {
+  FACTURE_LOGO_LIMITS,
+  FACTURE_TAX_REGIME_SUGGESTIONS,
+  FACTURE_VAT_RATES,
+  type FactureLogoPlacement,
+  formatVatRate,
+} from '@ocall/shared';
 import { FacturePage } from '@/components/facture/facture-page';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
@@ -14,8 +20,9 @@ import { useApi } from '@/lib/use-api';
 interface SettingsView {
   legalName: string;
   tradeName: string | null;
-  address: string;
-  city: string;
+  description: string | null;
+  address: string | null;
+  city: string | null;
   phone: string | null;
   email: string | null;
   nif: string | null;
@@ -25,6 +32,9 @@ interface SettingsView {
   legalFooter: string | null;
   defaultVatRate: number;
   paymentTermsDays: number;
+  accentColor: string;
+  quoteValidityDays: number;
+  defaultTerms: string | null;
   hasLogo: boolean;
   saved: boolean;
   legalMissing: string[];
@@ -90,6 +100,7 @@ function SettingsForm({ editable, onSaved }: { editable: boolean; onSaved: () =>
         body: {
           legalName: f.legalName,
           tradeName: f.tradeName,
+          description: f.description,
           address: f.address,
           city: f.city,
           phone: f.phone,
@@ -101,6 +112,9 @@ function SettingsForm({ editable, onSaved }: { editable: boolean; onSaved: () =>
           legalFooter: f.legalFooter,
           defaultVatRate: f.defaultVatRate,
           paymentTermsDays: f.paymentTermsDays,
+          accentColor: f.accentColor,
+          quoteValidityDays: f.quoteValidityDays,
+          defaultTerms: f.defaultTerms,
         },
       });
       setForm(saved);
@@ -132,7 +146,7 @@ function SettingsForm({ editable, onSaved }: { editable: boolean; onSaved: () =>
   return (
     <form onSubmit={save} className="space-y-6" data-testid="facture-settings-form">
       {f.legalMissing.length > 0 && (
-        <Alert tone="info" title="Mentions à compléter avant d’émettre une facture">
+        <Alert tone="info" title="Mentions recommandées encore absentes (facultatives)">
           {f.legalMissing.join(', ')}.
         </Alert>
       )}
@@ -147,8 +161,16 @@ function SettingsForm({ editable, onSaved }: { editable: boolean; onSaved: () =>
         <CardBody className="grid gap-4 sm:grid-cols-2">
           <InputField label="Raison sociale" required maxLength={160} {...text('legalName')} />
           <InputField label="Nom commercial (facultatif)" maxLength={120} {...text('tradeName')} />
-          <InputField label="Adresse" required maxLength={240} {...text('address')} />
-          <InputField label="Ville" required maxLength={80} {...text('city')} />
+          <div className="sm:col-span-2">
+            <InputField
+              label="Activité ou slogan (sous le nom, facultatif)"
+              placeholder="Ex. Distributeur agréé d’équipements solaires"
+              maxLength={160}
+              {...text('description')}
+            />
+          </div>
+          <InputField label="Adresse (facultatif)" maxLength={240} {...text('address')} />
+          <InputField label="Ville (facultatif)" maxLength={80} {...text('city')} />
           <InputField
             label="Téléphone (avec indicatif)"
             type="tel"
@@ -161,11 +183,11 @@ function SettingsForm({ editable, onSaved }: { editable: boolean; onSaved: () =>
       <Card>
         <CardHeader
           title="Mentions légales et fiscales"
-          description="Exigées sur les factures au Mali : à faire valider par votre expert-comptable."
+          description="Facultatives, imprimées si renseignées. Recommandées au Mali : à faire valider par votre expert-comptable."
         />
         <CardBody className="grid gap-4 sm:grid-cols-2">
           <InputField
-            label="Numéro d’identification fiscale (NIF)"
+            label="Numéro d’identification fiscale (NIF, facultatif)"
             maxLength={40}
             {...text('nif')}
           />
@@ -225,6 +247,48 @@ function SettingsForm({ editable, onSaved }: { editable: boolean; onSaved: () =>
           </div>
         </CardBody>
       </Card>
+      <Card>
+        <CardHeader
+          title="Présentation des documents"
+          description="Couleur des titres et tableaux, validité et conditions proposées sur les nouveaux devis."
+        />
+        <CardBody className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label htmlFor="facture-accent" className="mb-1 block text-sm font-medium">
+              Couleur d’accent
+            </label>
+            <input
+              id="facture-accent"
+              type="color"
+              value={f.accentColor}
+              disabled={!editable}
+              onChange={(e) => set({ accentColor: e.target.value })}
+              className="h-10 w-20 cursor-pointer rounded-lg border border-line bg-surface disabled:opacity-60"
+            />
+          </div>
+          <InputField
+            label="Validité d’un devis (jours)"
+            type="number"
+            min={1}
+            max={365}
+            value={String(f.quoteValidityDays)}
+            disabled={!editable}
+            onChange={(e) => set({ quoteValidityDays: Number(e.target.value) })}
+          />
+          <div className="sm:col-span-2">
+            <label htmlFor="facture-terms" className="mb-1 block text-sm font-medium">
+              Conditions générales proposées (modifiables sur chaque document)
+            </label>
+            <textarea
+              id="facture-terms"
+              rows={3}
+              maxLength={2000}
+              className={TEXTAREA}
+              {...text('defaultTerms')}
+            />
+          </div>
+        </CardBody>
+      </Card>
       {editable && (
         <Button type="submit" loading={saving}>
           Enregistrer
@@ -272,6 +336,130 @@ function SettingsForm({ editable, onSaved }: { editable: boolean; onSaved: () =>
           )}
         </CardBody>
       </Card>
+      {f.saved && <ExtraLogos editable={editable} hasMainLogo={f.hasLogo} />}
     </form>
+  );
+}
+
+interface ExtraLogoView {
+  id: string;
+  placement: FactureLogoPlacement;
+  label: string | null;
+}
+
+const PLACEMENTS: { value: FactureLogoPlacement; title: string; description: string }[] = [
+  {
+    value: 'HEADER',
+    title: 'Logos de l’en-tête',
+    description: `${FACTURE_LOGO_LIMITS.HEADER} au plus, logo principal compris.`,
+  },
+  {
+    value: 'FOOTER',
+    title: 'Logos du bas de page',
+    description: `Certifications, marques, produits : ${FACTURE_LOGO_LIMITS.FOOTER} au plus, sur chaque page.`,
+  },
+  {
+    value: 'STAMP',
+    title: 'Cachet ou signature',
+    description: 'Imprimé dans la case « Le fournisseur ».',
+  },
+];
+
+/**
+ * Logos imprimés sur tous les documents : en-tête (avec le logo principal), bas de page, cachet.
+ */
+function ExtraLogos({ editable, hasMainLogo }: { editable: boolean; hasMainLogo: boolean }) {
+  const logos = useApi<ExtraLogoView[]>('/facture/settings/logos');
+  const [error, setError] = useState<ApiError | null>(null);
+
+  async function add(placement: FactureLogoPlacement, file: File | undefined) {
+    if (!file) return;
+    setError(null);
+    const data = new FormData();
+    data.append('placement', placement);
+    data.append('file', file);
+    try {
+      await apiUpload('/facture/settings/logos', data);
+      logos.reload();
+    } catch (e) {
+      setError(toError(e));
+    }
+  }
+
+  async function remove(id: string) {
+    setError(null);
+    try {
+      await api(`/facture/settings/logos/${id}`, { method: 'DELETE' });
+      logos.reload();
+    } catch (e) {
+      setError(toError(e));
+    }
+  }
+
+  const list = logos.state === 'success' ? logos.data : [];
+  return (
+    <Card>
+      <CardHeader
+        title="Logos des documents"
+        description="Imprimés sur tous vos devis, factures, bons de commande et rapports."
+      />
+      <CardBody className="space-y-6">
+        <ApiErrorAlert error={error} />
+        {logos.state === 'error' && <ErrorState error={logos.error} onRetry={logos.reload} />}
+        {PLACEMENTS.map((p) => {
+          const own = list.filter((l) => l.placement === p.value);
+          const used = own.length + (p.value === 'HEADER' && hasMainLogo ? 1 : 0);
+          return (
+            <section key={p.value} data-testid={`facture-logos-${p.value}`}>
+              <h3 className="text-sm font-semibold">{p.title}</h3>
+              <p className="mb-2 text-xs text-muted">{p.description}</p>
+              <ul className="flex flex-wrap gap-3">
+                {own.length === 0 && <li className="text-sm text-muted">Aucun.</li>}
+                {own.map((l) => (
+                  <li
+                    key={l.id}
+                    className="flex flex-col items-center gap-2 rounded-xl border border-line p-3"
+                    data-testid="facture-extra-logo"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={`/api/v1/facture/settings/logos/${l.id}`}
+                      alt={l.label ?? p.title}
+                      className="h-12 max-w-[8rem] object-contain"
+                    />
+                    {editable && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => void remove(l.id)}
+                      >
+                        Retirer
+                      </Button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+              {editable && used < FACTURE_LOGO_LIMITS[p.value] && (
+                <label className="mt-2 inline-flex cursor-pointer items-center gap-2 rounded-xl border border-line px-3 py-2 text-sm font-medium hover:bg-ivory">
+                  <ImageUp className="h-4 w-4" aria-hidden />
+                  Ajouter (PNG, JPEG ou WebP, 1 Mo)
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    className="sr-only"
+                    data-testid={`facture-logo-input-${p.value}`}
+                    onChange={(e) => {
+                      void add(p.value, e.target.files?.[0]);
+                      e.target.value = '';
+                    }}
+                  />
+                </label>
+              )}
+            </section>
+          );
+        })}
+      </CardBody>
+    </Card>
   );
 }

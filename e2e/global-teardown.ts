@@ -1,8 +1,10 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { parse } from 'dotenv';
 import { PrismaClient, isLocalDatabase, resolveTestDatabase } from '@ocall/database';
+import { FacturePrismaClient, purgeFactureOrganizations } from '@ocall/facture-database';
 import {
   assertE2eDatabases,
+  assertSchoolTestDatabase,
   purgeSchoolOrganizations,
   resolveSchoolTestDatabase,
   schoolPortalUserIds,
@@ -31,18 +33,20 @@ export default async function globalTeardown(): Promise<void> {
     const school = resolveSchoolTestDatabase({ ...apiEnv, ...process.env }, testDb.databaseUrl);
     const portalUsers = school ? await schoolPortalUserIds(school, orgIds) : [];
     if (school) await purgeSchoolOrganizations(school, orgIds);
-    // Données Ocall Facture des organisations E2E : même purge par organisation, sur la base Facture
-    // de test (locale et jetable, garde identique).
+    // Données Ocall Facture des organisations E2E : purge par organisation sur la base Facture de test
+    // (locale et jetable, garde identique), documents émis compris (purge prévue par la base).
     const factureUrl = process.env.TEST_FACTURE_DATABASE_URL;
     if (factureUrl) {
-      await purgeSchoolOrganizations(
-        {
-          url: factureUrl,
-          ephemeral:
-            process.env.OCALL_TEST_EPHEMERAL_DATABASE === '1' && isLocalDatabase(factureUrl),
-        },
-        orgIds,
-      );
+      assertSchoolTestDatabase({
+        url: factureUrl,
+        ephemeral: process.env.OCALL_TEST_EPHEMERAL_DATABASE === '1' && isLocalDatabase(factureUrl),
+      });
+      const facture = new FacturePrismaClient({ datasourceUrl: factureUrl });
+      try {
+        await purgeFactureOrganizations(facture, orgIds);
+      } finally {
+        await facture.$disconnect();
+      }
     }
     const members = await prisma.organizationMembership.findMany({
       where: { organizationId: { in: orgIds } },
