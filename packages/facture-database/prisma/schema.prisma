@@ -86,6 +86,9 @@ model FactureMember {
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
+  assignments FactureInterventionTechnician[]
+  timeEntries FactureTimeEntry[]
+
   @@unique([organizationId, id])
   @@unique([organizationId, userId])
   @@index([organizationId, isActive])
@@ -133,7 +136,9 @@ model FactureClient {
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 
-  documents FactureDocument[]
+  documents     FactureDocument[]
+  equipment     FactureEquipment[]
+  interventions FactureIntervention[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, nif])
@@ -162,6 +167,7 @@ model FactureItem {
   updatedAt      DateTime        @updatedAt
 
   lines FactureDocumentLine[]
+  parts FacturePartUsage[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, reference])
@@ -257,6 +263,8 @@ model FactureDocument {
   creditNotes     FactureDocument[]     @relation("FactureCreditNotes")
   lines           FactureDocumentLine[]
   payments        FacturePayment[]
+  /// Intervention facturée par ce document (F3).
+  intervention    FactureIntervention?
 
   @@unique([organizationId, id])
   @@unique([organizationId, type, number])
@@ -345,4 +353,183 @@ model FactureLogo {
 
   @@unique([organizationId, id])
   @@index([organizationId, placement, position])
+}
+
+// ─── F3 — Interventions ───
+
+/// Équipement du parc d'un client (climatiseur, groupe électrogène, onduleur…). Jamais supprimé : archivé.
+model FactureEquipment {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @db.Uuid
+  clientId       String    @db.Uuid
+  name           String
+  brand          String?
+  model          String?
+  serialNumber   String?
+  /// Emplacement chez le client (bâtiment, étage, local).
+  location       String?
+  installedAt    DateTime? @db.Date
+  notes          String?
+  isArchived     Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  client        FactureClient         @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Restrict)
+  interventions FactureIntervention[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, clientId, id])
+  @@index([organizationId, clientId, isArchived])
+}
+
+enum FactureInterventionStatus {
+  PLANNED
+  IN_PROGRESS
+  /// Travaux terminés, rapport rédigé : temps, pièces et photos figés.
+  COMPLETED
+  /// Rapport signé par le client sur mobile : plus rien ne change, sauf la facturation.
+  SIGNED
+  INVOICED
+  CANCELLED
+}
+
+/// Compteur des références d'interventions (`INT-AAAA-NNNNN`), par organisation et année de création.
+model FactureInterventionCounter {
+  organizationId String   @db.Uuid
+  year           Int
+  value          Int      @default(0)
+  updatedAt      DateTime @updatedAt
+
+  @@id([organizationId, year])
+}
+
+/// Intervention chez un client : planifiée, réalisée (temps, pièces, photos, rapport), signée, facturée.
+/// Les règles de statut et le gel du rapport sont tenus aussi par la base (déclencheurs de la migration
+/// `facture_v1_interventions`).
+model FactureIntervention {
+  id                String                    @id @default(uuid()) @db.Uuid
+  organizationId    String                    @db.Uuid
+  number            String
+  year              Int
+  sequence          Int
+  status            FactureInterventionStatus @default(PLANNED)
+  clientId          String                    @db.Uuid
+  equipmentId       String?                   @db.Uuid
+  /// Objet de la demande.
+  title             String
+  description       String?
+  /// Lieu d'intervention (adresse du client par défaut).
+  siteAddress       String?
+  contactName       String?
+  contactPhone      String?
+  scheduledStart    DateTime
+  scheduledEnd      DateTime
+  startedAt         DateTime?
+  completedAt       DateTime?
+  completedByUserId String?                   @db.Uuid
+  /// Rapport : travaux réalisés et recommandations, rédigés à la fin des travaux.
+  workSummary       String?
+  recommendations   String?
+  /// Signature du client : nom du signataire, image (clé de stockage privée), empreinte SHA-256 du
+  /// rapport signé.
+  signerName        String?
+  signedAt          DateTime?
+  signatureKey      String?
+  reportHash        String?                   @db.Char(64)
+  /// Facture brouillon créée depuis l'intervention (une seule).
+  invoiceId         String?                   @db.Uuid
+  cancelledAt       DateTime?
+  cancelReason      String?
+  createdByUserId   String                    @db.Uuid
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+
+  client      FactureClient                   @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Restrict)
+  /// L'équipement appartient au client de l'intervention (clé composée avec le client).
+  equipment   FactureEquipment?               @relation(fields: [organizationId, clientId, equipmentId], references: [organizationId, clientId, id], onDelete: Restrict)
+  invoice     FactureDocument?                @relation(fields: [organizationId, invoiceId], references: [organizationId, id], onDelete: Restrict)
+  technicians FactureInterventionTechnician[]
+  timeEntries FactureTimeEntry[]
+  parts       FacturePartUsage[]
+  photos      FactureInterventionPhoto[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, number])
+  @@unique([organizationId, invoiceId])
+  @@index([organizationId, scheduledStart])
+  @@index([organizationId, status])
+  @@index([organizationId, clientId])
+}
+
+/// Technicien affecté à une intervention.
+model FactureInterventionTechnician {
+  organizationId String   @db.Uuid
+  interventionId String   @db.Uuid
+  memberId       String   @db.Uuid
+  createdAt      DateTime @default(now())
+
+  intervention FactureIntervention @relation(fields: [organizationId, interventionId], references: [organizationId, id], onDelete: Restrict)
+  member       FactureMember       @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Restrict)
+
+  @@id([interventionId, memberId])
+  @@index([organizationId, memberId])
+}
+
+/// Temps passé par un technicien affecté, en minutes.
+model FactureTimeEntry {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  interventionId  String   @db.Uuid
+  memberId        String   @db.Uuid
+  workDate        DateTime @db.Date
+  minutes         Int
+  note            String?
+  createdByUserId String   @db.Uuid
+  createdAt       DateTime @default(now())
+
+  intervention FactureIntervention @relation(fields: [organizationId, interventionId], references: [organizationId, id], onDelete: Restrict)
+  member       FactureMember       @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@index([organizationId, interventionId])
+}
+
+/// Pièce du catalogue posée pendant l'intervention : libellé, prix et TVA copiés (le catalogue peut
+/// changer ensuite).
+model FacturePartUsage {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  interventionId  String   @db.Uuid
+  itemId          String   @db.Uuid
+  reference       String?
+  label           String
+  unit            String
+  quantity        Decimal  @db.Decimal(12, 3)
+  unitPrice       Int
+  vatRate         Int
+  createdByUserId String   @db.Uuid
+  createdAt       DateTime @default(now())
+
+  intervention FactureIntervention @relation(fields: [organizationId, interventionId], references: [organizationId, id], onDelete: Restrict)
+  item         FactureItem         @relation(fields: [organizationId, itemId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@index([organizationId, interventionId])
+  @@index([organizationId, itemId])
+}
+
+/// Photo d'une intervention : image réencodée en JPEG (sans métadonnées), clé de stockage privée.
+model FactureInterventionPhoto {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  interventionId  String   @db.Uuid
+  storageKey      String
+  caption         String?
+  createdByUserId String   @db.Uuid
+  createdAt       DateTime @default(now())
+
+  intervention FactureIntervention @relation(fields: [organizationId, interventionId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@index([organizationId, interventionId])
 }

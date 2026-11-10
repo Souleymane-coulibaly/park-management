@@ -35,6 +35,12 @@ export const FACTURE_PERMISSIONS = [
   'facture.billing.manage',
   /** Exporter le journal des ventes et des encaissements (F2). */
   'facture.reports.read',
+  /** Consulter toutes les interventions et le parc d'équipements des clients (F3). */
+  'facture.interventions.read',
+  /** Planifier, modifier, affecter, annuler les interventions ; gérer les équipements (F3). */
+  'facture.interventions.manage',
+  /** Réaliser une intervention : temps, pièces, photos, fin des travaux, signature du client (F3). */
+  'facture.interventions.work',
 ] as const;
 export type FacturePermission = (typeof FACTURE_PERMISSIONS)[number];
 
@@ -49,6 +55,8 @@ const ROLE_PERMISSIONS: Record<FactureRole, readonly FacturePermission[]> = {
     'facture.catalog.manage',
     'facture.documents.read',
     'facture.documents.manage',
+    'facture.interventions.read',
+    'facture.interventions.manage',
   ],
   ACCOUNTANT: [
     'facture.access',
@@ -60,9 +68,15 @@ const ROLE_PERMISSIONS: Record<FactureRole, readonly FacturePermission[]> = {
     'facture.documents.manage',
     'facture.billing.manage',
     'facture.reports.read',
+    'facture.interventions.read',
   ],
-  // Le technicien consulte clients et catalogue (interventions, F3), jamais les documents commerciaux.
-  TECHNICIAN: ['facture.access', 'facture.clients.read', 'facture.catalog.read'],
+  // Le technicien réalise les interventions où il est affecté ; jamais de documents commerciaux.
+  TECHNICIAN: [
+    'facture.access',
+    'facture.clients.read',
+    'facture.catalog.read',
+    'facture.interventions.work',
+  ],
 };
 
 export function hasFacturePermission(role: FactureRole, permission: FacturePermission): boolean {

@@ -6,6 +6,8 @@ import { FactureBillingService } from './facture-billing.service';
 import { FactureClientsService } from './facture-clients.service';
 import { FactureCommercialController } from './facture-commercial.controller';
 import { FactureDocumentsService } from './facture-documents.service';
+import { FactureInterventionsController } from './facture-interventions.controller';
+import { FactureInterventionsService } from './facture-interventions.service';
 import { FactureMembersService } from './facture-members.service';
 import { FacturePrismaService } from './facture-prisma.service';
 import { FactureController } from './facture.controller';
@@ -17,7 +19,12 @@ import { FactureService } from './facture.service';
  */
 @Module({
   imports: [OrganizationsModule],
-  controllers: [FactureController, FactureCommercialController, FactureBillingController],
+  controllers: [
+    FactureController,
+    FactureCommercialController,
+    FactureBillingController,
+    FactureInterventionsController,
+  ],
   providers: [
     FacturePrismaService,
     FactureAccessGuard,
@@ -26,6 +33,7 @@ import { FactureService } from './facture.service';
     FactureClientsService,
     FactureDocumentsService,
     FactureBillingService,
+    FactureInterventionsService,
   ],
 })
 export class FactureModule {}

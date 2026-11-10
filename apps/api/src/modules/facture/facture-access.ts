@@ -39,8 +39,9 @@ export interface FactureContext {
 
 type FactureRequest = Request & { facture?: FactureContext };
 
-export const RequireFacturePermission = (permission: FacturePermission) =>
-  SetMetadata(FACTURE_PERMISSION, permission);
+/** Permission exigée ; plusieurs : l'une d'elles suffit (ex. planifier ou réaliser une intervention). */
+export const RequireFacturePermission = (...permissions: FacturePermission[]) =>
+  SetMetadata(FACTURE_PERMISSION, permissions);
 
 export const CurrentFacture = createParamDecorator((_data: unknown, ctx: ExecutionContext) => {
   return ctx.switchToHttp().getRequest<FactureRequest>().facture as FactureContext;
@@ -96,11 +97,13 @@ export class FactureAccessGuard implements CanActivate {
     if (!isOwner && !member) throw this.denied();
     const role: FactureRole = member?.role ?? 'MANAGER';
 
-    const permission = this.reflector.getAllAndOverride<FacturePermission | undefined>(
+    const permissions = this.reflector.getAllAndOverride<FacturePermission[] | undefined>(
       FACTURE_PERMISSION,
       [context.getHandler(), context.getClass()],
     );
-    if (permission && !hasFacturePermission(role, permission)) throw this.denied();
+    if (permissions && !permissions.some((p) => hasFacturePermission(role, p))) {
+      throw this.denied();
+    }
 
     req.facture = {
       organizationId,

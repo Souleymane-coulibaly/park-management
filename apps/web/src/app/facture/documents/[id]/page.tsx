@@ -72,6 +72,8 @@ interface DocumentView {
   payments: InvoicePayment[];
   creditNotes: InvoiceBillingView['creditNotes'];
   creditedInvoice: { id: string; number: string | null } | null;
+  /** Facture créée depuis une intervention (F3) : son client ne change pas. */
+  intervention: { id: string; number: string } | null;
   totalHt: number;
   totalVat: number;
   totalTtc: number;
@@ -149,8 +151,20 @@ function DocumentScreen({
           {doc.number ? 'PDF' : 'Aperçu PDF'}
         </a>
       </div>
-      {(doc.source || doc.derived.length > 0 || doc.creditedInvoice) && (
+      {(doc.source || doc.derived.length > 0 || doc.creditedInvoice || doc.intervention) && (
         <p className="text-sm text-muted">
+          {doc.intervention && (
+            <>
+              Facture de l’
+              <Link
+                href={`/facture/interventions/${doc.intervention.id}`}
+                className="text-forest underline"
+              >
+                intervention {doc.intervention.number}
+              </Link>
+              .{' '}
+            </>
+          )}
           {doc.creditedInvoice && (
             <>
               Avoir sur la{' '}
@@ -346,7 +360,7 @@ function DraftEditor({ doc, onSaved }: { doc: DocumentView; onSaved: () => void 
         <CardBody className="grid gap-4 sm:grid-cols-2">
           <SelectField
             label="Client"
-            disabled={doc.type === 'CREDIT_NOTE'}
+            disabled={doc.type === 'CREDIT_NOTE' || doc.intervention !== null}
             value={form.clientId}
             onChange={(e) => setForm({ ...form, clientId: e.target.value })}
             options={(clients.state === 'success'
@@ -577,9 +591,12 @@ function DraftEditor({ doc, onSaved }: { doc: DocumentView; onSaved: () => void 
             Émettre (numéro définitif)
           </Button>
         )}
-        <Button variant="secondary" onClick={() => void remove()} loading={busy === 'remove'}>
-          Supprimer
-        </Button>
+        {/* La facture d'une intervention ne se supprime pas (l'API le refuse aussi). */}
+        {!doc.intervention && (
+          <Button variant="secondary" onClick={() => void remove()} loading={busy === 'remove'}>
+            Supprimer
+          </Button>
+        )}
       </div>
     </div>
   );

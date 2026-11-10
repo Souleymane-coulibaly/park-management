@@ -142,6 +142,7 @@ export class FactureDocumentsService {
           orderBy: { createdAt: 'asc' },
         },
         payments: { orderBy: [{ paidAt: 'asc' }, { createdAt: 'asc' }] },
+        intervention: { select: { id: true, number: true } },
       },
     });
     if (!doc) throw new NotFoundException(NOT_FOUND);
@@ -175,35 +176,39 @@ export class FactureDocumentsService {
   // ─── Brouillons ───
 
   async create(ctx: FactureContext, dto: CreateFactureDocumentDto) {
-    const settings = await this.db.factureSettings.findUnique({
+    const id = await this.db.$transaction((tx) => this.createDraft(tx, ctx, dto));
+    await this.record(ctx, 'facture.document_created', id, { type: dto.type });
+    return this.get(ctx, id);
+  }
+
+  /**
+   * Crée un brouillon dans la transaction de l'appelant (création d'un document, facturation d'une
+   * intervention) : client vérifié, valeurs proposées par les réglages, lignes et totaux recalculés.
+   */
+  async createDraft(tx: Tx, ctx: FactureContext, dto: CreateFactureDocumentDto): Promise<string> {
+    const settings = await tx.factureSettings.findUnique({
       where: { organizationId: ctx.organizationId },
     });
     const withValidity = dto.type === 'QUOTE' || dto.type === 'PRO_FORMA';
-    const id = await this.db.$transaction(async (tx) => {
-      await this.assertClient(tx, ctx.organizationId, dto.clientId);
-      const doc = await tx.factureDocument.create({
-        data: {
-          organizationId: ctx.organizationId,
-          type: dto.type,
-          createdByUserId: ctx.userId,
-          ...this.draftFields(dto),
-          // Valeurs proposées par les réglages, modifiables sur le brouillon.
-          validityDays: withValidity
-            ? (dto.validityDays ?? settings?.quoteValidityDays ?? 30)
+    await this.assertClient(tx, ctx.organizationId, dto.clientId);
+    const doc = await tx.factureDocument.create({
+      data: {
+        organizationId: ctx.organizationId,
+        type: dto.type,
+        createdByUserId: ctx.userId,
+        ...this.draftFields(dto),
+        // Valeurs proposées par les réglages, modifiables sur le brouillon.
+        validityDays: withValidity ? (dto.validityDays ?? settings?.quoteValidityDays ?? 30) : null,
+        paymentTermsDays:
+          dto.type === 'INVOICE'
+            ? (dto.paymentTermsDays ?? settings?.paymentTermsDays ?? DEFAULT_PAYMENT_TERMS_DAYS)
             : null,
-          paymentTermsDays:
-            dto.type === 'INVOICE'
-              ? (dto.paymentTermsDays ?? settings?.paymentTermsDays ?? DEFAULT_PAYMENT_TERMS_DAYS)
-              : null,
-          terms: dto.terms !== undefined ? dto.terms : (settings?.defaultTerms ?? null),
-        },
-        select: { id: true },
-      });
-      await this.writeLines(tx, ctx.organizationId, doc.id, dto.lines);
-      return doc.id;
+        terms: dto.terms !== undefined ? dto.terms : (settings?.defaultTerms ?? null),
+      },
+      select: { id: true },
     });
-    await this.record(ctx, 'facture.document_created', id, { type: dto.type });
-    return this.get(ctx, id);
+    await this.writeLines(tx, ctx.organizationId, doc.id, dto.lines);
+    return doc.id;
   }
 
   /** Remplace le contenu d'un brouillon (lignes comprises), sous verrou. */
@@ -218,6 +223,12 @@ export class FactureDocumentsService {
         throw conflict(
           'FACTURE_CREDIT_NOTE_CLIENT',
           'Un avoir concerne toujours le client de la facture corrigée.',
+        );
+      }
+      if (dto.clientId !== doc.clientId && (await this.interventionOf(tx, doc))) {
+        throw conflict(
+          'FACTURE_INTERVENTION_CLIENT',
+          'La facture d’une intervention concerne toujours le client de l’intervention.',
         );
       }
       // Client d'un avoir : celui de la facture, même archivé depuis.
@@ -258,6 +269,12 @@ export class FactureDocumentsService {
         );
       }
       this.assertBilling(ctx, doc.type);
+      if (await this.interventionOf(tx, doc)) {
+        throw conflict(
+          'FACTURE_DOCUMENT_FROM_INTERVENTION',
+          'Cette facture vient d’une intervention : complétez-la et émettez-la plutôt que de la supprimer.',
+        );
+      }
       await tx.factureDocument.delete({
         where: { organizationId_id: { organizationId: ctx.organizationId, id } },
       });
@@ -872,6 +889,17 @@ export class FactureDocumentsService {
     if (client.isArchived) {
       throw conflict('FACTURE_CLIENT_ARCHIVED', 'Ce client est archivé : réactivez-le d’abord.');
     }
+  }
+
+  /** Intervention facturée par ce document (F3), s'il en vient. */
+  private interventionOf(tx: Tx, doc: { organizationId: string; id: string; type: string }) {
+    if (doc.type !== 'INVOICE') return Promise.resolve(null);
+    return tx.factureIntervention.findUnique({
+      where: {
+        organizationId_invoiceId: { organizationId: doc.organizationId, invoiceId: doc.id },
+      },
+      select: { id: true },
+    });
   }
 
   /** Verrouille le document (et le lit avec ses lignes) jusqu'à la fin de la transaction. */

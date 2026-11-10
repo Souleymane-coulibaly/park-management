@@ -8,14 +8,14 @@ celles de Park et de School.
 Proposition d'architecture et décisions : `ocall-audits/proposition-architecture-ocall-facture-v1.md`
 (hors dépôt).
 
-| Sprint               | Contenu                                                              | État                |
-| -------------------- | -------------------------------------------------------------------- | ------------------- |
-| **F0 — Socle**       | Base, accès, rôles, identité légale, TVA, numérotation, logo, PDF    | Livré               |
-| **F1 — Commercial**  | Clients, catalogue, devis, pro forma, bons de commande, PDF, e-mail  | Livré               |
-| **F2 — Facturation** | Factures émises figées, avoirs, encaissements, relances, exports     | Livré (ce document) |
-| F3 — Interventions   | Techniciens, planning, équipements, temps, pièces, photos, signature | À venir             |
-| F4 — Rendez-vous     | Notifications WhatsApp (fournisseur simulé en test)                  | À venir             |
-| F5 — Site vitrine    | Site public, formulaires de demande, domaines, SEO local             | À venir             |
+| Sprint                 | Contenu                                                              | État                |
+| ---------------------- | -------------------------------------------------------------------- | ------------------- |
+| **F0 — Socle**         | Base, accès, rôles, identité légale, TVA, numérotation, logo, PDF    | Livré               |
+| **F1 — Commercial**    | Clients, catalogue, devis, pro forma, bons de commande, PDF, e-mail  | Livré               |
+| **F2 — Facturation**   | Factures émises figées, avoirs, encaissements, relances, exports     | Livré               |
+| **F3 — Interventions** | Techniciens, planning, équipements, temps, pièces, photos, signature | Livré (ce document) |
+| F4 — Rendez-vous       | Notifications WhatsApp (fournisseur simulé en test)                  | À venir             |
+| F5 — Site vitrine      | Site public, formulaires de demande, domaines, SEO local             | À venir             |
 
 ## 1. Architecture
 
@@ -57,19 +57,23 @@ Le **propriétaire de l'organisation est gérant d'office**. Les autres comptes 
 avec le rôle Suite `PRODUCT_USER` (aucun droit Park ni School) et un rôle Facture. Un rôle Park ou School
 ne donne aucun droit Facture.
 
-| Permission                                      | Gérant | Commercial | Comptable | Technicien |
-| ----------------------------------------------- | ------ | ---------- | --------- | ---------- |
-| Entrer, consulter l'identité de l'entreprise    | Oui    | Oui        | Oui       | Oui        |
-| Modifier l'identité, le logo, la TVA par défaut | Oui    | Non        | Non       | Non        |
-| Voir l'équipe                                   | Oui    | Oui        | Oui       | Non        |
-| Gérer l'équipe                                  | Oui    | Non        | Non       | Non        |
-| Consulter clients et catalogue                  | Oui    | Oui        | Oui       | Oui        |
-| Gérer les clients                               | Oui    | Oui        | Oui       | Non        |
-| Gérer le catalogue                              | Oui    | Oui        | Non       | Non        |
-| Consulter et gérer les documents commerciaux    | Oui    | Oui        | Oui       | Non        |
-| Émettre et relancer les factures                | Oui    | Oui        | Oui       | Non        |
-| Encaissements et avoirs                         | Oui    | Non        | Oui       | Non        |
-| Exports comptables (journaux CSV)               | Oui    | Non        | Oui       | Non        |
+| Permission                                           | Gérant | Commercial | Comptable | Technicien  |
+| ---------------------------------------------------- | ------ | ---------- | --------- | ----------- |
+| Entrer, consulter l'identité de l'entreprise         | Oui    | Oui        | Oui       | Oui         |
+| Modifier l'identité, le logo, la TVA par défaut      | Oui    | Non        | Non       | Non         |
+| Voir l'équipe                                        | Oui    | Oui        | Oui       | Non         |
+| Gérer l'équipe                                       | Oui    | Non        | Non       | Non         |
+| Consulter clients et catalogue                       | Oui    | Oui        | Oui       | Oui         |
+| Gérer les clients                                    | Oui    | Oui        | Oui       | Non         |
+| Gérer le catalogue                                   | Oui    | Oui        | Non       | Non         |
+| Consulter et gérer les documents commerciaux         | Oui    | Oui        | Oui       | Non         |
+| Émettre et relancer les factures                     | Oui    | Oui        | Oui       | Non         |
+| Encaissements et avoirs                              | Oui    | Non        | Oui       | Non         |
+| Exports comptables (journaux CSV)                    | Oui    | Non        | Oui       | Non         |
+| Voir toutes les interventions et les équipements     | Oui    | Oui        | Oui       | Les siennes |
+| Planifier, affecter, annuler ; gérer les équipements | Oui    | Oui        | Non       | Non         |
+| Réaliser : temps, pièces, photos, fin, signature     | Oui    | Non        | Non       | Les siennes |
+| Facturer une intervention signée                     | Oui    | Oui        | Oui       | Non         |
 
 Désactiver un membre ferme aussi son compte Suite et ses sessions : Facture décide d'abord, Suite recopie
 l'état validé (même mécanisme que School).
@@ -95,8 +99,10 @@ liste exacte des mentions, obligation du RCCM, règles de numérotation.
 3 à droite des mentions), 1 cachet ou signature (case « Le fournisseur »). Plafonds tenus sous verrou,
 même en envois simultanés. Chaque image : PNG, JPEG ou WebP d'1 Mo au plus, vérifié puis réencodé en PNG sans métadonnées (600 × 300 au
 plus), stocké en privé (`org/<organisation>/_/<uuid>.png`), servi seulement par l'API après contrôle
-d'accès. Limite connue : le logo n'entre pas dans le quota de stockage de l'organisation (registre des
-fichiers privés réservé au support jusqu'ici) ; les photos d'intervention (F3) l'y feront entrer.
+d'accès. Limite connue : logos, photos d'intervention et signatures n'entrent pas dans le quota de
+stockage de l'organisation (le registre des fichiers privés de la base Suite est réservé au support ; l'y
+faire entrer demande une migration Suite). Les photos sont plafonnées à 12 par intervention, réencodées
+(1 600 px au plus).
 
 **Aperçu PDF de l'en-tête** : `GET /facture/settings/letterhead.pdf`, avec la liste des mentions encore
 manquantes. Socle PDF commun à School et Facture : `common/pdf/pdf-document.ts`.
@@ -164,7 +170,41 @@ brouillon n'a pas de numéro.
   corrigée, le bloc « En faveur de » et le « Total de l'avoir ».
 - **Hors V1** : remboursement d'un trop-perçu, relances automatiques, paiement en ligne.
 
-## 8. API (`/api/v1/facture`)
+## 8. Interventions (F3)
+
+- **Équipements** (`FactureEquipment`) : parc installé chez un client (désignation, marque, modèle, n° de
+  série, emplacement, mise en service). Jamais supprimés : archivés. Le client d'un équipement ne change
+  pas ; une intervention ne cite qu'un équipement de son propre client (clé étrangère composée).
+- **Planning** : intervention référencée `INT-AAAA-NNNNN` (par organisation et année de création), client,
+  équipement, lieu (adresse du client par défaut), contact, créneau (31 jours au plus), techniciens
+  affectés (membres actifs « technicien » ou « gérant » ; le propriétaire n'a pas de ligne membre et ne
+  s'affecte pas). Vue semaine par semaine, heure du Mali (UTC).
+- **Statuts** : planifiée → en cours → réalisée → signée → facturée ; une intervention réalisée non signée
+  se rouvre (gérant, commercial) ; seules une intervention planifiée ou en cours s'annulent (motif). Jamais
+  supprimée.
+- **Travaux** (intervention en cours) : temps par technicien affecté (1 min à 12 h par saisie, au plus tard
+  le jour même ; un technicien saisit son propre temps), pièces du catalogue (libellé, prix, TVA copiés),
+  photos (JPEG, PNG ou WebP de 8 Mo au plus, réencodées en JPEG sans métadonnées ni position, 12 au plus,
+  servies par l'API seulement). Un technicien qui a saisi du temps reste affecté.
+- **Fin des travaux** : rapport (travaux réalisés, recommandations) ; temps, pièces, photos et planning
+  sont alors figés, par l'API et par la base (déclencheurs `FactureIntervention_frozen` et `*_frozen`
+  des saisies, qui lisent l'intervention « FOR SHARE » : une saisie concurrente de la fin est comptée avant
+  ou refusée, jamais ajoutée après).
+- **Signature sur mobile** : le client signe au doigt sur l'écran du technicien (PWA, page de
+  l'intervention) ; nom du signataire, date ; image PNG vérifiée (une signature vide est refusée). Une
+  **empreinte SHA-256 du rapport signé** (contenu complet et image de la signature) est conservée et
+  imprimée. La signature est définitive (base comprise).
+- **Rapport PDF** : charte des documents ; client et lieu, créneau, équipement, techniciens, demande,
+  travaux, recommandations, temps, pièces (sans prix), photos, signature et empreinte (« non signé »
+  sinon).
+- **Facturation** : une intervention **signée** donne une facture brouillon (main-d'œuvre : prestation du
+  catalogue choisie, quantité en heures à 3 décimales ; pièces aux prix copiés), à vérifier puis émettre
+  comme toute facture. Une seule facture par intervention (second appel : la même, même en appels
+  simultanés). Cette facture garde le client de l'intervention et ne se supprime pas.
+- **Hors V1** : signature hors ligne, client absent ou refusant de signer, détection des chevauchements de
+  planning, intervention récurrente (contrat d'entretien).
+
+## 9. API (`/api/v1/facture`)
 
 | Route                                                                                                                    | Permission          |
 | ------------------------------------------------------------------------------------------------------------------------ | ------------------- |
@@ -181,29 +221,39 @@ brouillon n'a pas de numéro.
 | `POST documents/:id/credit-note` · `POST documents/:id/payments` · `POST documents/:id/payments/:paymentId/cancel`       | facturation         |
 | `GET dashboard`                                                                                                          | voir les documents  |
 | `GET exports/sales?from&to` · `GET exports/payments?from&to`                                                             | exports comptables  |
+| `GET equipment` · `GET interventions` · `GET interventions/:id{,/report,/signature,/photos/:photoId}`                    | interventions       |
+| `POST/PATCH equipment` · `GET technicians` · `POST/PATCH interventions` · `POST interventions/:id/{cancel,reopen}`       | planifier           |
+| `POST interventions/:id/{start,complete,sign}` · `POST/DELETE interventions/:id/{time,parts,photos}`                     | réaliser            |
+| `POST interventions/:id/invoice`                                                                                         | gérer les documents |
 | `GET members`                                                                                                            | voir l'équipe       |
 | `POST members` · `PATCH members/:id`                                                                                     | gérer l'équipe      |
 
 Écrans : `/facture` (tableau de bord, exports), `/facture/documents` (liste, reste à payer, retards) et
 `/facture/documents/:id` (éditeur du brouillon, actions du document émis ; règlement, encaissements, avoirs
 et relance d'une facture), `/facture/clients`, `/facture/catalogue`,
-`/facture/parametres` (identité, présentation, logos par emplacement), `/facture/equipe`.
+`/facture/parametres` (identité, présentation, logos par emplacement), `/facture/equipe`,
+`/facture/interventions` (planning de la semaine, planification ; « mes interventions » pour un
+technicien), `/facture/interventions/:id` (travaux, photos, fin, signature à l'écran, rapport,
+facturation) et `/facture/equipements`.
 
-## 9. Base et déploiement
+## 10. Base et déploiement
 
 - Migrations : `20261120000000_facture_v1_socle` (F0), `20261121000000_facture_v1_commercial` (F1 :
   clients, catalogue, documents, lignes, logos ; contrôles `CHECK` et déclencheurs du document figé) et
   `20261122000000_facture_v1_billing` (F2 : encaissements, avoirs, échéance ; contrôles et déclencheurs
-  `FactureDocument_creditNote`, `FacturePayment_frozen`), appliquées par `pnpm db:facture:migrate:deploy` (refus des instructions
+  `FactureDocument_creditNote`, `FacturePayment_frozen`) et `20261123000000_facture_v1_interventions`
+  (F3 : équipements, interventions, techniciens, temps, pièces, photos ; contrôles et déclencheurs
+  `FactureIntervention_frozen`, saisies figées, `FactureDocument_intervention`), appliquées par `pnpm db:facture:migrate:deploy` (refus des instructions
   destructrices et d'une base Suite ou School).
 - Pré-déploiement Railway : `db:migrate:deploy && db:school:migrate:deploy && db:facture:migrate:deploy`
   — sans `FACTURE_ENABLED=true`, l'étape Facture ne fait rien.
 - Variables : `FACTURE_ENABLED`, `FACTURE_DATABASE_URL`, `FACTURE_DIRECT_URL`.
 - **Aucune base Facture n'est créée en préproduction ni en production** sans GO.
 
-## 10. Tests
+## 11. Tests
 
 - Unitaires : `packages/shared/src/facture.spec.ts` (TVA, numérotation, mentions, permissions),
+  `facture-interventions.spec.ts` (transitions, durées, référence, portée des rôles),
   `facture-documents.spec.ts` (montants exacts, remises, TVA par taux, conversions, montant en lettres,
   reste dû, statut d'une facture, échéance dépassée),
   `facture-boundaries.spec.ts` (frontières, configuration), `migration-safety.spec.ts` (cible Facture).
@@ -213,8 +263,12 @@ et relance d'une facture), `/facture/clients`, `/facture/catalogue`,
   conversions idempotentes, annulation, logos par emplacement sous concurrence, rôles, lecture seule),
   `facture-f2.integration.spec.ts` (facture figée, échéance, encaissements partiels plafonnés sous
   concurrence, annulation d'un encaissement, avoirs plafonnés, trop-perçu, relance simulée, tableau de
-  bord, exports CSV, rôles, isolation, déclencheurs de la base) — exigent `TEST_FACTURE_DATABASE_URL`.
+  bord, exports CSV, rôles, isolation, déclencheurs de la base), `facture-f3.integration.spec.ts`
+  (planning, équipement du client, travaux, rapport figé, signature et empreinte, rapport PDF,
+  facturation idempotente sous concurrence, fin des travaux contre saisie concurrente, photos plafonnées,
+  réouverture, annulation, technicien limité à ses interventions, isolation, déclencheurs) — exigent `TEST_FACTURE_DATABASE_URL`.
 - E2E : `e2e/facture-f0.spec.ts` (portail, identité, logo, équipe), `e2e/facture-f1.spec.ts` (client,
   article, devis → bon de commande → facture brouillon, PDF), `e2e/facture-f2.spec.ts` (facture émise,
-  payée en deux fois, avoir, tableau de bord, export).
+  payée en deux fois, avoir, tableau de bord, export), `e2e/facture-f3.spec.ts` (intervention planifiée,
+  réalisée, signée à l'écran, facturée).
 - CI : base `ocall_facture_ci` éphémère, migrée puis utilisée par les tests d'intégration et E2E.
