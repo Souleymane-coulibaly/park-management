@@ -1,6 +1,7 @@
 import type { INestApplication } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { commissionPayableFrom } from '@ocall/shared';
+import { MailService } from '../src/common/mail/mail.service';
 import { currentStep, totpCode } from '../src/common/security/totp';
 import type { PrismaService } from '../src/prisma/prisma.service';
 import {
@@ -250,6 +251,74 @@ describe('Sprint S3 — Ocall Partner (intégration)', () => {
         type: 'RESELLER',
         links: { signup: `/inscription?ref=${partner.code}` },
       });
+    });
+
+    it('e-mails (fournisseur simulé) : accusé et alerte au dépôt, rien pour un robot ; invitation au candidat ; refus motivé', async () => {
+      const outbox = app.get(MailService).outbox;
+      const start = outbox.length;
+      const address = email('s3mail');
+      await submit(application({ email: address, type: 'REFERRER' })).expect(201);
+      await submit(application({ email: email('s3mailrobot'), website: 'spam' })).expect(201);
+      // Doublon en attente : même réponse, aucun nouvel e-mail.
+      await submit(application({ email: address, type: 'REFERRER' })).expect(201);
+      const deposit = outbox.slice(start);
+      expect(deposit.map((m) => m.tag).sort()).toEqual([
+        'partner-application-alert',
+        'partner-application-received',
+      ]);
+      expect(deposit.find((m) => m.tag === 'partner-application-received')!.to).toEqual([address]);
+      const alert = deposit.find((m) => m.tag === 'partner-application-alert')!;
+      expect(alert.to).toEqual(['alertes-partenaires@test.ocallpark.local']);
+      // L'alerte interne ne recopie ni l'adresse ni le téléphone du candidat.
+      expect(alert.text).not.toContain(address);
+      expect(alert.text).not.toContain('70 11 22 33');
+      expect(alert.text).toContain(
+        'https://app.ocall-test.example.com/admin/partenaires/candidatures',
+      );
+
+      const stored = await prisma.partnerApplication.findFirstOrThrow({
+        where: { emailNormalized: address },
+      });
+      const approved = (
+        await owner.agent
+          .post(api(`/platform/partner-applications/${stored.id}/approve`))
+          .send({})
+          .expect(200)
+      ).body;
+      expect(approved.emailSent).toBe(true);
+      const invitation = outbox.find((m) => m.tag === 'partner-invitation' && m.to[0] === address)!;
+      expect(invitation.text).toContain(
+        `https://app.ocall-test.example.com${approved.invitationPath}`,
+      );
+      // Le lien n'apparaît jamais dans le journal d'audit.
+      const token = (approved.invitationPath as string).split('token=')[1]!;
+      expect(
+        JSON.stringify(await prisma.auditLog.findMany({ where: { targetId: stored.id } })),
+      ).not.toContain(token);
+      // Réinvitation : nouvel e-mail avec le nouveau lien.
+      const reinvited = (
+        await owner.agent
+          .post(api(`/platform/partner-applications/${stored.id}/reinvite`))
+          .expect(200)
+      ).body;
+      expect(reinvited.emailSent).toBe(true);
+      expect(outbox.at(-1)!.text).toContain(reinvited.invitationPath);
+
+      const refusedAddress = email('s3mailrefus');
+      await submit(application({ email: refusedAddress, type: 'REFERRER' })).expect(201);
+      const toRefuse = await prisma.partnerApplication.findFirstOrThrow({
+        where: { emailNormalized: refusedAddress },
+      });
+      const rejected = (
+        await owner.agent
+          .post(api(`/platform/partner-applications/${toRefuse.id}/reject`))
+          .send({ reason: 'Secteur déjà couvert dans votre ville' })
+          .expect(200)
+      ).body;
+      expect(rejected.emailSent).toBe(true);
+      const refusal = outbox.at(-1)!;
+      expect(refusal).toMatchObject({ tag: 'partner-application-rejected', to: [refusedAddress] });
+      expect(refusal.text).toContain('Motif : Secteur déjà couvert dans votre ville');
     });
 
     it('refus motivé et anonymisation à l’échéance de conservation', async () => {
@@ -768,6 +837,15 @@ describe('Sprint S3 — Ocall Partner (intégration)', () => {
         .post(api(`/platform/partner-payout-requests/${request.id}/decide`))
         .send({ outcome: 'PROCESSED', payoutId: payout.id })
         .expect(200);
+
+      // Le partenaire est prévenu par e-mail du règlement confirmé et de sa demande traitée.
+      const sent = app
+        .get(MailService)
+        .outbox.filter((m) => m.to[0] === reseller.email)
+        .map((m) => m.tag);
+      expect(sent).toEqual(
+        expect.arrayContaining(['partner-payout-confirmed', 'partner-payout-request-decided']),
+      );
 
       // Setup déjà réglé au partenaire puis remboursé au client : régularisation imputable dès
       // maintenant ; la facture rouverte et réglée de nouveau redonne la prime de setup, une fois.

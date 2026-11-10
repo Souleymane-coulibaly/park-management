@@ -30,8 +30,12 @@ authentification obligatoire sont conservés.
    | Apporteur | 10 %  | 5 %         |
    | Revendeur | 15 %  | 10 %        |
 
-   Ils ne servent qu'à pré-remplir une règle de commission. Aucune prime n'est calculée tant qu'Ocall
-   n'a pas validé une règle.
+   Ils ne servent qu'à pré-remplir le formulaire : le barème reste fixé par l'admin, qui peut modifier
+   chaque taux avant d'enregistrer, puis le valider (décision du 10/11/2026). Aucune prime n'est
+   calculée tant qu'Ocall n'a pas validé une règle.
+
+9. **E-mails** (10/11/2026) : envoi par Resend de l'accusé de candidature, de l'alerte à l'équipe
+   Ocall, de l'invitation, du refus motivé, et des e-mails de règlement au partenaire.
 
 ## 1. Documentation fonctionnelle
 
@@ -51,9 +55,9 @@ authentification obligatoire sont conservés.
 
 ### Invitation et compte partenaire
 
-1. Le Super Admin approuve la candidature. L'API renvoie une seule fois le lien
-   `/activation-partenaire?token=…`, qu'Ocall transmet au candidat. Il n'existe pas de service
-   d'e-mail.
+1. Le Super Admin approuve la candidature. Le lien `/activation-partenaire?token=…` est envoyé par
+   e-mail au candidat ; il est aussi affiché une seule fois au Super Admin, en secours si l'e-mail
+   n'arrive pas (l'écran indique si l'envoi a réussi).
    - Le lien est à usage unique et valable 7 jours.
    - « Nouvelle invitation » révoque le lien précédent.
 2. Le candidat choisit son mot de passe. Son compte est actif, et son code commercial est attribué.
@@ -279,10 +283,12 @@ Calcul :
 
 ## 6. Risques résiduels et limites
 
-1. **Pas d'e-mail.** L'invitation est un lien affiché une seule fois au Super Admin, qui le transmet au
-   candidat. À brancher quand un service d'e-mail existera.
-2. **Pas de notification au Super Admin.** Il n'est pas prévenu individuellement des candidatures ; un
-   compteur figure sur son tableau de bord.
+1. **E-mails sans relance automatique.** Un envoi raté (fournisseur indisponible) n'est pas rejoué :
+   il est journalisé (type d'e-mail seulement) et l'écran du Super Admin le signale ; le lien
+   d'invitation reste disponible une fois en secours, et « Nouvelle invitation » renvoie un e-mail.
+2. **Configuration Resend à faire.** Tant que `MAIL_PROVIDER=resend`, `RESEND_API_KEY`, `MAIL_FROM`
+   (domaine vérifié chez Resend) et `PARTNER_ALERT_EMAILS` ne sont pas renseignés sur Railway, aucun
+   e-mail n'est envoyé (désactivé par défaut).
 3. **Rien n'est encore payable.** Aucun barème n'est validé : les taux définitifs sont à saisir, puis à
    valider par le propriétaire de la plateforme.
 4. **Statistiques.** Le « chiffre encaissé attribué » des statistiques porte sur les encaissements qui
@@ -314,3 +320,31 @@ Audit statique indépendant (rapport `ocall-audits/audit-codex-suite-s3.md`), ve
 
 Migration : les commissions déjà engagées dans un versement du Sprint 12B et les régularisations sont
 imputables dès leur création (un versement 12B en cours n'est pas bloqué par le délai M+1).
+
+## 8. E-mails transactionnels
+
+Service commun `apps/api/src/common/mail` (fournisseur Resend par API HTTP, sans dépendance ajoutée).
+Les e-mails partent **après** la validation de la transaction métier et ne la font jamais échouer.
+Chacun porte une clé d'idempotence (un événement = un e-mail chez Resend). Destinataires, contenu et
+liens ne sont jamais journalisés ; seul le type d'e-mail l'est en cas d'échec.
+
+| E-mail                                  | Destinataire           | Déclencheur                                                   |
+| --------------------------------------- | ---------------------- | ------------------------------------------------------------- |
+| Accusé de candidature                   | candidat               | dépôt enregistré (pas pour un robot ni un doublon en attente) |
+| Nouvelle candidature                    | `PARTNER_ALERT_EMAILS` | idem, sans l'adresse ni le téléphone du candidat              |
+| Invitation                              | candidat               | approbation, nouvelle invitation                              |
+| Refus motivé                            | candidat               | refus (le motif saisi lui est communiqué)                     |
+| Règlement confirmé                      | partenaire             | confirmation d'un versement par une seconde personne          |
+| Demande de règlement traitée ou refusée | partenaire             | décision du Super Admin                                       |
+
+| Variable               | Rôle                                                                        |
+| ---------------------- | --------------------------------------------------------------------------- |
+| `MAIL_PROVIDER`        | `disabled` (défaut), `resend`, `simulated` (tests ; interdit en production) |
+| `RESEND_API_KEY`       | clé Resend, variables Railway uniquement                                    |
+| `MAIL_FROM`            | expéditeur sur un domaine vérifié chez Resend                               |
+| `PARTNER_ALERT_EMAILS` | équipe Ocall alertée des candidatures (virgules)                            |
+| `PUBLIC_WEB_URL`       | origine des liens (défaut : première valeur de `WEB_ORIGIN`)                |
+
+Les tests utilisent le fournisseur simulé : aucun e-mail réel n'est envoyé. Le fournisseur Resend est
+testé avec un client HTTP simulé (en-têtes, idempotence, échec sans exception). La politique de
+confidentialité mentionne Resend comme prestataire d'envoi.

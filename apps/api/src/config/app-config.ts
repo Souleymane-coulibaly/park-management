@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { parseReminderOffsets } from '@ocall/shared';
 import { type AiConfig, loadAiConfig } from '../ai-core/ai-core.config';
+import { type MailConfig, loadMailConfig } from '../common/mail/mail.config';
 import { type SchoolConfig, loadSchoolConfig } from '../modules/school/school.config';
 import { type SitesConfig, loadSitesConfig } from '../modules/public-sites/sites.config';
 import {
@@ -57,6 +58,7 @@ export interface AppConfig {
   suiteReminderOffsets: number[];
   /** Sprint S3 : conservation des candidatures partenaires non retenues (mois), puis anonymisation. */
   partnerApplicationRetentionMonths: number;
+  mail: MailConfig;
 }
 
 function storageSigningKey(env: NodeJS.ProcessEnv, nodeEnv: string): Buffer {
@@ -112,14 +114,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (nodeEnv === 'production' && !cookieSecure) {
     throw new Error('COOKIE_SECURE doit valoir true en production.');
   }
+  const webOrigins = (env.WEB_ORIGIN ?? 'http://localhost:3000')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
   return {
     nodeEnv,
     // Railway injecte PORT ; API_PORT sert en local.
     port: int(env, 'PORT', int(env, 'API_PORT', 4000)),
-    webOrigins: (env.WEB_ORIGIN ?? 'http://localhost:3000')
-      .split(',')
-      .map((o) => o.trim())
-      .filter(Boolean),
+    webOrigins,
     sessionTtlHours: int(env, 'SESSION_TTL_HOURS', 12),
     cookieSecure,
     loginThrottleLimit: int(env, 'LOGIN_THROTTLE_LIMIT', 10),
@@ -138,6 +141,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     school: loadSchoolConfig(env),
     suiteReminderOffsets: parseReminderOffsets(env.SUITE_REMINDER_OFFSETS),
     partnerApplicationRetentionMonths: int(env, 'PARTNER_APPLICATION_RETENTION_MONTHS', 24),
+    mail: loadMailConfig(env, nodeEnv, webOrigins),
     mfaEncryptionKey: mfaKey(env, nodeEnv),
     storageSigningKey: storageSigningKey(env, nodeEnv),
     logFormat:

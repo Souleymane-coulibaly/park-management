@@ -14,6 +14,8 @@ import {
 } from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
+import { MailService } from '../../common/mail/mail.service';
+import { payoutConfirmedMail, payoutRequestDecidedMail } from '../../common/mail/partner-mails';
 import type { AuthContext } from '../../common/auth-context';
 import { applicableRule, reverseCommissions } from '../../common/commissions';
 import { uniquePartnerCode } from './partner-code';
@@ -76,6 +78,7 @@ export class PartnersAdminService {
     private readonly audit: AuditService,
     private readonly passwords: PasswordService,
     private readonly sessions: SessionService,
+    private readonly mail: MailService,
   ) {}
 
   // ─── Partenaires ───
@@ -922,7 +925,7 @@ export class PartnersAdminService {
   }
 
   async confirmPayout(auth: AuthContext, id: string) {
-    return this.prisma.$transaction(async (tx) => {
+    const confirmed = await this.prisma.$transaction(async (tx) => {
       const payout = await tx.commissionPayout.findUnique({ where: { id } });
       if (!payout)
         throw new NotFoundException({
@@ -966,7 +969,31 @@ export class PartnersAdminService {
         },
         tx,
       );
-      return { id, status: 'CONFIRMED' as const };
+      return payout;
+    });
+    // Après validation : le partenaire est prévenu du règlement (jamais bloquant).
+    await this.notifyPartner(confirmed.partnerId, `partner-payout-confirmed/${id}`, (p) =>
+      payoutConfirmedMail(p, confirmed, `${this.mail.webBaseUrl}/partenaire/commissions`),
+    );
+    return { id, status: 'CONFIRMED' as const };
+  }
+
+  /** E-mail transactionnel au partenaire (adresse de son compte), après la transaction. */
+  private async notifyPartner(
+    partnerId: string,
+    key: string,
+    build: (p: { contactName: string }) => { subject: string; text: string; html: string },
+  ) {
+    const partner = await this.prisma.partner.findUnique({
+      where: { id: partnerId },
+      select: { contactName: true, user: { select: { email: true } } },
+    });
+    if (!partner?.user.email) return false;
+    return this.mail.send({
+      to: [partner.user.email],
+      tag: key.split('/')[0]!,
+      idempotencyKey: key,
+      ...build(partner),
     });
   }
 
@@ -1022,7 +1049,7 @@ export class PartnersAdminService {
    * partenaire (jamais marquée payée sans confirmation administrative), ou refus motivé.
    */
   async decidePayoutRequest(auth: AuthContext, id: string, dto: PayoutRequestDecisionDto) {
-    return this.prisma.$transaction(async (tx) => {
+    const request = await this.prisma.$transaction(async (tx) => {
       const request = await tx.partnerPayoutRequest.findUnique({ where: { id } });
       if (!request) {
         throw new NotFoundException({
@@ -1086,8 +1113,18 @@ export class PartnersAdminService {
         },
         tx,
       );
-      return { id, status: dto.outcome };
+      return request;
     });
+    await this.notifyPartner(request.partnerId, `partner-payout-request-decided/${id}`, (p) =>
+      payoutRequestDecidedMail(
+        p,
+        request,
+        dto.outcome,
+        dto.note ?? null,
+        `${this.mail.webBaseUrl}/partenaire/commissions`,
+      ),
+    );
+    return { id, status: dto.outcome };
   }
 
   /**

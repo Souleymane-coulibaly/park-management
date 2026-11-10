@@ -63,7 +63,7 @@ export default function AdminPartnerApplicationsPage() {
     page: String(filters.page),
   }).toString();
   const list = useApi<Page>(`/platform/partner-applications?${query}`);
-  const [link, setLink] = useState<string | null>(null);
+  const [link, setLink] = useState<{ path: string; emailSent: boolean } | null>(null);
   const [origin, setOrigin] = useState('');
   const [error, setError] = useState<ApiError | null>(null);
   const [purged, setPurged] = useState<number | null>(null);
@@ -103,17 +103,24 @@ export default function AdminPartnerApplicationsPage() {
       {link && (
         <div className="mb-4" data-testid="invitation-link">
           <Alert
-            tone="info"
-            title="Lien d’invitation à transmettre au candidat (affiché une seule fois)"
+            tone={link.emailSent ? 'success' : 'info'}
+            title={
+              link.emailSent
+                ? 'Invitation envoyée par e-mail au candidat'
+                : 'E-mail non envoyé : transmettez ce lien au candidat (affiché une seule fois)'
+            }
           >
+            {link.emailSent && (
+              <p className="mt-1 text-sm">Lien de secours, affiché une seule fois :</p>
+            )}
             <p className="mt-2 flex items-center gap-2 break-all font-mono text-sm">
               {origin}
-              {link}
+              {link.path}
               <button
                 type="button"
                 className="shrink-0 rounded-lg p-1 hover:bg-white/50"
                 aria-label="Copier le lien"
-                onClick={() => void navigator.clipboard?.writeText(`${origin}${link}`)}
+                onClick={() => void navigator.clipboard?.writeText(`${origin}${link.path}`)}
               >
                 <Copy className="h-4 w-4" aria-hidden />
               </button>
@@ -204,7 +211,7 @@ function ApplicationRow({
   onDone,
 }: {
   application: Application;
-  onLink: (path: string) => void;
+  onLink: (link: { path: string; emailSent: boolean }) => void;
   onDone: () => void;
 }) {
   const [note, setNote] = useState('');
@@ -215,14 +222,14 @@ function ApplicationRow({
     setBusy(true);
     setError(null);
     try {
-      const r = await api<{ invitationPath?: string }>(
+      const r = await api<{ invitationPath?: string; emailSent?: boolean }>(
         `/platform/partner-applications/${a.id}/${action}`,
         {
           method: 'POST',
           body: action === 'reject' ? { reason: note } : action === 'approve' ? { note } : {},
         },
       );
-      if (r.invitationPath) onLink(r.invitationPath);
+      if (r.invitationPath) onLink({ path: r.invitationPath, emailSent: r.emailSent === true });
       onDone();
     } catch (e) {
       setError(toError(e));
@@ -270,7 +277,7 @@ function ApplicationRow({
         <div className="flex flex-wrap items-end gap-2">
           <div className="min-w-[14rem] flex-1">
             <InputField
-              label="Note (motif obligatoire pour un refus)"
+              label="Note (motif obligatoire pour un refus, communiqué au candidat par e-mail)"
               value={note}
               onChange={(e) => setNote(e.target.value)}
             />

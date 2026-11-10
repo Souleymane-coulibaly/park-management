@@ -31,5 +31,10 @@ process.env.SITES_BASE_DOMAIN = 'ocall-test.example.com';
 process.env.SITES_SUBDOMAINS_ENABLED = 'true';
 process.env.SITES_PUBLIC_ORIGIN = 'https://app.ocall-test.example.com';
 delete process.env.SITES_REVALIDATE_URL;
+// E-mails : fournisseur SIMULÉ (messages gardés en mémoire), aucun envoi réel ni clé Resend.
+process.env.MAIL_PROVIDER = 'simulated';
+delete process.env.RESEND_API_KEY;
+process.env.PARTNER_ALERT_EMAILS = 'alertes-partenaires@test.ocallpark.local';
+process.env.PUBLIC_WEB_URL = 'https://app.ocall-test.example.com';
 // Double authentification des comptes internes : clé de chiffrement éphémère, propre à l'exécution.
 process.env.MFA_ENCRYPTION_KEY = randomBytes(32).toString('base64');

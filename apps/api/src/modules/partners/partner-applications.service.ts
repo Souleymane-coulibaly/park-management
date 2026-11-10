@@ -14,6 +14,13 @@ import {
   phoneMatchKey,
 } from '@ocall/shared';
 import { AuditService } from '../../common/audit/audit.service';
+import { MailService } from '../../common/mail/mail.service';
+import {
+  applicationReceivedMail,
+  applicationRejectedMail,
+  invitationMail,
+  newApplicationAlertMail,
+} from '../../common/mail/partner-mails';
 import type { AuthContext } from '../../common/auth-context';
 import { nextPlatformSequence } from '../../common/platform-counter';
 import { PasswordService } from '../../common/security/password.service';
@@ -54,6 +61,7 @@ export class PartnerApplicationsService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly passwords: PasswordService,
+    private readonly mail: MailService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
@@ -74,8 +82,9 @@ export class PartnerApplicationsService {
     retentionUntil.setUTCMonth(
       retentionUntil.getUTCMonth() + this.config.partnerApplicationRetentionMonths,
     );
+    let created: { id: string; number: string } | null = null;
     try {
-      await this.prisma.$transaction(async (tx) => {
+      created = await this.prisma.$transaction(async (tx) => {
         const { year, sequence } = await nextPlatformSequence(tx, 'partner-application');
         const created = await tx.partnerApplication.create({
           data: {
@@ -110,10 +119,35 @@ export class PartnerApplicationsService {
           },
           tx,
         );
+        return created;
       });
     } catch (e) {
       // Candidature déjà en attente pour cette adresse (index unique partiel) : réponse identique.
       if (!(e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002')) throw e;
+    }
+    if (created) {
+      // Après validation : accusé de réception au candidat, alerte à l'équipe Ocall. Jamais bloquant.
+      await Promise.all([
+        this.mail.send({
+          to: [dto.email],
+          tag: 'partner-application-received',
+          idempotencyKey: `partner-application-received/${created.id}`,
+          ...applicationReceivedMail({
+            firstName: dto.firstName,
+            number: created.number,
+            type: dto.type,
+          }),
+        }),
+        this.mail.send({
+          to: this.mail.partnerAlertRecipients,
+          tag: 'partner-application-alert',
+          idempotencyKey: `partner-application-alert/${created.id}`,
+          ...newApplicationAlertMail(
+            { number: created.number, type: dto.type, city: dto.city, country: dto.country },
+            `${this.mail.webBaseUrl}/admin/partenaires/candidatures`,
+          ),
+        }),
+      ]);
     }
     return { received: true };
   }
@@ -282,7 +316,7 @@ export class PartnerApplicationsService {
 
   /** Approbation (vaut agrément) puis invitation : le lien n'est renvoyé qu'une fois, ici. */
   async approve(auth: AuthContext, id: string, note: string | null) {
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       const app = await this.find(tx, id);
       if (
         await tx.user.findUnique({ where: { email: app.emailNormalized }, select: { id: true } })
@@ -307,7 +341,7 @@ export class PartnerApplicationsService {
           message: 'Cette candidature a déjà été examinée.',
         });
       }
-      const invitationPath = await this.issueInvitation(tx, auth, id);
+      const invitation = await this.issueInvitation(tx, auth, id);
       await this.audit.record(
         {
           organizationId: null,
@@ -319,12 +353,19 @@ export class PartnerApplicationsService {
         },
         tx,
       );
-      return { id, status: 'APPROVED' as const, invitationPath };
+      return { app, invitation };
     });
+    const emailSent = await this.sendInvitation(result.app, result.invitation);
+    return {
+      id,
+      status: 'APPROVED' as const,
+      invitationPath: result.invitation.path,
+      emailSent,
+    };
   }
 
   async reject(auth: AuthContext, id: string, note: string) {
-    return this.prisma.$transaction(async (tx) => {
+    const app = await this.prisma.$transaction(async (tx) => {
       const app = await this.find(tx, id);
       const moved = await tx.partnerApplication.updateMany({
         where: { id, status: 'PENDING' },
@@ -352,13 +393,21 @@ export class PartnerApplicationsService {
         },
         tx,
       );
-      return { id, status: 'REJECTED' as const };
+      return app;
     });
+    // Refus motivé communiqué au candidat (le motif saisi lui est destiné).
+    const emailSent = await this.mail.send({
+      to: [app.email],
+      tag: 'partner-application-rejected',
+      idempotencyKey: `partner-application-rejected/${id}`,
+      ...applicationRejectedMail(app, note),
+    });
+    return { id, status: 'REJECTED' as const, emailSent };
   }
 
   /** Nouvelle invitation (lien perdu ou expiré) : la précédente est révoquée. */
   async reinvite(auth: AuthContext, id: string) {
-    return this.prisma.$transaction(async (tx) => {
+    const result = await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM "PartnerApplication" WHERE id = ${id}::uuid FOR UPDATE`;
       const app = await tx.partnerApplication.findUnique({
         where: { id },
@@ -375,7 +424,7 @@ export class PartnerApplicationsService {
           message: 'Seule une candidature approuvée, sans compte créé, peut être réinvitée.',
         });
       }
-      const invitationPath = await this.issueInvitation(tx, auth, id);
+      const invitation = await this.issueInvitation(tx, auth, id);
       await this.audit.record(
         {
           organizationId: null,
@@ -387,7 +436,25 @@ export class PartnerApplicationsService {
         },
         tx,
       );
-      return { id, invitationPath };
+      return { app, invitation };
+    });
+    const emailSent = await this.sendInvitation(result.app, result.invitation);
+    return { id, invitationPath: result.invitation.path, emailSent };
+  }
+
+  /**
+   * Invitation envoyée directement au candidat. Le lien reste aussi renvoyé une fois au Super Admin
+   * (secours si l'e-mail n'arrive pas) ; il n'est jamais journalisé.
+   */
+  private sendInvitation(
+    app: { email: string; firstName: string; type: 'REFERRER' | 'RESELLER' },
+    invitation: { id: string; path: string; expiresAt: Date },
+  ) {
+    return this.mail.send({
+      to: [app.email],
+      tag: 'partner-invitation',
+      idempotencyKey: `partner-invitation/${invitation.id}`,
+      ...invitationMail(app, `${this.mail.webBaseUrl}${invitation.path}`, invitation.expiresAt),
     });
   }
 
@@ -443,16 +510,18 @@ export class PartnerApplicationsService {
       data: { revokedAt: now },
     });
     const token = generateToken();
-    await tx.partnerInvitation.create({
+    const invitation = await tx.partnerInvitation.create({
       data: {
         applicationId,
         tokenHash: hashToken(token),
         expiresAt: new Date(now.getTime() + PARTNER_INVITATION_TTL_DAYS * DAY_MS),
         createdById: auth.user.id,
       },
+      select: { id: true, expiresAt: true },
     });
-    // Chemin relatif renvoyé une seule fois (transmis par Ocall au candidat) ; jamais journalisé.
-    return `/activation-partenaire?token=${token}`;
+    // Chemin relatif : envoyé au candidat par e-mail et renvoyé une seule fois au Super Admin
+    // (secours) ; jamais journalisé.
+    return { ...invitation, path: `/activation-partenaire?token=${token}` };
   }
 
   private async find(tx: Prisma.TransactionClient, id: string) {
