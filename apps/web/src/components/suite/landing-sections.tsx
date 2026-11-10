@@ -601,6 +601,9 @@ export function SuiteTrial() {
               <Cta href="/contact" variant="light">
                 Nous contacter
               </Cta>
+              <Cta href="/devenir-partenaire" variant="light">
+                Devenir partenaire
+              </Cta>
             </div>
           </div>
         </div>

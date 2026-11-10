@@ -62,6 +62,8 @@ export interface Me {
     code: string;
     companyName: string;
     status: 'PENDING_VERIFICATION' | 'ACTIVE';
+    /** Sprint S3 : apporteur d'affaires ou revendeur agréé. */
+    type: 'REFERRER' | 'RESELLER';
   } | null;
   navigation: {
     key: string;

@@ -1996,6 +1996,7 @@ model SaasProduct {
   demoRequests       DemoRequest[]
   prospects          Prospect[]
   commissions        Commission[]
+  attributions       Attribution[]
 }
 
 enum InvoiceStatus {
@@ -2304,6 +2305,16 @@ enum PartnerStatus {
   PENDING_VERIFICATION
   ACTIVE
   SUSPENDED
+  /// Sprint S3 : partenariat résilié (historique et commissions acquises conservés).
+  TERMINATED
+}
+
+/// Sprint S3 : modèle commercial du partenaire.
+enum PartnerType {
+  /// Apporteur d'affaires : apporte des prospects, commissionné sur les ventes attribuées.
+  REFERRER
+  /// Revendeur agréé : prospecte, accompagne les clients, prépare leurs demandes de souscription.
+  RESELLER
 }
 
 /// Partenaire commercial (apporteur d'affaires). Aucun privilège d'administration SaaS : il ne voit
@@ -2319,6 +2330,13 @@ model Partner {
   country               String
   territories           String[]      @default([])
   status                PartnerStatus @default(PENDING_VERIFICATION)
+  /// Sprint S3 : apporteur (par défaut, partenaires antérieurs) ou revendeur.
+  type                  PartnerType   @default(REFERRER)
+  city                  String?
+  terminatedAt          DateTime?
+  terminationReason     String?
+  /// Candidature publique à l'origine du partenaire (Sprint S3).
+  applicationId         String?       @unique @db.Uuid
   /// Encaissement d'espèces : désactivé par défaut ; plafond des collectes non remises (FCFA).
   cashCollectionEnabled Boolean       @default(false)
   cashCollectionLimit   Int           @default(0)
@@ -2333,14 +2351,18 @@ model Partner {
   createdAt             DateTime      @default(now())
   updatedAt             DateTime      @updatedAt
 
-  user              User                  @relation("PartnerUser", fields: [userId], references: [id], onDelete: Cascade)
-  commissionRule    CommissionRule?       @relation(fields: [commissionRuleId], references: [id], onDelete: SetNull)
-  prospects         Prospect[]
-  attributions      Attribution[]
-  commissions       Commission[]
-  payouts           CommissionPayout[]
-  demoRequests      DemoRequest[]
-  collectedPayments SubscriptionPayment[]
+  user               User                   @relation("PartnerUser", fields: [userId], references: [id], onDelete: Cascade)
+  commissionRule     CommissionRule?        @relation(fields: [commissionRuleId], references: [id], onDelete: SetNull)
+  application        PartnerApplication?    @relation(fields: [applicationId], references: [id], onDelete: SetNull)
+  payoutRequests     PartnerPayoutRequest[]
+  activationRequests ActivationRequest[]
+  prospectEvents     ProspectEvent[]
+  prospects          Prospect[]
+  attributions       Attribution[]
+  commissions        Commission[]
+  payouts            CommissionPayout[]
+  demoRequests       DemoRequest[]
+  collectedPayments  SubscriptionPayment[]
 
   @@index([status])
 }
@@ -2348,20 +2370,23 @@ model Partner {
 /// Règle de commission (taux en points de base : 1500 = 15 %). Créée inactive ; ne s'applique
 /// qu'après validation explicite par Ocall. Jamais de taux dans le code.
 model CommissionRule {
-  id                  String    @id @default(uuid()) @db.Uuid
+  id                  String       @id @default(uuid()) @db.Uuid
   name                String
   setupRateBps        Int
   monthlyRateBps      Int
-  /// Mensualités commissionnées pendant N mois à compter de la première activation du client.
-  monthlyWindowMonths Int
+  /// Mensualités commissionnées pendant N mois à compter de la première activation du client ;
+  /// null (Sprint S3) = tant que l'attribution reste confirmée et le partenaire actif.
+  monthlyWindowMonths Int?
   /// Produit concerné ; null = tous les produits.
-  productId           String?   @db.Uuid
-  isActive            Boolean   @default(false)
-  validatedById       String?   @db.Uuid
+  productId           String?      @db.Uuid
+  /// Sprint S3 : modèle commercial concerné ; null = tous les partenaires.
+  partnerType         PartnerType?
+  isActive            Boolean      @default(false)
+  validatedById       String?      @db.Uuid
   validatedAt         DateTime?
-  createdById         String    @db.Uuid
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  createdById         String       @db.Uuid
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
 
   partners     Partner[]
   attributions Attribution[]
@@ -2372,8 +2397,11 @@ model CommissionRule {
 enum ProspectStatus {
   NEW
   CONTACTED
+  /// Étape « Démonstration » (demandée ou réalisée).
   DEMO_REQUESTED
   QUALIFIED
+  /// Sprint S3 : proposition commerciale remise.
+  PROPOSAL
   WON
   LOST
 }
@@ -2395,19 +2423,24 @@ model Prospect {
   productId       String?        @db.Uuid
   status          ProspectStatus @default(NEW)
   notes           String?
+  /// Sprint S3 : secteur d'activité et prochaine relance.
+  sector          String?
+  nextFollowUpAt  DateTime?
   protectedUntil  DateTime
   /// Organisation cliente une fois convertie (renseignée par Ocall).
   organizationId  String?        @db.Uuid
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  partner      Partner       @relation(fields: [partnerId], references: [id], onDelete: Cascade)
-  product      SaasProduct?  @relation(fields: [productId], references: [id], onDelete: SetNull)
-  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  partner      Partner         @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  product      SaasProduct?    @relation(fields: [productId], references: [id], onDelete: SetNull)
+  organization Organization?   @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   attributions Attribution[]
   demoRequests DemoRequest[]
+  events       ProspectEvent[]
 
   @@index([partnerId, createdAt])
+  @@index([partnerId, status, nextFollowUpAt])
   @@index([phoneNormalized])
   @@index([emailNormalized])
   @@index([normalizedName])
@@ -2417,6 +2450,9 @@ enum AttributionStatus {
   PENDING
   CONFIRMED
   REJECTED
+  /// Sprint S3 : attribution confirmée puis close par Ocall (arbitrage) : plus de nouvelle commission,
+  /// commissions acquises conservées.
+  ENDED
 }
 
 enum AttributionSource {
@@ -2430,6 +2466,10 @@ enum AttributionSource {
 model Attribution {
   id              String            @id @default(uuid()) @db.Uuid
   organizationId  String            @db.Uuid
+  /// Sprint S3 : application attribuée ; null = toutes les applications (attributions antérieures,
+  /// conservées). Au plus une attribution confirmée par organisation et application (contrôle sous
+  /// verrou de l'organisation, index unique partiel).
+  productId       String?           @db.Uuid
   partnerId       String            @db.Uuid
   prospectId      String?           @db.Uuid
   source          AttributionSource
@@ -2439,6 +2479,9 @@ model Attribution {
   confirmedById   String?           @db.Uuid
   confirmedAt     DateTime?
   rejectionReason String?
+  endedAt         DateTime?
+  endedById       String?           @db.Uuid
+  endReason       String?
   createdById     String?           @db.Uuid
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
@@ -2447,9 +2490,11 @@ model Attribution {
   partner      Partner         @relation(fields: [partnerId], references: [id], onDelete: Cascade)
   prospect     Prospect?       @relation(fields: [prospectId], references: [id], onDelete: SetNull)
   rule         CommissionRule? @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+  product      SaasProduct?    @relation(fields: [productId], references: [id], onDelete: Restrict)
   commissions  Commission[]
 
   @@index([organizationId, status])
+  @@index([organizationId, productId, status])
   @@index([partnerId, status])
 }
 
@@ -2484,6 +2529,8 @@ model Commission {
   amount                Int
   currency              String           @default("XOF") @db.Char(3)
   status                CommissionStatus @default(ACCRUED)
+  /// Sprint S3 : règlement à la fin du mois suivant l'encaissement (novembre → fin décembre).
+  payableFrom           DateTime?
   validatedById         String?          @db.Uuid
   validatedAt           DateTime?
   reversedAt            DateTime?
@@ -2501,6 +2548,7 @@ model Commission {
 
   @@unique([subscriptionPaymentId, kind])
   @@index([partnerId, status])
+  @@index([partnerId, status, payableFrom])
   @@index([payoutId])
 }
 
@@ -2529,10 +2577,129 @@ model CommissionPayout {
   createdAt       DateTime               @default(now())
   updatedAt       DateTime               @updatedAt
 
-  partner     Partner      @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  partner     Partner                @relation(fields: [partnerId], references: [id], onDelete: Cascade)
   commissions Commission[]
+  requests    PartnerPayoutRequest[]
 
   @@index([partnerId, paidAt])
+}
+
+// ─── Sprint S3 : Ocall Partner ───
+
+enum PartnerApplicationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// Candidature publique (page /devenir-partenaire). Aucun compte n'est créé à la candidature :
+/// approbation par Ocall, puis invitation à usage unique. Conservation limitée (anonymisation).
+model PartnerApplication {
+  id              String                   @id @default(uuid()) @db.Uuid
+  number          String                   @unique
+  type            PartnerType
+  firstName       String
+  lastName        String
+  company         String?
+  email           String
+  emailNormalized String
+  phone           String
+  phoneNormalized String
+  country         String
+  city            String
+  experience      String
+  targetSectors   String
+  motivation      String
+  consentAt       DateTime
+  status          PartnerApplicationStatus @default(PENDING)
+  decidedById     String?                  @db.Uuid
+  decidedAt       DateTime?
+  decisionNote    String?
+  retentionUntil  DateTime
+  anonymizedAt    DateTime?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+
+  partner     Partner?
+  invitations PartnerInvitation[]
+
+  @@index([status, createdAt])
+  @@index([emailNormalized])
+  @@index([retentionUntil])
+}
+
+/// Invitation à créer son compte partenaire : jeton haché (jamais stocké en clair), usage unique,
+/// expiration ; une nouvelle invitation révoque la précédente.
+model PartnerInvitation {
+  id            String    @id @default(uuid()) @db.Uuid
+  applicationId String    @db.Uuid
+  tokenHash     String    @unique
+  expiresAt     DateTime
+  usedAt        DateTime?
+  revokedAt     DateTime?
+  createdById   String    @db.Uuid
+  createdAt     DateTime  @default(now())
+
+  application PartnerApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, createdAt])
+}
+
+enum ProspectEventType {
+  CREATED
+  STAGE_CHANGED
+  UPDATED
+  DEMO_REQUESTED
+  CONVERTED
+}
+
+/// Historique d'un prospect (en ajout seul).
+model ProspectEvent {
+  id          String            @id @default(uuid()) @db.Uuid
+  prospectId  String            @db.Uuid
+  partnerId   String            @db.Uuid
+  type        ProspectEventType
+  fromStatus  ProspectStatus?
+  toStatus    ProspectStatus?
+  note        String?
+  actorUserId String?           @db.Uuid
+  createdAt   DateTime          @default(now())
+
+  prospect Prospect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  partner  Partner  @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+
+  @@index([prospectId, createdAt])
+}
+
+enum PartnerPayoutRequestStatus {
+  PENDING
+  PROCESSED
+  REJECTED
+  CANCELLED
+}
+
+/// Demande de règlement d'un partenaire : montant payable au moment de la demande (indicatif). Ocall
+/// règle hors plateforme (versement saisi puis confirmé par une autre personne). Une seule demande en
+/// attente par partenaire (index unique partiel).
+model PartnerPayoutRequest {
+  id           String                     @id @default(uuid()) @db.Uuid
+  partnerId    String                     @db.Uuid
+  amount       Int
+  currency     String                     @default("XOF") @db.Char(3)
+  note         String?
+  status       PartnerPayoutRequestStatus @default(PENDING)
+  payoutId     String?                    @db.Uuid
+  decidedById  String?                    @db.Uuid
+  decidedAt    DateTime?
+  decisionNote String?
+  createdAt    DateTime                   @default(now())
+  updatedAt    DateTime                   @updatedAt
+
+  partner Partner           @relation(fields: [partnerId], references: [id], onDelete: Cascade)
+  payout  CommissionPayout? @relation(fields: [payoutId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([partnerId, createdAt])
 }
 
 /// Statut d'un contrat B2B Ocall Suite. Aucun statut ne supprime de données.
@@ -2665,6 +2832,8 @@ model ActivationRequest {
   /// Sprint S2 : activation, renouvellement ou changement d'offre (une seule demande en attente par
   /// application, tous types confondus).
   kind              ActivationRequestKind   @default(ACTIVATION)
+  /// Sprint S3 : demande préparée par le revendeur attribué (sinon par le client).
+  partnerId         String?                 @db.Uuid
   status            ActivationRequestStatus @default(PENDING)
   handledByUserId   String?                 @db.Uuid
   handledAt         DateTime?
@@ -2673,6 +2842,7 @@ model ActivationRequest {
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   product      SaasProduct  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  partner      Partner?     @relation(fields: [partnerId], references: [id], onDelete: SetNull)
 
   @@index([status, createdAt])
   @@index([organizationId, productId])

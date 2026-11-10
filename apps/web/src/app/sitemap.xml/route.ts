@@ -43,6 +43,7 @@ export async function GET(request: NextRequest) {
         '/demo',
         '/a-propos',
         '/contact',
+        '/devenir-partenaire',
       ].map((p) => ({
         url: `${origin}${p}`,
         lastModified: null as string | null,

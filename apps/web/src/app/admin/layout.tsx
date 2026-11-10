@@ -90,6 +90,12 @@ const NAV: (NavItem & { permission: PlatformPermission | null })[] = [
     permission: 'platform.demo.manage',
   },
   {
+    key: 'platform-partner-applications',
+    label: 'Candidatures partenaires',
+    href: '/admin/partenaires/candidatures',
+    permission: 'platform.partners.manage',
+  },
+  {
     key: 'platform-partners',
     label: 'Partenaires',
     href: '/admin/partenaires',

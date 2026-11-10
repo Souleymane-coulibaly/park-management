@@ -5,30 +5,39 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { randomInt } from 'node:crypto';
-import type { Prisma } from '@ocall/database';
-import { effectivePlatformRole, formatPayoutNumber } from '@ocall/shared';
+import { Prisma } from '@ocall/database';
+import {
+  PARK_APP_PRODUCT_CODES,
+  PARK_PRODUCT_CODE,
+  effectivePlatformRole,
+  formatPayoutNumber,
+} from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
+import { MailService } from '../../common/mail/mail.service';
+import { payoutConfirmedMail, payoutRequestDecidedMail } from '../../common/mail/partner-mails';
 import type { AuthContext } from '../../common/auth-context';
-import { reverseCommissions } from '../../common/commissions';
+import { applicableRule, reverseCommissions } from '../../common/commissions';
+import { uniquePartnerCode } from './partner-code';
 import { nextPlatformSequence } from '../../common/platform-counter';
 import { PasswordService } from '../../common/security/password.service';
 import { SessionService } from '../../common/security/session.service';
 import { generateTemporaryPassword } from '../../common/security/tokens';
 import type {
+  AssignAttributionDto,
+  AttributionsQueryDto,
   CreateCommissionRuleDto,
   CreatePartnerDto,
+  PayoutRequestDecisionDto,
   ProposeAttributionDto,
+  ProspectsQueryDto,
   RecordPayoutDto,
   UpdatePartnerDto,
 } from './partners.dto';
 
 type Tx = Prisma.TransactionClient;
 const DAY_MS = 86_400_000;
-const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-const randomCode = () =>
-  Array.from({ length: 6 }, () => CODE_ALPHABET[randomInt(CODE_ALPHABET.length)]).join('');
+const PAGE = 50;
 
 const PARTNER_SELECT = {
   id: true,
@@ -39,6 +48,11 @@ const PARTNER_SELECT = {
   country: true,
   territories: true,
   status: true,
+  type: true,
+  city: true,
+  terminatedAt: true,
+  terminationReason: true,
+  applicationId: true,
   cashCollectionEnabled: true,
   cashCollectionLimit: true,
   commissionRuleId: true,
@@ -64,6 +78,7 @@ export class PartnersAdminService {
     private readonly audit: AuditService,
     private readonly passwords: PasswordService,
     private readonly sessions: SessionService,
+    private readonly mail: MailService,
   ) {}
 
   // ─── Partenaires ───
@@ -97,14 +112,13 @@ export class PartnersAdminService {
         },
         select: { id: true },
       });
-      let code = randomCode();
-      for (let i = 0; i < 5 && (await tx.partner.count({ where: { code } })) > 0; i++) {
-        code = randomCode();
-      }
+      const code = await uniquePartnerCode(tx);
       const created = await tx.partner.create({
         data: {
           userId: user.id,
           code,
+          type: dto.type ?? 'REFERRER',
+          city: dto.city ?? null,
           companyName: dto.companyName,
           contactName: `${dto.firstName} ${dto.lastName}`,
           phone: dto.phone,
@@ -142,6 +156,7 @@ export class PartnersAdminService {
       const updated = await tx.partner.update({
         where: { id },
         data: {
+          ...(dto.type !== undefined ? { type: dto.type } : {}),
           ...(dto.territories !== undefined ? { territories: dto.territories } : {}),
           ...(dto.cashCollectionEnabled !== undefined
             ? { cashCollectionEnabled: dto.cashCollectionEnabled }
@@ -163,6 +178,7 @@ export class PartnersAdminService {
           targetId: id,
           metadata: {
             before: {
+              type: before.type,
               cashCollectionEnabled: before.cashCollectionEnabled,
               cashCollectionLimit: before.cashCollectionLimit,
               commissionRuleId: before.commissionRuleId,
@@ -200,6 +216,21 @@ export class PartnersAdminService {
     );
   }
 
+  /**
+   * Résiliation (Sprint S3) : définitive ; sessions fermées, propositions d'attribution en attente
+   * rejetées, plus aucune nouvelle commission. Historique et commissions acquises conservés.
+   */
+  terminate(auth: AuthContext, id: string, reason: string) {
+    return this.setStatus(
+      auth,
+      id,
+      ['PENDING_VERIFICATION', 'ACTIVE', 'SUSPENDED'],
+      'TERMINATED',
+      reason,
+      'platform.partner_terminated',
+    );
+  }
+
   reactivate(auth: AuthContext, id: string, reason: string) {
     return this.setStatus(
       auth,
@@ -215,7 +246,7 @@ export class PartnersAdminService {
     auth: AuthContext,
     id: string,
     from: ('PENDING_VERIFICATION' | 'ACTIVE' | 'SUSPENDED')[],
-    to: 'ACTIVE' | 'SUSPENDED',
+    to: 'ACTIVE' | 'SUSPENDED' | 'TERMINATED',
     reason: string | null,
     action: string,
   ) {
@@ -227,7 +258,9 @@ export class PartnersAdminService {
           status: to,
           ...(to === 'SUSPENDED'
             ? { suspendedAt: new Date(), suspensionReason: reason }
-            : { suspendedAt: null, suspensionReason: null }),
+            : to === 'TERMINATED'
+              ? { terminatedAt: new Date(), terminationReason: reason }
+              : { suspendedAt: null, suspensionReason: null }),
           ...(action === 'platform.partner_verified'
             ? { verifiedAt: new Date(), verifiedById: auth.user.id }
             : {}),
@@ -239,7 +272,13 @@ export class PartnersAdminService {
           message: `Action impossible depuis le statut ${partner.status}.`,
         });
       }
-      if (to === 'SUSPENDED') await this.sessions.revokeAllForUser(partner.userId, undefined, tx);
+      if (to !== 'ACTIVE') await this.sessions.revokeAllForUser(partner.userId, undefined, tx);
+      if (to === 'TERMINATED') {
+        await tx.attribution.updateMany({
+          where: { partnerId: id, status: 'PENDING' },
+          data: { status: 'REJECTED', rejectionReason: 'Partenariat résilié.' },
+        });
+      }
       await this.audit.record(
         {
           organizationId: null,
@@ -271,7 +310,16 @@ export class PartnersAdminService {
         });
       }
       const rule = await tx.commissionRule.create({
-        data: { ...dto, productId: dto.productId ?? null, createdById: auth.user.id },
+        data: {
+          name: dto.name,
+          setupRateBps: dto.setupRateBps,
+          monthlyRateBps: dto.monthlyRateBps,
+          // Vide : mensualités commissionnées tant que l'attribution reste confirmée.
+          monthlyWindowMonths: dto.monthlyWindowMonths ?? null,
+          productId: dto.productId ?? null,
+          partnerType: dto.partnerType ?? null,
+          createdById: auth.user.id,
+        },
       });
       await this.audit.record(
         {
@@ -329,17 +377,42 @@ export class PartnersAdminService {
 
   // ─── Prospects ───
 
-  prospects(query: { partnerId?: string }) {
-    return this.prisma.prospect.findMany({
-      where: query.partnerId ? { partnerId: query.partnerId } : {},
-      orderBy: { createdAt: 'desc' },
-      take: 500,
-      include: {
-        partner: { select: { id: true, code: true, companyName: true } },
-        product: { select: { code: true, name: true } },
-        organization: { select: { id: true, name: true } },
-      },
-    });
+  async prospects(q: ProspectsQueryDto) {
+    const where: Prisma.ProspectWhereInput = {
+      ...(q.partnerId ? { partnerId: q.partnerId } : {}),
+      ...(q.status ? { status: q.status } : {}),
+      ...(q.product ? { product: { slug: q.product } } : {}),
+      ...(q.q
+        ? {
+            OR: [
+              { companyName: { contains: q.q, mode: 'insensitive' } },
+              { contactName: { contains: q.q, mode: 'insensitive' } },
+              { city: { contains: q.q, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
+    const page = q.page ?? 0;
+    const [items, total] = await Promise.all([
+      this.prisma.prospect.findMany({
+        where,
+        orderBy: [
+          q.sort === 'nextFollowUpAt'
+            ? { nextFollowUpAt: { sort: q.order ?? 'asc', nulls: 'last' } }
+            : { [q.sort ?? 'createdAt']: q.order ?? 'desc' },
+          { id: 'asc' },
+        ],
+        skip: page * PAGE,
+        take: PAGE,
+        include: {
+          partner: { select: { id: true, code: true, companyName: true, type: true } },
+          product: { select: { code: true, name: true } },
+          organization: { select: { id: true, name: true } },
+        },
+      }),
+      this.prisma.prospect.count({ where }),
+    ]);
+    return { items, total, page, pageSize: PAGE };
   }
 
   /** Prolongation de la réservation d'un prospect (journalisée). */
@@ -366,63 +439,96 @@ export class PartnersAdminService {
 
   // ─── Attributions ───
 
-  attributions(query: { status?: string }) {
+  attributions(q: AttributionsQueryDto) {
     return this.prisma.attribution.findMany({
-      where: query.status ? { status: query.status as 'PENDING' } : {},
+      where: {
+        ...(q.status ? { status: q.status } : {}),
+        ...(q.partnerId ? { partnerId: q.partnerId } : {}),
+        ...(q.organizationId ? { organizationId: q.organizationId } : {}),
+      },
       orderBy: { createdAt: 'desc' },
       take: 500,
       include: {
         organization: { select: { id: true, name: true } },
-        partner: { select: { id: true, code: true, companyName: true } },
+        partner: { select: { id: true, code: true, companyName: true, type: true } },
         prospect: { select: { id: true, companyName: true } },
+        product: { select: { code: true, name: true } },
+        rule: { select: { id: true, name: true } },
       },
     });
+  }
+
+  /** Application attribuable : produit commercialisé (famille Park ramenée à « Ocall Park »). */
+  private async attributableProduct(tx: Tx, code: string) {
+    const product = await tx.saasProduct.findUnique({
+      where: { code: PARK_APP_PRODUCT_CODES.includes(code) ? PARK_PRODUCT_CODE : code },
+      select: { id: true, code: true, status: true },
+    });
+    if (!product || !['ACTIVE', 'PREPRODUCTION', 'PILOT'].includes(product.status)) {
+      throw new BadRequestException({
+        code: 'PRODUCT_NOT_ATTRIBUTABLE',
+        message: 'Application inconnue ou non commercialisée.',
+      });
+    }
+    return product;
+  }
+
+  private async checkParties(tx: Tx, dto: ProposeAttributionDto) {
+    const [org, partner] = await Promise.all([
+      tx.organization.findUnique({ where: { id: dto.organizationId }, select: { id: true } }),
+      tx.partner.findUnique({ where: { id: dto.partnerId }, select: { id: true, status: true } }),
+    ]);
+    if (!org) {
+      throw new NotFoundException({
+        code: 'ORGANIZATION_NOT_FOUND',
+        message: 'Organisation introuvable.',
+      });
+    }
+    if (!partner) {
+      throw new NotFoundException({
+        code: 'PARTNER_NOT_FOUND',
+        message: 'Partenaire introuvable.',
+      });
+    }
+    if (dto.prospectId) {
+      const prospect = await tx.prospect.findFirst({
+        where: { id: dto.prospectId, partnerId: dto.partnerId },
+        select: { id: true },
+      });
+      if (!prospect) {
+        throw new BadRequestException({
+          code: 'PROSPECT_INVALID',
+          message: 'Ce prospect n’appartient pas à ce partenaire.',
+        });
+      }
+    }
+    return { product: await this.attributableProduct(tx, dto.productCode) };
   }
 
   /** Proposition d'attribution par Ocall (source ADMIN), à confirmer comme toute attribution. */
   async propose(auth: AuthContext, dto: ProposeAttributionDto) {
     return this.prisma.$transaction(async (tx) => {
-      const [org, partner] = await Promise.all([
-        tx.organization.findUnique({ where: { id: dto.organizationId }, select: { id: true } }),
-        tx.partner.findUnique({ where: { id: dto.partnerId }, select: { id: true, status: true } }),
-      ]);
-      if (!org) {
-        throw new NotFoundException({
-          code: 'ORGANIZATION_NOT_FOUND',
-          message: 'Organisation introuvable.',
-        });
-      }
-      if (!partner)
-        throw new NotFoundException({
-          code: 'PARTNER_NOT_FOUND',
-          message: 'Partenaire introuvable.',
-        });
-      if (dto.prospectId) {
-        const prospect = await tx.prospect.findFirst({
-          where: { id: dto.prospectId, partnerId: dto.partnerId },
-          select: { id: true },
-        });
-        if (!prospect) {
-          throw new BadRequestException({
-            code: 'PROSPECT_INVALID',
-            message: 'Ce prospect n’appartient pas à ce partenaire.',
-          });
-        }
-      }
+      const { product } = await this.checkParties(tx, dto);
       const existing = await tx.attribution.findFirst({
-        where: { organizationId: dto.organizationId, partnerId: dto.partnerId, status: 'PENDING' },
+        where: {
+          organizationId: dto.organizationId,
+          partnerId: dto.partnerId,
+          productId: product.id,
+          status: 'PENDING',
+        },
         select: { id: true },
       });
       if (existing) {
         throw new ConflictException({
           code: 'ATTRIBUTION_PENDING',
-          message: 'Une proposition est déjà en attente pour ce partenaire.',
+          message: 'Une proposition est déjà en attente pour ce partenaire et cette application.',
         });
       }
       const attribution = await tx.attribution.create({
         data: {
           organizationId: dto.organizationId,
           partnerId: dto.partnerId,
+          productId: product.id,
           prospectId: dto.prospectId ?? null,
           source: dto.prospectId ? 'PROSPECT' : 'ADMIN',
           createdById: auth.user.id,
@@ -444,97 +550,168 @@ export class PartnersAdminService {
   }
 
   /**
-   * Confirmation : au plus une attribution confirmée par organisation (verrou de l'organisation) ;
-   * les autres propositions en attente sont rejetées (conflit tranché). La règle applicable
-   * (partenaire ou générale active) est figée.
+   * Attribution directe par le Super Admin (par exemple un client confié à un revendeur) : créée et
+   * confirmée dans la même transaction, avec les mêmes contrôles de conflit, motif journalisé.
    */
-  async confirm(auth: AuthContext, id: string) {
+  async assign(auth: AuthContext, dto: AssignAttributionDto) {
     return this.prisma.$transaction(async (tx) => {
-      const attribution = await tx.attribution.findUnique({
-        where: { id },
-        include: { partner: { select: { status: true, commissionRule: true } } },
-      });
-      if (!attribution) {
-        throw new NotFoundException({
-          code: 'ATTRIBUTION_NOT_FOUND',
-          message: 'Attribution introuvable.',
-        });
-      }
-      await tx.$queryRaw`SELECT "id" FROM "Organization" WHERE "id" = ${attribution.organizationId}::uuid FOR UPDATE`;
-      if (attribution.status !== 'PENDING') {
-        throw new ConflictException({
-          code: 'ATTRIBUTION_NOT_PENDING',
-          message: 'Cette attribution n’est plus en attente.',
-        });
-      }
-      if (attribution.partner.status !== 'ACTIVE') {
-        throw new ConflictException({
-          code: 'PARTNER_NOT_ACTIVE',
-          message: 'Le partenaire n’est pas actif.',
-        });
-      }
-      const confirmed = await tx.attribution.count({
-        where: { organizationId: attribution.organizationId, status: 'CONFIRMED' },
-      });
-      if (confirmed > 0) {
-        throw new ConflictException({
-          code: 'ORGANIZATION_ALREADY_ATTRIBUTED',
-          message: 'Cette organisation est déjà attribuée à un partenaire.',
-        });
-      }
-      const rule =
-        (attribution.partner.commissionRule?.isActive
-          ? attribution.partner.commissionRule
-          : null) ??
-        (await tx.commissionRule.findFirst({
-          where: { isActive: true, productId: null },
-          orderBy: { validatedAt: 'desc' },
-        }));
-      await tx.attribution.update({
-        where: { id },
+      const { product } = await this.checkParties(tx, dto);
+      const attribution = await tx.attribution.create({
         data: {
-          status: 'CONFIRMED',
-          confirmedById: auth.user.id,
-          confirmedAt: new Date(),
-          ruleId: rule?.id ?? null,
+          organizationId: dto.organizationId,
+          partnerId: dto.partnerId,
+          productId: product.id,
+          prospectId: dto.prospectId ?? null,
+          source: 'ADMIN',
+          createdById: auth.user.id,
         },
+        select: { id: true },
       });
-      const others = await tx.attribution.updateMany({
-        where: { organizationId: attribution.organizationId, status: 'PENDING', id: { not: id } },
-        data: {
-          status: 'REJECTED',
-          rejectionReason: 'Conflit tranché : attribuée à un autre partenaire.',
-        },
-      });
-      if (attribution.prospectId) {
-        await tx.prospect.update({
-          where: { id: attribution.prospectId },
-          data: { status: 'WON', organizationId: attribution.organizationId },
-        });
-      }
+      const result = await this.confirmTx(tx, auth, attribution.id);
       await this.audit.record(
         {
           organizationId: null,
           actorUserId: auth.user.id,
-          action: 'platform.attribution_confirmed',
+          action: 'platform.attribution_assigned',
           targetType: 'Attribution',
-          targetId: id,
+          targetId: attribution.id,
           metadata: {
-            organizationId: attribution.organizationId,
-            partnerId: attribution.partnerId,
-            ruleId: rule?.id ?? null,
-            conflictsRejected: others.count,
+            organizationId: dto.organizationId,
+            partnerId: dto.partnerId,
+            product: product.code,
+            reason: dto.reason,
           },
         },
         tx,
       );
-      return {
-        id,
-        status: 'CONFIRMED' as const,
-        ruleId: rule?.id ?? null,
-        conflictsRejected: others.count,
-      };
+      return result;
     });
+  }
+
+  /**
+   * Confirmation : au plus une attribution confirmée par organisation et application (verrou de
+   * l'organisation ; une attribution antérieure « toutes applications » couvre toute l'organisation).
+   * Les autres propositions en attente pour la même application sont rejetées (conflit tranché). La
+   * règle applicable, VALIDÉE, est figée (conditions contractuelles conservées).
+   */
+  confirm(auth: AuthContext, id: string) {
+    return this.prisma.$transaction((tx) => this.confirmTx(tx, auth, id));
+  }
+
+  private async confirmTx(tx: Tx, auth: AuthContext, id: string) {
+    const attribution = await tx.attribution.findUnique({
+      where: { id },
+      include: { partner: { select: { status: true, type: true, commissionRule: true } } },
+    });
+    if (!attribution) {
+      throw new NotFoundException({
+        code: 'ATTRIBUTION_NOT_FOUND',
+        message: 'Attribution introuvable.',
+      });
+    }
+    await tx.$queryRaw`SELECT "id" FROM "Organization" WHERE "id" = ${attribution.organizationId}::uuid FOR UPDATE`;
+    const fresh = await tx.attribution.findUniqueOrThrow({
+      where: { id },
+      select: { status: true },
+    });
+    if (fresh.status !== 'PENDING') {
+      throw new ConflictException({
+        code: 'ATTRIBUTION_NOT_PENDING',
+        message: 'Cette attribution n’est plus en attente.',
+      });
+    }
+    if (attribution.partner.status !== 'ACTIVE') {
+      throw new ConflictException({
+        code: 'PARTNER_NOT_ACTIVE',
+        message: 'Le partenaire n’est pas actif.',
+      });
+    }
+    // Une attribution antérieure « toutes applications », ou une attribution de cette application.
+    const conflict = await tx.attribution.findFirst({
+      where: {
+        organizationId: attribution.organizationId,
+        status: 'CONFIRMED',
+        ...(attribution.productId
+          ? { OR: [{ productId: attribution.productId }, { productId: null }] }
+          : {}),
+      },
+      select: { id: true },
+    });
+    if (conflict) {
+      throw new ConflictException({
+        code: 'ORGANIZATION_ALREADY_ATTRIBUTED',
+        message:
+          'Cette application de l’organisation est déjà attribuée : mettez fin à l’attribution en cours pour arbitrer.',
+      });
+    }
+    // Règle validée figée, y compris pour une proposition antérieure « toutes applications » (règles
+    // sans application seulement).
+    const rule = await applicableRule(tx, {
+      frozen: null,
+      partnerRule: attribution.partner.commissionRule,
+      partnerType: attribution.partner.type,
+      productIds: attribution.productId ? [attribution.productId] : [],
+    });
+    await tx.attribution.update({
+      where: { id },
+      data: {
+        status: 'CONFIRMED',
+        confirmedById: auth.user.id,
+        confirmedAt: new Date(),
+        ruleId: rule?.id ?? null,
+      },
+    });
+    const others = await tx.attribution.updateMany({
+      where: {
+        organizationId: attribution.organizationId,
+        status: 'PENDING',
+        id: { not: id },
+        ...(attribution.productId ? { productId: attribution.productId } : {}),
+      },
+      data: {
+        status: 'REJECTED',
+        rejectionReason: 'Conflit tranché : attribuée à un autre partenaire.',
+      },
+    });
+    if (attribution.prospectId) {
+      const prospect = await tx.prospect.update({
+        where: { id: attribution.prospectId },
+        data: { status: 'WON', organizationId: attribution.organizationId },
+        select: { id: true, partnerId: true },
+      });
+      await tx.prospectEvent.create({
+        data: {
+          prospectId: prospect.id,
+          partnerId: prospect.partnerId,
+          type: 'CONVERTED',
+          toStatus: 'WON',
+          actorUserId: auth.user.id,
+        },
+      });
+    }
+    await this.audit.record(
+      {
+        organizationId: null,
+        actorUserId: auth.user.id,
+        action: 'platform.attribution_confirmed',
+        targetType: 'Attribution',
+        targetId: id,
+        metadata: {
+          organizationId: attribution.organizationId,
+          partnerId: attribution.partnerId,
+          productId: attribution.productId,
+          ruleId: rule?.id ?? null,
+          conflictsRejected: others.count,
+        },
+      },
+      tx,
+    );
+    return {
+      id,
+      status: 'CONFIRMED' as const,
+      ruleId: rule?.id ?? null,
+      conflictsRejected: others.count,
+    };
   }
 
   async reject(auth: AuthContext, id: string, reason: string) {
@@ -557,6 +734,37 @@ export class PartnersAdminService {
       metadata: { reason },
     });
     return { id, status: 'REJECTED' as const };
+  }
+
+  /**
+   * Fin d'une attribution confirmée (arbitrage Ocall, jamais un transfert silencieux) : plus aucune
+   * nouvelle commission ; commissions acquises et historique conservés.
+   */
+  async end(auth: AuthContext, id: string, reason: string) {
+    return this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.attribution.updateMany({
+        where: { id, status: 'CONFIRMED' },
+        data: { status: 'ENDED', endedAt: new Date(), endedById: auth.user.id, endReason: reason },
+      });
+      if (claimed.count === 0) {
+        throw new ConflictException({
+          code: 'ATTRIBUTION_NOT_CONFIRMED',
+          message: 'Seule une attribution confirmée peut être close.',
+        });
+      }
+      await this.audit.record(
+        {
+          organizationId: null,
+          actorUserId: auth.user.id,
+          action: 'platform.attribution_ended',
+          targetType: 'Attribution',
+          targetId: id,
+          metadata: { reason },
+        },
+        tx,
+      );
+      return { id, status: 'ENDED' as const };
+    });
   }
 
   // ─── Commissions ───
@@ -642,8 +850,29 @@ export class PartnersAdminService {
           payoutId: true,
           amount: true,
           currency: true,
+          payableFrom: true,
         },
       });
+      // Règlement à la fin du mois suivant l'encaissement : jamais avant la date de règlement, ni
+      // par une date de versement future (contrôle aussi sur l'heure du serveur).
+      const now = new Date();
+      if (new Date(`${dto.paidAt}T00:00:00Z`) > now) {
+        throw new BadRequestException({
+          code: 'PAYOUT_DATE_IN_FUTURE',
+          message: 'La date du versement ne peut pas être dans le futur.',
+        });
+      }
+      const paidAt = new Date(`${dto.paidAt}T23:59:59Z`);
+      const dueAt = paidAt < now ? paidAt : now;
+      const notDue = rows.filter((c) => !c.payableFrom || c.payableFrom > dueAt).map((c) => c.id);
+      if (notDue.length > 0) {
+        throw new ConflictException({
+          code: 'PAYOUT_COMMISSIONS_NOT_DUE',
+          message:
+            'Certaines commissions ne sont pas encore payables (règlement à la fin du mois suivant l’encaissement).',
+          notDue,
+        });
+      }
       const invalid = ids.filter((id) => {
         const c = rows.find((r) => r.id === id);
         return (
@@ -696,7 +925,7 @@ export class PartnersAdminService {
   }
 
   async confirmPayout(auth: AuthContext, id: string) {
-    return this.prisma.$transaction(async (tx) => {
+    const confirmed = await this.prisma.$transaction(async (tx) => {
       const payout = await tx.commissionPayout.findUnique({ where: { id } });
       if (!payout)
         throw new NotFoundException({
@@ -707,6 +936,15 @@ export class PartnersAdminService {
         throw new ForbiddenException({
           code: 'SELF_CONFIRMATION_FORBIDDEN',
           message: 'Un versement est confirmé par une autre personne que celle qui l’a saisi.',
+        });
+      }
+      const early = await tx.commission.count({
+        where: { payoutId: id, OR: [{ payableFrom: null }, { payableFrom: { gt: new Date() } }] },
+      });
+      if (early > 0) {
+        throw new ConflictException({
+          code: 'PAYOUT_COMMISSIONS_NOT_DUE',
+          message: 'Certaines commissions de ce versement ne sont pas encore payables.',
         });
       }
       const claimed = await tx.commissionPayout.updateMany({
@@ -731,7 +969,31 @@ export class PartnersAdminService {
         },
         tx,
       );
-      return { id, status: 'CONFIRMED' as const };
+      return payout;
+    });
+    // Après validation : le partenaire est prévenu du règlement (jamais bloquant).
+    await this.notifyPartner(confirmed.partnerId, `partner-payout-confirmed/${id}`, (p) =>
+      payoutConfirmedMail(p, confirmed, `${this.mail.webBaseUrl}/partenaire/commissions`),
+    );
+    return { id, status: 'CONFIRMED' as const };
+  }
+
+  /** E-mail transactionnel au partenaire (adresse de son compte), après la transaction. */
+  private async notifyPartner(
+    partnerId: string,
+    key: string,
+    build: (p: { contactName: string }) => { subject: string; text: string; html: string },
+  ) {
+    const partner = await this.prisma.partner.findUnique({
+      where: { id: partnerId },
+      select: { contactName: true, user: { select: { email: true } } },
+    });
+    if (!partner?.user.email) return false;
+    return this.mail.send({
+      to: [partner.user.email],
+      tag: key.split('/')[0]!,
+      idempotencyKey: key,
+      ...build(partner),
     });
   }
 
@@ -768,6 +1030,167 @@ export class PartnersAdminService {
     });
   }
 
+  // ─── Demandes de règlement des partenaires ───
+
+  payoutRequests(status?: 'PENDING' | 'PROCESSED' | 'REJECTED' | 'CANCELLED') {
+    return this.prisma.partnerPayoutRequest.findMany({
+      where: status ? { status } : {},
+      orderBy: { createdAt: status === 'PENDING' ? 'asc' : 'desc' },
+      take: 300,
+      include: {
+        partner: { select: { id: true, code: true, companyName: true, type: true } },
+        payout: { select: { id: true, number: true, status: true } },
+      },
+    });
+  }
+
+  /**
+   * Décision sur une demande de règlement : « réglée » seulement avec un versement CONFIRMÉ du même
+   * partenaire (jamais marquée payée sans confirmation administrative), ou refus motivé.
+   */
+  async decidePayoutRequest(auth: AuthContext, id: string, dto: PayoutRequestDecisionDto) {
+    const request = await this.prisma.$transaction(async (tx) => {
+      const request = await tx.partnerPayoutRequest.findUnique({ where: { id } });
+      if (!request) {
+        throw new NotFoundException({
+          code: 'PAYOUT_REQUEST_NOT_FOUND',
+          message: 'Demande introuvable.',
+        });
+      }
+      if (dto.outcome === 'PROCESSED') {
+        const payout = dto.payoutId
+          ? await tx.commissionPayout.findUnique({ where: { id: dto.payoutId } })
+          : null;
+        if (!payout || payout.partnerId !== request.partnerId || payout.status !== 'CONFIRMED') {
+          throw new ConflictException({
+            code: 'PAYOUT_NOT_CONFIRMED',
+            message: 'Indiquez un versement confirmé de ce partenaire.',
+          });
+        }
+        // Le versement répond à CETTE demande : saisi après elle, couvrant son montant, et jamais
+        // déjà utilisé pour une autre demande (index unique partiel en base).
+        const reused = await tx.partnerPayoutRequest.count({ where: { payoutId: payout.id } });
+        if (reused > 0 || payout.createdAt < request.createdAt || payout.total < request.amount) {
+          throw new ConflictException({
+            code: 'PAYOUT_NOT_MATCHING_REQUEST',
+            message:
+              'Ce versement ne correspond pas à cette demande (déjà utilisé, antérieur à la demande ou montant insuffisant).',
+          });
+        }
+      } else if (!dto.note || dto.note.trim().length < 3) {
+        throw new BadRequestException({
+          code: 'REASON_REQUIRED',
+          message: 'Motif du refus requis.',
+        });
+      }
+      const moved = await tx.partnerPayoutRequest.updateMany({
+        where: { id, status: 'PENDING' },
+        data: {
+          status: dto.outcome,
+          payoutId: dto.outcome === 'PROCESSED' ? dto.payoutId! : null,
+          decidedById: auth.user.id,
+          decidedAt: new Date(),
+          decisionNote: dto.note ?? null,
+        },
+      });
+      if (moved.count !== 1) {
+        throw new ConflictException({
+          code: 'PAYOUT_REQUEST_NOT_PENDING',
+          message: 'Cette demande a déjà été traitée.',
+        });
+      }
+      await this.audit.record(
+        {
+          organizationId: null,
+          actorUserId: auth.user.id,
+          action:
+            dto.outcome === 'PROCESSED'
+              ? 'platform.payout_request_processed'
+              : 'platform.payout_request_rejected',
+          targetType: 'PartnerPayoutRequest',
+          targetId: id,
+          metadata: { partnerId: request.partnerId, payoutId: dto.payoutId ?? null },
+        },
+        tx,
+      );
+      return request;
+    });
+    await this.notifyPartner(request.partnerId, `partner-payout-request-decided/${id}`, (p) =>
+      payoutRequestDecidedMail(
+        p,
+        request,
+        dto.outcome,
+        dto.note ?? null,
+        `${this.mail.webBaseUrl}/partenaire/commissions`,
+      ),
+    );
+    return { id, status: dto.outcome };
+  }
+
+  /**
+   * Statistiques du réseau : par pays, par partenaire et par application (clients attribués, chiffre
+   * encaissé attribué, commissions par statut). Uniquement des données enregistrées, aucun chiffre
+   * estimé.
+   */
+  async stats(country?: string) {
+    const partners = await this.prisma.partner.findMany({
+      where: country ? { country } : {},
+      select: { id: true, code: true, companyName: true, country: true, type: true, status: true },
+    });
+    const ids = partners.map((p) => p.id);
+    const [attributions, commissions, products] = await Promise.all([
+      this.prisma.attribution.groupBy({
+        by: ['partnerId', 'productId'],
+        where: { partnerId: { in: ids }, status: 'CONFIRMED' },
+        _count: { _all: true },
+      }),
+      this.prisma.commission.groupBy({
+        by: ['partnerId', 'productId', 'status'],
+        where: { partnerId: { in: ids } },
+        _sum: { amount: true, baseAmount: true },
+      }),
+      this.prisma.saasProduct.findMany({ select: { id: true, name: true } }),
+    ]);
+    const productName = new Map(products.map((p) => [p.id, p.name]));
+    const byCountry = new Map<string, { partners: number; clients: number; commissions: number }>();
+    for (const p of partners) {
+      const c = byCountry.get(p.country) ?? { partners: 0, clients: 0, commissions: 0 };
+      c.partners += 1;
+      c.clients += attributions
+        .filter((a) => a.partnerId === p.id)
+        .reduce((t, a) => t + a._count._all, 0);
+      c.commissions += commissions
+        .filter((x) => x.partnerId === p.id && x.status !== 'REVERSED')
+        .reduce((t, x) => t + (x._sum.amount ?? 0), 0);
+      byCountry.set(p.country, c);
+    }
+    const byProduct = new Map<
+      string,
+      { clients: number; collected: number; commissions: number }
+    >();
+    for (const a of attributions) {
+      const key = a.productId
+        ? (productName.get(a.productId) ?? a.productId)
+        : 'Toutes applications';
+      const c = byProduct.get(key) ?? { clients: 0, collected: 0, commissions: 0 };
+      c.clients += a._count._all;
+      byProduct.set(key, c);
+    }
+    for (const x of commissions) {
+      if (x.status === 'REVERSED') continue;
+      const key = productName.get(x.productId) ?? x.productId;
+      const c = byProduct.get(key) ?? { clients: 0, collected: 0, commissions: 0 };
+      c.collected += x._sum.baseAmount ?? 0;
+      c.commissions += x._sum.amount ?? 0;
+      byProduct.set(key, c);
+    }
+    return {
+      byCountry: [...byCountry].map(([name, v]) => ({ country: name, ...v })),
+      byProduct: [...byProduct].map(([name, v]) => ({ product: name, ...v })),
+      partners: partners.length,
+    };
+  }
+
   // ─── Rapports ───
 
   /** Rapport par partenaire et par produit : clients, prospects, commissions par statut. */
@@ -779,6 +1202,8 @@ export class PartnersAdminService {
           code: true,
           companyName: true,
           status: true,
+          type: true,
+          country: true,
           _count: { select: { prospects: true } },
           attributions: { where: { status: 'CONFIRMED' }, select: { id: true } },
         },
@@ -805,6 +1230,8 @@ export class PartnersAdminService {
         code: p.code,
         companyName: p.companyName,
         status: p.status,
+        type: p.type,
+        country: p.country,
         prospects: p._count.prospects,
         clients: p.attributions.length,
         commissions: {

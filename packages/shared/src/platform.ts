@@ -350,6 +350,8 @@ export interface CommercialDashboard {
   pendingActivations: number;
   /** Demandes de démonstration : nouvelles (à traiter) et reçues sur la période. */
   demoRequests: { new: number; received: number };
+  /** Sprint S3 : candidatures Ocall Partner à examiner. */
+  partnerApplicationsPending: number;
   /** Facturé = factures émises (non annulées) sur la période. */
   invoiced: number;
   /** MRR contractuel THÉORIQUE : tarifs acceptés des abonnements actifs — pas un encaissement. */

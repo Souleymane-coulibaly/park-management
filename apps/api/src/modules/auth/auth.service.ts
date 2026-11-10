@@ -15,6 +15,7 @@ import { PasswordService } from '../../common/security/password.service';
 import { PortalAccounts } from '../../common/security/portal-accounts';
 import { SessionService } from '../../common/security/session.service';
 import { generateToken, hashToken } from '../../common/security/tokens';
+import { PARK_PRODUCT_CODE } from '@ocall/shared';
 import { OrganizationProvisioningService } from '../organizations/organization-provisioning.service';
 import type {
   ChangePasswordDto,
@@ -61,6 +62,28 @@ export class AuthService {
           mustChangePassword: false,
         },
       });
+      // Lien parrainé (Sprint S3) : attribution Ocall Park « à confirmer » au partenaire ACTIF du code.
+      // Aucun droit pour le partenaire avant la confirmation d'Ocall ; un code inconnu est ignoré.
+      const partner = dto.ref
+        ? await tx.partner.findFirst({
+            where: { code: dto.ref, status: 'ACTIVE' },
+            select: { id: true, user: { select: { email: true } } },
+          })
+        : null;
+      if (partner && partner.user.email !== dto.email) {
+        const park = await tx.saasProduct.findUniqueOrThrow({
+          where: { code: PARK_PRODUCT_CODE },
+          select: { id: true },
+        });
+        await tx.attribution.create({
+          data: {
+            organizationId: created.organizationId,
+            partnerId: partner.id,
+            productId: park.id,
+            source: 'REFERRAL',
+          },
+        });
+      }
       await this.audit.record(
         {
           organizationId: created.organizationId,
@@ -68,7 +91,7 @@ export class AuthService {
           action: 'organization.created',
           targetType: 'Organization',
           targetId: created.organizationId,
-          metadata: { businessType: dto.businessType, via: 'signup' },
+          metadata: { businessType: dto.businessType, via: 'signup', referral: !!partner },
           ipAddress: meta.ipAddress,
         },
         tx,
@@ -112,10 +135,13 @@ export class AuthService {
           where: { userId: user.id },
           select: { status: true },
         });
-    if (partner?.status === 'SUSPENDED') {
+    if (partner?.status === 'SUSPENDED' || partner?.status === 'TERMINATED') {
       throw new ForbiddenException({
-        code: 'PARTNER_SUSPENDED',
-        message: 'Ce compte partenaire est suspendu.',
+        code: partner.status === 'SUSPENDED' ? 'PARTNER_SUSPENDED' : 'PARTNER_TERMINATED',
+        message:
+          partner.status === 'SUSPENDED'
+            ? 'Ce compte partenaire est suspendu.'
+            : 'Ce partenariat est résilié.',
       });
     }
     if (!user.platformRole && !partner) {

@@ -57,7 +57,9 @@ export class SessionService {
       include: {
         user: {
           include: {
-            partner: { select: { id: true, code: true, companyName: true, status: true } },
+            partner: {
+              select: { id: true, code: true, companyName: true, status: true, type: true },
+            },
           },
         },
         membership: { include: { organization: true } },
@@ -112,12 +114,13 @@ export class SessionService {
         verified: session.mfaVerifiedAt !== null,
       },
       partner:
-        partner && partner.status !== 'SUSPENDED'
+        partner && partner.status !== 'SUSPENDED' && partner.status !== 'TERMINATED'
           ? {
               id: partner.id,
               code: partner.code,
               companyName: partner.companyName,
               status: partner.status,
+              type: partner.type,
             }
           : null,
       portal,

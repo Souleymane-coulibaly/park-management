@@ -88,6 +88,8 @@ const ICONS: Record<string, LucideIcon> = {
   'partner-commissions': Percent,
   'partner-cash': Banknote,
   'partner-products': Package,
+  'partner-profile': UserCog,
+  'platform-partner-applications': UserPlus,
   'platform-stats': BarChart3,
   'platform-domains': Globe,
   'platform-products': Package,

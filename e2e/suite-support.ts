@@ -25,7 +25,11 @@ const argon2 = apiRequire('argon2') as {
  * puis enrôlement de la double authentification par l'API, comme un compte réel. Retourne une page
  * connectée, session vérifiée.
  */
-export async function superAdminPage(browser: Browser, label: string): Promise<Page> {
+export async function superAdminPage(
+  browser: Browser,
+  label: string,
+  role: 'BILLING_MANAGER' | 'PLATFORM_ADMIN' | 'PLATFORM_OWNER' = 'BILLING_MANAGER',
+): Promise<Page> {
   const email = `${label}.${Date.now()}${E2E_INTERNAL_DOMAIN}`;
   const db = new PrismaClient({ datasourceUrl: testDb.databaseUrl });
   try {
@@ -35,7 +39,7 @@ export async function superAdminPage(browser: Browser, label: string): Promise<P
         loginId: email,
         firstName: 'Ocall',
         lastName: 'Facturation',
-        platformRole: 'BILLING_MANAGER',
+        platformRole: role,
         mustChangePassword: false,
         passwordHash: await argon2.hash(PASSWORD, { type: 2 }),
       },
@@ -83,4 +87,28 @@ export async function activateParkSubscription(
   } finally {
     await db.$disconnect();
   }
+}
+
+/** Accès direct à la base de TEST (préparation et simulations datées, jamais en exploitation). */
+export async function withTestDb<T>(fn: (db: PrismaClient) => Promise<T>): Promise<T> {
+  const db = new PrismaClient({ datasourceUrl: testDb.databaseUrl });
+  try {
+    return await fn(db);
+  } finally {
+    await db.$disconnect();
+  }
+}
+
+/** Connexion d'un compte (partenaire, interne) dans une page, avec enrôlement TOTP si nécessaire. */
+export async function loginWithMfa(page: Page, identifier: string): Promise<void> {
+  await page.goto('/connexion');
+  const call = apiCaller(page);
+  const login = await call('/auth/login', 'POST', { identifier, password: PASSWORD });
+  expect(login.status, JSON.stringify(login.body)).toBe(200);
+  const setup = await call<{ secret: string }>('/auth/mfa/setup', 'POST');
+  expect(setup.status, JSON.stringify(setup.body)).toBe(200);
+  const enable = await call('/auth/mfa/enable', 'POST', {
+    code: totpCode(setup.body.secret, currentStep()),
+  });
+  expect(enable.status, JSON.stringify(enable.body)).toBe(200);
 }

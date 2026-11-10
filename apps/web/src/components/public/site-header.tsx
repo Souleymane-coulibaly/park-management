@@ -17,6 +17,7 @@ const LINKS = [
   { href: '/#ia', label: 'IA Ocall' },
   { href: '/a-propos', label: 'À propos' },
   { href: '/contact', label: 'Contact' },
+  { href: '/devenir-partenaire', label: 'Devenir partenaire' },
 ];
 
 /** En-tête du site commercial Ocall Suite (distinct des sites vitrines des clients). */

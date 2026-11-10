@@ -397,7 +397,11 @@ describe('Socle commercial Ocall Suite S1 (intégration)', () => {
       const att = (
         await owner.agent
           .post(api('/platform/attributions'))
-          .send({ organizationId: legacy.organizationId, partnerId: partner.partnerId })
+          .send({
+            organizationId: legacy.organizationId,
+            partnerId: partner.partnerId,
+            productCode: 'OCALL_RESTAURANT',
+          })
           .expect(201)
       ).body as { id: string };
       await owner.agent.post(api(`/platform/attributions/${att.id}/confirm`)).expect(200);

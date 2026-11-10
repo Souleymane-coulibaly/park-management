@@ -8,14 +8,16 @@ export const PARTNER_STATUS_LABELS = {
   PENDING_VERIFICATION: 'À vérifier',
   ACTIVE: 'Actif',
   SUSPENDED: 'Suspendu',
+  TERMINATED: 'Résilié',
 } as const;
 export type PartnerStatus = keyof typeof PARTNER_STATUS_LABELS;
 
 export const PROSPECT_STATUS_LABELS = {
   NEW: 'Nouveau',
   CONTACTED: 'Contacté',
-  DEMO_REQUESTED: 'Démo demandée',
+  DEMO_REQUESTED: 'Démonstration',
   QUALIFIED: 'Qualifié',
+  PROPOSAL: 'Proposition',
   WON: 'Gagné',
   LOST: 'Perdu',
 } as const;
@@ -26,8 +28,115 @@ export const PARTNER_SETTABLE_PROSPECT_STATUSES = [
   'CONTACTED',
   'DEMO_REQUESTED',
   'QUALIFIED',
+  'PROPOSAL',
   'LOST',
 ] as const;
+
+/** Ordre du pipeline commercial (Sprint S3). */
+export const PROSPECT_PIPELINE = [
+  'NEW',
+  'CONTACTED',
+  'QUALIFIED',
+  'DEMO_REQUESTED',
+  'PROPOSAL',
+  'WON',
+  'LOST',
+] as const;
+
+// ─── Sprint S3 : Ocall Partner ───
+
+export const PARTNER_TYPES = ['REFERRER', 'RESELLER'] as const;
+export type PartnerType = (typeof PARTNER_TYPES)[number];
+export const PARTNER_TYPE_LABELS: Record<PartnerType, string> = {
+  REFERRER: 'Apporteur d’affaires',
+  RESELLER: 'Revendeur agréé',
+};
+
+/**
+ * Capacités supplémentaires du revendeur : préparer l'activation ou le renouvellement d'un client qui
+ * lui est attribué, consulter ses contrats. Toujours vérifiées côté serveur.
+ */
+export const RESELLER_ONLY_CAPABILITIES = ['subscription.requests', 'contracts.read'] as const;
+export function partnerCan(
+  type: PartnerType,
+  capability: (typeof RESELLER_ONLY_CAPABILITIES)[number],
+): boolean {
+  return type === 'RESELLER' && RESELLER_ONLY_CAPABILITIES.includes(capability);
+}
+
+export const PARTNER_APPLICATION_STATUS_LABELS = {
+  PENDING: 'À examiner',
+  APPROVED: 'Approuvée',
+  REJECTED: 'Refusée',
+} as const;
+export type PartnerApplicationStatus = keyof typeof PARTNER_APPLICATION_STATUS_LABELS;
+
+export const PAYOUT_REQUEST_STATUS_LABELS = {
+  PENDING: 'En attente',
+  PROCESSED: 'Réglée',
+  REJECTED: 'Refusée',
+  CANCELLED: 'Annulée',
+} as const;
+
+/** Pays d'activité proposés aux candidats (indicatif téléphonique pré-rempli). */
+export const PARTNER_COUNTRIES: readonly { code: string; name: string; dial: string }[] = [
+  { code: 'ML', name: 'Mali', dial: '+223' },
+  { code: 'SN', name: 'Sénégal', dial: '+221' },
+  { code: 'CI', name: 'Côte d’Ivoire', dial: '+225' },
+  { code: 'BF', name: 'Burkina Faso', dial: '+226' },
+  { code: 'NE', name: 'Niger', dial: '+227' },
+  { code: 'GN', name: 'Guinée', dial: '+224' },
+  { code: 'TG', name: 'Togo', dial: '+228' },
+  { code: 'BJ', name: 'Bénin', dial: '+229' },
+  { code: 'MR', name: 'Mauritanie', dial: '+222' },
+  { code: 'CM', name: 'Cameroun', dial: '+237' },
+  { code: 'TD', name: 'Tchad', dial: '+235' },
+  { code: 'GA', name: 'Gabon', dial: '+241' },
+  { code: 'CG', name: 'Congo', dial: '+242' },
+  { code: 'CD', name: 'RD Congo', dial: '+243' },
+];
+
+/** Conservation des candidatures non retenues (mois), puis anonymisation ; configurable côté API. */
+export const PARTNER_APPLICATION_RETENTION_MONTHS = 24;
+/** Validité d'une invitation à créer son compte partenaire. */
+export const PARTNER_INVITATION_TTL_DAYS = 7;
+/** Délai minimal de remplissage du formulaire public (anti-robot). */
+export const PARTNER_FORM_MIN_FILL_MS = 3_000;
+
+/**
+ * Barèmes PROPOSÉS (non validés) : servent seulement à pré-remplir une règle de commission, qui reste
+ * créée inactive et ne s'applique qu'après validation explicite par Ocall. Jamais utilisés pour calculer.
+ */
+export const PROPOSED_COMMISSION_PRESETS: Record<
+  PartnerType,
+  { name: string; setupRateBps: number; monthlyRateBps: number; monthlyWindowMonths: number | null }
+> = {
+  REFERRER: {
+    name: 'Apporteur — barème proposé',
+    setupRateBps: 1000,
+    monthlyRateBps: 500,
+    // Décision client : mensualités commissionnées jusqu'à la fin de vie du contrat client.
+    monthlyWindowMonths: null,
+  },
+  RESELLER: {
+    name: 'Revendeur — barème proposé',
+    setupRateBps: 1500,
+    monthlyRateBps: 1000,
+    monthlyWindowMonths: null,
+  },
+};
+
+/**
+ * Date de règlement d'une commission : fin du mois suivant celui de l'encaissement (encaissement de
+ * novembre → règlement fin décembre). Renvoie le dernier jour de ce mois, 00:00 UTC.
+ */
+export function commissionPayableFrom(paidAt: Date): Date {
+  return new Date(Date.UTC(paidAt.getUTCFullYear(), paidAt.getUTCMonth() + 2, 0));
+}
+
+/** Une commission entre dans le solde payable à sa date de règlement. */
+export const isCommissionPayable = (payableFrom: Date | null, now: Date = new Date()) =>
+  payableFrom !== null && payableFrom.getTime() <= now.getTime();
 
 export const ATTRIBUTION_STATUS_LABELS = {
   PENDING: 'À confirmer',
@@ -147,7 +256,8 @@ export function addMonthsUtc(date: Date, months: number): Date {
  */
 export function computeCommissions(input: {
   allocation: { setup: number; monthly: number };
-  rule: { setupRateBps: number; monthlyRateBps: number; monthlyWindowMonths: number };
+  /** monthlyWindowMonths null : mensualités commissionnées tant que l'attribution est confirmée. */
+  rule: { setupRateBps: number; monthlyRateBps: number; monthlyWindowMonths: number | null };
   /** Date de première activation de l'abonnement (ou de l'encaissement si pas encore activé). */
   windowStart: Date;
   paidAt: Date;
@@ -163,8 +273,10 @@ export function computeCommissions(input: {
       amount: Math.floor((allocation.setup * rule.setupRateBps) / 10_000),
     });
   }
-  const windowEnd = addMonthsUtc(input.windowStart, rule.monthlyWindowMonths);
-  if (allocation.monthly > 0 && rule.monthlyRateBps > 0 && input.paidAt < windowEnd) {
+  const inWindow =
+    rule.monthlyWindowMonths === null ||
+    input.paidAt < addMonthsUtc(input.windowStart, rule.monthlyWindowMonths);
+  if (allocation.monthly > 0 && rule.monthlyRateBps > 0 && inWindow) {
     out.push({
       kind: 'MONTHLY',
       baseAmount: allocation.monthly,

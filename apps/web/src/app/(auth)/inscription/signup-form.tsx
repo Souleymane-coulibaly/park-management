@@ -20,6 +20,10 @@ export function SignupForm() {
   const router = useRouter();
   const params = useSearchParams();
   const initialType = BUSINESS_TYPES.find((t) => t === params.get('metier')) ?? 'PARK';
+  // Lien de recommandation d'un partenaire Ocall (Sprint S3) : code transmis tel quel à l'inscription,
+  // qui crée une attribution à confirmer par Ocall ; il ne donne aucun droit sur l'organisation.
+  const rawRef = params.get('ref')?.trim().toUpperCase() ?? '';
+  const ref = /^[A-Z0-9]{4,16}$/.test(rawRef) ? rawRef : null;
   const [form, setForm] = useState({
     businessType: initialType as BusinessType,
     organizationName: '',
@@ -41,7 +45,7 @@ export function SignupForm() {
     setLoading(true);
     setError(null);
     try {
-      await api('/auth/signup', { method: 'POST', body: form });
+      await api('/auth/signup', { method: 'POST', body: ref ? { ...form, ref } : form });
       router.replace('/app');
       router.refresh();
     } catch (e) {
@@ -58,6 +62,11 @@ export function SignupForm() {
       <p className="mt-2 text-muted">
         Vous serez propriétaire du compte et pourrez ensuite inviter votre équipe.
       </p>
+      {ref && (
+        <p className="mt-2 text-sm text-muted" data-testid="signup-ref">
+          Recommandé par un partenaire Ocall (code {ref}).
+        </p>
+      )}
       <form onSubmit={onSubmit} className="mt-8 space-y-6" noValidate>
         <ApiErrorAlert error={error} />
 

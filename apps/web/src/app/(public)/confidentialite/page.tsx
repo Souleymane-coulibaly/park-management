@@ -29,6 +29,18 @@ export default function ConfidentialitePage() {
         </p>
       </section>
       <section>
+        <h2>Candidatures Ocall Partner</h2>
+        <p>
+          Les informations d’une candidature partenaire (identité, entreprise, coordonnées, pays et
+          ville, expérience, secteurs ciblés, motivation) servent uniquement à son examen par Ocall.
+          Aucune pièce d’identité n’est demandée. Une candidature non retenue est conservée 24 mois
+          au plus, puis anonymisée ; une candidature retenue est conservée avec la fiche du
+          partenaire pendant la relation commerciale. Les e-mails liés à la candidature et au
+          partenariat (accusé de réception, invitation, décision, règlements) sont envoyés par notre
+          prestataire d’envoi d’e-mails Resend, qui ne les utilise que pour les acheminer.
+        </p>
+      </section>
+      <section>
         <h2>Clients des solutions Ocall</h2>
         <p>
           Les données saisies par une entreprise cliente dans son application restent les siennes :

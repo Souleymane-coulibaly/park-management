@@ -27,6 +27,8 @@ export interface AuthContext {
     code: string;
     companyName: string;
     status: 'PENDING_VERIFICATION' | 'ACTIVE';
+    /** Sprint S3 : apporteur d'affaires ou revendeur agréé. */
+    type: 'REFERRER' | 'RESELLER';
   } | null;
   /**
    * Portail externe (Sprint 6 : portail parents d'Ocall School) : compte sans adhésion, déclaré actif par
