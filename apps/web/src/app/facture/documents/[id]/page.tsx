@@ -21,6 +21,11 @@ import {
 } from '@ocall/shared';
 import type { FactureItemView } from '../../catalogue/page';
 import { DocumentStatusBadge } from '@/components/facture/document-status-badge';
+import {
+  InvoiceBilling,
+  type InvoiceBillingView,
+  type InvoicePayment,
+} from '@/components/facture/invoice-billing';
 import { FacturePage } from '@/components/facture/facture-page';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
@@ -56,6 +61,17 @@ interface DocumentView {
   terms: string | null;
   vatExemptionReason: string | null;
   validityDays: number | null;
+  paymentTermsDays: number | null;
+  dueDate: string | null;
+  amountPaid: number;
+  amountCredited: number;
+  balance: number | null;
+  overdue: boolean;
+  reminderCount: number;
+  lastReminderAt: string | null;
+  payments: InvoicePayment[];
+  creditNotes: InvoiceBillingView['creditNotes'];
+  creditedInvoice: { id: string; number: string | null } | null;
   totalHt: number;
   totalVat: number;
   totalTtc: number;
@@ -81,19 +97,34 @@ const toError = (e: unknown) =>
   e instanceof ApiError ? e : new ApiError(0, 'UNKNOWN', 'Une erreur est survenue.');
 const dateFr = (iso: string) => new Date(iso).toLocaleDateString('fr-FR', { timeZone: 'UTC' });
 
-/** Un document : édition du brouillon, puis émission, envoi, conversion, annulation, PDF. */
+/**
+ * Un document : édition du brouillon, puis émission, envoi, conversion, annulation, PDF ; pour une
+ * facture émise, encaissements, avoirs et relance.
+ */
 export default function FactureDocumentPage() {
   const { id } = useParams<{ id: string }>();
   return (
     <FacturePage title="Document">
       {({ canWrite }) => (
-        <DocumentScreen id={id} canManage={canWrite('facture.documents.manage')} />
+        <DocumentScreen
+          id={id}
+          canManage={canWrite('facture.documents.manage')}
+          canBill={canWrite('facture.billing.manage')}
+        />
       )}
     </FacturePage>
   );
 }
 
-function DocumentScreen({ id, canManage }: { id: string; canManage: boolean }) {
+function DocumentScreen({
+  id,
+  canManage,
+  canBill,
+}: {
+  id: string;
+  canManage: boolean;
+  canBill: boolean;
+}) {
   const document = useApi<DocumentView>(`/facture/documents/${id}`);
   if (document.state === 'loading') return <LoadingState />;
   if (document.state === 'error') {
@@ -118,8 +149,20 @@ function DocumentScreen({ id, canManage }: { id: string; canManage: boolean }) {
           {doc.number ? 'PDF' : 'Aperçu PDF'}
         </a>
       </div>
-      {(doc.source || doc.derived.length > 0) && (
+      {(doc.source || doc.derived.length > 0 || doc.creditedInvoice) && (
         <p className="text-sm text-muted">
+          {doc.creditedInvoice && (
+            <>
+              Avoir sur la{' '}
+              <Link
+                href={`/facture/documents/${doc.creditedInvoice.id}`}
+                className="text-forest underline"
+              >
+                facture {doc.creditedInvoice.number}
+              </Link>
+              .{' '}
+            </>
+          )}
           {doc.source && (
             <>
               Issu de{' '}
@@ -140,10 +183,10 @@ function DocumentScreen({ id, canManage }: { id: string; canManage: boolean }) {
           ))}
         </p>
       )}
-      {doc.status === 'DRAFT' && canManage ? (
+      {doc.status === 'DRAFT' && canManage && (doc.type !== 'CREDIT_NOTE' || canBill) ? (
         <DraftEditor doc={doc} onSaved={document.reload} />
       ) : (
-        <IssuedView doc={doc} canManage={canManage} onChanged={document.reload} />
+        <IssuedView doc={doc} canManage={canManage} canBill={canBill} onChanged={document.reload} />
       )}
     </>
   );
@@ -160,6 +203,7 @@ function DraftEditor({ doc, onSaved }: { doc: DocumentView; onSaved: () => void 
     subject: doc.subject ?? '',
     clientReference: doc.clientReference ?? '',
     validityDays: doc.validityDays,
+    paymentTermsDays: doc.paymentTermsDays,
     terms: doc.terms ?? '',
     notes: doc.notes ?? '',
     vatExemptionReason: doc.vatExemptionReason ?? '',
@@ -235,6 +279,7 @@ function DraftEditor({ doc, onSaved }: { doc: DocumentView; onSaved: () => void 
     ...(doc.type === 'QUOTE' || doc.type === 'PRO_FORMA'
       ? { validityDays: form.validityDays }
       : {}),
+    ...(doc.type === 'INVOICE' ? { paymentTermsDays: form.paymentTermsDays } : {}),
     lines: lines.map((l) => ({
       itemId: l.itemId,
       reference: l.reference ?? '',
@@ -301,6 +346,7 @@ function DraftEditor({ doc, onSaved }: { doc: DocumentView; onSaved: () => void 
         <CardBody className="grid gap-4 sm:grid-cols-2">
           <SelectField
             label="Client"
+            disabled={doc.type === 'CREDIT_NOTE'}
             value={form.clientId}
             onChange={(e) => setForm({ ...form, clientId: e.target.value })}
             options={(clients.state === 'success'
@@ -310,6 +356,21 @@ function DraftEditor({ doc, onSaved }: { doc: DocumentView; onSaved: () => void 
           />
           <InputField label="Titre du document (objet)" maxLength={200} {...field('subject')} />
           <InputField label="Référence du client" maxLength={80} {...field('clientReference')} />
+          {doc.type === 'INVOICE' && (
+            <InputField
+              label="Délai de paiement (jours, 0 = à réception)"
+              type="number"
+              min={0}
+              max={365}
+              value={String(form.paymentTermsDays ?? '')}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  paymentTermsDays: e.target.value === '' ? null : Number(e.target.value),
+                })
+              }
+            />
+          )}
           {(doc.type === 'QUOTE' || doc.type === 'PRO_FORMA') && (
             <InputField
               label="Validité (jours)"
@@ -497,19 +558,24 @@ function DraftEditor({ doc, onSaved }: { doc: DocumentView; onSaved: () => void 
         <Button onClick={() => void save()} loading={busy === 'save'} data-testid="facture-save">
           Enregistrer le brouillon
         </Button>
-        {issuable ? (
+        {issuable && (
           <Button
             variant="secondary"
-            onClick={() => void issue()}
+            onClick={() => {
+              // Facture et avoir : définitifs une fois émis (correction par avoir seulement).
+              const final =
+                doc.type === 'INVOICE' || doc.type === 'CREDIT_NOTE'
+                  ? window.confirm(
+                      `Émettre ${doc.type === 'INVOICE' ? 'cette facture' : 'cet avoir'} ? Une fois émis, le document est définitif : il ne se modifie ni ne s’annule plus.`,
+                    )
+                  : true;
+              if (final) void issue();
+            }}
             loading={busy === 'issue'}
             data-testid="facture-issue"
           >
             Émettre (numéro définitif)
           </Button>
-        ) : (
-          <span className="self-center text-sm text-muted">
-            L’émission des factures arrive avec le module de facturation.
-          </span>
         )}
         <Button variant="secondary" onClick={() => void remove()} loading={busy === 'remove'}>
           Supprimer
@@ -524,10 +590,12 @@ function DraftEditor({ doc, onSaved }: { doc: DocumentView; onSaved: () => void 
 function IssuedView({
   doc,
   canManage,
+  canBill,
   onChanged,
 }: {
   doc: DocumentView;
   canManage: boolean;
+  canBill: boolean;
   onChanged: () => void;
 }) {
   const router = useRouter();
@@ -595,6 +663,14 @@ function IssuedView({
           )}
         </CardBody>
       </Card>
+      {doc.type === 'INVOICE' && doc.status !== 'DRAFT' && (
+        <InvoiceBilling
+          invoice={doc as InvoiceBillingView}
+          canBill={canBill}
+          canManage={canManage}
+          onChanged={onChanged}
+        />
+      )}
       <Card>
         <ul className="divide-y divide-line/70 text-sm">
           {doc.lines.map((l, i) => (
@@ -612,6 +688,7 @@ function IssuedView({
         </ul>
       </Card>
       <Totals
+        label={doc.type === 'CREDIT_NOTE' ? 'Total de l’avoir' : undefined}
         totalHt={doc.totalHt}
         totalDiscount={0}
         vat={doc.vatBreakdown}
@@ -699,18 +776,20 @@ function IssuedView({
                 Convertir en {FACTURE_DOCUMENT_TYPE_LABELS[target].toLowerCase()}
               </Button>
             ))}
-            <Button
-              variant="secondary"
-              loading={busy === 'duplicate'}
-              onClick={() =>
-                void run('duplicate', async () => {
-                  const copy = await post('duplicate');
-                  router.push(`/facture/documents/${copy.id}`);
-                })
-              }
-            >
-              Dupliquer
-            </Button>
+            {doc.type !== 'CREDIT_NOTE' && (
+              <Button
+                variant="secondary"
+                loading={busy === 'duplicate'}
+                onClick={() =>
+                  void run('duplicate', async () => {
+                    const copy = await post('duplicate');
+                    router.push(`/facture/documents/${copy.id}`);
+                  })
+                }
+              >
+                Dupliquer
+              </Button>
+            )}
             {canCancelFactureDocument(doc) && (
               <Button
                 variant="secondary"
@@ -737,11 +816,13 @@ function IssuedView({
 }
 
 function Totals({
+  label = 'Net à payer',
   totalHt,
   totalDiscount,
   vat,
   totalTtc,
 }: {
+  label?: string;
   totalHt: number;
   totalDiscount: number;
   vat: FactureVatBucket[];
@@ -768,7 +849,7 @@ function Totals({
             </div>
           ))}
           <div className="flex justify-between border-t border-line pt-2 text-base font-semibold">
-            <dt>Net à payer</dt>
+            <dt>{label}</dt>
             <dd data-testid="facture-total-ttc">{formatXof(totalTtc)}</dd>
           </div>
         </dl>

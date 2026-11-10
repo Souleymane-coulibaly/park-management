@@ -14,7 +14,7 @@ import {
   type RestaurantHourly,
   type AnalyticsOverview,
 } from '@ocall/shared';
-import type { CsvValue } from './csv';
+import type { CsvValue } from '../../common/csv';
 
 /**
  * Rapports exportables. Chacun est construit à partir de la MÊME réponse que l'écran

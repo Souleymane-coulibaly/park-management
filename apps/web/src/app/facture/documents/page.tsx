@@ -6,6 +6,7 @@ import { type FormEvent, useState } from 'react';
 import {
   FACTURE_CREATABLE_TYPES,
   FACTURE_DOCUMENT_STATUSES,
+  FACTURE_DOCUMENT_TYPES,
   FACTURE_DOCUMENT_STATUS_LABELS,
   FACTURE_DOCUMENT_TYPE_LABELS,
   type FactureDocumentStatus,
@@ -30,16 +31,19 @@ interface DocumentRow {
   issueDate: string | null;
   subject: string | null;
   totalTtc: number;
+  /** Facture émise : reste à payer (négatif : trop-perçu) ; null sinon. */
+  balance: number | null;
+  overdue: boolean;
   createdAt: string;
   client: { id: string; name: string };
 }
 
-/** Devis, pro forma, bons de commande et factures : liste filtrée et création d'un brouillon. */
+/** Devis, pro forma, bons de commande, factures et avoirs : liste filtrée, création d'un brouillon. */
 export default function FactureDocumentsPage() {
   return (
     <FacturePage
       title="Documents"
-      description="Devis, factures pro forma, bons de commande et factures."
+      description="Devis, factures pro forma, bons de commande, factures et avoirs."
     >
       {({ canWrite, context }) =>
         context.permissions.includes('facture.documents.read') ? (
@@ -75,7 +79,7 @@ function Documents({ canManage }: { canManage: boolean }) {
             onChange={(e) => setType(e.target.value)}
             options={[
               { value: '', label: 'Tous' },
-              ...FACTURE_CREATABLE_TYPES.map((t) => ({
+              ...FACTURE_DOCUMENT_TYPES.map((t) => ({
                 value: t,
                 label: FACTURE_DOCUMENT_TYPE_LABELS[t],
               })),
@@ -107,7 +111,7 @@ function Documents({ canManage }: { canManage: boolean }) {
             </CardBody>
           ) : (
             <div data-testid="facture-document-list">
-              <Table head={['Document', 'Client', 'Montant TTC', 'Statut']}>
+              <Table head={['Document', 'Client', 'Montant TTC', 'Reste à payer', 'Statut']}>
                 {documents.data.map((d) => (
                   <tr key={d.id}>
                     <Td>
@@ -121,6 +125,16 @@ function Documents({ canManage }: { canManage: boolean }) {
                     </Td>
                     <Td>{d.client.name}</Td>
                     <Td>{formatXof(d.totalTtc)}</Td>
+                    <Td>
+                      {d.balance === null ? (
+                        <span className="text-muted">—</span>
+                      ) : (
+                        <span className={d.overdue ? 'font-semibold text-terracotta-dark' : ''}>
+                          {formatXof(d.balance)}
+                          {d.overdue && <span className="block text-xs">En retard</span>}
+                        </span>
+                      )}
+                    </Td>
                     <Td>
                       <DocumentStatusBadge status={d.status} />
                     </Td>

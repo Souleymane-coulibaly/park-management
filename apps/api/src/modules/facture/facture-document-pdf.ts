@@ -60,6 +60,10 @@ export interface FacturePdfDocument {
   /** Heure d'émission (affichée à l'heure du Mali, UTC). */
   issuedAt: Date | null;
   validUntil: Date | null;
+  /** Facture émise : échéance (date d'émission + délai de paiement). */
+  dueDate: Date | null;
+  /** Facture : délai de paiement en jours (imprimé sur le brouillon, avant l'échéance). */
+  paymentTermsDays: number | null;
   subject: string | null;
   clientReference: string | null;
   /** Vendeur : membre qui a émis (ou créé) le document, nom et identifiant de connexion. */
@@ -67,6 +71,7 @@ export interface FacturePdfDocument {
   notes: string | null;
   terms: string | null;
   vatExemptionReason: string | null;
+  /** Document d'origine (conversion) ou, pour un avoir, facture corrigée. */
   sourceNumber: string | null;
   grossHt: number;
   totalDiscount: number;
@@ -192,6 +197,18 @@ export function renderFactureDocumentPdf(
       ...(document.validUntil
         ? ([['Valable jusqu’au', dateFr(document.validUntil)]] as [string, string][])
         : []),
+      ...(document.dueDate
+        ? ([['Échéance', dateFr(document.dueDate)]] as [string, string][])
+        : document.paymentTermsDays !== null && document.type === 'INVOICE'
+          ? ([
+              [
+                'Paiement',
+                document.paymentTermsDays === 0
+                  ? 'À réception'
+                  : `À ${document.paymentTermsDays} jours`,
+              ],
+            ] as [string, string][])
+          : []),
       ...(document.clientReference
         ? ([['Votre référence', document.clientReference]] as [string, string][])
         : []),
@@ -202,7 +219,12 @@ export function renderFactureDocumentPdf(
           ][])
         : []),
       ...(document.sourceNumber
-        ? ([['Document d’origine', document.sourceNumber]] as [string, string][])
+        ? ([
+            [
+              document.type === 'CREDIT_NOTE' ? 'Facture corrigée' : 'Document d’origine',
+              document.sourceNumber,
+            ],
+          ] as [string, string][])
         : []),
     ];
     const metaRows = Math.ceil(meta.length / 2);
@@ -211,7 +233,16 @@ export function renderFactureDocumentPdf(
 
     doc.roundedRect(left, panelTop, half, panelHeight, 8).fill(soft);
     doc.font('sansBold').fontSize(7.5).fillColor(accent);
-    doc.text('DOIT', left + pad, panelTop + pad, { width: inner, characterSpacing: 1.2 });
+    // Un avoir est en faveur du client ; les autres documents lui sont adressés comme débiteur.
+    doc.text(
+      document.type === 'CREDIT_NOTE' ? 'EN FAVEUR DE' : 'DOIT',
+      left + pad,
+      panelTop + pad,
+      {
+        width: inner,
+        characterSpacing: 1.2,
+      },
+    );
     doc.font('sansBold').fontSize(11.5).fillColor(FACTURE_INK);
     doc.text(client.name, left + pad, doc.y + 3, { width: inner });
     if (client.description) {
@@ -340,7 +371,12 @@ export function renderFactureDocumentPdf(
     y += 4;
     doc.roundedRect(totalsLeft, y, totalsWidth, 32, 6).fill(accent);
     doc.font('sansBold').fontSize(8).fillColor('#ffffff');
-    doc.text('NET À PAYER', totalsLeft + 12, y + 11.5, { characterSpacing: 0.8, lineBreak: false });
+    doc.text(
+      document.type === 'CREDIT_NOTE' ? 'TOTAL DE L’AVOIR' : 'NET À PAYER',
+      totalsLeft + 12,
+      y + 11.5,
+      { characterSpacing: 0.8, lineBreak: false },
+    );
     doc.font('sansBold').fontSize(13).fillColor('#ffffff');
     doc.text(formatXof(document.totalTtc), totalsLeft, y + 9, {
       width: totalsWidth - 12,

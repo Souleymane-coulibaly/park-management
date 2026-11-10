@@ -29,8 +29,12 @@ export const FACTURE_PERMISSIONS = [
   'facture.catalog.manage',
   /** Consulter les devis, pro forma, bons de commande et factures, et leurs PDF. */
   'facture.documents.read',
-  /** Créer et modifier les brouillons, émettre, envoyer, convertir, annuler. */
+  /** Créer et modifier les brouillons, émettre, envoyer, convertir, annuler, relancer. */
   'facture.documents.manage',
+  /** Enregistrer et annuler les encaissements, créer et émettre les avoirs (F2). */
+  'facture.billing.manage',
+  /** Exporter le journal des ventes et des encaissements (F2). */
+  'facture.reports.read',
 ] as const;
 export type FacturePermission = (typeof FACTURE_PERMISSIONS)[number];
 
@@ -54,6 +58,8 @@ const ROLE_PERMISSIONS: Record<FactureRole, readonly FacturePermission[]> = {
     'facture.catalog.read',
     'facture.documents.read',
     'facture.documents.manage',
+    'facture.billing.manage',
+    'facture.reports.read',
   ],
   // Le technicien consulte clients et catalogue (interventions, F3), jamais les documents commerciaux.
   TECHNICIAN: ['facture.access', 'facture.clients.read', 'facture.catalog.read'],

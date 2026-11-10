@@ -2,6 +2,7 @@ import {
   BadGatewayException,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
@@ -13,13 +14,20 @@ import {
   FACTURE_ISSUABLE_TYPES,
   FACTURE_LIVE_STATUSES,
   FACTURE_MAX_DOCUMENT_TOTAL,
+  FACTURE_FINAL_TYPES,
   type FactureDocumentType,
   type FactureVatBucket,
   canAcceptFactureDocument,
   canCancelFactureDocument,
   canConvertFactureDocument,
+  canCreditFactureInvoice,
+  canRecordFacturePayment,
   computeFactureTotals,
+  factureBalance,
+  factureInvoiceStatus,
   formatXof,
+  hasFacturePermission,
+  isFactureOverdue,
 } from '@ocall/shared';
 import { AuditService } from '../../common/audit/audit.service';
 import { composeMail } from '../../common/mail/mail-compose';
@@ -53,15 +61,20 @@ const DAY = 86_400_000;
 const conflict = (code: string, message: string, extra: Record<string, unknown> = {}) =>
   new ConflictException({ code, message, ...extra });
 
+const dateFr = (d: Date) => d.toLocaleDateString('fr-FR', { timeZone: 'UTC' });
+
 /** Date du jour (UTC, heure du Mali) à minuit. */
-const todayUtc = (now: Date) =>
+export const todayUtc = (now: Date) =>
   new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 
+const DEFAULT_PAYMENT_TERMS_DAYS = 30;
+
 /**
- * Documents commerciaux d'Ocall Facture (F1) : devis, pro forma, bons de commande (commandes clients) et
- * factures en brouillon. Les montants sont toujours recalculés ici (jamais repris du navigateur). Un
- * brouillon n'a pas de numéro ; l'émission attribue le numéro définitif, sans trou, et fige le document
- * (contrôlé aussi par la base). L'émission d'une facture, avec avoirs et encaissements, arrive en F2.
+ * Documents commerciaux d'Ocall Facture (F1, F2) : devis, pro forma, bons de commande (commandes
+ * clients), factures et avoirs. Les montants sont toujours recalculés ici (jamais repris du navigateur).
+ * Un brouillon n'a pas de numéro ; l'émission attribue le numéro définitif, sans trou, et fige le
+ * document (contrôlé aussi par la base). Une facture émise ne s'annule jamais : elle se corrige par un
+ * avoir, dans la limite de son TTC. Encaissements, relances, exports : `FactureBillingService`.
  */
 @Injectable()
 export class FactureDocumentsService {
@@ -93,11 +106,23 @@ export class FactureDocumentsService {
         issueDate: true,
         subject: true,
         totalTtc: true,
+        dueDate: true,
+        amountPaid: true,
+        amountCredited: true,
         createdAt: true,
         client: { select: { id: true, name: true } },
       },
     });
-    return rows.map((r) => ({ ...r, totalTtc: Number(r.totalTtc) }));
+    const now = new Date();
+    return rows.map((r) => {
+      const amounts = invoiceAmounts(r);
+      return {
+        ...r,
+        ...amounts,
+        balance: r.type === 'INVOICE' && r.status !== 'DRAFT' ? factureBalance(amounts) : null,
+        overdue: isFactureOverdue({ ...r, ...amounts }, now),
+      };
+    });
   }
 
   async get(ctx: FactureContext, id: string) {
@@ -111,12 +136,28 @@ export class FactureDocumentsService {
           select: { id: true, type: true, number: true, status: true },
           orderBy: { createdAt: 'asc' },
         },
+        creditedInvoice: { select: { id: true, number: true } },
+        creditNotes: {
+          select: { id: true, number: true, status: true, totalTtc: true },
+          orderBy: { createdAt: 'asc' },
+        },
+        payments: { orderBy: [{ paidAt: 'asc' }, { createdAt: 'asc' }] },
       },
     });
     if (!doc) throw new NotFoundException(NOT_FOUND);
     const { sellerSnapshot: _s, clientSnapshot, client, ...rest } = doc;
+    const amounts = invoiceAmounts(doc);
+    const billed = doc.type === 'INVOICE' && doc.status !== 'DRAFT';
     return {
       ...rest,
+      ...amounts,
+      balance: billed ? factureBalance(amounts) : null,
+      overdue: isFactureOverdue({ ...doc, ...amounts }, new Date()),
+      creditNotes: doc.creditNotes.map((c) => ({ ...c, totalTtc: Number(c.totalTtc) })),
+      payments: doc.payments.map(({ organizationId: _o, invoiceId: _i, ...p }) => ({
+        ...p,
+        amount: Number(p.amount),
+      })),
       totalHt: Number(doc.totalHt),
       totalVat: Number(doc.totalVat),
       totalTtc: Number(doc.totalTtc),
@@ -150,6 +191,10 @@ export class FactureDocumentsService {
           validityDays: withValidity
             ? (dto.validityDays ?? settings?.quoteValidityDays ?? 30)
             : null,
+          paymentTermsDays:
+            dto.type === 'INVOICE'
+              ? (dto.paymentTermsDays ?? settings?.paymentTermsDays ?? DEFAULT_PAYMENT_TERMS_DAYS)
+              : null,
           terms: dto.terms !== undefined ? dto.terms : (settings?.defaultTerms ?? null),
         },
         select: { id: true },
@@ -168,7 +213,15 @@ export class FactureDocumentsService {
       if (doc.status !== 'DRAFT') {
         throw conflict('FACTURE_DOCUMENT_NOT_DRAFT', 'Un document émis ne se modifie plus.');
       }
-      await this.assertClient(tx, ctx.organizationId, dto.clientId);
+      this.assertBilling(ctx, doc.type);
+      if (doc.type === 'CREDIT_NOTE' && dto.clientId !== doc.clientId) {
+        throw conflict(
+          'FACTURE_CREDIT_NOTE_CLIENT',
+          'Un avoir concerne toujours le client de la facture corrigée.',
+        );
+      }
+      // Client d'un avoir : celui de la facture, même archivé depuis.
+      if (doc.type !== 'CREDIT_NOTE') await this.assertClient(tx, ctx.organizationId, dto.clientId);
       const withValidity = doc.type === 'QUOTE' || doc.type === 'PRO_FORMA';
       await tx.factureDocumentLine.deleteMany({
         where: { organizationId: ctx.organizationId, documentId: id },
@@ -180,6 +233,9 @@ export class FactureDocumentsService {
           ...(dto.terms !== undefined ? { terms: dto.terms } : {}),
           ...(withValidity && dto.validityDays !== undefined
             ? { validityDays: dto.validityDays }
+            : {}),
+          ...(doc.type === 'INVOICE' && dto.paymentTermsDays !== undefined
+            ? { paymentTermsDays: dto.paymentTermsDays ?? DEFAULT_PAYMENT_TERMS_DAYS }
             : {}),
         },
       });
@@ -196,9 +252,12 @@ export class FactureDocumentsService {
       if (doc.status !== 'DRAFT') {
         throw conflict(
           'FACTURE_DOCUMENT_NOT_DRAFT',
-          'Un document émis ne se supprime pas : annulez-le.',
+          FACTURE_FINAL_TYPES.includes(doc.type)
+            ? 'Un document émis ne se supprime pas : la facture se corrige par un avoir.'
+            : 'Un document émis ne se supprime pas : annulez-le.',
         );
       }
+      this.assertBilling(ctx, doc.type);
       await tx.factureDocument.delete({
         where: { organizationId_id: { organizationId: ctx.organizationId, id } },
       });
@@ -214,7 +273,12 @@ export class FactureDocumentsService {
     const copy = await this.db.$transaction(async (tx) => {
       await this.assertClient(tx, ctx.organizationId, source.clientId);
       const doc = await tx.factureDocument.create({
-        data: { ...this.copyFields(source), type: source.type, createdByUserId: ctx.userId },
+        data: {
+          ...this.copyFields(source),
+          type: source.type,
+          paymentTermsDays: source.paymentTermsDays,
+          createdByUserId: ctx.userId,
+        },
         select: { id: true },
       });
       await this.copyLines(tx, source, doc.id);
@@ -238,11 +302,9 @@ export class FactureDocumentsService {
         throw conflict('FACTURE_DOCUMENT_NOT_DRAFT', 'Ce document est déjà émis.');
       }
       if (!FACTURE_ISSUABLE_TYPES.includes(doc.type)) {
-        throw conflict(
-          'FACTURE_ISSUE_NOT_AVAILABLE',
-          'L’émission des factures arrive avec le module de facturation : la facture reste en brouillon.',
-        );
+        throw conflict('FACTURE_ISSUE_NOT_AVAILABLE', 'Ce document ne s’émet pas.');
       }
+      this.assertBilling(ctx, doc.type);
       if (doc.lines.length === 0) {
         throw conflict('FACTURE_DOCUMENT_EMPTY', 'Ajoutez au moins une ligne avant d’émettre.');
       }
@@ -263,6 +325,7 @@ export class FactureDocumentsService {
         where: { organizationId_id: { organizationId: ctx.organizationId, id: doc.clientId } },
       });
       const issueDate = todayUtc(now);
+      if (doc.type === 'CREDIT_NOTE') await this.applyCreditNote(tx, doc);
       const allocated = await allocateFactureNumber(tx, ctx.organizationId, doc.type, now);
       await tx.factureDocument.update({
         where: { organizationId_id: { organizationId: ctx.organizationId, id } },
@@ -275,6 +338,13 @@ export class FactureDocumentsService {
           validUntil: doc.validityDays
             ? new Date(issueDate.getTime() + doc.validityDays * DAY)
             : null,
+          ...(doc.type === 'INVOICE'
+            ? {
+                dueDate: new Date(
+                  issueDate.getTime() + (doc.paymentTermsDays ?? DEFAULT_PAYMENT_TERMS_DAYS) * DAY,
+                ),
+              }
+            : {}),
           issuedAt: now,
           issuedByUserId: ctx.userId,
           sellerSnapshot: {
@@ -324,9 +394,11 @@ export class FactureDocumentsService {
       if (!canCancelFactureDocument(doc)) {
         throw conflict(
           'FACTURE_DOCUMENT_STATUS',
-          doc.status === 'DRAFT'
-            ? 'Un brouillon se supprime, il ne s’annule pas.'
-            : 'Ce document est déjà annulé.',
+          FACTURE_FINAL_TYPES.includes(doc.type)
+            ? 'Une facture ou un avoir émis ne s’annule pas : la facture se corrige par un avoir.'
+            : doc.status === 'DRAFT'
+              ? 'Un brouillon se supprime, il ne s’annule pas.'
+              : 'Ce document est déjà annulé.',
         );
       }
       const derived = await tx.factureDocument.count({
@@ -382,7 +454,7 @@ export class FactureDocumentsService {
       await this.assertClient(tx, ctx.organizationId, source.clientId);
       const settings = await tx.factureSettings.findUnique({
         where: { organizationId: ctx.organizationId },
-        select: { quoteValidityDays: true },
+        select: { quoteValidityDays: true, paymentTermsDays: true },
       });
       const doc = await tx.factureDocument.create({
         data: {
@@ -390,6 +462,10 @@ export class FactureDocumentsService {
           type: target,
           sourceDocumentId: id,
           validityDays: target === 'PRO_FORMA' ? (settings?.quoteValidityDays ?? 30) : null,
+          paymentTermsDays:
+            target === 'INVOICE'
+              ? (settings?.paymentTermsDays ?? DEFAULT_PAYMENT_TERMS_DAYS)
+              : null,
           createdByUserId: ctx.userId,
         },
         select: { id: true },
@@ -409,6 +485,85 @@ export class FactureDocumentsService {
     return this.get(ctx, result.id);
   }
 
+  // ─── Avoirs ───
+
+  /**
+   * Avoir sur une facture émise : un brouillon reprend son client et ses lignes (à ajuster pour un avoir
+   * partiel). Un seul avoir en brouillon à la fois par facture (une seconde demande le renvoie). Le
+   * plafond (TTC de la facture moins les avoirs déjà émis) est contrôlé à l'émission de l'avoir.
+   */
+  async createCreditNote(ctx: FactureContext, invoiceId: string) {
+    this.assertBilling(ctx, 'CREDIT_NOTE');
+    const result = await this.db.$transaction(async (tx) => {
+      const invoice = await this.lock(tx, ctx.organizationId, invoiceId);
+      const draft = await tx.factureDocument.findFirst({
+        where: {
+          organizationId: ctx.organizationId,
+          creditedInvoiceId: invoiceId,
+          status: 'DRAFT',
+        },
+        select: { id: true },
+      });
+      if (draft) return { id: draft.id, created: false };
+      if (!canCreditFactureInvoice({ ...invoice, ...invoiceAmounts(invoice) })) {
+        throw conflict(
+          'FACTURE_CREDIT_NOT_ALLOWED',
+          invoice.type !== 'INVOICE' || invoice.status === 'DRAFT'
+            ? 'Un avoir se crée sur une facture émise.'
+            : 'Cette facture est déjà entièrement couverte par des avoirs.',
+        );
+      }
+      const doc = await tx.factureDocument.create({
+        data: {
+          ...this.copyFields(invoice),
+          type: 'CREDIT_NOTE',
+          creditedInvoiceId: invoiceId,
+          subject: `Avoir sur la facture ${invoice.number}`,
+          validityDays: null,
+          terms: null,
+          createdByUserId: ctx.userId,
+        },
+        select: { id: true },
+      });
+      await this.copyLines(tx, invoice, doc.id);
+      return { id: doc.id, created: true };
+    });
+    if (result.created) {
+      await this.record(ctx, 'facture.credit_note_created', result.id, { invoice: invoiceId });
+    }
+    return this.get(ctx, result.id);
+  }
+
+  /**
+   * Émission d'un avoir, dans la même transaction et sous verrou de la facture corrigée : montant
+   * positif, plafonné au TTC de la facture moins les avoirs déjà émis. La facture est créditée d'autant
+   * et son statut recalculé (« annulée par avoir » sans encaissement ; sinon trop-perçu éventuel).
+   */
+  private async applyCreditNote(tx: Tx, note: DocumentRow) {
+    const invoice = await this.lock(tx, note.organizationId, note.creditedInvoiceId!);
+    const amounts = invoiceAmounts(invoice);
+    const available = amounts.totalTtc - amounts.amountCredited;
+    const credit = Number(note.totalTtc);
+    if (credit <= 0) {
+      throw conflict('FACTURE_CREDIT_NOTE_EMPTY', 'Le montant de l’avoir doit être positif.');
+    }
+    if (credit > available) {
+      throw conflict(
+        'FACTURE_CREDIT_EXCEEDS_INVOICE',
+        `L’avoir dépasse le montant restant à créditer sur la facture (${formatXof(available)}).`,
+        { details: { available } },
+      );
+    }
+    const next = { ...amounts, amountCredited: amounts.amountCredited + credit };
+    await tx.factureDocument.update({
+      where: { organizationId_id: { organizationId: note.organizationId, id: invoice.id } },
+      data: {
+        amountCredited: BigInt(next.amountCredited),
+        status: factureInvoiceStatus({ ...next, sent: invoice.sentAt !== null }),
+      },
+    });
+  }
+
   // ─── PDF et envoi ───
 
   async pdf(ctx: FactureContext, id: string): Promise<{ body: Buffer; filename: string }> {
@@ -426,10 +581,14 @@ export class FactureDocumentsService {
               },
             })
             .then(identityOf),
-      doc.sourceDocumentId
+      // Document d'origine imprimé : la facture corrigée pour un avoir, sinon la conversion.
+      (doc.creditedInvoiceId ?? doc.sourceDocumentId)
         ? this.db.factureDocument.findUnique({
             where: {
-              organizationId_id: { organizationId: ctx.organizationId, id: doc.sourceDocumentId },
+              organizationId_id: {
+                organizationId: ctx.organizationId,
+                id: (doc.creditedInvoiceId ?? doc.sourceDocumentId)!,
+              },
             },
             select: { number: true },
           })
@@ -449,6 +608,8 @@ export class FactureDocumentsService {
         issueDate: doc.issueDate,
         issuedAt: doc.issuedAt,
         validUntil: doc.validUntil,
+        dueDate: doc.dueDate,
+        paymentTermsDays: doc.paymentTermsDays,
         subject: doc.subject,
         clientReference: doc.clientReference,
         salesperson,
@@ -484,48 +645,17 @@ export class FactureDocumentsService {
           : 'Un document refusé ou annulé ne s’envoie plus.',
       );
     }
-    const client = doc.clientSnapshot as unknown as FactureClientIdentity;
-    const seller = doc.sellerSnapshot as unknown as FactureSellerIdentity;
-    const to = dto.to ?? client.email;
-    if (!to) {
-      throw new BadRequestException({
-        code: 'FACTURE_RECIPIENT_REQUIRED',
-        message: 'Le client n’a pas d’e-mail : indiquez un destinataire.',
-      });
-    }
-    if (!this.mail.enabled) {
-      throw conflict('MAIL_DISABLED', 'L’envoi d’e-mails n’est pas activé sur cette plateforme.');
-    }
-    const { body, filename } = await this.pdf(ctx, id);
     const label = FACTURE_DOCUMENT_TYPE_LABELS[doc.type];
-    const content = composeMail(
-      { brand: seller.tradeName ?? seller.legalName, signature: seller.legalName },
-      `${label} ${doc.number} — ${seller.tradeName ?? seller.legalName}`,
-      [
-        `Bonjour${client.contactName ? ` ${client.contactName}` : ''},`,
-        ...(dto.message ? [dto.message] : []),
+    await this.deliver(ctx, doc, dto, {
+      subject: label,
+      tag: 'facture-document',
+      idempotencyKey: `facture-document/${id}/${doc.sentCount + 1}`,
+      paragraphs: [
         `Veuillez trouver ci-joint notre ${label.toLowerCase()} n° ${doc.number}${
           doc.subject ? ` (${doc.subject})` : ''
         }, d’un montant de ${formatXof(Number(doc.totalTtc))} TTC.`,
-        seller.email
-          ? `Pour toute question, répondez simplement à cet e-mail.`
-          : `Pour toute question, contactez-nous${seller.phone ? ` au ${seller.phone}` : ''}.`,
       ],
-    );
-    const sent = await this.mail.send({
-      to: [to],
-      ...content,
-      tag: 'facture-document',
-      idempotencyKey: `facture-document/${id}/${doc.sentCount + 1}`,
-      ...(seller.email ? { replyTo: seller.email } : {}),
-      attachments: [{ filename, content: body }],
     });
-    if (!sent) {
-      throw new BadGatewayException({
-        code: 'MAIL_NOT_SENT',
-        message: 'L’e-mail n’a pas pu être envoyé. Réessayez dans quelques instants.',
-      });
-    }
     await this.db.factureDocument.update({
       where: { organizationId_id: { organizationId: ctx.organizationId, id } },
       data: {
@@ -539,7 +669,105 @@ export class FactureDocumentsService {
     return this.get(ctx, id);
   }
 
+  /**
+   * Relance d'une facture émise qui reste à encaisser : e-mail rappelant le reste dû et l'échéance,
+   * facture en pièce jointe. Comptée seulement si le fournisseur accepte le message ; clé d'idempotence
+   * par rang de relance (contre le double clic).
+   */
+  async remind(ctx: FactureContext, id: string, dto: SendFactureDocumentDto, now = new Date()) {
+    const doc = await this.row(this.db, ctx.organizationId, id);
+    const amounts = invoiceAmounts(doc);
+    if (!canRecordFacturePayment({ ...doc, ...amounts })) {
+      throw conflict(
+        'FACTURE_REMINDER_NOT_ALLOWED',
+        'Seule une facture émise qui reste à encaisser se relance.',
+      );
+    }
+    const due = doc.dueDate!;
+    const late = due.getTime() < todayUtc(now).getTime();
+    const rank = doc.reminderCount + 1;
+    await this.deliver(ctx, doc, dto, {
+      subject: `Relance — facture`,
+      tag: 'facture-reminder',
+      idempotencyKey: `facture-document/${id}/reminder/${rank}`,
+      paragraphs: [
+        `Sauf erreur de notre part, notre facture n° ${doc.number} du ${dateFr(doc.issueDate!)}, ${
+          late ? `échue le ${dateFr(due)}` : `payable au plus tard le ${dateFr(due)}`
+        }, présente un reste à payer de ${formatXof(factureBalance(amounts))}.`,
+        `Nous vous remercions de bien vouloir procéder à son règlement. Si celui-ci est déjà parti, merci de ne pas tenir compte de ce message.`,
+      ],
+    });
+    await this.db.factureDocument.update({
+      where: { organizationId_id: { organizationId: ctx.organizationId, id } },
+      data: { reminderCount: { increment: 1 }, lastReminderAt: now },
+    });
+    await this.record(ctx, 'facture.invoice_reminded', id, { reminderRank: rank });
+    return this.get(ctx, id);
+  }
+
+  /**
+   * Envoi d'un document émis par e-mail, PDF en pièce jointe, réponse adressée à l'entreprise. Échoue
+   * (502) si le fournisseur refuse le message : rien n'est alors compté comme envoyé.
+   */
+  private async deliver(
+    ctx: FactureContext,
+    doc: DocumentRow,
+    dto: SendFactureDocumentDto,
+    mail: { subject: string; tag: string; idempotencyKey: string; paragraphs: string[] },
+  ) {
+    const client = doc.clientSnapshot as unknown as FactureClientIdentity;
+    const seller = doc.sellerSnapshot as unknown as FactureSellerIdentity;
+    const to = dto.to ?? client.email;
+    if (!to) {
+      throw new BadRequestException({
+        code: 'FACTURE_RECIPIENT_REQUIRED',
+        message: 'Le client n’a pas d’e-mail : indiquez un destinataire.',
+      });
+    }
+    if (!this.mail.enabled) {
+      throw conflict('MAIL_DISABLED', 'L’envoi d’e-mails n’est pas activé sur cette plateforme.');
+    }
+    const { body, filename } = await this.pdf(ctx, doc.id);
+    const brand = seller.tradeName ?? seller.legalName;
+    const content = composeMail(
+      { brand, signature: seller.legalName },
+      `${mail.subject} ${doc.number} — ${brand}`,
+      [
+        `Bonjour${client.contactName ? ` ${client.contactName}` : ''},`,
+        ...(dto.message ? [dto.message] : []),
+        ...mail.paragraphs,
+        seller.email
+          ? `Pour toute question, répondez simplement à cet e-mail.`
+          : `Pour toute question, contactez-nous${seller.phone ? ` au ${seller.phone}` : ''}.`,
+      ],
+    );
+    const sent = await this.mail.send({
+      to: [to],
+      ...content,
+      tag: mail.tag,
+      idempotencyKey: mail.idempotencyKey,
+      ...(seller.email ? { replyTo: seller.email } : {}),
+      attachments: [{ filename, content: body }],
+    });
+    if (!sent) {
+      throw new BadGatewayException({
+        code: 'MAIL_NOT_SENT',
+        message: 'L’e-mail n’a pas pu être envoyé. Réessayez dans quelques instants.',
+      });
+    }
+  }
+
   // ─── Outils internes ───
+
+  /** Avoirs : réservés aux rôles qui gèrent la facturation (gérant, comptable). */
+  private assertBilling(ctx: FactureContext, type: FactureDocumentType) {
+    if (type === 'CREDIT_NOTE' && !hasFacturePermission(ctx.role, 'facture.billing.manage')) {
+      throw new ForbiddenException({
+        code: 'FACTURE_FORBIDDEN',
+        message: 'Les avoirs sont réservés au gérant et au comptable.',
+      });
+    }
+  }
 
   private draftFields(dto: FactureDraftDto) {
     return {
@@ -647,7 +875,7 @@ export class FactureDocumentsService {
   }
 
   /** Verrouille le document (et le lit avec ses lignes) jusqu'à la fin de la transaction. */
-  private async lock(tx: Tx, organizationId: string, id: string): Promise<DocumentRow> {
+  async lock(tx: Tx, organizationId: string, id: string): Promise<DocumentRow> {
     const locked = await tx.$queryRaw<{ id: string }[]>`
       SELECT "id" FROM "FactureDocument"
       WHERE "organizationId" = ${organizationId}::uuid AND "id" = ${id}::uuid FOR UPDATE`;
@@ -683,7 +911,7 @@ export class FactureDocumentsService {
       : null;
   }
 
-  private record(
+  record(
     ctx: FactureContext,
     action: string,
     targetId: string,
@@ -698,6 +926,19 @@ export class FactureDocumentsService {
       ...(metadata ? { metadata } : {}),
     });
   }
+}
+
+/** Montants de facturation d'un document, en nombres (FCFA entiers, exacts). */
+export function invoiceAmounts(doc: {
+  totalTtc: bigint;
+  amountPaid: bigint;
+  amountCredited: bigint;
+}) {
+  return {
+    totalTtc: Number(doc.totalTtc),
+    amountPaid: Number(doc.amountPaid),
+    amountCredited: Number(doc.amountCredited),
+  };
 }
 
 function lineView(line: {

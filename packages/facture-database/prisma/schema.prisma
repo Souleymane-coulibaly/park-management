@@ -175,6 +175,22 @@ enum FactureDocumentStatus {
   ACCEPTED
   REFUSED
   CANCELLED
+  /// Facture : encaissée ou créditée en partie.
+  PARTIALLY_PAID
+  /// Facture : plus rien à payer, au moins un encaissement.
+  PAID
+  /// Facture : entièrement couverte par des avoirs, sans encaissement.
+  CREDITED
+}
+
+/// Moyen de paiement d'un encaissement.
+enum FacturePaymentMethod {
+  CASH
+  MOBILE_MONEY
+  BANK_TRANSFER
+  CHECK
+  CARD
+  OTHER
 }
 
 /// Document commercial : devis, pro forma, bon de commande (commande client), facture. Un brouillon n'a
@@ -219,13 +235,28 @@ model FactureDocument {
   createdByUserId    String                @db.Uuid
   issuedAt           DateTime?
   issuedByUserId     String?               @db.Uuid
+  /// Facture : délai de paiement (jours), proposé par les réglages, modifiable sur le brouillon.
+  paymentTermsDays   Int?
+  /// Facture : échéance, fixée à l'émission (date d'émission + délai), figée ensuite.
+  dueDate            DateTime?             @db.Date
+  /// Facture : encaissements en vigueur (somme tenue sous verrou de la facture).
+  amountPaid         BigInt                @default(0)
+  /// Facture : avoirs émis sur elle (TTC).
+  amountCredited     BigInt                @default(0)
+  reminderCount      Int                   @default(0)
+  lastReminderAt     DateTime?
+  /// Avoir : facture corrigée (plusieurs avoirs possibles par facture, jamais au-delà de son TTC).
+  creditedInvoiceId  String?               @db.Uuid
   createdAt          DateTime              @default(now())
   updatedAt          DateTime              @updatedAt
 
-  client  FactureClient         @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Restrict)
-  source  FactureDocument?      @relation("FactureDocumentSource", fields: [organizationId, sourceDocumentId], references: [organizationId, id], onDelete: Restrict)
-  derived FactureDocument[]     @relation("FactureDocumentSource")
-  lines   FactureDocumentLine[]
+  client          FactureClient         @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Restrict)
+  source          FactureDocument?      @relation("FactureDocumentSource", fields: [organizationId, sourceDocumentId], references: [organizationId, id], onDelete: Restrict)
+  derived         FactureDocument[]     @relation("FactureDocumentSource")
+  creditedInvoice FactureDocument?      @relation("FactureCreditNotes", fields: [organizationId, creditedInvoiceId], references: [organizationId, id], onDelete: Restrict)
+  creditNotes     FactureDocument[]     @relation("FactureCreditNotes")
+  lines           FactureDocumentLine[]
+  payments        FacturePayment[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, type, number])
@@ -233,6 +264,34 @@ model FactureDocument {
   @@unique([organizationId, sourceDocumentId, type])
   @@index([organizationId, type, status, createdAt])
   @@index([organizationId, clientId])
+  @@index([organizationId, creditedInvoiceId])
+  @@index([organizationId, type, dueDate])
+}
+
+/// Encaissement d'une facture (paiements partiels possibles). Jamais modifié ni supprimé : une erreur
+/// de saisie s'annule (motif conservé), contrôlé aussi par la base.
+model FacturePayment {
+  id                String               @id @default(uuid()) @db.Uuid
+  organizationId    String               @db.Uuid
+  invoiceId         String               @db.Uuid
+  amount            BigInt
+  method            FacturePaymentMethod
+  /// Date de l'encaissement (déclarée par l'utilisateur).
+  paidAt            DateTime             @db.Date
+  /// Référence du paiement (n° de chèque, de virement, de transaction mobile money).
+  reference         String?
+  note              String?
+  createdByUserId   String               @db.Uuid
+  createdAt         DateTime             @default(now())
+  cancelledAt       DateTime?
+  cancelledByUserId String?              @db.Uuid
+  cancelReason      String?
+
+  invoice FactureDocument @relation(fields: [organizationId, invoiceId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@index([organizationId, invoiceId])
+  @@index([organizationId, paidAt])
 }
 
 /// Ligne d'un document : copie du libellé, du prix et de la TVA (le catalogue peut changer ensuite).

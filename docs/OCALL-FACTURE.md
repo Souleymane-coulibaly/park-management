@@ -8,14 +8,14 @@ celles de Park et de School.
 Proposition d'architecture et décisions : `ocall-audits/proposition-architecture-ocall-facture-v1.md`
 (hors dépôt).
 
-| Sprint              | Contenu                                                              | État                |
-| ------------------- | -------------------------------------------------------------------- | ------------------- |
-| **F0 — Socle**      | Base, accès, rôles, identité légale, TVA, numérotation, logo, PDF    | Livré               |
-| **F1 — Commercial** | Clients, catalogue, devis, pro forma, bons de commande, PDF, e-mail  | Livré (ce document) |
-| F2 — Facturation    | Factures émises figées, avoirs, encaissements                        | À venir             |
-| F3 — Interventions  | Techniciens, planning, équipements, temps, pièces, photos, signature | À venir             |
-| F4 — Rendez-vous    | Notifications WhatsApp (fournisseur simulé en test)                  | À venir             |
-| F5 — Site vitrine   | Site public, formulaires de demande, domaines, SEO local             | À venir             |
+| Sprint               | Contenu                                                              | État                |
+| -------------------- | -------------------------------------------------------------------- | ------------------- |
+| **F0 — Socle**       | Base, accès, rôles, identité légale, TVA, numérotation, logo, PDF    | Livré               |
+| **F1 — Commercial**  | Clients, catalogue, devis, pro forma, bons de commande, PDF, e-mail  | Livré               |
+| **F2 — Facturation** | Factures émises figées, avoirs, encaissements, relances, exports     | Livré (ce document) |
+| F3 — Interventions   | Techniciens, planning, équipements, temps, pièces, photos, signature | À venir             |
+| F4 — Rendez-vous     | Notifications WhatsApp (fournisseur simulé en test)                  | À venir             |
+| F5 — Site vitrine    | Site public, formulaires de demande, domaines, SEO local             | À venir             |
 
 ## 1. Architecture
 
@@ -67,6 +67,9 @@ ne donne aucun droit Facture.
 | Gérer les clients                               | Oui    | Oui        | Oui       | Non        |
 | Gérer le catalogue                              | Oui    | Oui        | Non       | Non        |
 | Consulter et gérer les documents commerciaux    | Oui    | Oui        | Oui       | Non        |
+| Émettre et relancer les factures                | Oui    | Oui        | Oui       | Non        |
+| Encaissements et avoirs                         | Oui    | Non        | Oui       | Non        |
+| Exports comptables (journaux CSV)               | Oui    | Non        | Oui       | Non        |
 
 Désactiver un membre ferme aussi son compte Suite et ses sessions : Facture décide d'abord, Suite recopie
 l'état validé (même mécanisme que School).
@@ -124,7 +127,6 @@ brouillon n'a pas de numéro.
   entière (`purgeFactureOrganizations`, réglage local `ocall.facture_purge`), jamais utilisée par l'API.
 - **Conversions** : devis → pro forma, bon de commande ou facture ; pro forma → bon ou facture ; bon →
   facture. Idempotentes (une par origine et par type) ; convertir un devis vaut acceptation.
-- **Émission d'une facture** : au sprint F2 (facture figée, avoirs, encaissements).
 - **Envoi par e-mail** : PDF en pièce jointe, réponse adressée à l'entreprise ; statut « envoyé » seulement
   si le fournisseur accepte ; destinataire jamais journalisé.
 - **PDF** (charte validée le 10/11/2026, commune à tous les documents Facture) : filet et couleur d'accent,
@@ -133,7 +135,36 @@ brouillon n'a pas de numéro.
   net à payer, montant en lettres, exonération, conditions, cases « Bon pour accord » et « Le fournisseur »
   (cachet), pied numéroté avec logos et mentions. `facture-pdf.ts` (charte) et `facture-document-pdf.ts`.
 
-## 7. API (`/api/v1/facture`)
+## 7. Facturation (F2)
+
+- **Facture émise définitive** : numéro `FAC-AAAA-NNNNN`, échéance = date d'émission + délai de paiement
+  (réglages, modifiable sur le brouillon ; 0 = à réception). Jamais annulée ni supprimée : elle se
+  corrige par un **avoir**. La base le garantit aussi (déclencheur `FactureDocument_frozen` : ni
+  échéance, ni délai, ni facture corrigée modifiables ; ni annulation, acceptation ou refus d'une facture
+  ou d'un avoir).
+- **Encaissements** (`FacturePayment`) : partiels, montant au plus égal au reste à payer, date au plus tard
+  aujourd'hui, mode (espèces, mobile money, virement, chèque, carte, autre), référence. Saisis sous verrou
+  de la facture : deux saisies simultanées ne dépassent jamais le reste dû. Jamais modifiés ni supprimés :
+  une erreur s'**annule** avec un motif (déclencheur `FacturePayment_frozen`).
+- **Avoirs** (`AV-AAAA-NNNNN`) : créés depuis une facture émise (lignes reprises, à ajuster pour un avoir
+  partiel ; client imposé) ; un seul brouillon d'avoir à la fois par facture. À l'émission, sous verrou de
+  la facture : montant positif, plafonné au TTC de la facture moins les avoirs déjà émis. Un avoir émis
+  après paiement complet donne un **trop-perçu** à rembourser (reste dû négatif, affiché comme tel).
+- **Statut d'une facture**, déduit de ses montants : émise / envoyée → payée en partie → soldée ; annulée
+  par avoir si les avoirs couvrent tout sans encaissement (`factureInvoiceStatus`).
+- **Relance** : e-mail rappelant le reste à payer et l'échéance, facture jointe ; comptée seulement si le
+  fournisseur accepte le message (clé d'idempotence par rang de relance). Relance manuelle, pas d'envoi
+  automatique en V1.
+- **Tableau de bord** (`/facture`) : facturé HT du mois net des avoirs, encaissé du mois, reste à
+  encaisser, retards (montant, nombre, 10 plus anciennes échéances), devis en attente.
+- **Exports CSV** (Excel français, « ; », UTF-8 avec BOM, cellules protégées contre l'injection de
+  formules) : journal des ventes (factures et avoirs émis, avoirs en négatif, TVA par taux, échéance,
+  reste à payer) et journal des encaissements (annulations comprises), sur une période d'un an au plus.
+- **PDF** : charte F1 ; la facture porte son échéance (ou son délai sur le brouillon), l'avoir la facture
+  corrigée, le bloc « En faveur de » et le « Total de l'avoir ».
+- **Hors V1** : remboursement d'un trop-perçu, relances automatiques, paiement en ligne.
+
+## 8. API (`/api/v1/facture`)
 
 | Route                                                                                                                    | Permission          |
 | ------------------------------------------------------------------------------------------------------------------------ | ------------------- |
@@ -146,33 +177,44 @@ brouillon n'a pas de numéro.
 | `GET items` / `POST items` · `PATCH items/:id`                                                                           | catalogue           |
 | `GET documents` · `GET documents/:id` · `GET documents/:id/pdf`                                                          | voir les documents  |
 | `POST documents` · `PUT/DELETE documents/:id` · `POST documents/:id/{issue,accept,refuse,cancel,convert,duplicate,send}` | gérer les documents |
+| `POST documents/:id/remind`                                                                                              | gérer les documents |
+| `POST documents/:id/credit-note` · `POST documents/:id/payments` · `POST documents/:id/payments/:paymentId/cancel`       | facturation         |
+| `GET dashboard`                                                                                                          | voir les documents  |
+| `GET exports/sales?from&to` · `GET exports/payments?from&to`                                                             | exports comptables  |
 | `GET members`                                                                                                            | voir l'équipe       |
 | `POST members` · `PATCH members/:id`                                                                                     | gérer l'équipe      |
 
-Écrans : `/facture` (tableau de bord), `/facture/documents` (liste, création) et `/facture/documents/:id`
-(éditeur du brouillon, actions du document émis), `/facture/clients`, `/facture/catalogue`,
+Écrans : `/facture` (tableau de bord, exports), `/facture/documents` (liste, reste à payer, retards) et
+`/facture/documents/:id` (éditeur du brouillon, actions du document émis ; règlement, encaissements, avoirs
+et relance d'une facture), `/facture/clients`, `/facture/catalogue`,
 `/facture/parametres` (identité, présentation, logos par emplacement), `/facture/equipe`.
 
-## 8. Base et déploiement
+## 9. Base et déploiement
 
-- Migrations : `20261120000000_facture_v1_socle` (F0) et `20261121000000_facture_v1_commercial` (F1 :
-  clients, catalogue, documents, lignes, logos ; contrôles `CHECK` et déclencheurs du document figé), appliquée par `pnpm db:facture:migrate:deploy` (refus des instructions
+- Migrations : `20261120000000_facture_v1_socle` (F0), `20261121000000_facture_v1_commercial` (F1 :
+  clients, catalogue, documents, lignes, logos ; contrôles `CHECK` et déclencheurs du document figé) et
+  `20261122000000_facture_v1_billing` (F2 : encaissements, avoirs, échéance ; contrôles et déclencheurs
+  `FactureDocument_creditNote`, `FacturePayment_frozen`), appliquées par `pnpm db:facture:migrate:deploy` (refus des instructions
   destructrices et d'une base Suite ou School).
 - Pré-déploiement Railway : `db:migrate:deploy && db:school:migrate:deploy && db:facture:migrate:deploy`
   — sans `FACTURE_ENABLED=true`, l'étape Facture ne fait rien.
 - Variables : `FACTURE_ENABLED`, `FACTURE_DATABASE_URL`, `FACTURE_DIRECT_URL`.
 - **Aucune base Facture n'est créée en préproduction ni en production** sans GO.
 
-## 9. Tests
+## 10. Tests
 
 - Unitaires : `packages/shared/src/facture.spec.ts` (TVA, numérotation, mentions, permissions),
-  `facture-documents.spec.ts` (montants exacts, remises, TVA par taux, conversions, montant en lettres),
+  `facture-documents.spec.ts` (montants exacts, remises, TVA par taux, conversions, montant en lettres,
+  reste dû, statut d'une facture, échéance dépassée),
   `facture-boundaries.spec.ts` (frontières, configuration), `migration-safety.spec.ts` (cible Facture).
 - Intégration : `apps/api/test/facture-f0.integration.spec.ts` (accès, lecture seule, TVA, logo, PDF,
   équipe sur deux bases, numérotation concurrente, isolation), `facture-f1.integration.spec.ts`
   (clients, catalogue, montants serveur, émission concurrente, document figé par la base, e-mail simulé,
-  conversions idempotentes, annulation, logos par emplacement sous concurrence, rôles, lecture seule)
-  — exigent `TEST_FACTURE_DATABASE_URL`.
+  conversions idempotentes, annulation, logos par emplacement sous concurrence, rôles, lecture seule),
+  `facture-f2.integration.spec.ts` (facture figée, échéance, encaissements partiels plafonnés sous
+  concurrence, annulation d'un encaissement, avoirs plafonnés, trop-perçu, relance simulée, tableau de
+  bord, exports CSV, rôles, isolation, déclencheurs de la base) — exigent `TEST_FACTURE_DATABASE_URL`.
 - E2E : `e2e/facture-f0.spec.ts` (portail, identité, logo, équipe), `e2e/facture-f1.spec.ts` (client,
-  article, devis → bon de commande → facture brouillon, PDF).
+  article, devis → bon de commande → facture brouillon, PDF), `e2e/facture-f2.spec.ts` (facture émise,
+  payée en deux fois, avoir, tableau de bord, export).
 - CI : base `ocall_facture_ci` éphémère, migrée puis utilisée par les tests d'intégration et E2E.

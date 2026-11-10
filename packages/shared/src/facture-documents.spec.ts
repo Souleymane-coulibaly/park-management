@@ -5,8 +5,13 @@ import {
   canAcceptFactureDocument,
   canCancelFactureDocument,
   canConvertFactureDocument,
+  canCreditFactureInvoice,
+  canRecordFacturePayment,
   computeFactureTotals,
   factureAmountInWords,
+  factureBalance,
+  factureInvoiceStatus,
+  isFactureOverdue,
   lineTotalHt,
   numberToFrenchWords,
   quantityToMilli,
@@ -95,9 +100,12 @@ describe('Ocall Facture — documents commerciaux', () => {
     expect(canAcceptFactureDocument({ type: 'ORDER', status: 'ISSUED' })).toBe(false);
     expect(canAcceptFactureDocument({ type: 'QUOTE', status: 'ACCEPTED' })).toBe(false);
     expect(canAcceptFactureDocument({ type: 'QUOTE', status: 'DRAFT' })).toBe(false);
-    expect(canCancelFactureDocument({ status: 'DRAFT' })).toBe(false);
-    expect(canCancelFactureDocument({ status: 'CANCELLED' })).toBe(false);
-    expect(canCancelFactureDocument({ status: 'REFUSED' })).toBe(true);
+    expect(canCancelFactureDocument({ type: 'QUOTE', status: 'DRAFT' })).toBe(false);
+    expect(canCancelFactureDocument({ type: 'QUOTE', status: 'CANCELLED' })).toBe(false);
+    expect(canCancelFactureDocument({ type: 'QUOTE', status: 'REFUSED' })).toBe(true);
+    // Une facture ou un avoir émis ne s'annule jamais : correction par avoir.
+    expect(canCancelFactureDocument({ type: 'INVOICE', status: 'ISSUED' })).toBe(false);
+    expect(canCancelFactureDocument({ type: 'CREDIT_NOTE', status: 'SENT' })).toBe(false);
   });
 
   it('montant en toutes lettres (orthographe traditionnelle)', () => {
@@ -144,5 +152,64 @@ describe('Ocall Facture — documents commerciaux', () => {
     expect(hasFacturePermission('TECHNICIAN', 'facture.documents.read')).toBe(false);
     expect(hasFacturePermission('TECHNICIAN', 'facture.clients.read')).toBe(true);
     expect(hasFacturePermission('TECHNICIAN', 'facture.clients.manage')).toBe(false);
+  });
+});
+
+describe('facturation : reste dû, statut, encaissement, avoir, échéance', () => {
+  const invoice = (over: Partial<Parameters<typeof canRecordFacturePayment>[0]> = {}) => ({
+    type: 'INVOICE' as const,
+    status: 'SENT' as const,
+    totalTtc: 59_000,
+    amountPaid: 0,
+    amountCredited: 0,
+    ...over,
+  });
+
+  it('reste dû et statut déduits des encaissements et avoirs', () => {
+    const s = (paid: number, credited: number, sent = true) =>
+      factureInvoiceStatus({ ...invoice({ amountPaid: paid, amountCredited: credited }), sent });
+    expect(s(0, 0, false)).toBe('ISSUED');
+    expect(s(0, 0)).toBe('SENT');
+    expect(s(20_000, 0)).toBe('PARTIALLY_PAID');
+    expect(s(0, 29_500)).toBe('PARTIALLY_PAID');
+    expect(s(59_000, 0)).toBe('PAID');
+    expect(s(29_500, 29_500)).toBe('PAID');
+    expect(s(0, 59_000)).toBe('CREDITED');
+    // Avoir après paiement complet : trop-perçu (reste dû négatif), facture soldée.
+    expect(factureBalance(invoice({ amountPaid: 59_000, amountCredited: 29_500 }))).toBe(-29_500);
+    expect(s(59_000, 29_500)).toBe('PAID');
+  });
+
+  it('encaissement et avoir : sur une facture émise qui reste due ou créditable', () => {
+    expect(canRecordFacturePayment(invoice())).toBe(true);
+    expect(canRecordFacturePayment(invoice({ status: 'DRAFT' }))).toBe(false);
+    expect(canRecordFacturePayment(invoice({ status: 'PAID', amountPaid: 59_000 }))).toBe(false);
+    expect(canRecordFacturePayment(invoice({ type: 'QUOTE' }))).toBe(false);
+    expect(canCreditFactureInvoice(invoice({ status: 'PAID', amountPaid: 59_000 }))).toBe(true);
+    expect(canCreditFactureInvoice(invoice({ amountCredited: 59_000, status: 'CREDITED' }))).toBe(
+      false,
+    );
+    expect(canCreditFactureInvoice(invoice({ status: 'DRAFT' }))).toBe(false);
+  });
+
+  it('échéance dépassée : la veille au plus tard, et seulement si un reste est dû', () => {
+    const today = new Date('2026-11-10T23:30:00Z');
+    expect(isFactureOverdue({ ...invoice(), dueDate: '2026-11-09' }, today)).toBe(true);
+    expect(isFactureOverdue({ ...invoice(), dueDate: '2026-11-10' }, today)).toBe(false);
+    expect(isFactureOverdue({ ...invoice(), dueDate: null }, today)).toBe(false);
+    expect(
+      isFactureOverdue(
+        { ...invoice({ status: 'PAID', amountPaid: 59_000 }), dueDate: '2026-10-01' },
+        today,
+      ),
+    ).toBe(false);
+  });
+
+  it('avoirs et encaissements réservés au gérant et au comptable', () => {
+    expect(hasFacturePermission('ACCOUNTANT', 'facture.billing.manage')).toBe(true);
+    expect(hasFacturePermission('MANAGER', 'facture.reports.read')).toBe(true);
+    expect(hasFacturePermission('SALES', 'facture.billing.manage')).toBe(false);
+    expect(hasFacturePermission('SALES', 'facture.reports.read')).toBe(false);
+    expect(hasFacturePermission('TECHNICIAN', 'facture.billing.manage')).toBe(false);
   });
 });

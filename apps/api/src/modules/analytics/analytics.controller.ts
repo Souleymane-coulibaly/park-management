@@ -36,7 +36,7 @@ import {
   visibleEstablishments,
 } from './analytics-scope';
 import { AnalyticsService } from './analytics.service';
-import { toCsv } from './csv';
+import { toCsv } from '../../common/csv';
 
 /**
  * Analyses (Sprint 9), en lecture seule. Les permissions sont vérifiées côté serveur (lecture,

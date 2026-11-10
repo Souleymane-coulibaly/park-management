@@ -6,6 +6,7 @@ import {
   IsBoolean,
   IsEmail,
   IsIn,
+  IsISO8601,
   IsInt,
   IsNumber,
   IsOptional,
@@ -23,14 +24,18 @@ import {
   FACTURE_CREATABLE_TYPES,
   FACTURE_DOCUMENT_STATUSES,
   FACTURE_DOCUMENT_TYPES,
+  FACTURE_MAX_DOCUMENT_TOTAL,
   FACTURE_MAX_LINES,
+  FACTURE_MAX_PAYMENT_TERMS_DAYS,
   FACTURE_MAX_QUANTITY,
   FACTURE_MAX_UNIT_PRICE,
+  FACTURE_PAYMENT_METHODS,
   FACTURE_REGISTRATION_PATTERN,
   FACTURE_VAT_RATES,
   type FactureCreatableType,
   type FactureDocumentStatus,
   type FactureDocumentType,
+  type FacturePaymentMethod,
 } from '@ocall/shared';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
@@ -317,6 +322,14 @@ export class FactureDraftDto {
   @Max(365)
   validityDays?: number | null;
 
+  @ApiPropertyOptional({ description: 'Facture : délai de paiement (jours après l’émission)' })
+  @IsOptional()
+  @ValidateIf(notNull)
+  @IsInt()
+  @Min(0)
+  @Max(FACTURE_MAX_PAYMENT_TERMS_DAYS)
+  paymentTermsDays?: number | null;
+
   @ApiProperty({ type: [FactureLineDto] })
   @IsArray()
   @ArrayMaxSize(FACTURE_MAX_LINES)
@@ -378,4 +391,60 @@ export class SendFactureDocumentDto {
   @IsString()
   @MaxLength(2000)
   message?: string | null;
+}
+
+// ─── Facturation (F2) ───
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+
+export class RecordFacturePaymentDto {
+  @ApiProperty({ description: 'Montant encaissé, en FCFA entiers' })
+  @IsInt()
+  @Min(1)
+  @Max(FACTURE_MAX_DOCUMENT_TOTAL)
+  amount: number;
+
+  @ApiProperty({ enum: FACTURE_PAYMENT_METHODS })
+  @IsIn(FACTURE_PAYMENT_METHODS)
+  method: FacturePaymentMethod;
+
+  @ApiProperty({ description: 'Date de l’encaissement (AAAA-MM-JJ), au plus tard aujourd’hui' })
+  @Matches(ISO_DAY)
+  @IsISO8601({ strict: true })
+  paidAt: string;
+
+  @ApiPropertyOptional({ description: 'N° de chèque, de virement ou de transaction' })
+  @IsOptional()
+  @Transform(trimOrNull)
+  @IsString()
+  @MaxLength(80)
+  reference?: string | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(trimOrNull)
+  @IsString()
+  @MaxLength(500)
+  note?: string | null;
+}
+
+export class CancelFacturePaymentDto {
+  @ApiProperty({ description: 'Motif de l’annulation de l’encaissement' })
+  @Transform(trim)
+  @IsString()
+  @Length(3, 300)
+  reason: string;
+}
+
+/** Période d'un export (dates incluses, un an au plus). */
+export class FactureExportQueryDto {
+  @ApiProperty({ description: 'Premier jour (AAAA-MM-JJ)' })
+  @Matches(ISO_DAY)
+  @IsISO8601({ strict: true })
+  from: string;
+
+  @ApiProperty({ description: 'Dernier jour (AAAA-MM-JJ)' })
+  @Matches(ISO_DAY)
+  @IsISO8601({ strict: true })
+  to: string;
 }

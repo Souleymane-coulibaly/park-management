@@ -651,10 +651,15 @@ const enabled = Boolean(process.env.TEST_FACTURE_DATABASE_URL);
         .expect(200)
     ).body;
     expect(invoice).toMatchObject({ type: 'INVOICE', status: 'DRAFT', sourceDocumentId: order.id });
-    // Émission d'une facture : module de facturation (F2).
-    const issueInvoice = await orgA.agent.post(api(`/facture/documents/${invoice.id}/issue`));
-    expect(issueInvoice.status).toBe(409);
-    expect(issueInvoice.body.code).toBe('FACTURE_ISSUE_NOT_AVAILABLE');
+    // Émission de la facture (F2) : numéro définitif, délai de paiement des réglages.
+    const issuedInvoice = (
+      await orgA.agent.post(api(`/facture/documents/${invoice.id}/issue`)).expect(200)
+    ).body;
+    expect(issuedInvoice).toMatchObject({
+      number: `FAC-${YEAR}-00001`,
+      paymentTermsDays: 30,
+      balance: 109_000,
+    });
 
     // Annuler l'origine d'un document en vigueur : refusé.
     const cancelQuote = await orgA.agent

@@ -8,6 +8,9 @@ const TONES: Record<FactureDocumentStatus, 'forest' | 'savanna' | 'terracotta' |
   ACCEPTED: 'forest',
   REFUSED: 'terracotta',
   CANCELLED: 'terracotta',
+  PARTIALLY_PAID: 'savanna',
+  PAID: 'forest',
+  CREDITED: 'neutral',
 };
 
 /** Statut d'un document Ocall Facture (couleur et libellé, jamais la couleur seule). */

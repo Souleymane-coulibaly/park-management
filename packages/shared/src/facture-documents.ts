@@ -1,6 +1,7 @@
 /**
- * Ocall Facture (F1) — documents commerciaux : calcul des montants (FCFA, sans décimale), statuts et
- * transitions, conversions entre documents, montant en toutes lettres. Partagé par l'API (qui seule fait
+ * Ocall Facture (F1, F2) — documents commerciaux : calcul des montants (FCFA, sans décimale), statuts et
+ * transitions, conversions entre documents, facturation (reste dû, encaissements, avoirs, échéance),
+ * montant en toutes lettres. Partagé par l'API (qui seule fait
  * foi) et le web (aperçu pendant la saisie).
  */
 import { FACTURE_DOCUMENT_TYPE_LABELS, type FactureDocumentType } from './facture';
@@ -115,6 +116,9 @@ export const FACTURE_DOCUMENT_STATUSES = [
   'ACCEPTED',
   'REFUSED',
   'CANCELLED',
+  'PARTIALLY_PAID',
+  'PAID',
+  'CREDITED',
 ] as const;
 export type FactureDocumentStatus = (typeof FACTURE_DOCUMENT_STATUSES)[number];
 
@@ -125,27 +129,34 @@ export const FACTURE_DOCUMENT_STATUS_LABELS: Record<FactureDocumentStatus, strin
   ACCEPTED: 'Accepté',
   REFUSED: 'Refusé',
   CANCELLED: 'Annulé',
+  PARTIALLY_PAID: 'Payée en partie',
+  PAID: 'Soldée',
+  CREDITED: 'Annulée par avoir',
 };
 
-/** Types qu'on peut créer en F1 (l'avoir arrive avec la facturation, F2). */
+/** Types créés directement ; un avoir naît toujours d'une facture émise (`credit-note`). */
 export const FACTURE_CREATABLE_TYPES = ['QUOTE', 'PRO_FORMA', 'ORDER', 'INVOICE'] as const;
 export type FactureCreatableType = (typeof FACTURE_CREATABLE_TYPES)[number];
 
-/** Types émis (numérotés) en F1. L'émission d'une facture, figée et définitive, arrive en F2. */
+/** Types émis (numérotés) : tous ; une facture ou un avoir émis est définitif (jamais annulé). */
 export const FACTURE_ISSUABLE_TYPES: readonly FactureDocumentType[] = [
   'QUOTE',
   'PRO_FORMA',
   'ORDER',
+  'INVOICE',
+  'CREDIT_NOTE',
 ];
 
 /** Documents qu'un client accepte ou refuse : devis et pro forma (un bon de commande vaut accord). */
 export const FACTURE_ACCEPTABLE_TYPES: readonly FactureDocumentType[] = ['QUOTE', 'PRO_FORMA'];
 
-/** Document émis et encore en vigueur : envoyable, convertible. */
+/** Document émis et encore en vigueur : envoyable, convertible (selon son type). */
 export const FACTURE_LIVE_STATUSES: readonly FactureDocumentStatus[] = [
   'ISSUED',
   'SENT',
   'ACCEPTED',
+  'PARTIALLY_PAID',
+  'PAID',
 ];
 
 /** Conversions permises : devis → pro forma, bon de commande ou facture ; pro forma → bon ou facture. */
@@ -177,9 +188,110 @@ export function canAcceptFactureDocument(doc: {
   );
 }
 
-/** Un document émis s'annule (son numéro reste attribué) ; un brouillon se supprime. */
-export function canCancelFactureDocument(doc: { status: FactureDocumentStatus }): boolean {
-  return doc.status !== 'DRAFT' && doc.status !== 'CANCELLED';
+/** Documents définitifs une fois émis : jamais annulés, corrigés par un avoir (facture). */
+export const FACTURE_FINAL_TYPES: readonly FactureDocumentType[] = ['INVOICE', 'CREDIT_NOTE'];
+
+/**
+ * Un devis, une pro forma ou un bon de commande émis s'annule (son numéro reste attribué) ; un brouillon
+ * se supprime ; une facture émise ne s'annule jamais : elle se corrige par un avoir.
+ */
+export function canCancelFactureDocument(doc: {
+  type: FactureDocumentType;
+  status: FactureDocumentStatus;
+}): boolean {
+  return (
+    !FACTURE_FINAL_TYPES.includes(doc.type) && doc.status !== 'DRAFT' && doc.status !== 'CANCELLED'
+  );
+}
+
+// ─── Facturation (F2) : reste dû, encaissements, avoirs ───
+
+export const FACTURE_PAYMENT_METHODS = [
+  'CASH',
+  'MOBILE_MONEY',
+  'BANK_TRANSFER',
+  'CHECK',
+  'CARD',
+  'OTHER',
+] as const;
+export type FacturePaymentMethod = (typeof FACTURE_PAYMENT_METHODS)[number];
+
+export const FACTURE_PAYMENT_METHOD_LABELS: Record<FacturePaymentMethod, string> = {
+  CASH: 'Espèces',
+  MOBILE_MONEY: 'Mobile money',
+  BANK_TRANSFER: 'Virement',
+  CHECK: 'Chèque',
+  CARD: 'Carte bancaire',
+  OTHER: 'Autre',
+};
+
+/** Délai de paiement d'une facture (jours après l'émission). */
+export const FACTURE_MAX_PAYMENT_TERMS_DAYS = 365;
+
+export interface FactureInvoiceAmounts {
+  totalTtc: number;
+  /** Encaissements en vigueur (hors encaissements annulés). */
+  amountPaid: number;
+  /** Avoirs émis sur la facture (TTC). */
+  amountCredited: number;
+}
+
+/**
+ * Reste dû d'une facture : TTC moins encaissements et avoirs. Négatif quand un avoir est émis après
+ * paiement : c'est alors un trop-perçu à rembourser au client.
+ */
+export const factureBalance = (i: FactureInvoiceAmounts) =>
+  i.totalTtc - i.amountPaid - i.amountCredited;
+
+/**
+ * Statut d'une facture émise, déduit de ses montants : soldée (rien à payer, au moins un encaissement),
+ * annulée par avoir (avoirs seuls), payée en partie, sinon émise ou envoyée.
+ */
+export function factureInvoiceStatus(
+  i: FactureInvoiceAmounts & { sent: boolean },
+): FactureDocumentStatus {
+  if (factureBalance(i) <= 0) return i.amountPaid > 0 ? 'PAID' : 'CREDITED';
+  if (i.amountPaid > 0 || i.amountCredited > 0) return 'PARTIALLY_PAID';
+  return i.sent ? 'SENT' : 'ISSUED';
+}
+
+/** Statuts d'une facture émise qui reste à encaisser (encaissement, relance). */
+export const FACTURE_OPEN_INVOICE_STATUSES: readonly FactureDocumentStatus[] = [
+  'ISSUED',
+  'SENT',
+  'PARTIALLY_PAID',
+];
+
+export function canRecordFacturePayment(
+  doc: { type: FactureDocumentType; status: FactureDocumentStatus } & FactureInvoiceAmounts,
+): boolean {
+  return (
+    doc.type === 'INVOICE' &&
+    FACTURE_OPEN_INVOICE_STATUSES.includes(doc.status) &&
+    factureBalance(doc) > 0
+  );
+}
+
+/** Un avoir se crée sur une facture émise dont le TTC n'est pas déjà entièrement crédité. */
+export function canCreditFactureInvoice(
+  doc: { type: FactureDocumentType; status: FactureDocumentStatus } & FactureInvoiceAmounts,
+): boolean {
+  return doc.type === 'INVOICE' && doc.status !== 'DRAFT' && doc.amountCredited < doc.totalTtc;
+}
+
+/** Échéance dépassée : date d'échéance antérieure à aujourd'hui (UTC, heure du Mali) et reste dû. */
+export function isFactureOverdue(
+  doc: {
+    type: FactureDocumentType;
+    status: FactureDocumentStatus;
+    dueDate: string | Date | null;
+  } & FactureInvoiceAmounts,
+  today: Date,
+): boolean {
+  if (!canRecordFacturePayment(doc) || !doc.dueDate) return false;
+  const due = new Date(doc.dueDate).getTime();
+  const day = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  return due < day;
 }
 
 // ─── Montant en toutes lettres ───

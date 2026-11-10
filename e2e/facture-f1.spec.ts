@@ -76,13 +76,10 @@ test('Ocall Facture : devis → bon de commande → facture brouillon', async ({
   await page.getByTestId('facture-issue').click();
   await expect(page.getByTestId('facture-document-number')).toContainText(`BC-${YEAR}-00001`);
 
-  // Conversion en facture : brouillon (émission au module de facturation).
+  // Conversion en facture : brouillon, émis ensuite par le module de facturation (F2).
   await page.getByTestId('facture-convert-INVOICE').click();
   await expect(page.getByTestId('facture-document-number')).toContainText('Facture — brouillon');
-  await expect(
-    page.getByText('L’émission des factures arrive avec le module de facturation.'),
-  ).toBeVisible();
-  await expect(page.getByTestId('facture-issue')).toHaveCount(0);
+  await expect(page.getByTestId('facture-issue')).toBeVisible();
 
   // Liste : trois documents liés.
   await page.goto('/facture/documents');

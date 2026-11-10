@@ -15,11 +15,13 @@ export async function purgeFactureOrganizations(
     async (tx) => {
       await tx.$executeRaw`SELECT set_config('ocall.facture_purge', 'on', true)`;
       const where = { organizationId: { in: organizationIds } };
+      await tx.facturePayment.deleteMany({ where });
       await tx.factureDocumentLine.deleteMany({ where });
-      // Chaîne devis → pro forma → bon de commande → facture : d'abord les documents sans dérivé.
+      // Chaîne devis → pro forma → bon de commande → facture → avoir : d'abord les documents dont rien
+      // ne découle.
       for (let pass = 0; pass < 20; pass++) {
         const { count } = await tx.factureDocument.deleteMany({
-          where: { ...where, derived: { none: {} } },
+          where: { ...where, derived: { none: {} }, creditNotes: { none: {} } },
         });
         if (count === 0) break;
       }
