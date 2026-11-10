@@ -1,0 +1,94 @@
+// Ocall Facture : base PostgreSQL distincte des bases Ocall Suite et Ocall School.
+//
+// `organizationId` et `userId` désignent des lignes de la base Suite : aucune clé étrangère entre bases,
+// l'API les contrôle. Dans cette base, chaque lien passe par une clé composée (organizationId, id) :
+// PostgreSQL refuse lui-même tout lien entre deux clients.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/facture-client"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("FACTURE_DATABASE_URL")
+  directUrl = env("FACTURE_DIRECT_URL")
+}
+
+/// Rôle d'un membre Ocall Facture. Le propriétaire de l'organisation (base Suite) est gérant d'office.
+enum FactureRole {
+  MANAGER
+  SALES
+  ACCOUNTANT
+  TECHNICIAN
+}
+
+/// Types de documents numérotés (numérotation continue par organisation, type et année).
+enum FactureDocumentType {
+  QUOTE
+  PRO_FORMA
+  ORDER
+  INVOICE
+  CREDIT_NOTE
+}
+
+/// Identité légale et réglages de facturation d'une organisation (mentions des documents, Mali).
+model FactureSettings {
+  organizationId   String   @id @db.Uuid
+  /// Raison sociale.
+  legalName        String
+  tradeName        String?
+  address          String
+  city             String
+  /// Pays (code ISO 3166-1 alpha-2) ; Mali par défaut.
+  country          String   @default("ML") @db.Char(2)
+  phone            String?
+  email            String?
+  /// Numéro d'identification fiscale du vendeur : obligatoire avant l'émission d'une facture.
+  nif              String?
+  rccm             String?
+  /// Régime d'imposition, imprimé sur les factures.
+  taxRegime        String?
+  bankDetails      String?
+  /// Mentions complémentaires imprimées en pied de document.
+  legalFooter      String?
+  /// Taux de TVA proposé par défaut, en pourcentage entier de 0 à 20.
+  defaultVatRate   Int      @default(18)
+  currency         String   @default("XOF") @db.Char(3)
+  paymentTermsDays Int      @default(30)
+  /// Clé de stockage privée du logo (jamais servie directement).
+  logoKey          String?
+  updatedByUserId  String?  @db.Uuid
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+/// Membre d'une organisation dans Ocall Facture. L'identité (compte, mot de passe, sessions) reste dans
+/// la base Suite, avec le rôle PRODUCT_USER, sans aucun droit Ocall Park ni School.
+model FactureMember {
+  id             String      @id @default(uuid()) @db.Uuid
+  organizationId String      @db.Uuid
+  userId         String      @db.Uuid
+  firstName      String
+  lastName       String
+  loginId        String
+  role           FactureRole
+  isActive       Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, userId])
+  @@index([organizationId, isActive])
+}
+
+/// Compteur de numérotation : continu et sans trou, incrémenté dans la transaction qui émet le document.
+model FactureNumberCounter {
+  organizationId String              @db.Uuid
+  type           FactureDocumentType
+  year           Int
+  value          Int                 @default(0)
+  updatedAt      DateTime            @updatedAt
+
+  @@id([organizationId, type, year])
+}

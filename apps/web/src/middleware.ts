@@ -5,7 +5,7 @@ import { isAppHost, isSchoolSiteHost, requestHost, schoolSitesBaseDomain } from 
 const API_URL = process.env.API_URL ?? 'http://localhost:4000';
 // Portail parents : privé, sauf la page publique d'activation par le lien d'invitation.
 const PRIVATE =
-  /^\/(app|admin|partenaire|suite|school|parents(?!\/activation)|changer-mot-de-passe|double-authentification)(\/|$)/;
+  /^\/(app|admin|partenaire|suite|school|facture|parents(?!\/activation)|changer-mot-de-passe|double-authentification)(\/|$)/;
 /** Chemins servis tels quels sur un hôte de site : ressources, images publiées, contrôle, SEO. */
 const SITE_PASSTHROUGH =
   /^\/(_next\/|api\/v1\/public\/|\.well-known\/ocall-site$|sitemap\.xml$|robots\.txt$|favicon\.ico$|icon\.svg$)/;

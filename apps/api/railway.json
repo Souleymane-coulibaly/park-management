@@ -6,7 +6,9 @@
     "watchPatterns": ["apps/api/**", "packages/**", "pnpm-lock.yaml"]
   },
   "deploy": {
-    "preDeployCommand": ["pnpm db:migrate:deploy && pnpm db:school:migrate:deploy"],
+    "preDeployCommand": [
+      "pnpm db:migrate:deploy && pnpm db:school:migrate:deploy && pnpm db:facture:migrate:deploy"
+    ],
     "startCommand": "pnpm --filter @ocall/api start",
     "healthcheckPath": "/api/v1/health",
     "healthcheckTimeout": 120,

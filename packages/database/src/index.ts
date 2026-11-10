@@ -6,6 +6,7 @@ export * from '@prisma/client';
 export {
   databaseIdentity,
   findDestructiveStatements,
+  factureMigrationTargetProblem,
   schoolMigrationTargetProblem,
 } from './migration-safety';
 export {

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { parse } from 'dotenv';
-import { PrismaClient, resolveTestDatabase } from '@ocall/database';
+import { PrismaClient, isLocalDatabase, resolveTestDatabase } from '@ocall/database';
 import {
   assertE2eDatabases,
   purgeSchoolOrganizations,
@@ -31,6 +31,19 @@ export default async function globalTeardown(): Promise<void> {
     const school = resolveSchoolTestDatabase({ ...apiEnv, ...process.env }, testDb.databaseUrl);
     const portalUsers = school ? await schoolPortalUserIds(school, orgIds) : [];
     if (school) await purgeSchoolOrganizations(school, orgIds);
+    // Données Ocall Facture des organisations E2E : même purge par organisation, sur la base Facture
+    // de test (locale et jetable, garde identique).
+    const factureUrl = process.env.TEST_FACTURE_DATABASE_URL;
+    if (factureUrl) {
+      await purgeSchoolOrganizations(
+        {
+          url: factureUrl,
+          ephemeral:
+            process.env.OCALL_TEST_EPHEMERAL_DATABASE === '1' && isLocalDatabase(factureUrl),
+        },
+        orgIds,
+      );
+    }
     const members = await prisma.organizationMembership.findMany({
       where: { organizationId: { in: orgIds } },
       select: { userId: true },

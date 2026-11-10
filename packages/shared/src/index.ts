@@ -32,3 +32,4 @@ export * from './school-ai';
 export * from './school-site';
 export * from './suite-notifications';
 export * from './school-sms-billing';
+export * from './facture';

@@ -2,7 +2,11 @@ import { defineConfig, devices } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { parse } from 'dotenv';
-import { resolveTestDatabase } from '@ocall/database';
+import {
+  assertDisposableTestDatabases,
+  databaseIdentity,
+  resolveTestDatabase,
+} from '@ocall/database';
 import {
   assertE2eDatabases,
   assertSchoolTestDatabase,
@@ -30,6 +34,21 @@ const schoolDb = resolveSchoolTestDatabase({ ...apiEnv, ...process.env }, testDb
 // connexion et AVANT le démarrage des serveurs (dont les traitements School de fond).
 assertE2eDatabases({ ...apiEnv, ...process.env }, testDb, schoolDb);
 if (schoolDb) assertSchoolTestDatabase(schoolDb);
+// Ocall Facture : activé seulement avec une base Facture de test dédiée (TEST_FACTURE_DATABASE_URL),
+// locale et jetable, distincte des bases Suite et School ; sinon les specs Facture sont ignorées.
+const factureUrl = process.env.TEST_FACTURE_DATABASE_URL;
+if (factureUrl) {
+  assertDisposableTestDatabases([factureUrl], { ...apiEnv, ...process.env });
+  const others = [testDb.databaseUrl, schoolDb?.url].filter((u): u is string => Boolean(u));
+  if (others.some((u) => databaseIdentity(u) === databaseIdentity(factureUrl))) {
+    throw new Error(
+      'Refus : la base Facture de test doit être distincte des bases Suite et School.',
+    );
+  }
+}
+const factureEnv: Record<string, string> = factureUrl
+  ? { FACTURE_ENABLED: 'true', FACTURE_DATABASE_URL: factureUrl }
+  : { FACTURE_ENABLED: 'false' };
 const schoolEnv: Record<string, string> = schoolDb
   ? {
       SCHOOL_ENABLED: 'true',
@@ -88,6 +107,7 @@ export default defineConfig({
         SITES_REVALIDATE_URL: 'http://localhost:3000/api/site-revalidate',
         SITES_REVALIDATE_SECRET: revalidateSecret,
         ...schoolEnv,
+        ...factureEnv,
       },
       reuseExistingServer: false,
       timeout: 120_000,

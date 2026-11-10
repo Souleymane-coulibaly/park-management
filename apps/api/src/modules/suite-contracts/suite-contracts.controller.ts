@@ -102,6 +102,10 @@ export class SuitePortalController {
 
   @Get('apps')
   apps(@CurrentAuth() auth: AuthContext) {
-    return this.contracts.apps(requireTenant(auth), this.config.school.enabled);
+    return this.contracts.apps(
+      requireTenant(auth),
+      this.config.school.enabled,
+      this.config.facture.enabled,
+    );
   }
 }
