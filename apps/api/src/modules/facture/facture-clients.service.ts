@@ -15,6 +15,12 @@ const CLIENT_NOT_FOUND = { code: 'FACTURE_CLIENT_NOT_FOUND', message: 'Client in
 const ITEM_NOT_FOUND = { code: 'FACTURE_ITEM_NOT_FOUND', message: 'Article introuvable.' };
 const LIST_LIMIT = 200;
 
+/** Consentement WhatsApp (F4) : date du consentement, effacée au retrait. */
+const consent = (optIn: boolean | undefined) =>
+  optIn
+    ? { whatsappOptIn: true, whatsappOptInAt: new Date() }
+    : { whatsappOptIn: false, whatsappOptInAt: null };
+
 const isUniqueViolation = (e: unknown) =>
   e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002';
 
@@ -62,18 +68,25 @@ export class FactureClientsService {
 
   async createClient(ctx: FactureContext, dto: FactureClientDto) {
     const client = await this.nifUnique(() =>
-      this.db.factureClient.create({ data: { organizationId: ctx.organizationId, ...dto } }),
+      this.db.factureClient.create({
+        data: { organizationId: ctx.organizationId, ...dto, ...consent(dto.whatsappOptIn) },
+      }),
     );
     await this.record(ctx, 'facture.client_created', 'FactureClient', client.id);
     return client;
   }
 
   async updateClient(ctx: FactureContext, id: string, dto: UpdateFactureClientDto) {
-    await this.client(ctx, id);
+    const current = await this.client(ctx, id);
+    // Consentement WhatsApp : daté quand il est donné, effacé quand il est retiré, inchangé sinon.
+    const optIn =
+      dto.whatsappOptIn === undefined || dto.whatsappOptIn === current.whatsappOptIn
+        ? {}
+        : consent(dto.whatsappOptIn);
     const client = await this.nifUnique(() =>
       this.db.factureClient.update({
         where: { organizationId_id: { organizationId: ctx.organizationId, id } },
-        data: dto,
+        data: { ...dto, ...optIn },
       }),
     );
     await this.record(ctx, 'facture.client_updated', 'FactureClient', id, Object.keys(dto));

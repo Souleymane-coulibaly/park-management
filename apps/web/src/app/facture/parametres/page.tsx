@@ -9,6 +9,7 @@ import {
   type FactureLogoPlacement,
   formatVatRate,
 } from '@ocall/shared';
+import { NotificationSettings } from '@/components/facture/notification-settings';
 import { FacturePage } from '@/components/facture/facture-page';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
@@ -57,7 +58,10 @@ export default function FactureSettingsPage() {
       description="Ces informations figurent sur vos devis, factures et rapports."
     >
       {({ canWrite, reload }) => (
-        <SettingsForm editable={canWrite('facture.settings.manage')} onSaved={reload} />
+        <>
+          <SettingsForm editable={canWrite('facture.settings.manage')} onSaved={reload} />
+          <NotificationSettings editable={canWrite('facture.settings.manage')} />
+        </>
       )}
     </FacturePage>
   );

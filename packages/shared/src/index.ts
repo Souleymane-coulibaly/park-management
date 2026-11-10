@@ -35,3 +35,4 @@ export * from './school-sms-billing';
 export * from './facture';
 export * from './facture-documents';
 export * from './facture-interventions';
+export * from './facture-notifications';

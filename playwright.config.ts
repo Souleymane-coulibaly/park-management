@@ -47,7 +47,12 @@ if (factureUrl) {
   }
 }
 const factureEnv: Record<string, string> = factureUrl
-  ? { FACTURE_ENABLED: 'true', FACTURE_DATABASE_URL: factureUrl }
+  ? {
+      FACTURE_ENABLED: 'true',
+      FACTURE_DATABASE_URL: factureUrl,
+      // Notifications de rendez-vous : fournisseur WhatsApp simulé, aucun message réel.
+      FACTURE_WHATSAPP_PROVIDER: 'simulated',
+    }
   : { FACTURE_ENABLED: 'false' };
 const schoolEnv: Record<string, string> = schoolDb
   ? {

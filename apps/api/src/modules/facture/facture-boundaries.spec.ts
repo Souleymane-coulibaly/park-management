@@ -50,7 +50,21 @@ describe('configuration Facture', () => {
   const facture = 'postgresql://u:p@ep-facture-pooler.neon.tech/facture';
 
   it('désactivé par défaut, sans base', () => {
-    expect(loadFactureConfig({})).toEqual({ enabled: false, databaseUrl: null });
+    expect(loadFactureConfig({})).toEqual({
+      enabled: false,
+      databaseUrl: null,
+      whatsapp: 'disabled',
+    });
+  });
+
+  it('WhatsApp : désactivé par défaut, simulé en test seulement, jamais en production', () => {
+    expect(loadFactureConfig({ FACTURE_WHATSAPP_PROVIDER: 'simulated' }).whatsapp).toBe(
+      'simulated',
+    );
+    expect(() =>
+      loadFactureConfig({ FACTURE_WHATSAPP_PROVIDER: 'simulated', NODE_ENV: 'production' }),
+    ).toThrow('interdit en production');
+    expect(() => loadFactureConfig({ FACTURE_WHATSAPP_PROVIDER: 'meta' })).toThrow('invalide');
   });
 
   it('activé : base obligatoire, distincte des bases Suite et School', () => {
@@ -77,6 +91,6 @@ describe('configuration Facture', () => {
         SCHOOL_DATABASE_URL: school,
         FACTURE_DATABASE_URL: facture,
       }),
-    ).toEqual({ enabled: true, databaseUrl: facture });
+    ).toEqual({ enabled: true, databaseUrl: facture, whatsapp: 'disabled' });
   });
 });

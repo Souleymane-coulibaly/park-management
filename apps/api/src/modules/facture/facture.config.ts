@@ -7,11 +7,24 @@ import { databaseIdentity } from '@ocall/database';
 export interface FactureConfig {
   enabled: boolean;
   databaseUrl: string | null;
+  /**
+   * Fournisseur WhatsApp des notifications de rendez-vous (F4) : `disabled` par défaut (aucun envoi
+   * WhatsApp, e-mail en secours) ; `simulated` pour les tests, interdit en production. Le fournisseur
+   * réel sera branché derrière la même interface, une fois choisi.
+   */
+  whatsapp: 'disabled' | 'simulated';
 }
 
 export function loadFactureConfig(env: NodeJS.ProcessEnv): FactureConfig {
   const enabled = env.FACTURE_ENABLED === 'true';
-  if (!enabled) return { enabled, databaseUrl: null };
+  const whatsapp = (env.FACTURE_WHATSAPP_PROVIDER ?? 'disabled').trim();
+  if (whatsapp !== 'disabled' && whatsapp !== 'simulated') {
+    throw new Error('FACTURE_WHATSAPP_PROVIDER invalide : disabled ou simulated.');
+  }
+  if (whatsapp === 'simulated' && env.NODE_ENV === 'production') {
+    throw new Error('FACTURE_WHATSAPP_PROVIDER=simulated est interdit en production.');
+  }
+  if (!enabled) return { enabled, databaseUrl: null, whatsapp };
   const databaseUrl = env.FACTURE_DATABASE_URL?.trim() || null;
   if (!databaseUrl) throw new Error('FACTURE_ENABLED=true exige FACTURE_DATABASE_URL.');
   const facture = databaseIdentity(databaseUrl);
@@ -23,5 +36,5 @@ export function loadFactureConfig(env: NodeJS.ProcessEnv): FactureConfig {
       'FACTURE_DATABASE_URL doit désigner une base distincte des bases Ocall Suite et Ocall School.',
     );
   }
-  return { enabled, databaseUrl };
+  return { enabled, databaseUrl, whatsapp };
 }

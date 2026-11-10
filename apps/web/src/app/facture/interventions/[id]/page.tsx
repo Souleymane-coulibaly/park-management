@@ -6,6 +6,12 @@ import { type FormEvent, type ReactNode, useRef, useState } from 'react';
 import { Camera, FileDown, Trash2 } from 'lucide-react';
 import {
   FACTURE_MAX_INTERVENTION_PHOTOS,
+  FACTURE_NOTIFICATION_CHANNEL_LABELS,
+  FACTURE_NOTIFICATION_KIND_LABELS,
+  FACTURE_NOTIFICATION_STATUS_LABELS,
+  type FactureNotificationChannel,
+  type FactureNotificationKind,
+  type FactureNotificationStatus,
   FACTURE_ROLE_LABELS,
   type FactureDocumentStatus,
   type FactureInterventionStatus,
@@ -68,6 +74,16 @@ interface Intervention {
   parts: { id: string; reference: string | null; label: string; unit: string; quantity: number }[];
   photos: { id: string; caption: string | null }[];
   invoice: { id: string; number: string | null; status: FactureDocumentStatus } | null;
+  notifications: {
+    id: string;
+    kind: FactureNotificationKind;
+    channel: FactureNotificationChannel;
+    recipient: string;
+    status: FactureNotificationStatus;
+    sendAt: string;
+    sentAt: string | null;
+    lastError: string | null;
+  }[];
   can: { manage: boolean; work: boolean; invoice: boolean };
 }
 
@@ -129,6 +145,7 @@ function InterventionView({ id, readOnly }: { id: string; readOnly: boolean }) {
       {i.status === 'COMPLETED' && can.work && <SignCard id={i.id} reload={res.reload} />}
       {i.signedAt && <SignatureCard i={i} />}
       {(i.status === 'SIGNED' || i.invoice) && <InvoiceCard i={i} canInvoice={can.invoice} />}
+      {i.notifications.length > 0 && <NotificationsCard i={i} />}
     </div>
   );
 }
@@ -870,6 +887,57 @@ function InvoiceCard({ i, canInvoice }: { i: Intervention; canInvoice: boolean }
         {i.status !== 'SIGNED' && (
           <Alert tone="info" title="Seule une intervention signée par le client se facture." />
         )}
+      </CardBody>
+    </Card>
+  );
+}
+
+/** Raisons d'annulation ou d'échec, en clair. */
+const NOTIFICATION_REASONS: Record<string, string> = {
+  RESCHEDULED: 'rendez-vous déplacé',
+  INTERVENTION_CANCELLED: 'intervention annulée',
+  INTERVENTION_STARTED: 'intervention commencée',
+  OBSOLETE: 'rendez-vous modifié',
+  NOTIFICATIONS_DISABLED: 'notifications désactivées',
+  CONSENT_WITHDRAWN: 'consentement WhatsApp retiré',
+  NOT_ON_WHATSAPP: 'numéro sans WhatsApp',
+  OUTCOME_UNKNOWN: 'envoi interrompu, jamais renvoyé',
+};
+
+function NotificationsCard({ i }: { i: Intervention }) {
+  return (
+    <Card>
+      <CardHeader
+        title="Notifications au client"
+        description="Confirmation, report, rappels et annulation du rendez-vous."
+      />
+      <CardBody>
+        <ul className="divide-y divide-line/70" data-testid="facture-notifications">
+          {i.notifications.map((n) => (
+            <li
+              key={n.id}
+              className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm"
+              data-kind={n.kind}
+              data-status={n.status}
+            >
+              <span>
+                <span className="font-semibold">{FACTURE_NOTIFICATION_KIND_LABELS[n.kind]}</span> ·{' '}
+                {FACTURE_NOTIFICATION_CHANNEL_LABELS[n.channel]} {n.recipient}
+                <span className="block text-xs text-muted">
+                  {n.sentAt
+                    ? `Envoyée le ${dateTimeFr(n.sentAt)}`
+                    : `Prévue le ${dateTimeFr(n.sendAt)}`}
+                  {n.lastError && NOTIFICATION_REASONS[n.lastError]
+                    ? ` · ${NOTIFICATION_REASONS[n.lastError]}`
+                    : ''}
+                </span>
+              </span>
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted">
+                {FACTURE_NOTIFICATION_STATUS_LABELS[n.status]}
+              </span>
+            </li>
+          ))}
+        </ul>
       </CardBody>
     </Card>
   );

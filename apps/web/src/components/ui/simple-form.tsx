@@ -25,7 +25,10 @@ const initial = (fields: SimpleField[]): Values =>
   Object.fromEntries(
     fields.map((f) => [
       f.name,
-      f.type === 'checkbox' ? false : (f.defaultValue ?? f.options?.[0]?.value ?? ''),
+      // Case à cocher : cochée seulement si la valeur enregistrée vaut « true ».
+      f.type === 'checkbox'
+        ? f.defaultValue === 'true'
+        : (f.defaultValue ?? f.options?.[0]?.value ?? ''),
     ]),
   );
 

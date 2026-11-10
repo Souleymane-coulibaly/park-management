@@ -13,9 +13,11 @@ Proposition d'architecture et décisions : `ocall-audits/proposition-architectur
 | **F0 — Socle**         | Base, accès, rôles, identité légale, TVA, numérotation, logo, PDF    | Livré               |
 | **F1 — Commercial**    | Clients, catalogue, devis, pro forma, bons de commande, PDF, e-mail  | Livré               |
 | **F2 — Facturation**   | Factures émises figées, avoirs, encaissements, relances, exports     | Livré               |
-| **F3 — Interventions** | Techniciens, planning, équipements, temps, pièces, photos, signature | Livré (ce document) |
-| F4 — Rendez-vous       | Notifications WhatsApp (fournisseur simulé en test)                  | À venir             |
+| **F3 — Interventions** | Techniciens, planning, équipements, temps, pièces, photos, signature | Livré               |
+| **F4 — Rendez-vous**   | Confirmation, report, rappels, annulation : WhatsApp, e-mail secours | Livré (ce document) |
 | F5 — Site vitrine      | Site public, formulaires de demande, domaines, SEO local             | À venir             |
+| F6A — IA (1)           | Socle IA, rapport d'intervention intelligent, devis intelligent      | À venir             |
+| F6B — IA (2)           | Planification intelligente, maintenance préventive intelligente      | À venir             |
 
 ## 1. Architecture
 
@@ -204,7 +206,40 @@ brouillon n'a pas de numéro.
 - **Hors V1** : signature hors ligne, client absent ou refusant de signer, détection des chevauchements de
   planning, intervention récurrente (contrat d'entretien).
 
-## 9. API (`/api/v1/facture`)
+## 9. Notifications de rendez-vous (F4)
+
+- **Messages** : le rendez-vous est le créneau d'une intervention. **Confirmation** à la planification,
+  **report** quand le début change avant l'intervention, **rappels** la veille (24 h avant) et quelques
+  heures avant (1, 2, 3, 4, 6 ou 12 h ; jamais dans le passé), **annulation**. Texte en français : entreprise,
+  objet, date et heure (heure du Mali), lieu, référence `INT-…`, téléphone de l'entreprise.
+- **Réglages** (`/facture/parametres`, gérant) : désactivées par défaut ; confirmation, rappel de la veille,
+  rappel du jour, e-mail de secours.
+- **Canal** : **WhatsApp** si le fournisseur est branché, le client a donné son **consentement** (case de
+  la fiche client, datée, retirée en la décochant) et un numéro est connu (contact sur place, sinon client) ;
+  sinon **e-mail** en secours si le client a une adresse ; sinon rien. Un échec définitif WhatsApp (numéro
+  sans WhatsApp) envoie le même message par e-mail.
+- **Fournisseur WhatsApp** derrière l'interface `WhatsAppProvider` (`facture-whatsapp.provider.ts`) :
+  `FACTURE_WHATSAPP_PROVIDER=disabled` par défaut (aucun WhatsApp, e-mail en secours), `simulated` pour les
+  tests (interdit en production). Le fournisseur réel (API Cloud de Meta ou prestataire), ses modèles à faire
+  approuver (`ocall_rdv_confirmation`, `ocall_rdv_report`, `ocall_rdv_rappel`, `ocall_rdv_annulation`) et
+  son coût restent à décider : **aucun tarif n'est inventé**, aucun crédit n'est décompté.
+- **File d'attente fiable** (`FactureNotification`, garanties du SMS School S2) : programmée dans la
+  transaction de l'intervention (jamais d'envoi dans la transaction) ; répartiteur toutes les 30 s, prise
+  en charge `FOR UPDATE SKIP LOCKED` sous bail ; erreur passagère : 4 tentatives au plus (1, 5, 15 min) ;
+  **résultat inconnu** (interruption entre l'envoi et son enregistrement) : jamais renvoyé ; clé
+  d'idempotence par notification chez le fournisseur ; un même fait n'est programmé qu'une fois par canal.
+- **Rappels obsolètes** : annulés au report, à l'annulation et au démarrage de l'intervention, et revérifiés
+  au moment d'envoyer (créneau changé, intervention commencée ou annulée, notifications désactivées,
+  consentement retiré → annulée, jamais envoyée).
+- **Ne bloque jamais un rendez-vous** : un échec d'envoi n'empêche ni la planification, ni le report, ni
+  l'annulation.
+- **Historique** sur la fiche de l'intervention : type, canal, destinataire masqué (4 derniers chiffres,
+  initiale de l'adresse), statut (programmée, envoyée, échec, annulée, résultat inconnu) et raison. Une
+  notification envoyée ou close ne change plus (déclencheur `FactureNotification_frozen`).
+- **Hors V1** : accusés de lecture et de remise WhatsApp (webhook du fournisseur), réponse du client
+  (confirmer, demander un report), SMS.
+
+## 10. API (`/api/v1/facture`)
 
 | Route                                                                                                                    | Permission          |
 | ------------------------------------------------------------------------------------------------------------------------ | ------------------- |
@@ -225,6 +260,8 @@ brouillon n'a pas de numéro.
 | `POST/PATCH equipment` · `GET technicians` · `POST/PATCH interventions` · `POST interventions/:id/{cancel,reopen}`       | planifier           |
 | `POST interventions/:id/{start,complete,sign}` · `POST/DELETE interventions/:id/{time,parts,photos}`                     | réaliser            |
 | `POST interventions/:id/invoice`                                                                                         | gérer les documents |
+| `GET notification-settings`                                                                                              | entrer              |
+| `PUT notification-settings`                                                                                              | gérer l'identité    |
 | `GET members`                                                                                                            | voir l'équipe       |
 | `POST members` · `PATCH members/:id`                                                                                     | gérer l'équipe      |
 
@@ -236,24 +273,28 @@ et relance d'une facture), `/facture/clients`, `/facture/catalogue`,
 technicien), `/facture/interventions/:id` (travaux, photos, fin, signature à l'écran, rapport,
 facturation) et `/facture/equipements`.
 
-## 10. Base et déploiement
+## 11. Base et déploiement
 
 - Migrations : `20261120000000_facture_v1_socle` (F0), `20261121000000_facture_v1_commercial` (F1 :
   clients, catalogue, documents, lignes, logos ; contrôles `CHECK` et déclencheurs du document figé) et
   `20261122000000_facture_v1_billing` (F2 : encaissements, avoirs, échéance ; contrôles et déclencheurs
   `FactureDocument_creditNote`, `FacturePayment_frozen`) et `20261123000000_facture_v1_interventions`
   (F3 : équipements, interventions, techniciens, temps, pièces, photos ; contrôles et déclencheurs
-  `FactureIntervention_frozen`, saisies figées, `FactureDocument_intervention`), appliquées par `pnpm db:facture:migrate:deploy` (refus des instructions
+  `FactureIntervention_frozen`, saisies figées, `FactureDocument_intervention`) et
+  `20261124000000_facture_v1_notifications` (F4 : réglages, consentement WhatsApp du client, file des
+  notifications ; contrôles et déclencheur `FactureNotification_frozen`), appliquées par `pnpm db:facture:migrate:deploy` (refus des instructions
   destructrices et d'une base Suite ou School).
 - Pré-déploiement Railway : `db:migrate:deploy && db:school:migrate:deploy && db:facture:migrate:deploy`
   — sans `FACTURE_ENABLED=true`, l'étape Facture ne fait rien.
-- Variables : `FACTURE_ENABLED`, `FACTURE_DATABASE_URL`, `FACTURE_DIRECT_URL`.
+- Variables : `FACTURE_ENABLED`, `FACTURE_DATABASE_URL`, `FACTURE_DIRECT_URL`,
+  `FACTURE_WHATSAPP_PROVIDER` (`disabled` par défaut).
 - **Aucune base Facture n'est créée en préproduction ni en production** sans GO.
 
-## 11. Tests
+## 12. Tests
 
 - Unitaires : `packages/shared/src/facture.spec.ts` (TVA, numérotation, mentions, permissions),
   `facture-interventions.spec.ts` (transitions, durées, référence, portée des rôles),
+  `facture-notifications.spec.ts` (heures des rappels, textes, délais des nouvelles tentatives),
   `facture-documents.spec.ts` (montants exacts, remises, TVA par taux, conversions, montant en lettres,
   reste dû, statut d'une facture, échéance dépassée),
   `facture-boundaries.spec.ts` (frontières, configuration), `migration-safety.spec.ts` (cible Facture).
@@ -266,9 +307,13 @@ facturation) et `/facture/equipements`.
   bord, exports CSV, rôles, isolation, déclencheurs de la base), `facture-f3.integration.spec.ts`
   (planning, équipement du client, travaux, rapport figé, signature et empreinte, rapport PDF,
   facturation idempotente sous concurrence, fin des travaux contre saisie concurrente, photos plafonnées,
-  réouverture, annulation, technicien limité à ses interventions, isolation, déclencheurs) — exigent `TEST_FACTURE_DATABASE_URL`.
+  réouverture, annulation, technicien limité à ses interventions, isolation, déclencheurs),
+  `facture-f4.integration.spec.ts` (rendez-vous confirmé, reporté, rappelé, annulé ; e-mail de secours,
+  échec définitif puis secours, échec passager retenté, consentement retiré, résultat inconnu jamais
+  renvoyé, répartiteurs simultanés sans doublon, notification figée, isolation) — exigent `TEST_FACTURE_DATABASE_URL`.
 - E2E : `e2e/facture-f0.spec.ts` (portail, identité, logo, équipe), `e2e/facture-f1.spec.ts` (client,
   article, devis → bon de commande → facture brouillon, PDF), `e2e/facture-f2.spec.ts` (facture émise,
   payée en deux fois, avoir, tableau de bord, export), `e2e/facture-f3.spec.ts` (intervention planifiée,
-  réalisée, signée à l'écran, facturée).
+  réalisée, signée à l'écran, facturée), `e2e/facture-f4.spec.ts` (rendez-vous confirmé, reporté,
+  annulé, envoyés par le répartiteur avec le fournisseur simulé).
 - CI : base `ocall_facture_ci` éphémère, migrée puis utilisée par les tests d'intégration et E2E.

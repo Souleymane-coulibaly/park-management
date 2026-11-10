@@ -25,6 +25,7 @@ interface ClientView {
   rccm: string | null;
   rib: string | null;
   description: string | null;
+  whatsappOptIn: boolean;
   isArchived: boolean;
 }
 
@@ -53,6 +54,12 @@ const FIELDS = (c?: ClientView): SimpleField[] => [
   { name: 'nif', label: 'NIF (client assujetti)', defaultValue: c?.nif ?? '' },
   { name: 'rccm', label: 'RCCM', defaultValue: c?.rccm ?? '' },
   { name: 'rib', label: 'RIB', defaultValue: c?.rib ?? '' },
+  {
+    name: 'whatsappOptIn',
+    label: 'Le client accepte de recevoir ses rendez-vous par WhatsApp',
+    type: 'checkbox',
+    defaultValue: c?.whatsappOptIn ? 'true' : '',
+  },
 ];
 
 /** Clients d'Ocall Facture : recherche, création, modification, archivage (jamais de suppression). */

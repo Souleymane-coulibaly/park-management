@@ -16,6 +16,8 @@ export async function purgeFactureOrganizations(
       await tx.$executeRaw`SELECT set_config('ocall.facture_purge', 'on', true)`;
       const where = { organizationId: { in: organizationIds } };
       // Interventions (F3) : leurs saisies, puis elles-mêmes, avant les factures qu'elles citent.
+      await tx.factureNotification.deleteMany({ where });
+      await tx.factureNotificationSettings.deleteMany({ where });
       await tx.factureInterventionPhoto.deleteMany({ where });
       await tx.facturePartUsage.deleteMany({ where });
       await tx.factureTimeEntry.deleteMany({ where });

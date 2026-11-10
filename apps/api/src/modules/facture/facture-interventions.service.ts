@@ -22,6 +22,7 @@ import {
   formatFactureMinutes,
   hasFacturePermission,
   isFactureInterventionPlanningOpen,
+  maskPhone,
   isFactureInterventionWorkOpen,
 } from '@ocall/shared';
 import sharp from 'sharp';
@@ -38,6 +39,7 @@ import {
   type FactureInterventionReport,
   renderFactureInterventionReport,
 } from './facture-intervention-pdf';
+import { FactureNotificationsService } from './facture-notifications.service';
 import { loadFactureLogos } from './facture-pdf';
 import { FacturePrismaService } from './facture-prisma.service';
 import type {
@@ -94,6 +96,21 @@ const INCLUDE = {
     orderBy: { createdAt: 'asc' },
   },
   invoice: { select: { id: true, number: true, status: true } },
+  notifications: {
+    select: {
+      id: true,
+      kind: true,
+      channel: true,
+      recipient: true,
+      status: true,
+      sendAt: true,
+      sentAt: true,
+      attempts: true,
+      lastError: true,
+      createdAt: true,
+    },
+    orderBy: [{ sendAt: 'asc' }, { createdAt: 'asc' }],
+  },
 } satisfies Prisma.FactureInterventionInclude;
 
 type InterventionRow = Prisma.FactureInterventionGetPayload<{ include: typeof INCLUDE }>;
@@ -116,6 +133,7 @@ export class FactureInterventionsService {
     private readonly db: FacturePrismaService,
     private readonly audit: AuditService,
     private readonly documents: FactureDocumentsService,
+    private readonly notifications: FactureNotificationsService,
     @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
   ) {}
 
@@ -271,6 +289,7 @@ export class FactureInterventionsService {
           })),
         });
       }
+      await this.notifications.onPlanned(tx, ctx.organizationId, intervention.id, now);
       return intervention.id;
     });
     await this.record(ctx, 'facture.intervention_created', 'FactureIntervention', id);
@@ -278,7 +297,12 @@ export class FactureInterventionsService {
   }
 
   /** Planning : créneau, techniciens, équipement, demande ; avant la fin des travaux. */
-  async update(ctx: FactureContext, id: string, dto: UpdateFactureInterventionDto) {
+  async update(
+    ctx: FactureContext,
+    id: string,
+    dto: UpdateFactureInterventionDto,
+    now = new Date(),
+  ) {
     await this.db.$transaction(async (tx) => {
       const row = await this.lock(tx, ctx, id);
       if (!isFactureInterventionPlanningOpen(row.status)) {
@@ -339,13 +363,25 @@ export class FactureInterventionsService {
           ...(dto.contactPhone !== undefined ? { contactPhone: dto.contactPhone } : {}),
         },
       });
+      // Rendez-vous déplacé avant son début : rappels obsolètes annulés, client prévenu du report.
+      if (row.status === 'PLANNED' && slot.start.getTime() !== row.scheduledStart.getTime()) {
+        await this.notifications.onRescheduled(tx, ctx.organizationId, id, now);
+      }
     });
     await this.record(ctx, 'facture.intervention_updated', 'FactureIntervention', id);
     return this.get(ctx, id);
   }
 
   async cancel(ctx: FactureContext, id: string, reason: string, now = new Date()) {
-    await this.transition(ctx, id, 'CANCELLED', { cancelledAt: now, cancelReason: reason });
+    await this.transition(
+      ctx,
+      id,
+      'CANCELLED',
+      { cancelledAt: now, cancelReason: reason },
+      'manage',
+      undefined,
+      (tx) => this.notifications.onCancelled(tx, ctx.organizationId, id, now),
+    );
     await this.record(ctx, 'facture.intervention_cancelled', 'FactureIntervention', id);
     return this.get(ctx, id);
   }
@@ -353,7 +389,9 @@ export class FactureInterventionsService {
   // ─── Travaux ───
 
   async start(ctx: FactureContext, id: string, now = new Date()) {
-    await this.transition(ctx, id, 'IN_PROGRESS', { startedAt: now }, 'work', 'PLANNED');
+    await this.transition(ctx, id, 'IN_PROGRESS', { startedAt: now }, 'work', 'PLANNED', (tx) =>
+      this.notifications.onStarted(tx, ctx.organizationId, id),
+    );
     await this.record(ctx, 'facture.intervention_started', 'FactureIntervention', id);
     return this.get(ctx, id);
   }
@@ -828,6 +866,8 @@ export class FactureInterventionsService {
     mode: 'work' | 'manage' = 'manage',
     /** Statut de départ exigé (démarrage ≠ réouverture, toutes deux vers « en cours »). */
     from?: FactureInterventionStatus,
+    /** Suite dans la même transaction (notifications de rendez-vous). */
+    after?: (tx: Tx) => Promise<unknown>,
   ) {
     await this.db.$transaction(async (tx) => {
       const row = await this.lockFor(tx, ctx, id, mode);
@@ -838,6 +878,7 @@ export class FactureInterventionsService {
         where: { organizationId_id: { organizationId: ctx.organizationId, id } },
         data: { ...data, status: to },
       });
+      if (after) await after(tx);
     });
   }
 
@@ -924,7 +965,7 @@ export class FactureInterventionsService {
 
   private view(ctx: FactureContext, row: InterventionRow) {
     const assigned = row.technicians.some((t) => t.memberId === ctx.memberId);
-    const { signatureKey, photos, timeEntries, parts, technicians, ...rest } = row;
+    const { signatureKey, photos, timeEntries, parts, technicians, notifications, ...rest } = row;
     return {
       ...rest,
       hasSignature: Boolean(signatureKey),
@@ -943,6 +984,8 @@ export class FactureInterventionsService {
         quantity: Number(p.quantity.toString()),
       })),
       photos: photos.map(({ storageKey: _k, ...p }) => p),
+      /** Notifications au client (F4) : numéros et adresses masqués. */
+      notifications: notifications.map((n) => ({ ...n, recipient: maskRecipient(n.recipient) })),
       /** Droits de l'utilisateur sur cette intervention (affichage des actions ; l'API décide). */
       can: {
         manage: this.canManage(ctx),
@@ -1064,4 +1107,13 @@ async function normalizeSignature(file: FactureUpload | undefined): Promise<Buff
   // Aucun pixel sensiblement plus sombre que le fond : rien n'a été signé.
   if ((stats.channels[0]?.min ?? 255) > 200) throw refused('La signature est vide.');
   return png;
+}
+
+/** Destinataire masqué : 4 derniers chiffres d'un numéro, initiale et domaine d'une adresse. */
+function maskRecipient(recipient: string): string {
+  if (recipient.includes('@')) {
+    const [local, domain] = recipient.split('@');
+    return `${local!.slice(0, 1)}•••@${domain}`;
+  }
+  return maskPhone(recipient.replace(/\s/g, '')) ?? '';
 }

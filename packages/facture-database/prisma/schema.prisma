@@ -114,27 +114,30 @@ enum FactureClientKind {
 
 /// Client d'une organisation (entreprise ou particulier). Jamais supprimé : archivé.
 model FactureClient {
-  id             String            @id @default(uuid()) @db.Uuid
-  organizationId String            @db.Uuid
-  kind           FactureClientKind @default(COMPANY)
-  name           String
-  contactName    String?
-  email          String?
-  phone          String?
-  address        String?
-  city           String?
-  country        String            @default("ML") @db.Char(2)
+  id              String            @id @default(uuid()) @db.Uuid
+  organizationId  String            @db.Uuid
+  kind            FactureClientKind @default(COMPANY)
+  name            String
+  contactName     String?
+  email           String?
+  phone           String?
+  address         String?
+  city            String?
+  country         String            @default("ML") @db.Char(2)
   /// NIF de l'acheteur, imprimé sur ses documents quand il est assujetti ; unique par organisation.
-  nif            String?
-  rccm           String?
+  nif             String?
+  rccm            String?
   /// Relevé d'identité bancaire du client, imprimé dans son bloc s'il est renseigné.
-  rib            String?
+  rib             String?
   /// Description imprimée sous le nom du client sur les documents (activité, service, précision).
-  description    String?
-  notes          String?
-  isArchived     Boolean           @default(false)
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  description     String?
+  notes           String?
+  /// Consentement du client à recevoir ses rendez-vous par WhatsApp (F4), daté.
+  whatsappOptIn   Boolean           @default(false)
+  whatsappOptInAt DateTime?
+  isArchived      Boolean           @default(false)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
 
   documents     FactureDocument[]
   equipment     FactureEquipment[]
@@ -444,14 +447,15 @@ model FactureIntervention {
   createdAt         DateTime                  @default(now())
   updatedAt         DateTime                  @updatedAt
 
-  client      FactureClient                   @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Restrict)
+  client        FactureClient                   @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Restrict)
   /// L'équipement appartient au client de l'intervention (clé composée avec le client).
-  equipment   FactureEquipment?               @relation(fields: [organizationId, clientId, equipmentId], references: [organizationId, clientId, id], onDelete: Restrict)
-  invoice     FactureDocument?                @relation(fields: [organizationId, invoiceId], references: [organizationId, id], onDelete: Restrict)
-  technicians FactureInterventionTechnician[]
-  timeEntries FactureTimeEntry[]
-  parts       FacturePartUsage[]
-  photos      FactureInterventionPhoto[]
+  equipment     FactureEquipment?               @relation(fields: [organizationId, clientId, equipmentId], references: [organizationId, clientId, id], onDelete: Restrict)
+  invoice       FactureDocument?                @relation(fields: [organizationId, invoiceId], references: [organizationId, id], onDelete: Restrict)
+  technicians   FactureInterventionTechnician[]
+  timeEntries   FactureTimeEntry[]
+  parts         FacturePartUsage[]
+  photos        FactureInterventionPhoto[]
+  notifications FactureNotification[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, number])
@@ -531,5 +535,79 @@ model FactureInterventionPhoto {
   intervention FactureIntervention @relation(fields: [organizationId, interventionId], references: [organizationId, id], onDelete: Restrict)
 
   @@unique([organizationId, id])
+  @@index([organizationId, interventionId])
+}
+
+// ─── F4 — Notifications de rendez-vous ───
+
+/// Réglages des notifications de rendez-vous d'une organisation (désactivées par défaut).
+model FactureNotificationSettings {
+  organizationId      String   @id @db.Uuid
+  enabled             Boolean  @default(false)
+  /// Confirmation envoyée dès la planification.
+  sendConfirmation    Boolean  @default(true)
+  /// Rappel la veille (24 h avant).
+  reminderDayBefore   Boolean  @default(true)
+  /// Rappel quelques heures avant (1, 2, 3, 4, 6 ou 12), ou aucun.
+  reminderHoursBefore Int?     @default(2)
+  /// E-mail en secours : client sans consentement WhatsApp, sans numéro, ou échec définitif WhatsApp.
+  emailFallback       Boolean  @default(true)
+  updatedByUserId     String?  @db.Uuid
+  updatedAt           DateTime @updatedAt
+}
+
+enum FactureNotificationKind {
+  CONFIRMATION
+  RESCHEDULED
+  REMINDER
+  CANCELLATION
+}
+
+enum FactureNotificationChannel {
+  WHATSAPP
+  EMAIL
+}
+
+enum FactureNotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  CANCELLED
+  /// Envoi peut-être parti (interruption entre l'envoi et son enregistrement) : jamais renvoyé.
+  UNKNOWN
+}
+
+/// Notification d'un rendez-vous (intervention) : file d'attente en base, envoyée par le répartiteur à
+/// son heure, tentatives bornées. Le texte est figé à la programmation ; une notification devenue
+/// obsolète (report, annulation, intervention commencée) est annulée, jamais envoyée.
+model FactureNotification {
+  id                String                     @id @default(uuid()) @db.Uuid
+  organizationId    String                     @db.Uuid
+  interventionId    String                     @db.Uuid
+  kind              FactureNotificationKind
+  channel           FactureNotificationChannel
+  /// Numéro WhatsApp (international) ou adresse e-mail.
+  recipient         String
+  body              String
+  /// Rendez-vous annoncé : une notification ne part que si le créneau n'a pas changé depuis.
+  appointmentAt     DateTime
+  /// Heure d'envoi prévue (maintenant, ou heure du rappel).
+  sendAt            DateTime
+  status            FactureNotificationStatus  @default(PENDING)
+  attempts          Int                        @default(0)
+  nextAttemptAt     DateTime
+  lastError         String?
+  providerMessageId String?
+  sentAt            DateTime?
+  /// Un même fait n'est notifié qu'une fois par canal.
+  dedupeKey         String
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+
+  intervention FactureIntervention @relation(fields: [organizationId, interventionId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, dedupeKey])
+  @@index([status, nextAttemptAt])
   @@index([organizationId, interventionId])
 }

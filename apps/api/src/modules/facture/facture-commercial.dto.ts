@@ -135,6 +135,13 @@ export class FactureClientDto {
   @IsString()
   @MaxLength(1000)
   notes?: string | null;
+
+  @ApiPropertyOptional({
+    description: 'Le client accepte de recevoir ses rendez-vous par WhatsApp (consentement daté)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  whatsappOptIn?: boolean;
 }
 
 export class UpdateFactureClientDto extends PartialType(FactureClientDto) {
