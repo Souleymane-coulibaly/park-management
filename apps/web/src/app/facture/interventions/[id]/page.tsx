@@ -22,6 +22,7 @@ import {
 } from '@ocall/shared';
 import { DocumentStatusBadge } from '@/components/facture/document-status-badge';
 import { FacturePage } from '@/components/facture/facture-page';
+import { AiReportAssistant } from '@/components/facture/ai-report-assistant';
 import { InterventionStatusBadge } from '@/components/facture/intervention-status-badge';
 import { SignaturePad, type SignaturePadHandle } from '@/components/facture/signature-pad';
 import { TextareaField } from '@/components/facture/textarea-field';
@@ -87,6 +88,13 @@ interface Intervention {
   can: { manage: boolean; work: boolean; invoice: boolean };
 }
 
+interface AiSettingsView {
+  configured: boolean;
+  enabled: boolean;
+  reportEnabled: boolean;
+  quoteEnabled: boolean;
+}
+
 interface CatalogItem {
   id: string;
   kind: 'PRODUCT' | 'SERVICE';
@@ -116,12 +124,26 @@ export default function FactureInterventionPage() {
   const { id } = useParams<{ id: string }>();
   return (
     <FacturePage title="Intervention">
-      {({ context }) => <InterventionView id={id} readOnly={context.access !== 'full'} />}
+      {({ context }) => (
+        <InterventionView
+          id={id}
+          readOnly={context.access !== 'full'}
+          aiReport={context.permissions.includes('facture.ai.report')}
+        />
+      )}
     </FacturePage>
   );
 }
 
-function InterventionView({ id, readOnly }: { id: string; readOnly: boolean }) {
+function InterventionView({
+  id,
+  readOnly,
+  aiReport,
+}: {
+  id: string;
+  readOnly: boolean;
+  aiReport: boolean;
+}) {
   const res = useApi<Intervention>(`/facture/interventions/${id}`);
   if (res.state === 'loading') return <LoadingState />;
   if (res.state === 'error') return <ErrorState error={res.error} onRetry={res.reload} />;
@@ -138,7 +160,7 @@ function InterventionView({ id, readOnly }: { id: string; readOnly: boolean }) {
       <TimeCard i={i} working={working} canManage={can.manage} reload={res.reload} />
       <PartsCard i={i} working={working} reload={res.reload} />
       <PhotosCard i={i} working={working} reload={res.reload} />
-      {working && <CompleteCard id={i.id} draft={i} reload={res.reload} />}
+      {working && <CompleteCard id={i.id} draft={i} reload={res.reload} aiReport={aiReport} />}
       {i.workSummary && i.status !== 'IN_PROGRESS' && i.status !== 'PLANNED' && (
         <ReportCard i={i} />
       )}
@@ -662,14 +684,21 @@ function CompleteCard({
   id,
   draft,
   reload,
+  aiReport,
 }: {
   id: string;
   draft: Intervention;
   reload: () => void;
+  aiReport: boolean;
 }) {
   const { error, busy, run } = useAction(reload);
   const [workSummary, setWorkSummary] = useState(draft.workSummary ?? '');
   const [recommendations, setRecommendations] = useState(draft.recommendations ?? '');
+  const [proposalId, setProposalId] = useState<string | null>(null);
+  // Rapport intelligent proposé seulement si l'IA est activée pour l'entreprise (F6A).
+  const ai = useApi<AiSettingsView>(aiReport ? '/facture/ai/settings' : null);
+  const aiReady =
+    ai.state === 'success' && ai.data.configured && ai.data.enabled && ai.data.reportEnabled;
   return (
     <Card>
       <CardHeader
@@ -685,11 +714,27 @@ function CompleteCard({
             void run('complete', () =>
               api(`/facture/interventions/${id}/complete`, {
                 method: 'POST',
-                body: { workSummary, recommendations: recommendations || null },
+                body: {
+                  workSummary,
+                  recommendations: recommendations || null,
+                  ...(proposalId ? { aiProposalId: proposalId } : {}),
+                },
               }),
             );
           }}
         >
+          {aiReady && (
+            <AiReportAssistant
+              interventionId={id}
+              proposalId={proposalId}
+              onProposal={(p) => {
+                setProposalId(p.proposalId);
+                setWorkSummary(p.workSummary);
+                setRecommendations(p.recommendations ?? '');
+              }}
+              onRejected={() => setProposalId(null)}
+            />
+          )}
           <TextareaField
             label="Travaux réalisés"
             required

@@ -41,6 +41,10 @@ export const FACTURE_PERMISSIONS = [
   'facture.interventions.manage',
   /** Réaliser une intervention : temps, pièces, photos, fin des travaux, signature du client (F3). */
   'facture.interventions.work',
+  /** Rapport d'intervention intelligent : proposition à relire avant la fin des travaux (F6A). */
+  'facture.ai.report',
+  /** Devis intelligent : brouillon de devis proposé depuis une demande (F6A). */
+  'facture.ai.quote',
 ] as const;
 export type FacturePermission = (typeof FACTURE_PERMISSIONS)[number];
 
@@ -57,6 +61,7 @@ const ROLE_PERMISSIONS: Record<FactureRole, readonly FacturePermission[]> = {
     'facture.documents.manage',
     'facture.interventions.read',
     'facture.interventions.manage',
+    'facture.ai.quote',
   ],
   ACCOUNTANT: [
     'facture.access',
@@ -76,6 +81,7 @@ const ROLE_PERMISSIONS: Record<FactureRole, readonly FacturePermission[]> = {
     'facture.clients.read',
     'facture.catalog.read',
     'facture.interventions.work',
+    'facture.ai.report',
   ],
 };
 

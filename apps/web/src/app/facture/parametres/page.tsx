@@ -9,6 +9,7 @@ import {
   type FactureLogoPlacement,
   formatVatRate,
 } from '@ocall/shared';
+import { AiSettings } from '@/components/facture/ai-settings';
 import { NotificationSettings } from '@/components/facture/notification-settings';
 import { FacturePage } from '@/components/facture/facture-page';
 import { Button } from '@/components/ui/button';
@@ -61,6 +62,7 @@ export default function FactureSettingsPage() {
         <>
           <SettingsForm editable={canWrite('facture.settings.manage')} onSaved={reload} />
           <NotificationSettings editable={canWrite('facture.settings.manage')} />
+          <AiSettings editable={canWrite('facture.settings.manage')} />
         </>
       )}
     </FacturePage>

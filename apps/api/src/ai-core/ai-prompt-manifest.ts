@@ -12,4 +12,6 @@ export const AI_PROMPT_MANIFEST: Readonly<Record<string, string>> = {
   'school.teaching@1': '9a5494341ed692fd',
   'school.teaching_section@1': 'db9af55cb942438e',
   'school.analysis@1': 'c1880adc54e3d5d1',
+  'facture.report@1': '46cc1a018a1d305f',
+  'facture.quote@1': 'bceebf42c544354b',
 };

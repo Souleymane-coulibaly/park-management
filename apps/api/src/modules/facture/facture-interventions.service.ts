@@ -39,6 +39,7 @@ import {
   type FactureInterventionReport,
   renderFactureInterventionReport,
 } from './facture-intervention-pdf';
+import { applyFactureReportProposal } from './facture-ai-proposals';
 import { FactureNotificationsService } from './facture-notifications.service';
 import { loadFactureLogos } from './facture-pdf';
 import { FacturePrismaService } from './facture-prisma.service';
@@ -601,6 +602,19 @@ export class FactureInterventionsService {
         recommendations: dto.recommendations ?? null,
       },
       'work',
+      undefined,
+      // Rapport proposé par l'IA (F6A) : appliqué seulement ici, après relecture du technicien.
+      dto.aiProposalId
+        ? (tx) =>
+            applyFactureReportProposal(
+              tx,
+              ctx,
+              dto.aiProposalId!,
+              id,
+              { workSummary: dto.workSummary, recommendations: dto.recommendations ?? null },
+              now,
+            )
+        : undefined,
     );
     await this.record(ctx, 'facture.intervention_completed', 'FactureIntervention', id);
     return this.get(ctx, id);

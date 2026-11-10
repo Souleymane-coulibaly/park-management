@@ -13,6 +13,7 @@ import {
   type FactureDocumentType,
   formatXof,
 } from '@ocall/shared';
+import { AiQuoteAssistant } from '@/components/facture/ai-quote-assistant';
 import { DocumentStatusBadge } from '@/components/facture/document-status-badge';
 import { FacturePage } from '@/components/facture/facture-page';
 import { Button } from '@/components/ui/button';
@@ -47,7 +48,10 @@ export default function FactureDocumentsPage() {
     >
       {({ canWrite, context }) =>
         context.permissions.includes('facture.documents.read') ? (
-          <Documents canManage={canWrite('facture.documents.manage')} />
+          <Documents
+            canManage={canWrite('facture.documents.manage')}
+            aiQuote={canWrite('facture.documents.manage') && canWrite('facture.ai.quote')}
+          />
         ) : (
           <Alert
             tone="info"
@@ -59,7 +63,13 @@ export default function FactureDocumentsPage() {
   );
 }
 
-function Documents({ canManage }: { canManage: boolean }) {
+function Documents({ canManage, aiQuote }: { canManage: boolean; aiQuote: boolean }) {
+  // Devis intelligent (F6A) : proposé seulement si l'IA est activée pour l'entreprise.
+  const ai = useApi<{ configured: boolean; enabled: boolean; quoteEnabled: boolean }>(
+    aiQuote ? '/facture/ai/settings' : null,
+  );
+  const aiReady =
+    ai.state === 'success' && ai.data.configured && ai.data.enabled && ai.data.quoteEnabled;
   const [type, setType] = useState('');
   const [status, setStatus] = useState('');
   const query = new URLSearchParams({
@@ -71,6 +81,7 @@ function Documents({ canManage }: { canManage: boolean }) {
   return (
     <>
       {canManage && <NewDocument />}
+      {aiReady && <AiQuoteAssistant />}
       <Card>
         <CardBody className="flex flex-wrap gap-4">
           <SelectField

@@ -611,3 +611,80 @@ model FactureNotification {
   @@index([status, nextAttemptAt])
   @@index([organizationId, interventionId])
 }
+
+// ─── F6A — Module IA (Ocall AI Core) ───
+
+/// Réglages IA d'une organisation : désactivée par défaut ; plafond mensuel par fonctionnalité, fixé par
+/// le gérant sous le plafond plateforme Ocall.
+model FactureAiSettings {
+  organizationId     String   @id @db.Uuid
+  enabled            Boolean  @default(false)
+  reportEnabled      Boolean  @default(true)
+  quoteEnabled       Boolean  @default(true)
+  reportMonthlyLimit Int      @default(100)
+  quoteMonthlyLimit  Int      @default(100)
+  updatedByUserId    String?  @db.Uuid
+  updatedAt          DateTime @updatedAt
+}
+
+/// Consommation IA (une ligne par appel réservé) : aucun contenu, seulement le coût et la trace technique.
+model FactureAiUsage {
+  id                    String   @id @default(uuid()) @db.Uuid
+  organizationId        String   @db.Uuid
+  actorUserId           String   @db.Uuid
+  memberId              String?  @db.Uuid
+  feature               String
+  provider              String
+  model                 String
+  promptId              String?
+  promptVersion         Int?
+  /// PENDING (réservé), SUCCEEDED, FAILED.
+  status                String   @default("PENDING")
+  inputTokens           Int      @default(0)
+  cachedInputTokens     Int      @default(0)
+  outputTokens          Int      @default(0)
+  /// null = coût non estimable, jamais présenté comme nul.
+  estimatedCostMicroUsd Int?
+  latencyMs             Int?
+  errorCode             String?
+  createdAt             DateTime @default(now())
+
+  @@index([organizationId, feature, createdAt])
+  @@index([status, createdAt])
+}
+
+enum FactureAiProposalStatus {
+  PROPOSED
+  APPLIED
+  REJECTED
+}
+
+/// Proposition de l'IA, tracée : objet concerné, entrées résumées, sortie, prompt et modèle, décision
+/// humaine (appliquée telle quelle ou corrigée, rejetée), décideur et date. Jamais supprimée.
+model FactureAiProposal {
+  id              String                  @id @default(uuid()) @db.Uuid
+  organizationId  String                  @db.Uuid
+  feature         String
+  status          FactureAiProposalStatus @default(PROPOSED)
+  /// Objet concerné : intervention (rapport) ou client (devis).
+  targetType      String
+  targetId        String                  @db.Uuid
+  /// Entrées résumées (aucune donnée inutile) et sortie validée par le serveur.
+  input           Json
+  output          Json
+  promptId        String
+  promptVersion   Int
+  model           String
+  createdByUserId String                  @db.Uuid
+  createdAt       DateTime                @default(now())
+  decidedByUserId String?                 @db.Uuid
+  decidedAt       DateTime?
+  /// Appliquée après correction par l'utilisateur.
+  edited          Boolean                 @default(false)
+  /// Résultat de l'application (ex. devis brouillon créé).
+  resultId        String?                 @db.Uuid
+
+  @@unique([organizationId, id])
+  @@index([organizationId, targetType, targetId])
+  @@index([organizationId, feature, createdAt])
+}

@@ -1,4 +1,5 @@
 import { databaseIdentity } from '@ocall/database';
+import { FACTURE_AI_PLATFORM_MONTHLY_CEILING } from '@ocall/shared';
 
 /**
  * Configuration d'Ocall Facture : désactivé par défaut, jamais sur la base Ocall Suite ni sur la base
@@ -13,6 +14,11 @@ export interface FactureConfig {
    * réel sera branché derrière la même interface, une fois choisi.
    */
   whatsapp: 'disabled' | 'simulated';
+  /**
+   * Plafond plateforme Ocall des appels IA, par organisation, fonctionnalité et mois (F6A) : le gérant
+   * règle ses plafonds en dessous.
+   */
+  aiMonthlyCeiling: number;
 }
 
 export function loadFactureConfig(env: NodeJS.ProcessEnv): FactureConfig {
@@ -24,7 +30,12 @@ export function loadFactureConfig(env: NodeJS.ProcessEnv): FactureConfig {
   if (whatsapp === 'simulated' && env.NODE_ENV === 'production') {
     throw new Error('FACTURE_WHATSAPP_PROVIDER=simulated est interdit en production.');
   }
-  if (!enabled) return { enabled, databaseUrl: null, whatsapp };
+  const ceiling = Number(env.FACTURE_AI_MAX_MONTHLY_CALLS ?? FACTURE_AI_PLATFORM_MONTHLY_CEILING);
+  if (!Number.isInteger(ceiling) || ceiling < 0 || ceiling > 100_000) {
+    throw new Error('FACTURE_AI_MAX_MONTHLY_CALLS invalide : entier de 0 à 100 000.');
+  }
+  const aiMonthlyCeiling = ceiling;
+  if (!enabled) return { enabled, databaseUrl: null, whatsapp, aiMonthlyCeiling };
   const databaseUrl = env.FACTURE_DATABASE_URL?.trim() || null;
   if (!databaseUrl) throw new Error('FACTURE_ENABLED=true exige FACTURE_DATABASE_URL.');
   const facture = databaseIdentity(databaseUrl);
@@ -36,5 +47,5 @@ export function loadFactureConfig(env: NodeJS.ProcessEnv): FactureConfig {
       'FACTURE_DATABASE_URL doit désigner une base distincte des bases Ocall Suite et Ocall School.',
     );
   }
-  return { enabled, databaseUrl, whatsapp };
+  return { enabled, databaseUrl, whatsapp, aiMonthlyCeiling };
 }

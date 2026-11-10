@@ -54,6 +54,7 @@ describe('configuration Facture', () => {
       enabled: false,
       databaseUrl: null,
       whatsapp: 'disabled',
+      aiMonthlyCeiling: 500,
     });
   });
 
@@ -65,6 +66,8 @@ describe('configuration Facture', () => {
       loadFactureConfig({ FACTURE_WHATSAPP_PROVIDER: 'simulated', NODE_ENV: 'production' }),
     ).toThrow('interdit en production');
     expect(() => loadFactureConfig({ FACTURE_WHATSAPP_PROVIDER: 'meta' })).toThrow('invalide');
+    expect(loadFactureConfig({ FACTURE_AI_MAX_MONTHLY_CALLS: '50' }).aiMonthlyCeiling).toBe(50);
+    expect(() => loadFactureConfig({ FACTURE_AI_MAX_MONTHLY_CALLS: '-1' })).toThrow('invalide');
   });
 
   it('activé : base obligatoire, distincte des bases Suite et School', () => {
@@ -91,6 +94,6 @@ describe('configuration Facture', () => {
         SCHOOL_DATABASE_URL: school,
         FACTURE_DATABASE_URL: facture,
       }),
-    ).toEqual({ enabled: true, databaseUrl: facture, whatsapp: 'disabled' });
+    ).toEqual({ enabled: true, databaseUrl: facture, whatsapp: 'disabled', aiMonthlyCeiling: 500 });
   });
 });

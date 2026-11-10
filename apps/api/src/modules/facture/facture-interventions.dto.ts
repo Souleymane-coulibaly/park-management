@@ -286,6 +286,14 @@ export class CompleteFactureInterventionDto {
   @IsString()
   @MaxLength(2000)
   recommendations?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Proposition IA relue et validée (rapport intelligent, F6A), tracée comme appliquée',
+  })
+  @IsOptional()
+  @IsUUID()
+  aiProposalId?: string;
 }
 
 export class SignFactureInterventionDto {

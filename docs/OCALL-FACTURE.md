@@ -14,9 +14,9 @@ Proposition d'architecture et décisions : `ocall-audits/proposition-architectur
 | **F1 — Commercial**    | Clients, catalogue, devis, pro forma, bons de commande, PDF, e-mail  | Livré               |
 | **F2 — Facturation**   | Factures émises figées, avoirs, encaissements, relances, exports     | Livré               |
 | **F3 — Interventions** | Techniciens, planning, équipements, temps, pièces, photos, signature | Livré               |
-| **F4 — Rendez-vous**   | Confirmation, report, rappels, annulation : WhatsApp, e-mail secours | Livré (ce document) |
+| **F4 — Rendez-vous**   | Confirmation, report, rappels, annulation : WhatsApp, e-mail secours | Livré               |
 | F5 — Site vitrine      | Site public, formulaires de demande, domaines, SEO local             | À venir             |
-| F6A — IA (1)           | Socle IA, rapport d'intervention intelligent, devis intelligent      | À venir             |
+| **F6A — IA (1)**       | Socle IA, rapport d'intervention intelligent, devis intelligent      | Livré (ce document) |
 | F6B — IA (2)           | Planification intelligente, maintenance préventive intelligente      | À venir             |
 
 ## 1. Architecture
@@ -76,6 +76,8 @@ ne donne aucun droit Facture.
 | Planifier, affecter, annuler ; gérer les équipements | Oui    | Oui        | Non       | Non         |
 | Réaliser : temps, pièces, photos, fin, signature     | Oui    | Non        | Non       | Les siennes |
 | Facturer une intervention signée                     | Oui    | Oui        | Oui       | Non         |
+| Rapport d'intervention intelligent (IA)              | Oui    | Non        | Non       | Les siennes |
+| Devis intelligent (IA)                               | Oui    | Oui        | Non       | Non         |
 
 Désactiver un membre ferme aussi son compte Suite et ses sessions : Facture décide d'abord, Suite recopie
 l'état validé (même mécanisme que School).
@@ -239,7 +241,38 @@ brouillon n'a pas de numéro.
 - **Hors V1** : accusés de lecture et de remise WhatsApp (webhook du fournisseur), réponse du client
   (confirmer, demander un report), SMS.
 
-## 10. API (`/api/v1/facture`)
+## 10. Module IA (F6A)
+
+Sur **Ocall AI Core** (`apps/api/src/ai-core`) : application `facture` inscrite au démarrage, consommation et
+quotas dans la base Facture (`FactureAiUsageStore`, réservation atomique sous verrou, réservations
+orphelines libérées), prompts versionnés `facture.report` et `facture.quote` (empreintes au manifeste du
+cœur), fournisseur simulé en test (aucun appel payant). **L'IA propose, une personne décide.**
+
+- **Réglages** (`/facture/parametres`, gérant) : assistant désactivé par défaut ; chaque fonctionnalité
+  activable ; plafond mensuel par fonctionnalité fixé par le gérant, **sous le plafond plateforme Ocall**
+  (`FACTURE_AI_MAX_MONTHLY_CALLS`, 500 par défaut) ; consommation du mois. Aucune nouvelle facturation.
+- **Traçabilité** (`FactureAiProposal`) : fonctionnalité, objet, entrées, sortie contrôlée, prompt et
+  version, modèle, auteur, décision (appliquée, corrigée ou non, rejetée), décideur, date, résultat. Jamais
+  supprimée ni modifiée après décision (déclencheur `FactureAiProposal_frozen`). Liste pour le gérant.
+- **Rapport d'intervention intelligent** (intervention en cours, technicien affecté ou gérant) :
+  observations **saisies ou dictées** (transcription ; l'audio n'est jamais conservé) → constat, travaux,
+  recommandations proposés à partir des **données réelles** de l'intervention ; la ligne « Temps passé,
+  pièces » est composée par le serveur, jamais par le modèle. **Aucun chiffre absent des données** n'est
+  accepté (proposition refusée). La proposition **préremplit** la fin des travaux : le technicien relit,
+  corrige et valide ; elle n'est marquée appliquée (et « corrigée » le cas échéant) qu'à la fin des
+  travaux, dans la même transaction. La signature reste impossible avant.
+- **Devis intelligent** (gérant, commercial) : depuis la demande d'un client, lignes choisies
+  **exclusivement dans le catalogue** (références courtes, aucun identifiant interne exposé) ; **prix et TVA
+  lus par le serveur**, jamais par le modèle ; article inconnu, quantité absurde ou prix proposé par le
+  modèle écartés et signalés ; **informations manquantes** listées. Le brouillon de devis n'est créé que sur
+  décision (« Créer le brouillon », une seule fois même en double clic), aux prix du catalogue à cet instant,
+  et **n'est jamais émis automatiquement**.
+- **Sécurité** : contexte de chaque appel construit depuis la session (organisation, utilisateur, rôle,
+  opération), jamais depuis le modèle ; textes saisis ou dictés traités comme des données ; aucune lecture
+  hors de l'organisation ; technicien limité à ses interventions.
+- **F6B** (à venir) : planification intelligente, maintenance préventive intelligente.
+
+## 11. API (`/api/v1/facture`)
 
 | Route                                                                                                                    | Permission          |
 | ------------------------------------------------------------------------------------------------------------------------ | ------------------- |
@@ -262,6 +295,11 @@ brouillon n'a pas de numéro.
 | `POST interventions/:id/invoice`                                                                                         | gérer les documents |
 | `GET notification-settings`                                                                                              | entrer              |
 | `PUT notification-settings`                                                                                              | gérer l'identité    |
+| `GET ai/settings`                                                                                                        | entrer              |
+| `PUT ai/settings` · `GET ai/proposals`                                                                                   | gérer l'identité    |
+| `POST interventions/:id/ai/report`                                                                                       | rapport IA          |
+| `POST ai/quote` · `POST ai/proposals/:id/apply`                                                                          | devis IA            |
+| `POST ai/proposals/:id/reject`                                                                                           | rapport ou devis IA |
 | `GET members`                                                                                                            | voir l'équipe       |
 | `POST members` · `PATCH members/:id`                                                                                     | gérer l'équipe      |
 
@@ -273,7 +311,7 @@ et relance d'une facture), `/facture/clients`, `/facture/catalogue`,
 technicien), `/facture/interventions/:id` (travaux, photos, fin, signature à l'écran, rapport,
 facturation) et `/facture/equipements`.
 
-## 11. Base et déploiement
+## 12. Base et déploiement
 
 - Migrations : `20261120000000_facture_v1_socle` (F0), `20261121000000_facture_v1_commercial` (F1 :
   clients, catalogue, documents, lignes, logos ; contrôles `CHECK` et déclencheurs du document figé) et
@@ -282,19 +320,23 @@ facturation) et `/facture/equipements`.
   (F3 : équipements, interventions, techniciens, temps, pièces, photos ; contrôles et déclencheurs
   `FactureIntervention_frozen`, saisies figées, `FactureDocument_intervention`) et
   `20261124000000_facture_v1_notifications` (F4 : réglages, consentement WhatsApp du client, file des
-  notifications ; contrôles et déclencheur `FactureNotification_frozen`), appliquées par `pnpm db:facture:migrate:deploy` (refus des instructions
+  notifications ; contrôles et déclencheur `FactureNotification_frozen`) et
+  `20261125000000_facture_v1_ai` (F6A : réglages IA, consommation, propositions tracées ; contrôles et
+  déclencheur `FactureAiProposal_frozen`), appliquées par `pnpm db:facture:migrate:deploy` (refus des instructions
   destructrices et d'une base Suite ou School).
 - Pré-déploiement Railway : `db:migrate:deploy && db:school:migrate:deploy && db:facture:migrate:deploy`
   — sans `FACTURE_ENABLED=true`, l'étape Facture ne fait rien.
 - Variables : `FACTURE_ENABLED`, `FACTURE_DATABASE_URL`, `FACTURE_DIRECT_URL`,
-  `FACTURE_WHATSAPP_PROVIDER` (`disabled` par défaut).
+  `FACTURE_WHATSAPP_PROVIDER` (`disabled` par défaut), `FACTURE_AI_MAX_MONTHLY_CALLS` (plafond Ocall,
+  500 par défaut ; l'IA elle-même suit `AI_PROVIDER` et `AI_REAL_CALLS_ENABLED` d'Ocall AI Core).
 - **Aucune base Facture n'est créée en préproduction ni en production** sans GO.
 
-## 12. Tests
+## 13. Tests
 
 - Unitaires : `packages/shared/src/facture.spec.ts` (TVA, numérotation, mentions, permissions),
   `facture-interventions.spec.ts` (transitions, durées, référence, portée des rôles),
   `facture-notifications.spec.ts` (heures des rappels, textes, délais des nouvelles tentatives),
+  `facture-ai.spec.ts` (droits IA, texte corrigé), `ai-prompt-manifest.spec.ts` (empreintes des prompts),
   `facture-documents.spec.ts` (montants exacts, remises, TVA par taux, conversions, montant en lettres,
   reste dû, statut d'une facture, échéance dépassée),
   `facture-boundaries.spec.ts` (frontières, configuration), `migration-safety.spec.ts` (cible Facture).
@@ -310,10 +352,15 @@ facturation) et `/facture/equipements`.
   réouverture, annulation, technicien limité à ses interventions, isolation, déclencheurs),
   `facture-f4.integration.spec.ts` (rendez-vous confirmé, reporté, rappelé, annulé ; e-mail de secours,
   échec définitif puis secours, échec passager retenté, consentement retiré, résultat inconnu jamais
-  renvoyé, répartiteurs simultanés sans doublon, notification figée, isolation) — exigent `TEST_FACTURE_DATABASE_URL`.
+  renvoyé, répartiteurs simultanés sans doublon, notification figée, isolation),
+  `facture-f6a.integration.spec.ts` (réglages et plafond Ocall, rapport sur données réelles et dictée,
+  validation à la fin des travaux, chiffres inventés refusés, proposition d'une autre intervention,
+  devis aux prix du catalogue, article inconnu / quantité absurde / prix du modèle écartés, brouillon jamais
+  émis, quotas sous concurrence, rôles, isolation, proposition figée) — exigent `TEST_FACTURE_DATABASE_URL`.
 - E2E : `e2e/facture-f0.spec.ts` (portail, identité, logo, équipe), `e2e/facture-f1.spec.ts` (client,
   article, devis → bon de commande → facture brouillon, PDF), `e2e/facture-f2.spec.ts` (facture émise,
   payée en deux fois, avoir, tableau de bord, export), `e2e/facture-f3.spec.ts` (intervention planifiée,
   réalisée, signée à l'écran, facturée), `e2e/facture-f4.spec.ts` (rendez-vous confirmé, reporté,
-  annulé, envoyés par le répartiteur avec le fournisseur simulé).
+  annulé, envoyés par le répartiteur avec le fournisseur simulé), `e2e/facture-f6a.spec.ts` (rapport et
+  devis intelligents validés par une personne).
 - CI : base `ocall_facture_ci` éphémère, migrée puis utilisée par les tests d'intégration et E2E.

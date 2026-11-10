@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
 import { OrganizationsModule } from '../organizations/organizations.module';
 import { FactureAccessGuard } from './facture-access';
+import { FactureAiUsageStore } from './facture-ai-usage.store';
+import { FactureAiController } from './facture-ai.controller';
+import { FactureAiService } from './facture-ai.service';
 import { FactureBillingController } from './facture-billing.controller';
 import { FactureBillingService } from './facture-billing.service';
 import { FactureClientsService } from './facture-clients.service';
@@ -33,6 +36,7 @@ import { FactureService } from './facture.service';
     FactureBillingController,
     FactureInterventionsController,
     FactureNotificationsController,
+    FactureAiController,
   ],
   providers: [
     FacturePrismaService,
@@ -44,6 +48,8 @@ import { FactureService } from './facture.service';
     FactureBillingService,
     FactureInterventionsService,
     FactureNotificationsService,
+    FactureAiUsageStore,
+    FactureAiService,
     // WhatsApp : simulé en test, désactivé sinon, tant qu'aucun fournisseur réel n'est choisi.
     {
       provide: FACTURE_WHATSAPP_PROVIDER,

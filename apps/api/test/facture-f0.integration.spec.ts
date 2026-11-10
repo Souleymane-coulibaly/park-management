@@ -321,6 +321,7 @@ const enabled = Boolean(process.env.TEST_FACTURE_DATABASE_URL);
         'facture.clients.read',
         'facture.catalog.read',
         'facture.interventions.work',
+        'facture.ai.report',
       ],
     });
     await tech.agent.get(api('/facture/settings')).expect(200);
