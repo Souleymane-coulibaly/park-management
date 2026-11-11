@@ -79,6 +79,7 @@ export default async function SchoolLayout({ children }: { children: ReactNode }
       nav={NAV}
       context={{ title: me.organization!.name, subtitle: 'Ocall School' }}
       homeHref="/school"
+      appsHref="/suite"
       accountHref="/school/compte"
       headerNote={
         <Link href="/suite" className="font-medium text-forest hover:underline">
