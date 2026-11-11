@@ -234,6 +234,24 @@ export class FactureAiPlanningService {
       }
       const start = new Date(chosen.start);
       const end = new Date(chosen.end);
+      // Proposition encore d'actualité : intervention toujours planifiée, même durée, créneau à venir.
+      const [current] = await tx.$queryRaw<
+        { status: string; scheduledStart: Date; scheduledEnd: Date }[]
+      >`SELECT "status", "scheduledStart", "scheduledEnd" FROM "FactureIntervention"
+        WHERE "organizationId" = ${ctx.organizationId}::uuid AND "id" = ${proposal.targetId}::uuid FOR UPDATE`;
+      if (
+        !current ||
+        current.status !== 'PLANNED' ||
+        start.getTime() <= now.getTime() ||
+        end.getTime() - start.getTime() !==
+          current.scheduledEnd.getTime() - current.scheduledStart.getTime()
+      ) {
+        throw new ConflictException({
+          code: 'FACTURE_AI_PROPOSAL_STALE',
+          message:
+            'L’intervention ou le créneau a changé depuis la proposition : demandez une nouvelle proposition.',
+        });
+      }
       // Sérialise les affectations d'un même technicien, puis revérifie qu'il est encore libre.
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`facture-member/${chosen.memberId}`}))`;
       const taken =

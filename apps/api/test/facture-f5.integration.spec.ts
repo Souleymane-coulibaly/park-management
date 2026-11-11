@@ -292,10 +292,15 @@ const opened = () => Date.now() - 10_000;
     expect((await pub().get(api(`/public/facture-sites/froid-${RUN}`))).body.site.gallery).toEqual([
       { key: media.storageKey, caption: null },
     ]);
-    // Une image en ligne ne se supprime pas directement.
-    expect((await showcase.agent.delete(api(`/facture/site/media/${media.id}`))).body.code).toBe(
-      'FACTURE_SITE_MEDIA_PUBLISHED',
+    // Audit V1 (P1) : une image en ligne se retire ; elle quitte aussitôt la version publiée.
+    await showcase.agent.delete(api(`/facture/site/media/${media.id}`)).expect(200);
+    expect((await pub().get(api(`/public/facture-sites/froid-${RUN}`))).body.site.gallery).toEqual(
+      [],
     );
+    await pub()
+      .get(api(`/public/facture-media/${media.storageKey}`))
+      .expect(404);
+    expect(await db.factureSiteMedia.count({ where: { id: media.id } })).toBe(0);
     await showcase.agent
       .post(api('/facture/site/media'))
       .field('kind', 'GALLERY')
@@ -427,6 +432,11 @@ const opened = () => Date.now() - 10_000;
     });
     verifier.setHttps(hostname, showcase.organizationId);
     expect((await svc.activate(showcase.organizationId, domain.id)).status).toBe('ACTIVE');
+    // Audit V1 (P2) : « Vérifier » un domaine actif le laisse actif (jamais d'erreur 500).
+    expect(
+      (await showcase.agent.post(api(`/facture/site/domains/${domain.id}/verify`)).expect(200)).body
+        .status,
+    ).toBe('ACTIVE');
     expect(
       (
         await pub()
@@ -480,10 +490,44 @@ const opened = () => Date.now() - 10_000;
     await pub()
       .get(api(`/public/facture-sites/resolve?host=${hostname}`))
       .expect(404);
+    // Audit V1 (P2) : seul le Super Admin lève une suspension ; l'entreprise ne la contourne pas.
+    expect(
+      (await showcase.agent.post(api(`/facture/site/domains/${domain.id}/verify`)).expect(409)).body
+        .code,
+    ).toBe('DOMAIN_SUSPENDED');
+    expect(
+      (await showcase.agent.delete(api(`/facture/site/domains/${domain.id}`)).expect(409)).body
+        .code,
+    ).toBe('DOMAIN_SUSPENDED');
+    expect(
+      (await db.factureSiteDomain.findUniqueOrThrow({ where: { id: domain.id } })).status,
+    ).toBe('SUSPENDED');
   });
 
   it('hors ligne : retrait de la publication, plus rien de public', async () => {
     const slug = `froid-${RUN}`;
+    // Audit V1 (P2) : organisation suspendue par le Super Admin → vitrine et formulaire hors ligne.
+    await pub()
+      .get(api(`/public/facture-sites/${slug}`))
+      .expect(200);
+    await prisma.organization.update({
+      where: { id: showcase.organizationId },
+      data: { status: 'SUSPENDED' },
+    });
+    try {
+      await pub()
+        .get(api(`/public/facture-sites/${slug}`))
+        .expect(404);
+      await ask(slug).expect(404);
+    } finally {
+      await prisma.organization.update({
+        where: { id: showcase.organizationId },
+        data: { status: 'ACTIVE' },
+      });
+    }
+    await pub()
+      .get(api(`/public/facture-sites/${slug}`))
+      .expect(200);
     await showcase.agent.post(api('/facture/site/unpublish')).expect(200);
     await pub()
       .get(api(`/public/facture-sites/${slug}`))

@@ -292,6 +292,14 @@ const audio = (text: string) =>
         where: { organizationId: orgA.organizationId, errorCode: 'AI_INVALID_OUTPUT' },
       }),
     ).not.toBeNull();
+    // Audit V1 : une panne annoncée comme certaine (ici dans les recommandations) est refusée.
+    const certain = await report(
+      tech.agent,
+      id,
+      'OCALL-SIM:{"findings":"Filtre encrassé","workDone":"Nettoyage du filtre","recommendations":"Le compresseur lâchera à coup sûr"}:FIN',
+    );
+    expect([certain.status, certain.body.code]).toEqual([502, 'AI_INVALID_OUTPUT']);
+    expect(await db.factureAiProposal.count({ where: { targetId: id } })).toBe(before);
 
     // Proposition d'une autre intervention : refusée, et la fin des travaux n'a pas lieu.
     const other = await started();
@@ -372,6 +380,33 @@ const audio = (text: string) =>
       expect.objectContaining({ label: 'Déplacement technicien', quantity: 2, unitPrice: 10_000 }),
     ]);
     expect(forged.missing[0]).toMatch(/2 ligne\(s\) proposée\(s\)/);
+
+    // Audit V1 : prix ou remise glissés dans l'objet ou une note de ligne : textes retirés et signalés.
+    const smuggled = (
+      await quote(
+        orgA.agent,
+        'Demande : OCALL-SIM:{"subject":"Devis à 5 000 FCFA","lines":[{"ref":"i1","quantity":2,"note":"prix négocié 15 000 FCFA, remise 20 %"},{"ref":"i1","quantity":1,"note":"accès par la cour"}],"missing":[]}:FIN',
+      ).expect(200)
+    ).body;
+    expect(smuggled.subject).toBe('Devis');
+    expect(smuggled.lines.map((l: { note: string | null }) => l.note)).toEqual([
+      null,
+      'accès par la cour',
+    ]);
+    expect(smuggled.lines[0]).toMatchObject({ quantity: 2, unitPrice: 10_000 });
+    expect(smuggled.missing).toEqual([expect.stringMatching(/^2 texte\(s\) proposé\(s\)/)]);
+    // Chiffre présent dans la demande : conservé.
+    const kept = (
+      await quote(
+        orgA.agent,
+        'Deux déplacements, bâtiment 12. OCALL-SIM:{"subject":"Bâtiment 12","lines":[{"ref":"i1","quantity":2,"note":"bâtiment 12"}],"missing":[]}:FIN',
+      ).expect(200)
+    ).body;
+    expect([kept.subject, kept.lines[0].note, kept.missing]).toEqual([
+      'Bâtiment 12',
+      'bâtiment 12',
+      [],
+    ]);
     // Demande sans article correspondant : aucune ligne, besoin signalé, rien d'applicable.
     const empty = (
       await quote(

@@ -143,7 +143,8 @@ brouillon n'a pas de numéro.
 - **Conversions** : devis → pro forma, bon de commande ou facture ; pro forma → bon ou facture ; bon →
   facture. Idempotentes (une par origine et par type) ; convertir un devis vaut acceptation.
 - **Envoi par e-mail** : PDF en pièce jointe, réponse adressée à l'entreprise ; statut « envoyé » seulement
-  si le fournisseur accepte ; destinataire jamais journalisé.
+  si le fournisseur accepte, et seulement depuis « émis » (un devis accepté ou une facture soldée pendant
+  l'envoi gardent leur statut) ; destinataire jamais journalisé.
 - **PDF** (charte validée le 10/11/2026, commune à tous les documents Facture) : filet et couleur d'accent,
   logos, nom et activité, bloc client « Doit », date et heure, validité, référence client, vendeur (nom
   et identifiant), document d'origine, tableau avec référence article, sous-total, remise, TVA par taux,
@@ -163,7 +164,9 @@ brouillon n'a pas de numéro.
   une erreur s'**annule** avec un motif (déclencheur `FacturePayment_frozen`).
 - **Avoirs** (`AV-AAAA-NNNNN`) : créés depuis une facture émise (lignes reprises, à ajuster pour un avoir
   partiel ; client imposé) ; un seul brouillon d'avoir à la fois par facture. À l'émission, sous verrou de
-  la facture : montant positif, plafonné au TTC de la facture moins les avoirs déjà émis. Un avoir émis
+  la facture : montant positif, plafonné au TTC de la facture moins les avoirs déjà émis, et **par taux de
+  TVA** : chaque taux de l'avoir existe sur la facture, base cumulée des avoirs au plus égale à la base de la
+  facture pour ce taux (journal des ventes juste). Un avoir émis
   après paiement complet donne un **trop-perçu** à rembourser (reste dû négatif, affiché comme tel).
 - **Statut d'une facture**, déduit de ses montants : émise / envoyée → payée en partie → soldée ; annulée
   par avoir si les avoirs couvrent tout sans encaissement (`factureInvoiceStatus`).
@@ -202,7 +205,10 @@ brouillon n'a pas de numéro.
 - **Signature sur mobile** : le client signe au doigt sur l'écran du technicien (PWA, page de
   l'intervention) ; nom du signataire, date ; image PNG vérifiée (une signature vide est refusée). Une
   **empreinte SHA-256 du rapport signé** (contenu complet et image de la signature) est conservée et
-  imprimée. La signature est définitive (base comprise).
+  imprimée. Les **données imprimées** (client, lieu, contact, équipement, techniciens) sont **figées à la
+  signature** (`reportSnapshot`, couvert par l'empreinte) : modifier ensuite la fiche du client ou de
+  l'équipement ne change jamais un rapport signé. La signature et l'instantané sont définitifs (base
+  comprise ; une signature posée sans instantané est refusée).
 - **Rapport PDF** : charte des documents ; client et lieu, créneau, équipement, techniciens, demande,
   travaux, recommandations, temps, pièces (sans prix), photos, signature et empreinte (« non signé »
   sinon).
@@ -232,12 +238,17 @@ brouillon n'a pas de numéro.
   son coût restent à décider : **aucun tarif n'est inventé**, aucun crédit n'est décompté.
 - **File d'attente fiable** (`FactureNotification`, garanties du SMS School S2) : programmée dans la
   transaction de l'intervention (jamais d'envoi dans la transaction) ; répartiteur toutes les 30 s, prise
-  en charge `FOR UPDATE SKIP LOCKED` sous bail ; erreur passagère : 4 tentatives au plus (1, 5, 15 min) ;
+  en charge `FOR UPDATE SKIP LOCKED` sous bail de 5 min (lot de 20, un seul passage à la fois par
+  processus ; un envoi qui ne tiendrait plus dans le bail est rendu à la file sans être tenté, jamais
+  clos « résultat inconnu ») ; erreur passagère : 4 tentatives au plus (1, 5, 15 min) ;
   **résultat inconnu** (interruption entre l'envoi et son enregistrement) : jamais renvoyé ; clé
   d'idempotence par notification chez le fournisseur ; un même fait n'est programmé qu'une fois par canal.
 - **Rappels obsolètes** : annulés au report, à l'annulation et au démarrage de l'intervention, et revérifiés
   au moment d'envoyer (créneau changé, intervention commencée ou annulée, notifications désactivées,
-  consentement retiré → annulée, jamais envoyée).
+  consentement retiré → annulée, jamais envoyée). Une notification **en cours d'envoi** n'est jamais
+  marquée « annulée » (elle part peut-être : son résultat est enregistré tel quel).
+- **Contact, lieu ou objet corrigé** sans changer le créneau : les notifications en attente sont refaites
+  avec les nouvelles données (nouveau destinataire compris), sans avis de report.
 - **Ne bloque jamais un rendez-vous** : un échec d'envoi n'empêche ni la planification, ni le report, ni
   l'annulation.
 - **Historique** sur la fiche de l'intervention : type, canal, destinataire masqué (4 derniers chiffres,
@@ -262,14 +273,15 @@ cœur), fournisseur simulé en test (aucun appel payant). **L'IA propose, une pe
 - **Rapport d'intervention intelligent** (intervention en cours, technicien affecté ou gérant) :
   observations **saisies ou dictées** (transcription ; l'audio n'est jamais conservé) → constat, travaux,
   recommandations proposés à partir des **données réelles** de l'intervention ; la ligne « Temps passé,
-  pièces » est composée par le serveur, jamais par le modèle. **Aucun chiffre absent des données** n'est
-  accepté (proposition refusée). La proposition **préremplit** la fin des travaux : le technicien relit,
+  pièces » est composée par le serveur, jamais par le modèle. **Aucun chiffre absent des données** ni
+  **aucune panne annoncée comme certaine** n'est accepté (proposition refusée). La proposition **préremplit** la fin des travaux : le technicien relit,
   corrige et valide ; elle n'est marquée appliquée (et « corrigée » le cas échéant) qu'à la fin des
   travaux, dans la même transaction. La signature reste impossible avant.
 - **Devis intelligent** (gérant, commercial) : depuis la demande d'un client, lignes choisies
   **exclusivement dans le catalogue** (références courtes, aucun identifiant interne exposé) ; **prix et TVA
   lus par le serveur**, jamais par le modèle ; article inconnu, quantité absurde ou prix proposé par le
-  modèle écartés et signalés ; **informations manquantes** listées. Le brouillon de devis n'est créé que sur
+  modèle écartés et signalés ; objet et notes de ligne citant un chiffre absent de la demande et du
+  catalogue (prix, remise) retirés et signalés ; **informations manquantes** listées. Le brouillon de devis n'est créé que sur
   décision (« Créer le brouillon », une seule fois même en double clic), aux prix du catalogue à cet instant,
   et **n'est jamais émis automatiquement**.
 - **Sécurité** : contexte de chaque appel construit depuis la session (organisation, utilisateur, rôle,
@@ -284,8 +296,10 @@ cœur), fournisseur simulé en test (aucun appel payant). **L'IA propose, une pe
   créneau demandé gardé s'il est libre, sinon premier créneau libre de même durée dans les journées de
   travail (8 h – 18 h, heure du Mali, 14 jours) ; une urgence est proposée au plus tôt ; interventions
   prévues et indisponibilités exclues. L'IA ne fait que **classer et expliquer** ces candidats (référence
-  inconnue écartée ; aucun créneau modifiable). **Affectation sur décision** (« Affecter ») : créneau
-  revérifié sous verrou du technicien au moment d'appliquer (refus s'il a été pris entre-temps), puis
+  inconnue écartée ; aucun créneau modifiable). **Affectation sur décision** (« Affecter ») : proposition
+  revérifiée au moment d'appliquer — intervention toujours planifiée, même durée, créneau à venir, sinon
+  nouvelle proposition demandée — et créneau revérifié sous verrou du technicien (refus s'il a été pris
+  entre-temps), puis
   modification de l'intervention dans la même transaction (notifications de report comprises).
 - **Maintenance préventive intelligente** (gérant, commercial) : le **serveur** sélectionne les
   équipements (`factureMaintenanceCandidates`) — entretien périodique échu ou à 30 jours, aucun entretien
@@ -307,7 +321,8 @@ WhatsApp (`whatsappDigits`). Park et School inchangés (tests d'intégration et 
 
 - **Droit** : publication et service public seulement avec l'offre Ocall Facture **« avec vitrine »**
   (migration Suite `20261118000000_facture_v1_offres` : offres 50 000 / 65 000, inactives, produit
-  toujours « à venir ») et Ocall Facture accessible (essai ou abonnement en cours). Le **droit historique**
+  toujours « à venir »), Ocall Facture accessible (essai ou abonnement en cours) et organisation **active**
+  (suspendue par le Super Admin : vitrine et formulaires hors ligne, contenu conservé). Le **droit historique**
   des clients Park antérieurs au socle S1 **ne vaut pas** pour Facture (`honorGrandfathered: false`).
   Le brouillon se prépare sans l'offre.
 - **Contenu** (`/facture/site`, gérant) : adresse publique (`slug`, unique, figée pendant la mise en
@@ -315,12 +330,15 @@ WhatsApp (`whatsappDigits`). Park et School inchangés (tests d'intégration et 
   choix), téléphone, WhatsApp, e-mail, adresse, horaires, lien de carte (https), description SEO,
   formulaires proposés ; logo, couverture et 12 réalisations (images réencodées, sans métadonnées).
   **Brouillon jamais public** ; « Publier » fige une copie (libellés et prix du jour, images publiées).
+  Une image en ligne se **retire à tout moment** : elle quitte aussitôt la version publiée.
 - **Adresses** : domaine personnalisé actif > `<slug>.<FACTURE_SITES_BASE_DOMAIN>` (si
   `FACTURE_SITES_SUBDOMAINS_ENABLED=true`, après la configuration DNS/TLS réelle) > `<origine>/v/<slug>`
   ; les autres adresses redirigent (301). Préfixe `/v/` distinct des sites Park (`/e/`) et School (`/s/`).
 - **Domaine personnalisé** : table `FactureSiteDomain` (base Facture), enregistrement TXT de propriété,
   activation par le **Super Admin** (TXT revérifié, page `/.well-known/ocall-site` répondant l'identifiant
-  du site, en HTTPS), mise hors service avec motif. Un domaine déjà déclaré pour un site Park est refusé.
+  du site, en HTTPS), mise hors service avec motif ; seul le Super Admin lève une suspension (l'entreprise ne
+  peut ni revérifier ni supprimer un domaine suspendu ; « Vérifier » un domaine actif ne change rien). Un
+  domaine déjà déclaré pour un site Park est refusé.
   Routage web : sites Park d'abord, puis vitrines Facture (un domaine Park n'est jamais masqué).
 - **Demandes des visiteurs** (contact, devis, intervention, rendez-vous ; formulaires choisis par
   l'entreprise) : téléphone ou e-mail exigé, champ piège et durée minimale de saisie (un envoi suspect
@@ -398,7 +416,9 @@ facturation) et `/facture/equipements`.
   `20261125000000_facture_v1_ai` (F6A : réglages IA, consommation, propositions tracées ; contrôles et
   déclencheur `FactureAiProposal_frozen`) et `20261126000000_facture_v1_ai_planning` (F6B : compétences,
   indisponibilités, priorité, compétences requises, périodicité d'entretien, réglages IA ; contrôles) et
-  `20261127000000_facture_v1_site` (F5 : site, médias, domaines, demandes ; contrôles), appliquées par `pnpm db:facture:migrate:deploy` (refus des instructions
+  `20261127000000_facture_v1_site` (F5 : site, médias, domaines, demandes ; contrôles) et
+  `20261128000000_facture_v1_audit` (corrections de l'audit de fin de V1 : instantané du rapport signé,
+  contrôle et déclencheur), appliquées par `pnpm db:facture:migrate:deploy` (refus des instructions
   destructrices et d'une base Suite ou School).
 - Pré-déploiement Railway : `db:migrate:deploy && db:school:migrate:deploy && db:facture:migrate:deploy`
   — sans `FACTURE_ENABLED=true`, l'étape Facture ne fait rien.
@@ -426,25 +446,31 @@ facturation) et `/facture/equipements`.
   (clients, catalogue, montants serveur, émission concurrente, document figé par la base, e-mail simulé,
   conversions idempotentes, annulation, logos par emplacement sous concurrence, rôles, lecture seule),
   `facture-f2.integration.spec.ts` (facture figée, échéance, encaissements partiels plafonnés sous
-  concurrence, annulation d'un encaissement, avoirs plafonnés, trop-perçu, relance simulée, tableau de
+  concurrence, annulation d'un encaissement, avoirs plafonnés au TTC et par taux de TVA, trop-perçu,
+  envoi sans écraser une facture soldée, relance simulée, tableau de
   bord, exports CSV, rôles, isolation, déclencheurs de la base), `facture-f3.integration.spec.ts`
-  (planning, équipement du client, travaux, rapport figé, signature et empreinte, rapport PDF,
+  (planning, équipement du client, travaux, rapport figé, signature et empreinte, données imprimées
+  figées à la signature, rapport PDF,
   facturation idempotente sous concurrence, fin des travaux contre saisie concurrente, photos plafonnées,
   réouverture, annulation, technicien limité à ses interventions, isolation, déclencheurs),
   `facture-f4.integration.spec.ts` (rendez-vous confirmé, reporté, rappelé, annulé ; e-mail de secours,
   échec définitif puis secours, échec passager retenté, consentement retiré, résultat inconnu jamais
-  renvoyé, répartiteurs simultanés sans doublon, notification figée, isolation),
+  renvoyé, répartiteurs simultanés sans doublon, notification figée, envoi en cours jamais annulé,
+  contact corrigé reprogrammé, bail près d'expirer, isolation),
   `facture-f6a.integration.spec.ts` (réglages et plafond Ocall, rapport sur données réelles et dictée,
-  validation à la fin des travaux, chiffres inventés refusés, proposition d'une autre intervention,
-  devis aux prix du catalogue, article inconnu / quantité absurde / prix du modèle écartés, brouillon jamais
+  validation à la fin des travaux, chiffres inventés et panne certaine refusés, proposition d'une autre
+  intervention, devis aux prix du catalogue, article inconnu / quantité absurde / prix du modèle écartés,
+  prix glissé dans l'objet ou une note retiré, brouillon jamais
   émis, quotas sous concurrence, rôles, isolation, proposition figée), `facture-f6b.integration.spec.ts`
   (compétences et indisponibilités, candidats du serveur, conflit évité, urgence, technicien sans
-  compétence écarté, créneau pris refusé à l'affectation, candidat inventé écarté, suggestions de
+  compétence écarté, créneau pris refusé à l'affectation, proposition périmée refusée (intervention
+  commencée, durée changée, créneau passé), candidat inventé écarté, suggestions de
   maintenance sur historique réel sans doublon, panne certaine et intervention étrangère refusées,
   suggestion appliquée en planifiant, rôles, isolation, plafonds), `facture-f5.integration.spec.ts`
   (offre « avec vitrine » et droit historique exclu, brouillon jamais public, publication figée aux prix
-  du catalogue, images publiées seulement, demandes anti-spam sans rien créer d'autre, domaine TXT /
-  HTTPS / Super Admin, unicité avec les domaines Park, plan du site, isolation, rôles) — exigent `TEST_FACTURE_DATABASE_URL`.
+  du catalogue, images publiées seulement, image en ligne retirée, organisation suspendue hors ligne,
+  demandes anti-spam sans rien créer d'autre, domaine TXT / HTTPS / Super Admin, domaine actif ou suspendu
+  intouchable par l'entreprise, unicité avec les domaines Park, plan du site, isolation, rôles) — exigent `TEST_FACTURE_DATABASE_URL`.
 - E2E : `e2e/facture-f0.spec.ts` (portail, identité, logo, équipe), `e2e/facture-f1.spec.ts` (client,
   article, devis → bon de commande → facture brouillon, PDF), `e2e/facture-f2.spec.ts` (facture émise,
   payée en deux fois, avoir, tableau de bord, export), `e2e/facture-f3.spec.ts` (intervention planifiée,

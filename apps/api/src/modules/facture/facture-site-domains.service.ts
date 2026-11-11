@@ -117,13 +117,16 @@ export class FactureSiteDomainsService {
   /** Vérification de propriété par l'entreprise (enregistrement TXT). */
   async verify(ctx: FactureContext, id: string) {
     const domain = await this.find(ctx.organizationId, id);
+    this.assertNotSuspended(domain);
+    // Domaine déjà actif : rien à vérifier (son activation reste celle du Super Admin).
+    if (domain.status === 'ACTIVE') return { ...domain, ...this.instructions(domain) };
     const proven = await this.ownershipProven(domain.hostname, domain.verificationToken).catch(
       () => false,
     );
     const updated = await this.db.factureSiteDomain.update({
       where: { id },
       data: {
-        status: proven ? 'VERIFIED' : domain.status === 'ACTIVE' ? 'ACTIVE' : 'PENDING',
+        status: proven ? 'VERIFIED' : 'PENDING',
         lastCheckedAt: new Date(),
         lastError: proven
           ? null
@@ -135,6 +138,8 @@ export class FactureSiteDomainsService {
 
   async remove(ctx: FactureContext, id: string) {
     const domain = await this.find(ctx.organizationId, id);
+    // Supprimer puis redéclarer contournerait la suspension : seul le Super Admin la lève.
+    this.assertNotSuspended(domain);
     await this.db.factureSiteDomain.delete({ where: { id: domain.id } });
     await this.record(ctx.organizationId, ctx.userId, 'facture.site_domain_removed', id, {
       hostname: domain.hostname,
@@ -204,6 +209,15 @@ export class FactureSiteDomainsService {
   }
 
   // ─── Outils ───
+
+  private assertNotSuspended(domain: { status: string }) {
+    if (domain.status === 'SUSPENDED') {
+      throw new ConflictException({
+        code: 'DOMAIN_SUSPENDED',
+        message: 'Domaine mis hors service par Ocall : contactez le support.',
+      });
+    }
+  }
 
   private async ownershipProven(hostname: string, token: string) {
     const values = await this.verifier.resolveTxt(`${SITE_DOMAIN_TXT_PREFIX}.${hostname}`);

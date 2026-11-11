@@ -34,6 +34,9 @@ type Tx = Prisma.TransactionClient;
 /** Bail d'une notification en cours d'envoi : un autre traitement ne la reprend qu'après ce délai. */
 const LEASE_MS = 5 * 60_000;
 const POLL_MS = 30_000;
+/** Lot par passage : 20 envois × 10 s de délai d'attente au plus restent sous le bail de 5 minutes. */
+const BATCH = 20;
+const LEASE_MARGIN_MS = 30_000;
 /**
  * Marqueur posé à la prise en charge, effacé quand le résultat du fournisseur est enregistré. Retrouvé
  * après l'expiration du bail : la notification est peut-être partie → « résultat inconnu », jamais
@@ -63,6 +66,7 @@ type Planned = { kind: FactureNotificationKind; sendAt: Date; key: string };
 export class FactureNotificationsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger('FactureNotifications');
   private timer: NodeJS.Timeout | null = null;
+  private running = false;
 
   constructor(
     private readonly db: FacturePrismaService,
@@ -75,7 +79,14 @@ export class FactureNotificationsService implements OnModuleInit, OnModuleDestro
   onModuleInit() {
     // Les essais déclenchent l'envoi explicitement (processDue) : aucun traitement de fond en test.
     if (process.env.NODE_ENV === 'test' || !this.config.facture.enabled) return;
-    this.timer = setInterval(() => void this.processDue(), POLL_MS);
+    // Un seul passage à la fois dans ce processus : un lot lent n'est jamais repris par le suivant.
+    this.timer = setInterval(() => {
+      if (this.running) return;
+      this.running = true;
+      void this.processDue().finally(() => {
+        this.running = false;
+      });
+    }, POLL_MS);
     this.timer.unref();
   }
 
@@ -164,6 +175,34 @@ export class FactureNotificationsService implements OnModuleInit, OnModuleDestro
     ]);
   }
 
+  /**
+   * Contact, lieu ou objet modifié sans changement de créneau : les notifications en attente (destinataire
+   * et texte figés) sont remplacées par des notifications à jour — jamais d'envoi à un ancien numéro.
+   */
+  async onDetailsChanged(tx: Tx, organizationId: string, interventionId: string, now: Date) {
+    const pending = await tx.factureNotification.findMany({
+      where: {
+        organizationId,
+        interventionId,
+        status: 'PENDING',
+        OR: [{ lastError: null }, { lastError: { not: SENDING } }],
+      },
+      select: { kind: true },
+    });
+    if (pending.length === 0) return;
+    await this.cancelPending(tx, organizationId, interventionId, 'DETAILS_CHANGED');
+    const settings = await this.activeSettings(tx, organizationId);
+    if (!settings) return;
+    const row = await this.intervention(tx, organizationId, interventionId);
+    const version = now.getTime();
+    await this.enqueue(tx, settings, row, [
+      ...[...new Set(pending.map((p) => p.kind))]
+        .filter((kind) => kind !== 'REMINDER')
+        .map((kind) => ({ kind, sendAt: now, key: `${kind.toLowerCase()}/${version}` })),
+      ...this.reminders(row.scheduledStart, settings, now, version),
+    ]);
+  }
+
   /** Intervention commencée : les rappels encore en attente n'ont plus d'objet. */
   async onStarted(tx: Tx, organizationId: string, interventionId: string) {
     await this.cancelPending(tx, organizationId, interventionId, 'INTERVENTION_STARTED');
@@ -176,7 +215,12 @@ export class FactureNotificationsService implements OnModuleInit, OnModuleDestro
    * Erreur passagère : nouvelle tentative après un délai croissant ; erreur définitive ou tentatives
    * épuisées : échec (et e-mail de secours pour un échec WhatsApp). Ne lève jamais.
    */
-  async processDue(now = new Date(), limit = 50) {
+  async processDue(
+    now = new Date(),
+    limit = BATCH,
+    /** Heure (réelle) au-delà de laquelle un envoi n'est plus tenté : le bail expirerait pendant l'envoi. */
+    deadline = new Date(Date.now() + LEASE_MS - LEASE_MARGIN_MS),
+  ) {
     const result = { sent: 0, retried: 0, failed: 0, cancelled: 0, unknown: 0 };
     try {
       const claimed = await this.db.$transaction(async (tx) => {
@@ -266,6 +310,19 @@ export class FactureNotificationsService implements OnModuleInit, OnModuleDestro
       });
 
       for (const n of claimed) {
+        // Bail bientôt expiré (fournisseur lent) : la notification n'est PAS envoyée, elle est rendue à la
+        // file (tentative suivante), jamais laissée « en cours » puis close « résultat inconnu ».
+        if (Date.now() > deadline.getTime()) {
+          await this.db.factureNotification
+            .updateMany({
+              where: { id: n.id, status: 'PENDING', lastError: SENDING },
+              // Tentative comptée (la base interdit de décompter) ; le plafond de tentatives s'applique.
+              data: { lastError: 'NOT_SENT_LEASE', nextAttemptAt: new Date() },
+            })
+            .catch(() => undefined);
+          result.retried += 1;
+          continue;
+        }
         let accepted: { id: string };
         try {
           accepted = await this.deliver(n);
@@ -470,9 +527,18 @@ export class FactureNotificationsService implements OnModuleInit, OnModuleDestro
     });
   }
 
+  /**
+   * Annule les notifications en attente. Une notification en cours d'envoi (marqueur) n'est pas touchée :
+   * elle part peut-être, son résultat sera enregistré tel quel (jamais « annulée » pour un message parti).
+   */
   private cancelPending(tx: Tx, organizationId: string, interventionId: string, reason: string) {
     return tx.factureNotification.updateMany({
-      where: { organizationId, interventionId, status: 'PENDING' },
+      where: {
+        organizationId,
+        interventionId,
+        status: 'PENDING',
+        OR: [{ lastError: null }, { lastError: { not: SENDING } }],
+      },
       data: { status: 'CANCELLED', lastError: reason },
     });
   }

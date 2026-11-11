@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import { purgeFactureOrganizations } from '@ocall/facture-database';
 import { FACTURE_PRODUCT_CODE } from '@ocall/shared';
 import sharp from 'sharp';
+import { FactureInterventionsService } from '../src/modules/facture/facture-interventions.service';
 import { FacturePrismaService } from '../src/modules/facture/facture-prisma.service';
 import type { PrismaService } from '../src/prisma/prisma.service';
 import {
@@ -377,6 +378,19 @@ const TOMORROW = isoDay(new Date(Date.now() + DAY));
 
     // Signature vide refusée ; signature valide : nom, date, empreinte SHA-256.
     expect((await sign(tech.agent, id, blank)).body.code).toBe('SIGNATURE_REFUSED');
+    // Signature posée en base sans l'instantané des données imprimées : refusée.
+    await expect(
+      db.factureIntervention.update({
+        where: { id },
+        data: {
+          status: 'SIGNED',
+          signerName: 'Awa Traoré',
+          signedAt: new Date(),
+          signatureKey: 'cle-factice',
+          reportHash: 'a'.repeat(64),
+        },
+      }),
+    ).rejects.toThrow(/FACTURE_INTERVENTION_INVALID: une signature fige/);
     await sign(tech.agent, id, signature, 'A').expect(400);
     const signed = (await sign(tech.agent, id, signature).expect(200)).body;
     expect(signed).toMatchObject({
@@ -391,6 +405,40 @@ const TOMORROW = isoDay(new Date(Date.now() + DAY));
     await expect(
       db.factureIntervention.update({ where: { id }, data: { signerName: 'Quelqu’un d’autre' } }),
     ).rejects.toThrow(/FACTURE_INTERVENTION_FROZEN/);
+
+    // Audit V1 (P1) : client, lieu, équipement et techniciens imprimés sont figés à la signature.
+    const frozen = await db.factureIntervention.findUniqueOrThrow({ where: { id } });
+    expect(frozen.reportSnapshot).toMatchObject({
+      client: { id: clientA, name: 'Hôtel du Fleuve' },
+      equipment: { id: equipmentA, serialNumber: 'DK-001' },
+      technicians: [expect.stringContaining('Technicien')],
+    });
+    await expect(
+      db.factureIntervention.update({
+        where: { id },
+        data: { reportSnapshot: { client: { name: 'Faux' } } },
+      }),
+    ).rejects.toThrow(/FACTURE_INTERVENTION_FROZEN/);
+    // Fiches modifiées après la signature : le rapport signé imprime toujours l'instantané.
+    await db.factureEquipment.update({
+      where: { id: equipmentA },
+      data: { serialNumber: 'DK-999' },
+    });
+    await db.factureClient.update({ where: { id: clientA }, data: { name: 'Nom changé' } });
+    const reread = await db.factureIntervention.findUniqueOrThrow({
+      where: { id },
+      include: { client: true, equipment: true, technicians: { include: { member: true } } },
+    });
+    expect(reread.client.name).toBe('Nom changé');
+    const printed = app
+      .get(FactureInterventionsService)
+      .printedData(reread as unknown as Parameters<FactureInterventionsService['printedData']>[0]);
+    expect(printed).toEqual(frozen.reportSnapshot);
+    await db.factureEquipment.update({
+      where: { id: equipmentA },
+      data: { serialNumber: 'DK-001' },
+    });
+    await db.factureClient.update({ where: { id: clientA }, data: { name: 'Hôtel du Fleuve' } });
     const png = await tech.agent.get(api(`/facture/interventions/${id}/signature`)).expect(200);
     expect(png.headers['content-type']).toBe('image/png');
 

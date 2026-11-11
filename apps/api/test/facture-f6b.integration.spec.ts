@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import { purgeFactureOrganizations } from '@ocall/facture-database';
 import { FACTURE_PRODUCT_CODE } from '@ocall/shared';
 import type { FactureContext } from '../src/modules/facture/facture-access';
+import { FactureAiPlanningService } from '../src/modules/facture/facture-ai-planning.service';
 import { FactureInterventionsService } from '../src/modules/facture/facture-interventions.service';
 import { FacturePrismaService } from '../src/modules/facture/facture-prisma.service';
 import type { PrismaService } from '../src/prisma/prisma.service';
@@ -393,6 +394,60 @@ const TOMORROW = day(1);
     ).body;
     await techA.agent.post(api(`/facture/interventions/${started.id}/start`)).expect(200);
     expect((await suggest(orgA.agent, started.id)).body.code).toBe('FACTURE_AI_PLANNING_CLOSED');
+  });
+
+  it('audit V1 : proposition périmée refusée (intervention commencée, durée changée, créneau passé)', async () => {
+    await aiSettings(orgA.agent).expect(200);
+    const stale = async (proposalId: string) => {
+      const res = await orgA.agent
+        .post(api(`/facture/ai/proposals/${proposalId}/assign`))
+        .send({ choice: 0 });
+      expect([res.status, res.body.code]).toEqual([409, 'FACTURE_AI_PROPOSAL_STALE']);
+      expect(
+        (await db.factureAiProposal.findUniqueOrThrow({ where: { id: proposalId } })).status,
+      ).toBe('PROPOSED');
+    };
+
+    // Intervention commencée entre la proposition et la validation : ni déplacée ni réaffectée.
+    const started = (
+      await plan(orgA.agent, day(4), '08:00', '09:00', { technicianIds: [techA.id] }).expect(201)
+    ).body;
+    const p1 = (await suggest(orgA.agent, started.id).expect(200)).body;
+    await techA.agent.post(api(`/facture/interventions/${started.id}/start`)).expect(200);
+    await stale(p1.proposalId);
+    expect(
+      (await orgA.agent.get(api(`/facture/interventions/${started.id}`)).expect(200)).body,
+    ).toMatchObject({
+      status: 'IN_PROGRESS',
+      scheduledStart: `${day(4)}T08:00:00.000Z`,
+      technicians: [expect.objectContaining({ memberId: techA.id })],
+    });
+
+    // Durée modifiée depuis la proposition : nouvelle proposition demandée.
+    const resized = (await plan(orgA.agent, day(4), '14:00', '15:00').expect(201)).body;
+    const p2 = (await suggest(orgA.agent, resized.id).expect(200)).body;
+    await orgA.agent
+      .patch(api(`/facture/interventions/${resized.id}`))
+      .send({
+        scheduledStart: `${day(4)}T14:00:00.000Z`,
+        scheduledEnd: `${day(4)}T17:00:00.000Z`,
+      })
+      .expect(200);
+    await stale(p2.proposalId);
+
+    // Créneau proposé désormais passé : refusé (validation tardive).
+    const late = (await plan(orgA.agent, day(5), '10:00', '11:00').expect(201)).body;
+    const p3 = (await suggest(orgA.agent, late.id).expect(200)).body;
+    await expect(
+      app
+        .get(FactureAiPlanningService)
+        .assign(owner, p3.proposalId, 0, new Date(Date.now() + 30 * DAY)),
+    ).rejects.toMatchObject({ response: { code: 'FACTURE_AI_PROPOSAL_STALE' } });
+    // À temps : appliquée.
+    await orgA.agent
+      .post(api(`/facture/ai/proposals/${p3.proposalId}/assign`))
+      .send({ choice: 0 })
+      .expect(200);
   });
 
   it('planification — sécurité : candidat inventé écarté, classement vide refusé, rôles, isolation', async () => {

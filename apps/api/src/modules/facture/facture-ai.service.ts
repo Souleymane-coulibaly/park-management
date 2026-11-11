@@ -23,6 +23,7 @@ import {
   factureInterventionScope,
   formatFactureMinutes,
   hasFacturePermission,
+  factureAiClaimsCertainty,
   isFactureInterventionWorkOpen,
   numbersAreGrounded,
 } from '@ocall/shared';
@@ -375,6 +376,13 @@ export class FactureAiService implements OnModuleInit {
             'Le rapport proposé citait des chiffres absents de vos données. Réessayez.',
           );
         }
+        // Aucune panne annoncée comme certaine (constat, travaux ou recommandations).
+        if (factureAiClaimsCertainty(`${findings} ${workDone} ${recommendations}`)) {
+          invalid(
+            { ...out, usage: merged },
+            'Le rapport proposé annonçait une panne comme certaine. Réessayez.',
+          );
+        }
         return {
           value: { findings, workDone, recommendations, transcript, said },
           usage: merged,
@@ -482,6 +490,14 @@ export class FactureAiService implements OnModuleInit {
       .slice(0, 20);
     const lines: FactureQuoteLineProposal[] = [];
     let rejected = 0;
+    // Chiffres autorisés : ceux de la demande et du catalogue (jamais un prix, une remise inventés).
+    const grounding = stripSimulationDirectives(`${catalog}\n${dto.request}`);
+    let ungrounded = 0;
+    const grounded = (value: string) => {
+      if (!value || numbersAreGrounded(value, grounding)) return value;
+      ungrounded += 1;
+      return '';
+    };
     for (const raw of (result.lines as unknown[]).slice(0, FACTURE_AI_MAX_QUOTE_LINES)) {
       const line = raw as { ref?: unknown; quantity?: unknown; note?: unknown };
       const item = typeof line.ref === 'string' ? refs.get(line.ref.trim()) : undefined;
@@ -501,7 +517,7 @@ export class FactureAiService implements OnModuleInit {
         quantity,
         unitPrice: item.unitPrice,
         vatRate: item.vatRate,
-        note: text(line.note, 300) || null,
+        note: grounded(text(line.note, 300)) || null,
       });
     }
     if (rejected > 0) {
@@ -513,7 +529,12 @@ export class FactureAiService implements OnModuleInit {
       missing.push('Aucun article du catalogue ne correspond à la demande : préciser le besoin.');
     }
     const totals = computeFactureTotals(lines.map((l) => ({ ...l, discountPercent: 0 })));
-    const subject = text(result.subject, 200) || 'Devis';
+    const subject = grounded(text(result.subject, 200)) || 'Devis';
+    if (ungrounded > 0) {
+      missing.push(
+        `${ungrounded} texte(s) proposé(s) (objet ou note) citai(en)t des chiffres absents de la demande : retirés, à compléter vous-même.`,
+      );
+    }
     const output = {
       subject,
       lines,

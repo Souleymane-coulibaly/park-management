@@ -406,6 +406,57 @@ const TODAY = isoDay(new Date());
       .expect(400);
   });
 
+  it('audit V1 : avoir contrôlé par taux de TVA ; envoi sans écraser une facture soldée', async () => {
+    // Facture : 25 000 HT à 18 % + 25 000 HT à 5 % = 29 500 + 26 250 = 55 750 TTC.
+    const mixed = await invoice(orgA.agent, clientA, {
+      lines: [line(1), { ...line(1), label: 'Formation', vatRate: 5 }],
+    });
+    expect(mixed.totalTtc).toBe(55_750);
+    const note = (
+      await orgA.agent.post(api(`/facture/documents/${mixed.id}/credit-note`)).expect(201)
+    ).body;
+    const tryIssue = async (lines: Record<string, unknown>[]) => {
+      await orgA.agent
+        .put(api(`/facture/documents/${note.id}`))
+        .send({ clientId: clientA, lines })
+        .expect(200);
+      return orgA.agent.post(api(`/facture/documents/${note.id}/issue`));
+    };
+    // Taux absent de la facture (TTC pourtant sous le plafond) : refusé.
+    const wrongRate = await tryIssue([{ ...line(1), vatRate: 10 }]);
+    expect([wrongRate.status, wrongRate.body.code]).toEqual([409, 'FACTURE_CREDIT_NOTE_VAT']);
+    // Base à 5 % dépassée (50 000 > 25 000) alors que le TTC (52 500) reste sous 55 750 : refusé.
+    const overBase = await tryIssue([{ ...line(2), vatRate: 5 }]);
+    expect([overBase.status, overBase.body.code]).toEqual([409, 'FACTURE_CREDIT_NOTE_VAT']);
+    // Dans les bases de chaque taux : émis.
+    expect((await tryIssue([{ ...line(1), vatRate: 5 }])).status).toBe(200);
+
+    // Envoi pendant lequel la facture est soldée : le statut « payée » n'est jamais écrasé.
+    const inv = await invoice(orgA.agent, clientA);
+    const spy = jest.spyOn(mail, 'send').mockImplementationOnce(async () => {
+      await pay(orgA.agent, inv.id, 59_000).expect(201);
+      return true;
+    });
+    const sent = (
+      await orgA.agent
+        .post(api(`/facture/documents/${inv.id}/send`))
+        .send({})
+        .expect(200)
+    ).body;
+    spy.mockRestore();
+    expect(sent).toMatchObject({ status: 'PAID', sentCount: 1 });
+    // Facture émise non réglée : l'envoi la passe bien « envoyée ».
+    const other = await invoice(orgA.agent, clientA);
+    expect(
+      (
+        await orgA.agent
+          .post(api(`/facture/documents/${other.id}/send`))
+          .send({})
+          .expect(200)
+      ).body,
+    ).toMatchObject({ status: 'SENT', sentCount: 1 });
+  });
+
   it('relance : e-mail avec reste dû et facture jointe, comptée seulement si le fournisseur accepte', async () => {
     const inv = await invoice(orgA.agent, clientA);
     await pay(orgA.agent, inv.id, 9_000).expect(201);

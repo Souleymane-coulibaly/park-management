@@ -445,6 +445,9 @@ model FactureIntervention {
   signedAt          DateTime?
   signatureKey      String?
   reportHash        String?                     @db.Char(64)
+  /// Données imprimées figées à la signature (client, lieu, contact, équipement, techniciens) : le rapport
+  /// signé ne change plus, même si la fiche du client ou de l'équipement change ensuite.
+  reportSnapshot    Json?
   /// Facture brouillon créée depuis l'intervention (une seule).
   invoiceId         String?                     @db.Uuid
   cancelledAt       DateTime?

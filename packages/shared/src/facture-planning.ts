@@ -224,10 +224,15 @@ export function factureMaintenanceCandidates(
   return out;
 }
 
-/** Formulations interdites : une panne n'est jamais annoncée comme certaine. */
+/**
+ * Formulations interdites : une panne n'est jamais annoncée comme certaine. Frontières de mot Unicode
+ * (« à coup sûr », « forcément » sont reconnus). « certain(e) » n'est retenu qu'après une panne (« panne
+ * certaine »), en fin de groupe (« échec certain. ») ou devant « que » : « un certain temps », « certains
+ * équipements », « une certaine usure » restent permis.
+ */
 const CERTAINTY =
-  /\b(certainement|certaine(ment)?|à coup sûr|sans aucun doute|inévitabl\w*|va (tomber|lâcher|casser)|tombera en panne|lâchera|cassera)\b/i;
+  /(?<![\p{L}\p{N}])(certainement|certaine?s?\s+que|(?:panne|échec|défaillance|rupture|casse|fuite|arrêt)s?\s+certaine?s?|certaine?(?=\s*(?:[^\p{L}\s]|$))|à coup sûr|sans aucun doute|sans faute|inévitabl\p{L}*|inéluctabl\p{L}*|immanquablement|assurément|forcément|sûrement|va (?:tomber|lâcher|casser)|vont (?:tomber|lâcher|casser)|tombera|tomberont|lâchera|lâcheront|cassera|casseront)(?![\p{L}\p{N}])/iu;
 
 export function factureAiClaimsCertainty(text: string): boolean {
-  return CERTAINTY.test(text);
+  return CERTAINTY.test(text.normalize('NFC'));
 }

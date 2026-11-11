@@ -484,6 +484,87 @@ const isoDay = (d: Date) => d.toISOString().slice(0, 10);
     expect(whatsapp.sent.some((m) => m.body.startsWith('Ancien créneau'))).toBe(false);
   });
 
+  it('audit V1 : envoi en cours jamais « annulé » ; contact corrigé → rappels refaits ; bail près d’expirer', async () => {
+    await settings(orgA.agent).expect(200);
+    const digits = (v: string) => v.replace(/\D/g, '');
+
+    // Contact corrigé sans changer le créneau : les notifications en attente sont refaites vers le
+    // nouveau numéro, sans avis de report ; plus rien ne part vers l'ancien.
+    const moved = await plan(await client());
+    expect((await rows(moved.id)).filter((n) => n.status === 'PENDING').map((n) => n.kind)).toEqual(
+      ['CONFIRMATION', 'REMINDER', 'REMINDER'],
+    );
+    await orgA.agent
+      .patch(api(`/facture/interventions/${moved.id}`))
+      .send({ contactName: 'Moussa Diarra', contactPhone: '+223 76 55 44 33' })
+      .expect(200);
+    let list = await rows(moved.id);
+    expect(list.filter((n) => n.status === 'CANCELLED').map((n) => n.lastError)).toEqual([
+      'DETAILS_CHANGED',
+      'DETAILS_CHANGED',
+      'DETAILS_CHANGED',
+    ]);
+    const redone = list.filter((n) => n.status === 'PENDING');
+    expect(redone.map((n) => n.kind)).toEqual(['CONFIRMATION', 'REMINDER', 'REMINDER']);
+    expect(redone.every((n) => digits(n.recipient) === '22376554433')).toBe(true);
+    expect(redone.every((n) => n.body.includes('Moussa Diarra'))).toBe(true);
+    await notifications.processDue(new Date());
+    expect(sentFor(moved.number).map((m) => [m.template, digits(m.to)])).toEqual([
+      ['ocall_rdv_confirmation', '22376554433'],
+    ]);
+    // Correction sans effet (mêmes valeurs) : rien n'est refait.
+    await orgA.agent
+      .patch(api(`/facture/interventions/${moved.id}`))
+      .send({ contactName: 'Moussa Diarra' })
+      .expect(200);
+    expect((await rows(moved.id)).length).toBe(list.length);
+
+    // Notification en cours d'envoi au moment de l'annulation : elle n'est pas marquée « annulée »
+    // (elle part peut-être) ; les autres le sont.
+    const inFlight = await plan(await client());
+    const confirmation = (await rows(inFlight.id)).find((n) => n.kind === 'CONFIRMATION')!;
+    await db.factureNotification.update({
+      where: { id: confirmation.id },
+      data: { attempts: 1, lastError: 'SENDING', nextAttemptAt: new Date(Date.now() + HOUR) },
+    });
+    await orgA.agent
+      .post(api(`/facture/interventions/${inFlight.id}/cancel`))
+      .send({ reason: 'Client absent' })
+      .expect(200);
+    list = await rows(inFlight.id);
+    expect(list.find((n) => n.id === confirmation.id)).toMatchObject({
+      status: 'PENDING',
+      lastError: 'SENDING',
+    });
+    expect(list.filter((n) => n.kind === 'REMINDER').map((n) => [n.status, n.lastError])).toEqual([
+      ['CANCELLED', 'INTERVENTION_CANCELLED'],
+      ['CANCELLED', 'INTERVENTION_CANCELLED'],
+    ]);
+    await db.factureNotification.update({
+      where: { id: confirmation.id },
+      data: { lastError: null, nextAttemptAt: new Date(Date.now() - 1_000) },
+    });
+    await notifications.processDue(new Date());
+
+    // Bail près d'expirer (fournisseur lent) : rien n'est envoyé, la notification revient dans la
+    // file (tentative comptée), puis part au passage suivant — jamais « résultat inconnu ».
+    const slow = await plan(await client());
+    const pending = (await rows(slow.id)).find((n) => n.kind === 'CONFIRMATION')!;
+    const skipped = await notifications.processDue(new Date(), 20, new Date(0));
+    expect(skipped.sent).toBe(0);
+    expect(sentFor(slow.number)).toEqual([]);
+    expect((await rows(slow.id)).find((n) => n.id === pending.id)).toMatchObject({
+      status: 'PENDING',
+      attempts: 1,
+      lastError: 'NOT_SENT_LEASE',
+    });
+    await notifications.processDue(new Date());
+    expect((await rows(slow.id)).find((n) => n.id === pending.id)).toMatchObject({
+      status: 'SENT',
+    });
+    expect(sentFor(slow.number)).toHaveLength(1);
+  });
+
   it('isolation : réglages et historique propres à chaque organisation', async () => {
     const b = (await orgB.agent.get(api('/facture/notification-settings')).expect(200)).body;
     expect(b.enabled).toBe(false);

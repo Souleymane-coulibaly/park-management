@@ -571,6 +571,38 @@ export class FactureDocumentsService {
         { details: { available } },
       );
     }
+    // TVA : un avoir ne corrige que des taux présents sur la facture, sans dépasser, taux par taux, la
+    // base hors taxe facturée (avoirs déjà émis compris) — jamais de TVA déduite qui n'a pas été facturée.
+    const issued = await tx.factureDocument.findMany({
+      where: {
+        organizationId: note.organizationId,
+        creditedInvoiceId: invoice.id,
+        status: { not: 'DRAFT' },
+        id: { not: note.id },
+      },
+      select: { vatBreakdown: true },
+    });
+    const baseByRate = (buckets: FactureVatBucket[]) =>
+      buckets.reduce(
+        (m, b) => m.set(b.rate, (m.get(b.rate) ?? 0) + b.base),
+        new Map<number, number>(),
+      );
+    const invoiced = baseByRate(invoice.vatBreakdown as unknown as FactureVatBucket[]);
+    const credited = baseByRate(
+      issued.flatMap((d) => d.vatBreakdown as unknown as FactureVatBucket[]),
+    );
+    for (const [rate, base] of baseByRate(note.vatBreakdown as unknown as FactureVatBucket[])) {
+      const left = (invoiced.get(rate) ?? 0) - (credited.get(rate) ?? 0);
+      if (base > left) {
+        throw conflict(
+          'FACTURE_CREDIT_NOTE_VAT',
+          invoiced.has(rate)
+            ? `L’avoir dépasse la base hors taxe restant à créditer au taux de ${rate} % (${formatXof(Math.max(0, left))}).`
+            : `La facture ne comporte aucune ligne au taux de ${rate} % : l’avoir doit reprendre ses taux.`,
+          { details: { rate, available: Math.max(0, left) } },
+        );
+      }
+    }
     const next = { ...amounts, amountCredited: amounts.amountCredited + credit };
     await tx.factureDocument.update({
       where: { organizationId_id: { organizationId: note.organizationId, id: invoice.id } },
@@ -673,14 +705,18 @@ export class FactureDocumentsService {
         }, d’un montant de ${formatXof(Number(doc.totalTtc))} TTC.`,
       ],
     });
-    await this.db.factureDocument.update({
-      where: { organizationId_id: { organizationId: ctx.organizationId, id } },
-      data: {
-        sentAt: new Date(),
-        sentCount: { increment: 1 },
-        ...(doc.status === 'ISSUED' ? { status: 'SENT' } : {}),
-      },
-    });
+    // Statut relu au moment d'écrire : seul un document encore « émis » passe à « envoyé » (une facture
+    // soldée ou un devis accepté pendant l'envoi gardent leur statut).
+    await this.db.$transaction([
+      this.db.factureDocument.update({
+        where: { organizationId_id: { organizationId: ctx.organizationId, id } },
+        data: { sentAt: new Date(), sentCount: { increment: 1 } },
+      }),
+      this.db.factureDocument.updateMany({
+        where: { organizationId: ctx.organizationId, id, status: 'ISSUED' },
+        data: { status: 'SENT' },
+      }),
+    ]);
     // Destinataire jamais journalisé (donnée personnelle) : seul le rang d'envoi l'est.
     await this.record(ctx, 'facture.document_sent', id, { sendRank: doc.sentCount + 1 });
     return this.get(ctx, id);

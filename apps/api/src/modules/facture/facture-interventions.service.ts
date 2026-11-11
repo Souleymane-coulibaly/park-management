@@ -427,6 +427,15 @@ export class FactureInterventionsService {
       // Rendez-vous déplacé avant son début : rappels obsolètes annulés, client prévenu du report.
       if (row.status === 'PLANNED' && slot.start.getTime() !== row.scheduledStart.getTime()) {
         await this.notifications.onRescheduled(tx, ctx.organizationId, id, now);
+      } else if (
+        row.status === 'PLANNED' &&
+        ((dto.contactPhone !== undefined && dto.contactPhone !== row.contactPhone) ||
+          (dto.contactName !== undefined && dto.contactName !== row.contactName) ||
+          (dto.siteAddress !== undefined && dto.siteAddress !== row.siteAddress) ||
+          (dto.title !== undefined && dto.title !== row.title))
+      ) {
+        // Contact, lieu ou objet corrigé : notifications en attente refaites avec les bonnes données.
+        await this.notifications.onDetailsChanged(tx, ctx.organizationId, id, now);
       }
     }
   }
@@ -712,10 +721,19 @@ export class FactureInterventionsService {
         if (!canMoveFactureIntervention(row.status, 'SIGNED')) {
           throw this.badTransition(row.status, 'SIGNED');
         }
-        const reportHash = hashReport(row, signerName, now, png);
+        // Données imprimées figées avec la signature : le rapport signé ne change plus.
+        const reportSnapshot = snapshotOf(row);
+        const reportHash = hashReport(row, reportSnapshot, signerName, now, png);
         await tx.factureIntervention.update({
           where: { organizationId_id: { organizationId: ctx.organizationId, id } },
-          data: { status: 'SIGNED', signerName, signedAt: now, signatureKey: key, reportHash },
+          data: {
+            status: 'SIGNED',
+            signerName,
+            signedAt: now,
+            signatureKey: key,
+            reportHash,
+            reportSnapshot: reportSnapshot as unknown as Prisma.InputJsonValue,
+          },
         });
       });
     } catch (error) {
@@ -741,6 +759,7 @@ export class FactureInterventionsService {
   /** Rapport d'intervention PDF (charte Facture) : travaux, temps, pièces, photos, signature. */
   async report(ctx: FactureContext, id: string): Promise<{ body: Buffer; filename: string }> {
     const row = await this.read(this.db, ctx, id);
+    const printed = this.printedData(row);
     const settings = await this.db.factureSettings.findUnique({
       where: { organizationId: ctx.organizationId },
     });
@@ -760,16 +779,12 @@ export class FactureInterventionsService {
       statusLabel: FACTURE_INTERVENTION_STATUS_LABELS[row.status],
       title: row.title,
       description: row.description,
-      client: row.client,
-      siteAddress: row.siteAddress,
-      contactName: row.contactName,
-      contactPhone: row.contactPhone,
-      equipment: row.equipment,
+      ...printed,
       scheduledStart: row.scheduledStart,
       scheduledEnd: row.scheduledEnd,
       startedAt: row.startedAt,
       completedAt: row.completedAt,
-      technicians: row.technicians.map((t) => fullName(t.member)),
+
       time: row.timeEntries.map((e) => ({
         date: e.workDate,
         technician: fullName(e.member),
@@ -794,6 +809,14 @@ export class FactureInterventionsService {
     };
     const body = await renderFactureInterventionReport(settings, report, logos);
     return { body, filename: `rapport-${row.number}.pdf` };
+  }
+
+  /**
+   * Données imprimées d'un rapport : celles figées à la signature pour un rapport signé (jamais modifiées
+   * ensuite, même si la fiche du client ou de l'équipement change), les données actuelles sinon.
+   */
+  printedData(row: InterventionRow): ReportSnapshot {
+    return (row.reportSnapshot as unknown as ReportSnapshot | null) ?? snapshotOf(row);
   }
 
   // ─── Facturation ───
@@ -1039,6 +1062,7 @@ export class FactureInterventionsService {
     const assigned = row.technicians.some((t) => t.memberId === ctx.memberId);
     const {
       signatureKey,
+      reportSnapshot: _snapshot,
       photos,
       timeEntries,
       parts,
@@ -1107,9 +1131,51 @@ export class FactureInterventionsService {
  * (client, lieu, équipement, créneau, techniciens, temps, pièces, photos, rapport, signataire, date) et
  * empreinte de l'image de la signature. Sérialisation à ordre de clés fixe.
  */
-export function hashReport(row: InterventionRow, signerName: string, signedAt: Date, png: Buffer) {
+/** Données imprimées d'un rapport, figées à la signature. */
+export interface ReportSnapshot {
+  client: {
+    id: string;
+    name: string;
+    phone: string | null;
+    address: string | null;
+    city: string | null;
+  };
+  siteAddress: string | null;
+  contactName: string | null;
+  contactPhone: string | null;
+  equipment: {
+    id: string;
+    name: string;
+    brand: string | null;
+    model: string | null;
+    serialNumber: string | null;
+    location: string | null;
+  } | null;
+  technicians: string[];
+}
+
+export function snapshotOf(row: InterventionRow): ReportSnapshot {
+  return {
+    client: { ...row.client },
+    siteAddress: row.siteAddress,
+    contactName: row.contactName,
+    contactPhone: row.contactPhone,
+    equipment: row.equipment ? { ...row.equipment } : null,
+    technicians: row.technicians.map((t) => fullName(t.member)),
+  };
+}
+
+export function hashReport(
+  row: InterventionRow,
+  snapshot: ReportSnapshot,
+  signerName: string,
+  signedAt: Date,
+  png: Buffer,
+) {
   const payload = {
-    v: 1,
+    v: 2,
+    /** Tout ce qui est imprimé du client, du lieu, du contact, de l'équipement et des techniciens. */
+    printed: snapshot,
     number: row.number,
     client: { id: row.client.id, name: row.client.name },
     title: row.title,

@@ -272,24 +272,44 @@ export class FactureSiteService {
   }
 
   /** Retrait d'une image : une image publiée disparaît du site à la prochaine publication. */
+  /**
+   * Retrait d'une image, publiée ou non : une image en ligne disparaît aussitôt de la version publiée
+   * (logo, couverture ou galerie), sous le verrou du site — jamais d'image publiée impossible à retirer.
+   */
   async removeMedia(ctx: FactureContext, id: string) {
-    const media = await this.db.factureSiteMedia.findUnique({
-      where: { organizationId_id: { organizationId: ctx.organizationId, id } },
+    const key = await this.db.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "organizationId" FROM "FactureSite" WHERE "organizationId" = ${ctx.organizationId}::uuid FOR UPDATE`;
+      const media = await tx.factureSiteMedia.findUnique({
+        where: { organizationId_id: { organizationId: ctx.organizationId, id } },
+      });
+      if (!media) {
+        throw new NotFoundException({
+          code: 'FACTURE_SITE_MEDIA_NOT_FOUND',
+          message: 'Image introuvable.',
+        });
+      }
+      if (media.isPublished) {
+        const site = await tx.factureSite.findUniqueOrThrow({
+          where: { organizationId: ctx.organizationId },
+        });
+        const published = site.published as unknown as FactureSitePublished | null;
+        if (published) {
+          const next: FactureSitePublished = {
+            ...published,
+            logo: published.logo === media.storageKey ? null : published.logo,
+            cover: published.cover === media.storageKey ? null : published.cover,
+            gallery: published.gallery.filter((g) => g.key !== media.storageKey),
+          };
+          await tx.factureSite.update({
+            where: { organizationId: ctx.organizationId },
+            data: { published: next as unknown as Prisma.InputJsonValue },
+          });
+        }
+      }
+      await tx.factureSiteMedia.delete({ where: { id } });
+      return media.storageKey;
     });
-    if (!media) {
-      throw new NotFoundException({
-        code: 'FACTURE_SITE_MEDIA_NOT_FOUND',
-        message: 'Image introuvable.',
-      });
-    }
-    if (media.isPublished) {
-      throw new ConflictException({
-        code: 'FACTURE_SITE_MEDIA_PUBLISHED',
-        message: 'Image en ligne : publiez d’abord une version sans elle, ou retirez le site.',
-      });
-    }
-    await this.db.factureSiteMedia.delete({ where: { id } });
-    await this.storage.delete(media.storageKey).catch(() => undefined);
+    await this.storage.delete(key).catch(() => undefined);
     await this.record(ctx, 'facture.site_media_removed');
     return this.get(ctx);
   }
@@ -587,6 +607,12 @@ export class FactureSiteService {
    * et offre « avec vitrine » (sans droit historique).
    */
   async entitled(organizationId: string): Promise<boolean> {
+    // Organisation suspendue par Ocall : vitrine hors ligne (comme les sites Park), contenu conservé.
+    const org = await this.core.organization.findUnique({
+      where: { id: organizationId },
+      select: { status: true },
+    });
+    if (org?.status !== 'ACTIVE') return false;
     if ((await loadAppAccess(this.core, organizationId, FACTURE_PRODUCT_CODE)) !== 'full')
       return false;
     try {

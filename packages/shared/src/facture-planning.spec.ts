@@ -127,4 +127,30 @@ describe('Ocall Facture — planification (F6B)', () => {
     expect(factureAiClaimsCertainty('Panne certaine du ventilateur.')).toBe(true);
     expect(factureAiClaimsCertainty('Vérification recommandée du ventilateur.')).toBe(false);
   });
+
+  it('certitude : frontières de mot Unicode et formulations élargies (audit V1)', () => {
+    for (const said of [
+      'Panne à coup sûr avant l’été.',
+      'Échec certain.',
+      'Il est certain que la courroie cède.',
+      'Le joint va forcément fuir.',
+      'Le moteur est sûrement fichu.',
+      'Rupture inéluctable du roulement.',
+      'Les roulements casseront.',
+      'Le joint fuira inévitablement.',
+      // Forme décomposée (NFD) : même résultat.
+      'Panne à coup sûr.'.normalize('NFD'),
+    ]) {
+      expect([said, factureAiClaimsCertainty(said)]).toEqual([said, true]);
+    }
+    for (const said of [
+      'Certains équipements sont anciens.',
+      'Après un certain temps de fonctionnement.',
+      'Une certaine usure est visible.',
+      'Contrôle certifié par le technicien.',
+      'Usure possible du roulement : à surveiller.',
+    ]) {
+      expect([said, factureAiClaimsCertainty(said)]).toEqual([said, false]);
+    }
+  });
 });
