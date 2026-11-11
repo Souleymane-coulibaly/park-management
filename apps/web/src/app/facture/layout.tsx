@@ -27,6 +27,7 @@ export default async function FactureLayout({ children }: { children: ReactNode 
       nav={NAV}
       context={{ title: me.organization!.name, subtitle: 'Ocall Facture' }}
       homeHref="/facture"
+      appsHref="/suite"
       accountHref="/facture/compte"
       headerNote={
         <Link href="/suite" className="font-medium text-forest hover:underline">

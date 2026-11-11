@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { type ReactNode, useEffect, useState } from 'react';
-import { Menu } from 'lucide-react';
+import { LayoutGrid, Menu } from 'lucide-react';
 import { ROLE_LABELS } from '@ocall/shared';
 import { Logo } from '@/components/brand/logo';
 import { ConnectivityBadge } from '@/components/pwa/pwa-runtime';
@@ -28,6 +28,11 @@ interface ShellProps {
   homeHref: string;
   accountHref?: string;
   headerNote?: ReactNode;
+  /**
+   * Portail des applications (« Mes applications »). Sur grand écran, le lien est dans l'en-tête
+   * (`headerNote`) ; sur téléphone et tablette, l'en-tête le masque : il est alors dans le menu.
+   */
+  appsHref?: string;
   /** Routes affichées en pleine largeur (ex. la caisse sur tablette). */
   wideRoutes?: string[];
   /** Éléments propres à un espace, sous le contenu (navigation mobile du parc, PWA). */
@@ -43,8 +48,9 @@ function Sidebar({
   nav,
   context,
   homeHref,
+  appsHref,
   onNavigate,
-}: Pick<ShellProps, 'nav' | 'context' | 'homeHref'> & { onNavigate?: () => void }) {
+}: Pick<ShellProps, 'nav' | 'context' | 'homeHref' | 'appsHref'> & { onNavigate?: () => void }) {
   const pathname = usePathname();
   return (
     <div className="flex h-full flex-col bg-charcoal text-ivory">
@@ -82,6 +88,18 @@ function Sidebar({
           );
         })}
       </nav>
+      {appsHref && (
+        <div className="border-t border-ivory/10 px-3 py-3">
+          <Link
+            href={appsHref}
+            onClick={onNavigate}
+            className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold text-savanna hover:bg-ivory/5"
+          >
+            <LayoutGrid className="h-4 w-4" aria-hidden />
+            <span className="flex-1 truncate">Mes applications</span>
+          </Link>
+        </div>
+      )}
       <div
         className="h-1.5 bg-[repeating-linear-gradient(90deg,#D99B38_0_16px,#C46A43_16px_32px,#176B53_32px_48px)]"
         aria-hidden
@@ -98,6 +116,7 @@ export function AppShell({
   homeHref,
   accountHref,
   headerNote,
+  appsHref,
   wideRoutes = [],
   mobileExtras,
   children,
@@ -128,8 +147,10 @@ export function AppShell({
         </aside>
 
         {mobileOpen && (
+          // Au-dessus des barres fixes des espaces (z-40, ex. navigation mobile du parc), qui couvraient
+          // le bas du menu.
           <div
-            className="fixed inset-0 z-40 lg:hidden"
+            className="fixed inset-0 z-50 lg:hidden"
             role="dialog"
             aria-modal="true"
             aria-label="Menu"
@@ -145,6 +166,7 @@ export function AppShell({
                 nav={nav}
                 context={context}
                 homeHref={homeHref}
+                appsHref={appsHref}
                 onNavigate={() => setMobileOpen(false)}
               />
             </div>

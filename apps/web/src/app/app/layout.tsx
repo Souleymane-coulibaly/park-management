@@ -29,6 +29,7 @@ export default async function MemberLayout({ children }: { children: ReactNode }
       me={me}
       nav={nav}
       context={{ title: org.name, subtitle: BUSINESS_TYPE_LABELS[org.businessType] }}
+      appsHref="/suite"
       homeHref="/app"
       accountHref="/app/compte"
       wideRoutes={['/app/caisse']}
