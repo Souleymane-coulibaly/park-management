@@ -66,7 +66,8 @@ export const REMOTE_TEST_OPT_IN = 'OCALL_TEST_ALLOW_MARKED_REMOTE';
  * Protection bloquante des tests d'intégration : ils ne s'exécutent que sur des bases PostgreSQL locales
  * jetables. Refus si une base de test est distante (sauf dérogation explicite, et le marqueur « test »
  * reste alors exigé), si elle désigne une base configurée pour l'application (développement ou
- * production : `DATABASE_URL`, `DIRECT_URL`, `SCHOOL_DATABASE_URL`), ou en environnement de production.
+ * production : `DATABASE_URL`, `DIRECT_URL`, `SCHOOL_DATABASE_URL`, `FACTURE_DATABASE_URL`), ou en
+ * environnement de production.
  */
 export function assertDisposableTestDatabases(
   urls: readonly (string | undefined)[],
@@ -78,7 +79,7 @@ export function assertDisposableTestDatabases(
   // Identité canonique (alias locaux, port effectif, nom décodé) : une même base, écrite autrement,
   // reste la même base.
   const configured = new Set(
-    [env.DATABASE_URL, env.DIRECT_URL, env.SCHOOL_DATABASE_URL]
+    [env.DATABASE_URL, env.DIRECT_URL, env.SCHOOL_DATABASE_URL, env.FACTURE_DATABASE_URL]
       .filter((u): u is string => Boolean(u))
       .map((u) => databaseIdentity(u)),
   );

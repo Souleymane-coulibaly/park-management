@@ -8,6 +8,7 @@ import {
 import { Prisma } from '@ocall/database';
 import {
   PARK_APP_PRODUCT_CODES,
+  FACTURE_PRODUCT_CODE,
   PARK_PRODUCT_CODE,
   SCHOOL_PRODUCT_CODE,
   type ProductAccess,
@@ -28,12 +29,17 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
 import type { AuthContext, TenantContext } from '../../common/auth-context';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
+import { loadAppAccess } from '../../common/app-access';
 import { loadParkAccess } from '../../common/park-access';
 import { notifyOrganization } from '../../common/suite-notify';
 import { SuiteContractsService } from '../suite-contracts/suite-contracts.service';
 
 type Tx = Prisma.TransactionClient;
-const APP_HREF: Record<string, string> = { OCALL_PARK: '/app', OCALL_SCHOOL: '/school' };
+const APP_HREF: Record<string, string> = {
+  OCALL_PARK: '/app',
+  OCALL_SCHOOL: '/school',
+  OCALL_FACTURE: '/facture',
+};
 
 const NOT_FOUND = { code: 'PRODUCT_NOT_FOUND', message: 'Application introuvable.' };
 const DAY_MS = 86_400_000;
@@ -315,6 +321,10 @@ export class SuiteCommercialService {
     ]);
     const parkAccess = await this.parkAccessFor(auth, now);
     const schoolAccess = await this.schoolAccess(organizationId);
+    // Ocall Facture : abonnement et essai (socle S1), application activée par configuration.
+    const factureAccess: ProductAccess = this.config.facture.enabled
+      ? await loadAppAccess(this.prisma, organizationId, FACTURE_PRODUCT_CODE, now)
+      : 'none';
     const out: SuitePortalApp[] = [];
     for (const p of products) {
       const status = p.status as SaasProductStatus;
@@ -329,7 +339,9 @@ export class SuiteCommercialService {
         ? parkAccess
         : p.code === SCHOOL_PRODUCT_CODE
           ? schoolAccess
-          : 'none';
+          : p.code === FACTURE_PRODUCT_CODE
+            ? factureAccess
+            : 'none';
       const trialUsed = trials.some((t) => t.productId === p.id);
       const fee = fees.find((f) => f.productId === (sub?.productId ?? p.id));
       const pendingRequest = pending.find((r) => r.productId === p.id) ?? null;

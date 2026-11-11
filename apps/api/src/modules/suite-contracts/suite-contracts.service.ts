@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@ocall/database';
 import {
+  FACTURE_PRODUCT_CODE,
   SCHOOL_PRODUCT_CODE,
   type AuthProductApp,
   type SuiteContractStatus,
@@ -20,6 +21,7 @@ import type { AuthContext, TenantContext } from '../../common/auth-context';
 import { PasswordService } from '../../common/security/password.service';
 import { generateTemporaryPassword } from '../../common/security/tokens';
 import { PrismaService } from '../../prisma/prisma.service';
+import { loadAppAccess } from '../../common/app-access';
 import { loadParkAccess } from '../../common/park-access';
 import { assertShowcaseAllowed } from '../../common/showcase';
 import { OrganizationProvisioningService } from '../organizations/organization-provisioning.service';
@@ -174,7 +176,11 @@ export class SuiteContractsService {
   }
 
   /** Applications du portail Ocall Suite accessibles à ce membre, décidées par le serveur. */
-  async apps(auth: TenantContext, schoolEnabled: boolean): Promise<AuthProductApp[]> {
+  async apps(
+    auth: TenantContext,
+    schoolEnabled: boolean,
+    factureEnabled = false,
+  ): Promise<AuthProductApp[]> {
     const apps: AuthProductApp[] = [];
     if (
       activitiesOf(auth.membership.businessType).length > 0 &&
@@ -194,6 +200,17 @@ export class SuiteContractsService {
           href: '/school',
           access: school.access,
         });
+      }
+    }
+    // Ocall Facture : abonnement et essai ; le rôle Facture est contrôlé par l'application elle-même.
+    if (factureEnabled) {
+      const access = await loadAppAccess(
+        this.prisma,
+        auth.membership.organizationId,
+        FACTURE_PRODUCT_CODE,
+      );
+      if (access !== 'none') {
+        apps.push({ code: FACTURE_PRODUCT_CODE, name: 'Ocall Facture', href: '/facture', access });
       }
     }
     return apps;

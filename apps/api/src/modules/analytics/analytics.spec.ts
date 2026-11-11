@@ -3,7 +3,7 @@ import type { PrismaService } from '../../prisma/prisma.service';
 import type { TenantContext } from '../../common/auth-context';
 import { buildExportTable, exportRows, selectColumns } from './analytics-export';
 import { resolveAnalyticsScope } from './analytics-scope';
-import { csvCell, neutralizeFormula, toCsv } from './csv';
+import { csvCell, neutralizeFormula, toCsv } from '../../common/csv';
 
 describe('Analyses — CSV et injection de formules', () => {
   it.each([

@@ -2,6 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { parseReminderOffsets } from '@ocall/shared';
 import { type AiConfig, loadAiConfig } from '../ai-core/ai-core.config';
 import { type MailConfig, loadMailConfig } from '../common/mail/mail.config';
+import { type FactureConfig, loadFactureConfig } from '../modules/facture/facture.config';
 import { type SchoolConfig, loadSchoolConfig } from '../modules/school/school.config';
 import { type SitesConfig, loadSitesConfig } from '../modules/public-sites/sites.config';
 import {
@@ -59,6 +60,7 @@ export interface AppConfig {
   /** Sprint S3 : conservation des candidatures partenaires non retenues (mois), puis anonymisation. */
   partnerApplicationRetentionMonths: number;
   mail: MailConfig;
+  facture: FactureConfig;
 }
 
 function storageSigningKey(env: NodeJS.ProcessEnv, nodeEnv: string): Buffer {
@@ -142,6 +144,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     suiteReminderOffsets: parseReminderOffsets(env.SUITE_REMINDER_OFFSETS),
     partnerApplicationRetentionMonths: int(env, 'PARTNER_APPLICATION_RETENTION_MONTHS', 24),
     mail: loadMailConfig(env, nodeEnv, webOrigins),
+    facture: loadFactureConfig(env),
     mfaEncryptionKey: mfaKey(env, nodeEnv),
     storageSigningKey: storageSigningKey(env, nodeEnv),
     logFormat:

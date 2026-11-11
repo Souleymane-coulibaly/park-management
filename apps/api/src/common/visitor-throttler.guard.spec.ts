@@ -45,6 +45,23 @@ describe('limitation de débit : identité du visiteur', () => {
     expect(throttleTracker({ ...req(h), method: 'POST' }, secret)).toBe('10.0.0.5');
   });
 
+  it('vitrines Facture (F5) : lectures publiques par visiteur ; formulaires jamais', () => {
+    const h = { 'x-ocall-internal': secret, 'x-ocall-visitor-ip': '41.82.10.7' };
+    expect(throttleTracker(req(h, '/api/v1/public/facture-sites/froid'), secret)).toBe(
+      'visiteur:41.82.10.7',
+    );
+    expect(throttleTracker(req(h, '/api/v1/public/facture-media/a.jpg'), secret)).toBe(
+      'visiteur:41.82.10.7',
+    );
+    expect(
+      throttleTracker(
+        { ...req(h, '/api/v1/public/facture-sites/froid/requests'), method: 'POST' },
+        secret,
+      ),
+    ).toBe('10.0.0.5');
+    expect(throttleTracker(req(h, '/api/v1/facture/site'), secret)).toBe('10.0.0.5');
+  });
+
   it('identité de visiteur invalide : ignorée', () => {
     expect(
       throttleTracker(

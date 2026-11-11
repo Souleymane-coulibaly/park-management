@@ -1,0 +1,875 @@
+// Ocall Facture : base PostgreSQL distincte des bases Ocall Suite et Ocall School.
+//
+// `organizationId` et `userId` désignent des lignes de la base Suite : aucune clé étrangère entre bases,
+// l'API les contrôle. Dans cette base, chaque lien passe par une clé composée (organizationId, id) :
+// PostgreSQL refuse lui-même tout lien entre deux clients.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/facture-client"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("FACTURE_DATABASE_URL")
+  directUrl = env("FACTURE_DIRECT_URL")
+}
+
+/// Rôle d'un membre Ocall Facture. Le propriétaire de l'organisation (base Suite) est gérant d'office.
+enum FactureRole {
+  MANAGER
+  SALES
+  ACCOUNTANT
+  TECHNICIAN
+}
+
+/// Types de documents numérotés (numérotation continue par organisation, type et année).
+enum FactureDocumentType {
+  QUOTE
+  PRO_FORMA
+  ORDER
+  INVOICE
+  CREDIT_NOTE
+}
+
+/// Identité légale et réglages de facturation d'une organisation (mentions des documents, Mali).
+model FactureSettings {
+  organizationId    String   @id @db.Uuid
+  /// Raison sociale.
+  legalName         String
+  tradeName         String?
+  /// Activité ou slogan, imprimé sous le nom de l'entreprise (ex. « Représentant exclusif de … »).
+  description       String?
+  /// Facultatives (décision du 10/11/2026) : imprimées seulement si renseignées.
+  address           String?
+  city              String?
+  /// Pays (code ISO 3166-1 alpha-2) ; Mali par défaut.
+  country           String   @default("ML") @db.Char(2)
+  phone             String?
+  email             String?
+  /// Numéro d'identification fiscale du vendeur : obligatoire avant l'émission d'une facture.
+  nif               String?
+  rccm              String?
+  /// Régime d'imposition, imprimé sur les factures.
+  taxRegime         String?
+  bankDetails       String?
+  /// Mentions complémentaires imprimées en pied de document.
+  legalFooter       String?
+  /// Taux de TVA proposé par défaut, en pourcentage entier de 0 à 20.
+  defaultVatRate    Int      @default(18)
+  currency          String   @default("XOF") @db.Char(3)
+  paymentTermsDays  Int      @default(30)
+  /// Clé de stockage privée du logo (jamais servie directement).
+  logoKey           String?
+  /// Couleur d'accent des documents PDF (#RRGGBB).
+  accentColor       String   @default("#1f6f4a") @db.Char(7)
+  /// Durée de validité proposée pour un devis ou une pro forma, en jours.
+  quoteValidityDays Int      @default(30)
+  /// Conditions générales proposées sur les nouveaux documents (modifiables document par document).
+  defaultTerms      String?
+  updatedByUserId   String?  @db.Uuid
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
+
+/// Membre d'une organisation dans Ocall Facture. L'identité (compte, mot de passe, sessions) reste dans
+/// la base Suite, avec le rôle PRODUCT_USER, sans aucun droit Ocall Park ni School.
+model FactureMember {
+  id             String      @id @default(uuid()) @db.Uuid
+  organizationId String      @db.Uuid
+  userId         String      @db.Uuid
+  firstName      String
+  lastName       String
+  loginId        String
+  role           FactureRole
+  isActive       Boolean     @default(true)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  assignments      FactureInterventionTechnician[]
+  timeEntries      FactureTimeEntry[]
+  skills           FactureMemberSkill[]
+  unavailabilities FactureUnavailability[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, userId])
+  @@index([organizationId, isActive])
+}
+
+/// Compteur de numérotation : continu et sans trou, incrémenté dans la transaction qui émet le document.
+model FactureNumberCounter {
+  organizationId String              @db.Uuid
+  type           FactureDocumentType
+  year           Int
+  value          Int                 @default(0)
+  updatedAt      DateTime            @updatedAt
+
+  @@id([organizationId, type, year])
+}
+
+// ─── F1 — Commercial ───
+
+enum FactureClientKind {
+  COMPANY
+  INDIVIDUAL
+}
+
+/// Client d'une organisation (entreprise ou particulier). Jamais supprimé : archivé.
+model FactureClient {
+  id              String            @id @default(uuid()) @db.Uuid
+  organizationId  String            @db.Uuid
+  kind            FactureClientKind @default(COMPANY)
+  name            String
+  contactName     String?
+  email           String?
+  phone           String?
+  address         String?
+  city            String?
+  country         String            @default("ML") @db.Char(2)
+  /// NIF de l'acheteur, imprimé sur ses documents quand il est assujetti ; unique par organisation.
+  nif             String?
+  rccm            String?
+  /// Relevé d'identité bancaire du client, imprimé dans son bloc s'il est renseigné.
+  rib             String?
+  /// Description imprimée sous le nom du client sur les documents (activité, service, précision).
+  description     String?
+  notes           String?
+  /// Consentement du client à recevoir ses rendez-vous par WhatsApp (F4), daté.
+  whatsappOptIn   Boolean           @default(false)
+  whatsappOptInAt DateTime?
+  isArchived      Boolean           @default(false)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  documents     FactureDocument[]
+  equipment     FactureEquipment[]
+  interventions FactureIntervention[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, nif])
+  @@index([organizationId, isArchived, name])
+}
+
+enum FactureItemKind {
+  PRODUCT
+  SERVICE
+}
+
+/// Article ou prestation du catalogue : prix hors taxe (FCFA entiers), TVA et unité proposés sur les lignes.
+model FactureItem {
+  id             String          @id @default(uuid()) @db.Uuid
+  organizationId String          @db.Uuid
+  kind           FactureItemKind @default(SERVICE)
+  /// Référence interne, unique par organisation.
+  reference      String?
+  name           String
+  description    String?
+  unit           String          @default("unité")
+  unitPrice      Int
+  vatRate        Int
+  isArchived     Boolean         @default(false)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  lines FactureDocumentLine[]
+  parts FacturePartUsage[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, reference])
+  @@index([organizationId, isArchived, name])
+}
+
+enum FactureDocumentStatus {
+  DRAFT
+  ISSUED
+  SENT
+  ACCEPTED
+  REFUSED
+  CANCELLED
+  /// Facture : encaissée ou créditée en partie.
+  PARTIALLY_PAID
+  /// Facture : plus rien à payer, au moins un encaissement.
+  PAID
+  /// Facture : entièrement couverte par des avoirs, sans encaissement.
+  CREDITED
+}
+
+/// Moyen de paiement d'un encaissement.
+enum FacturePaymentMethod {
+  CASH
+  MOBILE_MONEY
+  BANK_TRANSFER
+  CHECK
+  CARD
+  OTHER
+}
+
+/// Document commercial : devis, pro forma, bon de commande (commande client), facture. Un brouillon n'a
+/// pas de numéro ; une fois émis, son contenu est figé (contrôlé aussi par la base : déclencheurs de la
+/// migration `facture_v1_commercial`). Les identités du vendeur et du client sont copiées à l'émission.
+model FactureDocument {
+  id                 String                @id @default(uuid()) @db.Uuid
+  organizationId     String                @db.Uuid
+  type               FactureDocumentType
+  status             FactureDocumentStatus @default(DRAFT)
+  number             String?
+  year               Int?
+  sequence           Int?
+  clientId           String                @db.Uuid
+  /// Document d'origine (conversion devis → bon de commande → facture).
+  sourceDocumentId   String?               @db.Uuid
+  subject            String?
+  /// Référence du client (numéro de sa commande).
+  clientReference    String?
+  notes              String?
+  terms              String?
+  /// Motif d'exonération, imprimé quand une ligne est à 0 % de TVA.
+  vatExemptionReason String?
+  validityDays       Int?
+  issueDate          DateTime?             @db.Date
+  validUntil         DateTime?             @db.Date
+  currency           String                @default("XOF") @db.Char(3)
+  totalHt            BigInt                @default(0)
+  totalVat           BigInt                @default(0)
+  totalTtc           BigInt                @default(0)
+  /// Ventilation de la TVA par taux : [{ rate, base, amount }].
+  vatBreakdown       Json                  @default("[]")
+  /// Identités figées à l'émission (le document émis ne change plus si le client ou l'entreprise change).
+  sellerSnapshot     Json?
+  clientSnapshot     Json?
+  sentAt             DateTime?
+  sentCount          Int                   @default(0)
+  acceptedAt         DateTime?
+  refusedAt          DateTime?
+  cancelledAt        DateTime?
+  cancelReason       String?
+  createdByUserId    String                @db.Uuid
+  issuedAt           DateTime?
+  issuedByUserId     String?               @db.Uuid
+  /// Facture : délai de paiement (jours), proposé par les réglages, modifiable sur le brouillon.
+  paymentTermsDays   Int?
+  /// Facture : échéance, fixée à l'émission (date d'émission + délai), figée ensuite.
+  dueDate            DateTime?             @db.Date
+  /// Facture : encaissements en vigueur (somme tenue sous verrou de la facture).
+  amountPaid         BigInt                @default(0)
+  /// Facture : avoirs émis sur elle (TTC).
+  amountCredited     BigInt                @default(0)
+  reminderCount      Int                   @default(0)
+  lastReminderAt     DateTime?
+  /// Avoir : facture corrigée (plusieurs avoirs possibles par facture, jamais au-delà de son TTC).
+  creditedInvoiceId  String?               @db.Uuid
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  client          FactureClient         @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Restrict)
+  source          FactureDocument?      @relation("FactureDocumentSource", fields: [organizationId, sourceDocumentId], references: [organizationId, id], onDelete: Restrict)
+  derived         FactureDocument[]     @relation("FactureDocumentSource")
+  creditedInvoice FactureDocument?      @relation("FactureCreditNotes", fields: [organizationId, creditedInvoiceId], references: [organizationId, id], onDelete: Restrict)
+  creditNotes     FactureDocument[]     @relation("FactureCreditNotes")
+  lines           FactureDocumentLine[]
+  payments        FacturePayment[]
+  /// Intervention facturée par ce document (F3).
+  intervention    FactureIntervention?
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, type, number])
+  /// Une seule conversion par document d'origine et par type (conversion idempotente).
+  @@unique([organizationId, sourceDocumentId, type])
+  @@index([organizationId, type, status, createdAt])
+  @@index([organizationId, clientId])
+  @@index([organizationId, creditedInvoiceId])
+  @@index([organizationId, type, dueDate])
+}
+
+/// Encaissement d'une facture (paiements partiels possibles). Jamais modifié ni supprimé : une erreur
+/// de saisie s'annule (motif conservé), contrôlé aussi par la base.
+model FacturePayment {
+  id                String               @id @default(uuid()) @db.Uuid
+  organizationId    String               @db.Uuid
+  invoiceId         String               @db.Uuid
+  amount            BigInt
+  method            FacturePaymentMethod
+  /// Date de l'encaissement (déclarée par l'utilisateur).
+  paidAt            DateTime             @db.Date
+  /// Référence du paiement (n° de chèque, de virement, de transaction mobile money).
+  reference         String?
+  note              String?
+  createdByUserId   String               @db.Uuid
+  createdAt         DateTime             @default(now())
+  cancelledAt       DateTime?
+  cancelledByUserId String?              @db.Uuid
+  cancelReason      String?
+
+  invoice FactureDocument @relation(fields: [organizationId, invoiceId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@index([organizationId, invoiceId])
+  @@index([organizationId, paidAt])
+}
+
+/// Ligne d'un document : copie du libellé, du prix et de la TVA (le catalogue peut changer ensuite).
+model FactureDocumentLine {
+  id              String  @id @default(uuid()) @db.Uuid
+  organizationId  String  @db.Uuid
+  documentId      String  @db.Uuid
+  position        Int
+  itemId          String? @db.Uuid
+  /// Référence de l'article (copiée du catalogue ou saisie), imprimée dans la colonne « Réf. ».
+  reference       String?
+  label           String
+  description     String?
+  unit            String
+  quantity        Decimal @db.Decimal(12, 3)
+  unitPrice       Int
+  discountPercent Int     @default(0)
+  vatRate         Int
+  totalHt         BigInt
+
+  document FactureDocument @relation(fields: [organizationId, documentId], references: [organizationId, id], onDelete: Cascade)
+  item     FactureItem?    @relation(fields: [organizationId, itemId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([documentId, position])
+  @@index([organizationId, documentId])
+  @@index([organizationId, itemId])
+}
+
+/// Emplacement d'un logo sur les documents.
+enum FactureLogoPlacement {
+  /// En-tête : 3 logos au plus, logo principal des réglages compris.
+  HEADER
+  /// Bandeau au bas de chaque page : 6 logos au plus (3 à gauche, 3 à droite des mentions).
+  FOOTER
+  /// Cachet ou signature de l'entreprise, imprimé dans la case « Le fournisseur » : 1 au plus.
+  STAMP
+}
+
+/// Logos supplémentaires (certifications, marques, partenaires) imprimés sur tous les documents : en-tête
+/// (avec le logo principal des réglages) ou bas de page. Image réencodée, clé de stockage privée.
+model FactureLogo {
+  id              String               @id @default(uuid()) @db.Uuid
+  organizationId  String               @db.Uuid
+  storageKey      String
+  placement       FactureLogoPlacement
+  /// Libellé facultatif (ex. « Certifié ISO 9001 »), non imprimé : aide à les reconnaître.
+  label           String?
+  position        Int
+  createdByUserId String               @db.Uuid
+  createdAt       DateTime             @default(now())
+
+  @@unique([organizationId, id])
+  @@index([organizationId, placement, position])
+}
+
+// ─── F3 — Interventions ───
+
+/// Équipement du parc d'un client (climatiseur, groupe électrogène, onduleur…). Jamais supprimé : archivé.
+model FactureEquipment {
+  id                        String    @id @default(uuid()) @db.Uuid
+  organizationId            String    @db.Uuid
+  clientId                  String    @db.Uuid
+  name                      String
+  brand                     String?
+  model                     String?
+  serialNumber              String?
+  /// Emplacement chez le client (bâtiment, étage, local).
+  location                  String?
+  installedAt               DateTime? @db.Date
+  /// Périodicité d'entretien conseillée, en mois (1 à 60), pour la maintenance préventive (F6B).
+  maintenanceIntervalMonths Int?
+  notes                     String?
+  isArchived                Boolean   @default(false)
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+
+  client        FactureClient         @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Restrict)
+  interventions FactureIntervention[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, clientId, id])
+  @@index([organizationId, clientId, isArchived])
+}
+
+enum FactureInterventionStatus {
+  PLANNED
+  IN_PROGRESS
+  /// Travaux terminés, rapport rédigé : temps, pièces et photos figés.
+  COMPLETED
+  /// Rapport signé par le client sur mobile : plus rien ne change, sauf la facturation.
+  SIGNED
+  INVOICED
+  CANCELLED
+}
+
+/// Compteur des références d'interventions (`INT-AAAA-NNNNN`), par organisation et année de création.
+model FactureInterventionCounter {
+  organizationId String   @db.Uuid
+  year           Int
+  value          Int      @default(0)
+  updatedAt      DateTime @updatedAt
+
+  @@id([organizationId, year])
+}
+
+/// Intervention chez un client : planifiée, réalisée (temps, pièces, photos, rapport), signée, facturée.
+/// Les règles de statut et le gel du rapport sont tenus aussi par la base (déclencheurs de la migration
+/// `facture_v1_interventions`).
+model FactureIntervention {
+  id                String                      @id @default(uuid()) @db.Uuid
+  organizationId    String                      @db.Uuid
+  number            String
+  year              Int
+  sequence          Int
+  status            FactureInterventionStatus   @default(PLANNED)
+  /// Priorité (F6B) : une urgence est proposée au plus tôt par la planification intelligente.
+  priority          FactureInterventionPriority @default(NORMAL)
+  clientId          String                      @db.Uuid
+  equipmentId       String?                     @db.Uuid
+  /// Objet de la demande.
+  title             String
+  description       String?
+  /// Lieu d'intervention (adresse du client par défaut).
+  siteAddress       String?
+  contactName       String?
+  contactPhone      String?
+  scheduledStart    DateTime
+  scheduledEnd      DateTime
+  startedAt         DateTime?
+  completedAt       DateTime?
+  completedByUserId String?                     @db.Uuid
+  /// Rapport : travaux réalisés et recommandations, rédigés à la fin des travaux.
+  workSummary       String?
+  recommendations   String?
+  /// Signature du client : nom du signataire, image (clé de stockage privée), empreinte SHA-256 du
+  /// rapport signé.
+  signerName        String?
+  signedAt          DateTime?
+  signatureKey      String?
+  reportHash        String?                     @db.Char(64)
+  /// Données imprimées figées à la signature (client, lieu, contact, équipement, techniciens) : le rapport
+  /// signé ne change plus, même si la fiche du client ou de l'équipement change ensuite.
+  reportSnapshot    Json?
+  /// Facture brouillon créée depuis l'intervention (une seule).
+  invoiceId         String?                     @db.Uuid
+  cancelledAt       DateTime?
+  cancelReason      String?
+  createdByUserId   String                      @db.Uuid
+  createdAt         DateTime                    @default(now())
+  updatedAt         DateTime                    @updatedAt
+
+  client         FactureClient                   @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Restrict)
+  /// L'équipement appartient au client de l'intervention (clé composée avec le client).
+  equipment      FactureEquipment?               @relation(fields: [organizationId, clientId, equipmentId], references: [organizationId, clientId, id], onDelete: Restrict)
+  invoice        FactureDocument?                @relation(fields: [organizationId, invoiceId], references: [organizationId, id], onDelete: Restrict)
+  technicians    FactureInterventionTechnician[]
+  timeEntries    FactureTimeEntry[]
+  parts          FacturePartUsage[]
+  photos         FactureInterventionPhoto[]
+  notifications  FactureNotification[]
+  requiredSkills FactureInterventionSkill[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, number])
+  @@unique([organizationId, invoiceId])
+  @@index([organizationId, scheduledStart])
+  @@index([organizationId, status])
+  @@index([organizationId, clientId])
+}
+
+/// Technicien affecté à une intervention.
+model FactureInterventionTechnician {
+  organizationId String   @db.Uuid
+  interventionId String   @db.Uuid
+  memberId       String   @db.Uuid
+  createdAt      DateTime @default(now())
+
+  intervention FactureIntervention @relation(fields: [organizationId, interventionId], references: [organizationId, id], onDelete: Restrict)
+  member       FactureMember       @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Restrict)
+
+  @@id([interventionId, memberId])
+  @@index([organizationId, memberId])
+}
+
+/// Temps passé par un technicien affecté, en minutes.
+model FactureTimeEntry {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  interventionId  String   @db.Uuid
+  memberId        String   @db.Uuid
+  workDate        DateTime @db.Date
+  minutes         Int
+  note            String?
+  createdByUserId String   @db.Uuid
+  createdAt       DateTime @default(now())
+
+  intervention FactureIntervention @relation(fields: [organizationId, interventionId], references: [organizationId, id], onDelete: Restrict)
+  member       FactureMember       @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@index([organizationId, interventionId])
+}
+
+/// Pièce du catalogue posée pendant l'intervention : libellé, prix et TVA copiés (le catalogue peut
+/// changer ensuite).
+model FacturePartUsage {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  interventionId  String   @db.Uuid
+  itemId          String   @db.Uuid
+  reference       String?
+  label           String
+  unit            String
+  quantity        Decimal  @db.Decimal(12, 3)
+  unitPrice       Int
+  vatRate         Int
+  createdByUserId String   @db.Uuid
+  createdAt       DateTime @default(now())
+
+  intervention FactureIntervention @relation(fields: [organizationId, interventionId], references: [organizationId, id], onDelete: Restrict)
+  item         FactureItem         @relation(fields: [organizationId, itemId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@index([organizationId, interventionId])
+  @@index([organizationId, itemId])
+}
+
+/// Photo d'une intervention : image réencodée en JPEG (sans métadonnées), clé de stockage privée.
+model FactureInterventionPhoto {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  interventionId  String   @db.Uuid
+  storageKey      String
+  caption         String?
+  createdByUserId String   @db.Uuid
+  createdAt       DateTime @default(now())
+
+  intervention FactureIntervention @relation(fields: [organizationId, interventionId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@index([organizationId, interventionId])
+}
+
+// ─── F4 — Notifications de rendez-vous ───
+
+/// Réglages des notifications de rendez-vous d'une organisation (désactivées par défaut).
+model FactureNotificationSettings {
+  organizationId      String   @id @db.Uuid
+  enabled             Boolean  @default(false)
+  /// Confirmation envoyée dès la planification.
+  sendConfirmation    Boolean  @default(true)
+  /// Rappel la veille (24 h avant).
+  reminderDayBefore   Boolean  @default(true)
+  /// Rappel quelques heures avant (1, 2, 3, 4, 6 ou 12), ou aucun.
+  reminderHoursBefore Int?     @default(2)
+  /// E-mail en secours : client sans consentement WhatsApp, sans numéro, ou échec définitif WhatsApp.
+  emailFallback       Boolean  @default(true)
+  updatedByUserId     String?  @db.Uuid
+  updatedAt           DateTime @updatedAt
+}
+
+enum FactureNotificationKind {
+  CONFIRMATION
+  RESCHEDULED
+  REMINDER
+  CANCELLATION
+}
+
+enum FactureNotificationChannel {
+  WHATSAPP
+  EMAIL
+}
+
+enum FactureNotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  CANCELLED
+  /// Envoi peut-être parti (interruption entre l'envoi et son enregistrement) : jamais renvoyé.
+  UNKNOWN
+}
+
+/// Notification d'un rendez-vous (intervention) : file d'attente en base, envoyée par le répartiteur à
+/// son heure, tentatives bornées. Le texte est figé à la programmation ; une notification devenue
+/// obsolète (report, annulation, intervention commencée) est annulée, jamais envoyée.
+model FactureNotification {
+  id                String                     @id @default(uuid()) @db.Uuid
+  organizationId    String                     @db.Uuid
+  interventionId    String                     @db.Uuid
+  kind              FactureNotificationKind
+  channel           FactureNotificationChannel
+  /// Numéro WhatsApp (international) ou adresse e-mail.
+  recipient         String
+  body              String
+  /// Rendez-vous annoncé : une notification ne part que si le créneau n'a pas changé depuis.
+  appointmentAt     DateTime
+  /// Heure d'envoi prévue (maintenant, ou heure du rappel).
+  sendAt            DateTime
+  status            FactureNotificationStatus  @default(PENDING)
+  attempts          Int                        @default(0)
+  nextAttemptAt     DateTime
+  lastError         String?
+  providerMessageId String?
+  sentAt            DateTime?
+  /// Un même fait n'est notifié qu'une fois par canal.
+  dedupeKey         String
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+
+  intervention FactureIntervention @relation(fields: [organizationId, interventionId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, dedupeKey])
+  @@index([status, nextAttemptAt])
+  @@index([organizationId, interventionId])
+}
+
+// ─── F6A — Module IA (Ocall AI Core) ───
+
+/// Réglages IA d'une organisation : désactivée par défaut ; plafond mensuel par fonctionnalité, fixé par
+/// le gérant sous le plafond plateforme Ocall.
+model FactureAiSettings {
+  organizationId          String   @id @db.Uuid
+  enabled                 Boolean  @default(false)
+  reportEnabled           Boolean  @default(true)
+  quoteEnabled            Boolean  @default(true)
+  planningEnabled         Boolean  @default(true)
+  maintenanceEnabled      Boolean  @default(true)
+  reportMonthlyLimit      Int      @default(100)
+  quoteMonthlyLimit       Int      @default(100)
+  planningMonthlyLimit    Int      @default(100)
+  maintenanceMonthlyLimit Int      @default(100)
+  updatedByUserId         String?  @db.Uuid
+  updatedAt               DateTime @updatedAt
+}
+
+/// Consommation IA (une ligne par appel réservé) : aucun contenu, seulement le coût et la trace technique.
+model FactureAiUsage {
+  id                    String   @id @default(uuid()) @db.Uuid
+  organizationId        String   @db.Uuid
+  actorUserId           String   @db.Uuid
+  memberId              String?  @db.Uuid
+  feature               String
+  provider              String
+  model                 String
+  promptId              String?
+  promptVersion         Int?
+  /// PENDING (réservé), SUCCEEDED, FAILED.
+  status                String   @default("PENDING")
+  inputTokens           Int      @default(0)
+  cachedInputTokens     Int      @default(0)
+  outputTokens          Int      @default(0)
+  /// null = coût non estimable, jamais présenté comme nul.
+  estimatedCostMicroUsd Int?
+  latencyMs             Int?
+  errorCode             String?
+  createdAt             DateTime @default(now())
+
+  @@index([organizationId, feature, createdAt])
+  @@index([status, createdAt])
+}
+
+enum FactureAiProposalStatus {
+  PROPOSED
+  APPLIED
+  REJECTED
+}
+
+/// Proposition de l'IA, tracée : objet concerné, entrées résumées, sortie, prompt et modèle, décision
+/// humaine (appliquée telle quelle ou corrigée, rejetée), décideur et date. Jamais supprimée.
+model FactureAiProposal {
+  id              String                  @id @default(uuid()) @db.Uuid
+  organizationId  String                  @db.Uuid
+  feature         String
+  status          FactureAiProposalStatus @default(PROPOSED)
+  /// Objet concerné : intervention (rapport) ou client (devis).
+  targetType      String
+  targetId        String                  @db.Uuid
+  /// Entrées résumées (aucune donnée inutile) et sortie validée par le serveur.
+  input           Json
+  output          Json
+  promptId        String
+  promptVersion   Int
+  model           String
+  createdByUserId String                  @db.Uuid
+  createdAt       DateTime                @default(now())
+  decidedByUserId String?                 @db.Uuid
+  decidedAt       DateTime?
+  /// Appliquée après correction par l'utilisateur.
+  edited          Boolean                 @default(false)
+  /// Résultat de l'application (ex. devis brouillon créé).
+  resultId        String?                 @db.Uuid
+
+  @@unique([organizationId, id])
+  @@index([organizationId, targetType, targetId])
+  @@index([organizationId, feature, createdAt])
+}
+
+// ─── F6B — Planification et maintenance préventive ───
+
+enum FactureInterventionPriority {
+  NORMAL
+  URGENT
+}
+
+/// Compétence définie par l'entreprise (liste libre : climatisation, électricité, groupe électrogène…).
+model FactureSkill {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  name           String
+  isArchived     Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  members       FactureMemberSkill[]
+  interventions FactureInterventionSkill[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, name])
+}
+
+/// Compétence détenue par un membre de l'équipe.
+model FactureMemberSkill {
+  organizationId String @db.Uuid
+  memberId       String @db.Uuid
+  skillId        String @db.Uuid
+
+  member FactureMember @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Cascade)
+  skill  FactureSkill  @relation(fields: [organizationId, skillId], references: [organizationId, id], onDelete: Restrict)
+
+  @@id([memberId, skillId])
+  @@index([organizationId, skillId])
+}
+
+/// Compétence requise par une intervention.
+model FactureInterventionSkill {
+  organizationId String @db.Uuid
+  interventionId String @db.Uuid
+  skillId        String @db.Uuid
+
+  intervention FactureIntervention @relation(fields: [organizationId, interventionId], references: [organizationId, id], onDelete: Restrict)
+  skill        FactureSkill        @relation(fields: [organizationId, skillId], references: [organizationId, id], onDelete: Restrict)
+
+  @@id([interventionId, skillId])
+  @@index([organizationId, skillId])
+}
+
+/// Indisponibilité d'un membre (congé, absence, formation) : jamais proposé sur cette période.
+model FactureUnavailability {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  memberId        String   @db.Uuid
+  startsAt        DateTime
+  endsAt          DateTime
+  reason          String?
+  createdByUserId String   @db.Uuid
+  createdAt       DateTime @default(now())
+
+  member FactureMember @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@index([organizationId, memberId, startsAt])
+}
+
+// ─── F5 — Site vitrine ───
+
+/// Site vitrine d'une organisation (un seul) : brouillon modifiable, version publiée figée. Publié
+/// seulement avec l'offre Facture « avec vitrine » ; jamais de donnée interne (documents, clients).
+model FactureSite {
+  organizationId  String    @id @db.Uuid
+  /// Adresse publique (`/v/<slug>`, `<slug>.<domaine des vitrines>`), unique.
+  slug            String    @unique
+  draft           Json
+  published       Json?
+  isOnline        Boolean   @default(false)
+  publishedAt     DateTime?
+  updatedByUserId String?   @db.Uuid
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+enum FactureSiteMediaKind {
+  LOGO
+  COVER
+  GALLERY
+}
+
+/// Image d'une vitrine (réencodée, sans métadonnées) ; servie publiquement seulement une fois publiée.
+model FactureSiteMedia {
+  id              String               @id @default(uuid()) @db.Uuid
+  organizationId  String               @db.Uuid
+  kind            FactureSiteMediaKind
+  /// Clé publique `<uuid>.jpg`, servie par l'API publique des vitrines Facture seulement.
+  storageKey      String               @unique
+  caption         String?
+  position        Int                  @default(0)
+  isPublished     Boolean              @default(false)
+  createdByUserId String               @db.Uuid
+  createdAt       DateTime             @default(now())
+
+  @@unique([organizationId, id])
+  @@index([organizationId, kind, position])
+}
+
+enum FactureSiteDomainStatus {
+  PENDING
+  VERIFIED
+  ACTIVE
+  ERROR
+  SUSPENDED
+}
+
+/// Domaine personnalisé d'une vitrine : propriété prouvée par TXT, activation par le Super Admin (HTTPS
+/// contrôlé), même vérificateur que les sites Park. Unicité contrôlée aussi contre les domaines Park.
+model FactureSiteDomain {
+  id                String                  @id @default(uuid()) @db.Uuid
+  organizationId    String                  @db.Uuid
+  hostname          String                  @unique
+  status            FactureSiteDomainStatus @default(PENDING)
+  verificationToken String
+  lastCheckedAt     DateTime?
+  lastError         String?
+  activatedAt       DateTime?
+  activatedByUserId String?                 @db.Uuid
+  createdByUserId   String                  @db.Uuid
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+
+  @@unique([organizationId, id])
+  @@index([organizationId])
+  @@index([status])
+}
+
+enum FactureRequestKind {
+  CONTACT
+  QUOTE
+  INTERVENTION
+  APPOINTMENT
+}
+
+enum FactureRequestStatus {
+  NEW
+  IN_PROGRESS
+  DONE
+  SPAM
+}
+
+/// Demande reçue par la vitrine : arrive dans la boîte de l'entreprise, ne crée JAMAIS de facture, de
+/// devis ni d'intervention ; un rendez-vous demandé n'est jamais confirmé automatiquement.
+model FactureRequest {
+  id              String               @id @default(uuid()) @db.Uuid
+  organizationId  String               @db.Uuid
+  kind            FactureRequestKind
+  status          FactureRequestStatus @default(NEW)
+  name            String
+  phone           String?
+  email           String?
+  message         String
+  /// Prestation du catalogue concernée (copie du libellé : le catalogue peut changer).
+  serviceLabel    String?
+  /// Date souhaitée (rendez-vous, intervention), indicative.
+  preferredDate   DateTime?            @db.Date
+  handledByUserId String?              @db.Uuid
+  handledAt       DateTime?
+  createdAt       DateTime             @default(now())
+
+  @@unique([organizationId, id])
+  @@index([organizationId, status, createdAt])
+}

@@ -11,6 +11,10 @@ export interface MailMessage {
   tag: string;
   /** Clé d'idempotence transmise au fournisseur (un même événement n'est envoyé qu'une fois). */
   idempotencyKey?: string;
+  /** Adresse de réponse (ex. l'entreprise qui envoie son devis via Ocall). */
+  replyTo?: string;
+  /** Pièces jointes (ex. PDF d'un devis), jamais journalisées. */
+  attachments?: { filename: string; content: Buffer }[];
 }
 
 type FetchLike = typeof fetch;
@@ -66,6 +70,15 @@ export class MailService {
           subject: message.subject,
           text: message.text,
           html: message.html,
+          ...(message.replyTo ? { reply_to: message.replyTo } : {}),
+          ...(message.attachments?.length
+            ? {
+                attachments: message.attachments.map((a) => ({
+                  filename: a.filename,
+                  content: a.content.toString('base64'),
+                })),
+              }
+            : {}),
           tags: [{ name: 'type', value: message.tag.replace(/[^A-Za-z0-9_-]/g, '_') }],
         }),
         signal: AbortSignal.timeout(10_000),

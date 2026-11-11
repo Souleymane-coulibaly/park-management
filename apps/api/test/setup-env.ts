@@ -33,6 +33,8 @@ process.env.SITES_PUBLIC_ORIGIN = 'https://app.ocall-test.example.com';
 delete process.env.SITES_REVALIDATE_URL;
 // E-mails : fournisseur SIMULÉ (messages gardés en mémoire), aucun envoi réel ni clé Resend.
 process.env.MAIL_PROVIDER = 'simulated';
+// WhatsApp (Ocall Facture, F4) : fournisseur SIMULÉ, aucun message réel.
+process.env.FACTURE_WHATSAPP_PROVIDER = 'simulated';
 delete process.env.RESEND_API_KEY;
 process.env.PARTNER_ALERT_EMAILS = 'alertes-partenaires@test.ocallpark.local';
 process.env.PUBLIC_WEB_URL = 'https://app.ocall-test.example.com';

@@ -72,16 +72,23 @@ jobs:
         run: |
           PGPASSWORD=postgres psql -h localhost -U postgres -c 'CREATE DATABASE ocall_school_ci'
           SCHOOL_ENABLED=true DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ocall_park_ci SCHOOL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ocall_school_ci pnpm db:school:migrate:deploy
+      - name: Base Facture éphémère et migrations
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -c 'CREATE DATABASE ocall_facture_ci'
+          FACTURE_ENABLED=true DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ocall_park_ci SCHOOL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ocall_school_ci FACTURE_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ocall_facture_ci pnpm db:facture:migrate:deploy
       - name: Tests d'intégration API
         run: pnpm test:integration
         env:
           TEST_SCHOOL_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ocall_school_ci
+          TEST_FACTURE_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ocall_facture_ci
       - run: pnpm exec playwright install --with-deps chromium
       - name: Tests E2E Playwright
         run: pnpm test:e2e
         env:
           # Parcours Ocall School : base School éphémère, distincte de la base Suite.
           TEST_SCHOOL_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ocall_school_ci
+          # Parcours Ocall Facture : base Facture éphémère, distincte des bases Suite et School.
+          TEST_FACTURE_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ocall_facture_ci
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

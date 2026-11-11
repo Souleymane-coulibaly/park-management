@@ -10,6 +10,7 @@ export function GET(request: NextRequest) {
     lines.push(
       'Disallow: /app',
       'Disallow: /admin',
+      'Disallow: /facture',
       'Disallow: /partenaire',
       'Disallow: /activation-partenaire',
       'Disallow: /connexion',

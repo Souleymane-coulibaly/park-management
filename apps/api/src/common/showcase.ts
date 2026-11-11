@@ -17,6 +17,11 @@ export async function assertShowcaseAllowed(
   db: Db,
   organizationId: string,
   productCodes: readonly string[],
+  /**
+   * Droit historique des organisations antérieures au socle S1 (Park, School). Un produit lancé après
+   * (Ocall Facture) le refuse : sa vitrine exige toujours son offre « avec vitrine ».
+   */
+  options: { honorGrandfathered?: boolean } = {},
 ): Promise<void> {
   const [org, sub] = await Promise.all([
     db.organization.findUniqueOrThrow({
@@ -31,7 +36,7 @@ export async function assertShowcaseAllowed(
   if (
     canPublishShowcase({
       planIncludesShowcase: sub?.plan.includesShowcase ?? false,
-      grandfathered: org.showcaseGrandfathered,
+      grandfathered: (options.honorGrandfathered ?? true) && org.showcaseGrandfathered,
     })
   ) {
     return;

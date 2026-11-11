@@ -18,7 +18,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
 import type { AuthContext, TenantContext } from '../../common/auth-context';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
-import { DOMAIN_VERIFIER, type DomainVerifier } from './domain-verifier';
+import { DOMAIN_VERIFIER, type DomainVerifier } from '../../common/sites/domain-verifier';
 import { SitesService } from './sites.service';
 
 /**

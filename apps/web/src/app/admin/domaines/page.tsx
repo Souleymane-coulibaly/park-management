@@ -13,6 +13,7 @@ import { Table, Td } from '@/components/ui/table';
 import { type ApiError, api } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { useApi } from '@/lib/use-api';
+import { FactureDomains } from '@/components/admin/facture-domains';
 
 interface PlatformDomains {
   customDomainTarget: string | null;
@@ -181,6 +182,7 @@ export default function AdminDomainsPage() {
             </Table>
           ))}
       </Card>
+      <FactureDomains />
     </>
   );
 }

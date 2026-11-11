@@ -1,47 +1,16 @@
 import { PARTNER_INVITATION_TTL_DAYS, PARTNER_TYPE_LABELS, formatXof } from '@ocall/shared';
+import { composeMail } from './mail-compose';
 
 /**
  * Gabarits des e-mails Ocall Partner (Sprint S3) : texte brut et HTML simple, en français. Toute valeur
  * saisie par un utilisateur est échappée dans le HTML. Aucun mot de passe, aucune donnée métier client.
  */
-export interface MailContent {
-  subject: string;
-  text: string;
-  html: string;
-}
+export type { MailContent } from './mail-compose';
 
 type PartnerType = keyof typeof PARTNER_TYPE_LABELS;
 
-const escapeHtml = (value: string) =>
-  value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-
-const SIGNATURE = 'L’équipe Ocall';
-
-/** Assemble un e-mail : paragraphes (texte brut), bouton facultatif. */
-function compose(
-  subject: string,
-  paragraphs: string[],
-  action?: { label: string; url: string },
-): MailContent {
-  const text = [
-    ...paragraphs,
-    ...(action ? [`${action.label} : ${action.url}`] : []),
-    SIGNATURE,
-  ].join('\n\n');
-  const body = paragraphs
-    .map((p) => `<p style="margin:0 0 16px">${escapeHtml(p).replace(/\n/g, '<br>')}</p>`)
-    .join('');
-  const button = action
-    ? `<p style="margin:24px 0"><a href="${escapeHtml(action.url)}" style="background:#1f6f4a;color:#ffffff;padding:12px 20px;border-radius:10px;text-decoration:none;font-weight:600">${escapeHtml(action.label)}</a></p><p style="margin:0 0 16px;font-size:13px;color:#555">Si le bouton ne fonctionne pas, copiez ce lien : ${escapeHtml(action.url)}</p>`
-    : '';
-  const html = `<!doctype html><html lang="fr"><body style="margin:0;background:#f6f4ee;font-family:Arial,Helvetica,sans-serif;color:#1d1d1b"><div style="max-width:560px;margin:0 auto;padding:32px 24px"><p style="font-weight:700;font-size:18px;margin:0 0 24px">Ocall Partner</p>${body}${button}<p style="margin:24px 0 0">${SIGNATURE}</p></div></body></html>`;
-  return { subject, text, html };
-}
+const compose = (subject: string, paragraphs: string[], action?: { label: string; url: string }) =>
+  composeMail({ brand: 'Ocall Partner', signature: 'L’équipe Ocall' }, subject, paragraphs, action);
 
 export function applicationReceivedMail(a: {
   firstName: string;

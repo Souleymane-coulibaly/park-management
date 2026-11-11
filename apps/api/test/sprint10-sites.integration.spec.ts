@@ -1,10 +1,7 @@
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import type { PrismaService } from '../src/prisma/prisma.service';
-import {
-  DOMAIN_VERIFIER,
-  type SimulatedDomainVerifier,
-} from '../src/modules/public-sites/domain-verifier';
+import { DOMAIN_VERIFIER, type SimulatedDomainVerifier } from '../src/common/sites/domain-verifier';
 import {
   type Agent,
   PASSWORD,

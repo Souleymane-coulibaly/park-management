@@ -1,6 +1,5 @@
-import { join } from 'node:path';
-import PDFDocument from 'pdfkit';
 import type { SchoolLocale } from '@ocall/shared';
+import { PDF_CONTENT_WIDTH, PDF_PAGE, renderPdfDocument } from '../../common/pdf/pdf-document';
 import {
   detachPunctuation,
   hasArabic,
@@ -11,21 +10,14 @@ import {
 } from './school-rtl-text';
 
 /**
- * Socle des documents PDF d'Ocall School (bulletins au Sprint 4, reçus au Sprint 5) : polices embarquées
- * (Noto Sans, Noto Naskh Arabic, licence OFL), mise en page A4, texte arabe de droite à gauche, libellés
- * et contenus selon la langue de l'établissement. Rendu sans navigateur, en mémoire, jamais stocké.
+ * Documents PDF d'Ocall School (bulletins au Sprint 4, reçus au Sprint 5), sur le socle PDF commun
+ * (`common/pdf`) : polices embarquées (Noto Sans, plus Noto Naskh Arabic pour School, licence OFL), mise
+ * en page A4, texte arabe de droite à gauche, libellés et contenus selon la langue de l'établissement.
+ * Rendu sans navigateur, en mémoire, jamais stocké.
  */
 
-const FONTS_DIR = join(__dirname, '..', '..', '..', 'assets', 'fonts');
-const FONT_FILES = {
-  sans: 'NotoSans-Regular.ttf',
-  sansBold: 'NotoSans-Bold.ttf',
-  naskh: 'NotoNaskhArabic-Regular.ttf',
-  naskhBold: 'NotoNaskhArabic-Bold.ttf',
-} as const;
-
-export const PAGE = { width: 595.28, height: 841.89, margin: 40 };
-export const CONTENT = PAGE.width - 2 * PAGE.margin;
+export const PAGE = PDF_PAGE;
+export const CONTENT = PDF_CONTENT_WIDTH;
 export const INK = '#1f2a24';
 export const MUTED = '#5b665f';
 export const LINE = '#c9d1cb';
@@ -41,27 +33,16 @@ export interface TextOptions {
   keepAlign?: boolean;
 }
 
-/** Document A4 aux polices enregistrées ; `draw` le remplit, le contenu est rendu en mémoire. */
+/** Document A4 aux polices enregistrées (dont l'arabe) ; `draw` le remplit, rendu en mémoire. */
 export function renderPdf(title: string, draw: (doc: PDFKit.PDFDocument) => void): Promise<Buffer> {
-  const doc = new PDFDocument({
-    size: 'A4',
-    margin: PAGE.margin,
-    autoFirstPage: false,
-    info: { Title: title, Creator: 'Ocall School', Producer: 'Ocall School' },
-  });
-  doc.registerFont('sans', join(FONTS_DIR, FONT_FILES.sans));
-  doc.registerFont('sansBold', join(FONTS_DIR, FONT_FILES.sansBold));
-  doc.registerFont('naskh', join(FONTS_DIR, FONT_FILES.naskh));
-  doc.registerFont('naskhBold', join(FONTS_DIR, FONT_FILES.naskhBold));
-  const chunks: Buffer[] = [];
-  doc.on('data', (chunk: Buffer) => chunks.push(chunk));
-  const done = new Promise<Buffer>((resolve, reject) => {
-    doc.on('end', () => resolve(Buffer.concat(chunks)));
-    doc.on('error', reject);
-  });
-  draw(doc);
-  doc.end();
-  return done;
+  return renderPdfDocument(
+    {
+      title,
+      creator: 'Ocall School',
+      extraFonts: { naskh: 'NotoNaskhArabic-Regular.ttf', naskhBold: 'NotoNaskhArabic-Bold.ttf' },
+    },
+    draw,
+  );
 }
 
 /** Texte positionné ; l'arabe passe par la mise en ordre droite-à-gauche, le reste par pdfkit. */

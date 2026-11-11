@@ -9,6 +9,7 @@ import {
   resolveTestDatabase,
   databaseIdentity,
 } from '@ocall/database';
+import { FacturePrismaClient } from '@ocall/facture-database';
 import { SchoolPrismaClient } from '@ocall/school-database';
 import { type BusinessType, type StoredPlatformRole, platformRoleRequiresMfa } from '@ocall/shared';
 import { hash } from 'argon2';
@@ -26,6 +27,7 @@ const APP_DATABASES: NodeJS.ProcessEnv = {
   DATABASE_URL: process.env.DATABASE_URL,
   DIRECT_URL: process.env.DIRECT_URL,
   SCHOOL_DATABASE_URL: process.env.SCHOOL_DATABASE_URL,
+  FACTURE_DATABASE_URL: process.env.FACTURE_DATABASE_URL,
   NODE_ENV: process.env.OCALL_ORIGINAL_NODE_ENV || process.env.NODE_ENV,
   RAILWAY_ENVIRONMENT_NAME: process.env.RAILWAY_ENVIRONMENT_NAME,
   CI: process.env.CI,
@@ -50,6 +52,7 @@ export async function createTestApp(): Promise<{ app: INestApplication; prisma: 
       testDb.databaseUrl,
       testDb.directUrl,
       process.env.SCHOOL_TEST_DATABASE_URL ?? process.env.TEST_SCHOOL_DATABASE_URL,
+      process.env.TEST_FACTURE_DATABASE_URL,
     ],
     APP_DATABASES,
   );
@@ -77,6 +80,25 @@ export async function createTestApp(): Promise<{ app: INestApplication; prisma: 
   }
   process.env.SCHOOL_ENABLED = schoolUrl ? 'true' : 'false';
   process.env.SCHOOL_DATABASE_URL = schoolUrl ?? '';
+  // Ocall Facture : activé seulement avec une base de test dédiée, distincte des bases Suite et School,
+  // soumise au même marqueur.
+  const factureUrl = process.env.TEST_FACTURE_DATABASE_URL;
+  if (factureUrl) {
+    const others = [testDb.databaseUrl, schoolUrl].filter((u): u is string => Boolean(u));
+    if (others.some((u) => databaseIdentity(u) === databaseIdentity(factureUrl))) {
+      throw new Error(
+        'Refus : la base Facture de test doit être distincte des bases Suite et School.',
+      );
+    }
+    const factureProbe = new FacturePrismaClient({ datasourceUrl: factureUrl });
+    try {
+      await assertTestDatabaseMarker((sql) => factureProbe.$queryRawUnsafe(sql), factureUrl);
+    } finally {
+      await factureProbe.$disconnect();
+    }
+  }
+  process.env.FACTURE_ENABLED = factureUrl ? 'true' : 'false';
+  process.env.FACTURE_DATABASE_URL = factureUrl ?? '';
   // Clé fictive, propre aux tests.
   process.env.SCHOOL_DATA_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64');
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();

@@ -1,6 +1,6 @@
 import { Module } from '@nestjs/common';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
-import { DOMAIN_VERIFIER, createDomainVerifier } from './domain-verifier';
+import { DOMAIN_VERIFIER, createDomainVerifier } from '../../common/sites/domain-verifier';
 import {
   PlatformSiteDomainsController,
   PublicSitesController,

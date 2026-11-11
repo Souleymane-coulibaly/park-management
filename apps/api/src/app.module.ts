@@ -42,6 +42,7 @@ import { RealtimeModule } from './modules/realtime/realtime.module';
 import { ReservationsModule } from './modules/reservations/reservations.module';
 import { RestaurantModule } from './modules/restaurant/restaurant.module';
 import { RolesModule } from './modules/roles/roles.module';
+import { FactureModule } from './modules/facture/facture.module';
 import { SchoolModule } from './modules/school/school.module';
 import { SuiteContractsModule } from './modules/suite-contracts/suite-contracts.module';
 import { SuiteCommercialModule } from './modules/suite-commercial/suite-commercial.module';
@@ -95,6 +96,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     SuiteCommercialModule,
     SuiteNotificationsModule,
     SchoolModule,
+    FactureModule,
   ],
   controllers: [HealthController],
   providers: [

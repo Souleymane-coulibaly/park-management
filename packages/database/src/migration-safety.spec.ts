@@ -4,6 +4,7 @@ import {
   DESTRUCTIVE_APPROVAL_MARKER,
   databaseIdentity,
   findDestructiveStatements,
+  factureMigrationTargetProblem,
   schoolMigrationTargetProblem,
 } from './migration-safety';
 
@@ -92,5 +93,42 @@ describe('findDestructiveStatements', () => {
         destructive: [],
       });
     }
+  });
+});
+
+describe('factureMigrationTargetProblem', () => {
+  const suite = 'postgresql://u:p@ep-suite-pooler.neon.tech/neondb';
+  const school = 'postgresql://u:p@ep-school-pooler.neon.tech/neondb';
+  const facture = 'postgresql://u:p@ep-facture-pooler.neon.tech/neondb';
+
+  it('accepte une base Facture distincte des bases Suite et School', () => {
+    expect(
+      factureMigrationTargetProblem({
+        DATABASE_URL: suite,
+        SCHOOL_DATABASE_URL: school,
+        FACTURE_DATABASE_URL: facture,
+        FACTURE_DIRECT_URL: 'postgresql://u:p@ep-facture.neon.tech/neondb',
+      }),
+    ).toBeNull();
+  });
+
+  it('refuse une base absente, deux URL divergentes, ou la base Suite ou School', () => {
+    expect(factureMigrationTargetProblem({ DATABASE_URL: suite })).toContain('obligatoire');
+    expect(
+      factureMigrationTargetProblem({
+        FACTURE_DATABASE_URL: facture,
+        FACTURE_DIRECT_URL: 'postgresql://u:p@ep-autre.neon.tech/neondb',
+      }),
+    ).toContain('différentes');
+    expect(
+      factureMigrationTargetProblem({ DATABASE_URL: suite, FACTURE_DATABASE_URL: suite }),
+    ).toContain('distincte');
+    expect(
+      factureMigrationTargetProblem({
+        DATABASE_URL: suite,
+        SCHOOL_DATABASE_URL: school,
+        FACTURE_DATABASE_URL: 'postgresql://v:q@EP-SCHOOL-POOLER.neon.tech:5432/neondb',
+      }),
+    ).toContain('distincte');
   });
 });

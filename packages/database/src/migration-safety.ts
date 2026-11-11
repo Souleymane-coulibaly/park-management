@@ -62,3 +62,30 @@ export function schoolMigrationTargetProblem(env: {
     return 'Refus : la base School doit être distincte de la base Ocall Suite.';
   return null;
 }
+
+/**
+ * Motif de refus de la cible des migrations Facture, sinon null. Prisma migre par l'URL directe : les deux
+ * URL Facture doivent désigner la même base, distincte de la base Suite et de la base School.
+ */
+export function factureMigrationTargetProblem(env: {
+  DATABASE_URL?: string;
+  DIRECT_URL?: string;
+  SCHOOL_DATABASE_URL?: string;
+  SCHOOL_DIRECT_URL?: string;
+  FACTURE_DATABASE_URL?: string;
+  FACTURE_DIRECT_URL?: string;
+}): string | null {
+  const identity = databaseIdentity;
+  if (!env.FACTURE_DATABASE_URL)
+    return 'FACTURE_DATABASE_URL est obligatoire quand FACTURE_ENABLED=true.';
+  const facture = identity(env.FACTURE_DATABASE_URL);
+  const direct = identity(env.FACTURE_DIRECT_URL ?? env.FACTURE_DATABASE_URL);
+  if (facture !== direct)
+    return 'Refus : FACTURE_DIRECT_URL et FACTURE_DATABASE_URL désignent deux bases différentes.';
+  const others = [env.DATABASE_URL, env.DIRECT_URL, env.SCHOOL_DATABASE_URL, env.SCHOOL_DIRECT_URL]
+    .filter((u): u is string => Boolean(u))
+    .map(identity);
+  if (others.includes(facture))
+    return 'Refus : la base Facture doit être distincte des bases Ocall Suite et Ocall School.';
+  return null;
+}
