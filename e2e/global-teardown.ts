@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { parse } from 'dotenv';
 import { PrismaClient, isLocalDatabase, resolveTestDatabase } from '@ocall/database';
 import { FacturePrismaClient, purgeFactureOrganizations } from '@ocall/facture-database';
+import { StockPrismaClient, purgeStockOrganizations } from '@ocall/stock-database';
 import {
   assertE2eDatabases,
   assertSchoolTestDatabase,
@@ -46,6 +47,20 @@ export default async function globalTeardown(): Promise<void> {
         await purgeFactureOrganizations(facture, orgIds);
       } finally {
         await facture.$disconnect();
+      }
+    }
+    // Données Ocall Stock des organisations E2E : même règle sur la base Stock de test.
+    const stockUrl = process.env.TEST_STOCK_DATABASE_URL;
+    if (stockUrl) {
+      assertSchoolTestDatabase({
+        url: stockUrl,
+        ephemeral: process.env.OCALL_TEST_EPHEMERAL_DATABASE === '1' && isLocalDatabase(stockUrl),
+      });
+      const stock = new StockPrismaClient({ datasourceUrl: stockUrl });
+      try {
+        await purgeStockOrganizations(stock, orgIds);
+      } finally {
+        await stock.$disconnect();
       }
     }
     const members = await prisma.organizationMembership.findMany({

@@ -7,7 +7,7 @@
   },
   "deploy": {
     "preDeployCommand": [
-      "pnpm db:migrate:deploy && pnpm db:school:migrate:deploy && pnpm db:facture:migrate:deploy"
+      "pnpm db:migrate:deploy && pnpm db:school:migrate:deploy && pnpm db:facture:migrate:deploy && pnpm db:stock:migrate:deploy"
     ],
     "startCommand": "pnpm --filter @ocall/api start",
     "healthcheckPath": "/api/v1/health",

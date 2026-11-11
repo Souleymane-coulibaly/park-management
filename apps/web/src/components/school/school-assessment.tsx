@@ -12,7 +12,7 @@ import type {
 import { Badge } from '@/components/ui/badge';
 import { SelectField } from '@/components/ui/field';
 import { Alert, ErrorState, LoadingState } from '@/components/ui/states';
-import { ApiError } from '@/lib/api';
+import { downloadFile } from '@/lib/download';
 import { useApi } from '@/lib/use-api';
 import { useSchoolText } from './school-language';
 import type { ClassOption, NamedView, YearOption } from './school-students';
@@ -215,24 +215,7 @@ export function QuranStatusBadge({ status }: { status: QuranStatus }) {
   return <Badge tone={QURAN_TONES[status]}>{t(`qstatus.${status}`)}</Badge>;
 }
 
-/**
- * Téléchargement d'un PDF de l'API avec la session : le fichier n'a pas d'adresse publique, il est
- * produit à la demande puis remis au navigateur.
- */
-export async function downloadPdf(path: string, fallbackName: string): Promise<void> {
-  const res = await fetch(`/api/v1${path}`, { credentials: 'same-origin', cache: 'no-store' });
-  if (!res.ok) {
-    const err = (await res.json().catch(() => ({}))) as { code?: string; message?: string };
-    throw new ApiError(res.status, err.code ?? 'ERROR', err.message ?? 'Une erreur est survenue.');
-  }
-  const blob = await res.blob();
-  const match = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '');
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = match?.[1] ?? fallbackName;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+/** Téléchargement d'un PDF de l'API avec la session (voir `downloadFile`). */
+export function downloadPdf(path: string, fallbackName: string): Promise<void> {
+  return downloadFile(path, fallbackName);
 }

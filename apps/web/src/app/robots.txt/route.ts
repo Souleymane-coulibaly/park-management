@@ -11,6 +11,7 @@ export function GET(request: NextRequest) {
       'Disallow: /app',
       'Disallow: /admin',
       'Disallow: /facture',
+      'Disallow: /stock',
       'Disallow: /partenaire',
       'Disallow: /activation-partenaire',
       'Disallow: /connexion',

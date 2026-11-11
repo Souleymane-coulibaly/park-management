@@ -106,6 +106,7 @@ export class SuitePortalController {
       requireTenant(auth),
       this.config.school.enabled,
       this.config.facture.enabled,
+      this.config.stock.enabled,
     );
   }
 }

@@ -54,6 +54,23 @@ const factureEnv: Record<string, string> = factureUrl
       FACTURE_WHATSAPP_PROVIDER: 'simulated',
     }
   : { FACTURE_ENABLED: 'false' };
+// Ocall Stock : activé seulement avec une base Stock de test dédiée (TEST_STOCK_DATABASE_URL), locale et
+// jetable, distincte des bases Suite, School et Facture ; sinon les specs Stock sont ignorées.
+const stockUrl = process.env.TEST_STOCK_DATABASE_URL;
+if (stockUrl) {
+  assertDisposableTestDatabases([stockUrl], { ...apiEnv, ...process.env });
+  const others = [testDb.databaseUrl, schoolDb?.url, factureUrl].filter((u): u is string =>
+    Boolean(u),
+  );
+  if (others.some((u) => databaseIdentity(u) === databaseIdentity(stockUrl))) {
+    throw new Error(
+      'Refus : la base Stock de test doit être distincte des bases Suite, School et Facture.',
+    );
+  }
+}
+const stockEnv: Record<string, string> = stockUrl
+  ? { STOCK_ENABLED: 'true', STOCK_DATABASE_URL: stockUrl }
+  : { STOCK_ENABLED: 'false' };
 const schoolEnv: Record<string, string> = schoolDb
   ? {
       SCHOOL_ENABLED: 'true',
@@ -113,6 +130,7 @@ export default defineConfig({
         SITES_REVALIDATE_SECRET: revalidateSecret,
         ...schoolEnv,
         ...factureEnv,
+        ...stockEnv,
       },
       reuseExistingServer: false,
       timeout: 120_000,

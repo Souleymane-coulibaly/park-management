@@ -7,6 +7,7 @@ export {
   databaseIdentity,
   findDestructiveStatements,
   factureMigrationTargetProblem,
+  stockMigrationTargetProblem,
   schoolMigrationTargetProblem,
 } from './migration-safety';
 export {

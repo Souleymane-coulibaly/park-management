@@ -39,3 +39,6 @@ export * from './facture-notifications';
 export * from './facture-ai';
 export * from './facture-planning';
 export * from './facture-site';
+export * from './stock';
+export * from './stock-barcodes';
+export * from './stock-labels';

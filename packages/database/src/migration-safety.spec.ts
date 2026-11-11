@@ -5,6 +5,7 @@ import {
   databaseIdentity,
   findDestructiveStatements,
   factureMigrationTargetProblem,
+  stockMigrationTargetProblem,
   schoolMigrationTargetProblem,
 } from './migration-safety';
 
@@ -130,5 +131,44 @@ describe('factureMigrationTargetProblem', () => {
         FACTURE_DATABASE_URL: 'postgresql://v:q@EP-SCHOOL-POOLER.neon.tech:5432/neondb',
       }),
     ).toContain('distincte');
+  });
+});
+
+describe('stockMigrationTargetProblem', () => {
+  const suite = 'postgresql://u:p@ep-suite-pooler.neon.tech/neondb';
+  const school = 'postgresql://u:p@ep-school-pooler.neon.tech/neondb';
+  const facture = 'postgresql://u:p@ep-facture-pooler.neon.tech/neondb';
+  const stock = 'postgresql://u:p@ep-stock-pooler.neon.tech/neondb';
+
+  it('accepte une base Stock distincte des bases Suite, School et Facture', () => {
+    expect(
+      stockMigrationTargetProblem({
+        DATABASE_URL: suite,
+        SCHOOL_DATABASE_URL: school,
+        FACTURE_DATABASE_URL: facture,
+        STOCK_DATABASE_URL: stock,
+        STOCK_DIRECT_URL: 'postgresql://u:p@ep-stock.neon.tech/neondb',
+      }),
+    ).toBeNull();
+  });
+
+  it('refuse une base absente, deux URL divergentes, ou la base Suite, School ou Facture', () => {
+    expect(stockMigrationTargetProblem({ DATABASE_URL: suite })).toContain('STOCK_DATABASE_URL');
+    expect(
+      stockMigrationTargetProblem({
+        STOCK_DATABASE_URL: stock,
+        STOCK_DIRECT_URL: 'postgresql://u:p@ep-autre.neon.tech/neondb',
+      }),
+    ).toContain('différentes');
+    for (const other of [suite, school, facture]) {
+      expect(
+        stockMigrationTargetProblem({
+          DATABASE_URL: suite,
+          SCHOOL_DATABASE_URL: school,
+          FACTURE_DATABASE_URL: facture,
+          STOCK_DATABASE_URL: other,
+        }),
+      ).toContain('distincte');
+    }
   });
 });

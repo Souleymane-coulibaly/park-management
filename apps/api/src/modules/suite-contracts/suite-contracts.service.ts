@@ -8,6 +8,7 @@ import { Prisma } from '@ocall/database';
 import {
   FACTURE_PRODUCT_CODE,
   SCHOOL_PRODUCT_CODE,
+  STOCK_PRODUCT_CODE,
   type AuthProductApp,
   type SuiteContractStatus,
   activitiesOf,
@@ -180,6 +181,7 @@ export class SuiteContractsService {
     auth: TenantContext,
     schoolEnabled: boolean,
     factureEnabled = false,
+    stockEnabled = false,
   ): Promise<AuthProductApp[]> {
     const apps: AuthProductApp[] = [];
     if (
@@ -211,6 +213,17 @@ export class SuiteContractsService {
       );
       if (access !== 'none') {
         apps.push({ code: FACTURE_PRODUCT_CODE, name: 'Ocall Facture', href: '/facture', access });
+      }
+    }
+    // Ocall Stock : abonnement et essai ; le rôle Stock est contrôlé par l'application elle-même.
+    if (stockEnabled) {
+      const access = await loadAppAccess(
+        this.prisma,
+        auth.membership.organizationId,
+        STOCK_PRODUCT_CODE,
+      );
+      if (access !== 'none') {
+        apps.push({ code: STOCK_PRODUCT_CODE, name: 'Ocall Stock', href: '/stock', access });
       }
     }
     return apps;

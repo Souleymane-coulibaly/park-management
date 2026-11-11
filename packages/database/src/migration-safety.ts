@@ -75,17 +75,62 @@ export function factureMigrationTargetProblem(env: {
   FACTURE_DATABASE_URL?: string;
   FACTURE_DIRECT_URL?: string;
 }): string | null {
-  const identity = databaseIdentity;
-  if (!env.FACTURE_DATABASE_URL)
-    return 'FACTURE_DATABASE_URL est obligatoire quand FACTURE_ENABLED=true.';
-  const facture = identity(env.FACTURE_DATABASE_URL);
-  const direct = identity(env.FACTURE_DIRECT_URL ?? env.FACTURE_DATABASE_URL);
-  if (facture !== direct)
-    return 'Refus : FACTURE_DIRECT_URL et FACTURE_DATABASE_URL désignent deux bases différentes.';
-  const others = [env.DATABASE_URL, env.DIRECT_URL, env.SCHOOL_DATABASE_URL, env.SCHOOL_DIRECT_URL]
-    .filter((u): u is string => Boolean(u))
-    .map(identity);
-  if (others.includes(facture))
-    return 'Refus : la base Facture doit être distincte des bases Ocall Suite et Ocall School.';
+  return separateDatabaseTargetProblem({
+    prefix: 'FACTURE',
+    label: 'Facture',
+    othersLabel: 'des bases Ocall Suite et Ocall School',
+    url: env.FACTURE_DATABASE_URL,
+    directUrl: env.FACTURE_DIRECT_URL,
+    others: [env.DATABASE_URL, env.DIRECT_URL, env.SCHOOL_DATABASE_URL, env.SCHOOL_DIRECT_URL],
+  });
+}
+
+/**
+ * Motif de refus de la cible des migrations Stock, sinon null : les deux URL Stock désignent la même
+ * base, distincte des bases Suite, School et Facture.
+ */
+export function stockMigrationTargetProblem(env: {
+  DATABASE_URL?: string;
+  DIRECT_URL?: string;
+  SCHOOL_DATABASE_URL?: string;
+  SCHOOL_DIRECT_URL?: string;
+  FACTURE_DATABASE_URL?: string;
+  FACTURE_DIRECT_URL?: string;
+  STOCK_DATABASE_URL?: string;
+  STOCK_DIRECT_URL?: string;
+}): string | null {
+  return separateDatabaseTargetProblem({
+    prefix: 'STOCK',
+    label: 'Stock',
+    othersLabel: 'des bases Ocall Suite, Ocall School et Ocall Facture',
+    url: env.STOCK_DATABASE_URL,
+    directUrl: env.STOCK_DIRECT_URL,
+    others: [
+      env.DATABASE_URL,
+      env.DIRECT_URL,
+      env.SCHOOL_DATABASE_URL,
+      env.SCHOOL_DIRECT_URL,
+      env.FACTURE_DATABASE_URL,
+      env.FACTURE_DIRECT_URL,
+    ],
+  });
+}
+
+/** Règle commune des applications à base séparée (Facture, Stock). */
+function separateDatabaseTargetProblem(t: {
+  prefix: string;
+  label: string;
+  othersLabel: string;
+  url?: string;
+  directUrl?: string;
+  others: (string | undefined)[];
+}): string | null {
+  if (!t.url) return `${t.prefix}_DATABASE_URL est obligatoire quand ${t.prefix}_ENABLED=true.`;
+  const target = databaseIdentity(t.url);
+  if (target !== databaseIdentity(t.directUrl ?? t.url))
+    return `Refus : ${t.prefix}_DIRECT_URL et ${t.prefix}_DATABASE_URL désignent deux bases différentes.`;
+  const others = t.others.filter((u): u is string => Boolean(u)).map(databaseIdentity);
+  if (others.includes(target))
+    return `Refus : la base ${t.label} doit être distincte ${t.othersLabel}.`;
   return null;
 }

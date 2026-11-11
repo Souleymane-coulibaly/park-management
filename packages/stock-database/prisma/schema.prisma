@@ -1,0 +1,297 @@
+// Ocall Stock : base PostgreSQL distincte des bases Ocall Suite, School et Facture.
+//
+// `organizationId` et `userId` désignent des lignes de la base Suite : aucune clé étrangère entre bases,
+// l'API les contrôle. Dans cette base, chaque lien passe par une clé composée (organizationId, id) :
+// PostgreSQL refuse lui-même tout lien entre deux organisations.
+//
+// Montants : entiers dans l'unité de la devise de l'organisation (le franc CFA n'a pas de décimales).
+// Prix de vente TTC (prix payé par le client, imprimé sur l'étiquette) ; prix d'achat HT.
+//
+// Contrôles, déclencheurs (historiques en ajout seul) et index de recherche (pg_trgm) sont écrits à la
+// main dans les migrations.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/stock-client"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("STOCK_DATABASE_URL")
+  directUrl = env("STOCK_DIRECT_URL")
+}
+
+/// Rôle d'un membre Ocall Stock. Le propriétaire de l'organisation (base Suite) est administrateur d'office.
+enum StockRole {
+  ADMIN
+  STORE_MANAGER
+  WAREHOUSE_MANAGER
+  STOREKEEPER
+  CASHIER
+  SALES
+  AUDITOR
+}
+
+/// Type d'un code-barres. Les codes GTIN (EAN-13, EAN-8, UPC-A) viennent du fabricant et ne sont jamais
+/// inventés ; le code interne est généré par Ocall Stock (imprimé en Code 128 ou en QR code).
+enum StockBarcodeType {
+  EAN13
+  EAN8
+  UPCA
+  INTERNAL
+}
+
+/// Compteurs de l'organisation : références d'articles et codes internes.
+enum StockCounterKind {
+  SKU
+  INTERNAL_CODE
+}
+
+/// Prix suivi dans l'historique des prix.
+enum StockPriceKind {
+  SALE
+  PURCHASE
+}
+
+/// Réglages Ocall Stock d'une organisation.
+model StockSettings {
+  organizationId     String   @id @db.Uuid
+  /// Nom imprimé sur les étiquettes et, plus tard, les tickets.
+  storeName          String
+  /// TVA proposée pour un nouvel article (0 à 30 %).
+  defaultVatRate     Int      @default(18)
+  /// Préfixe des codes internes et des références générées (2 à 4 lettres majuscules).
+  internalCodePrefix String   @default("OC")
+  updatedByUserId    String?  @db.Uuid
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+/// Membre Ocall Stock : compte Suite (rôle PRODUCT_USER) avec un rôle Stock.
+model StockMember {
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @db.Uuid
+  userId         String    @db.Uuid
+  firstName      String
+  lastName       String
+  loginId        String
+  role           StockRole
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  permissions StockMemberPermission[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, userId])
+  @@index([organizationId, isActive])
+}
+
+/// Ajustement d'une permission pour un membre : accordée (en plus de son rôle) ou retirée.
+model StockMemberPermission {
+  organizationId  String   @db.Uuid
+  memberId        String   @db.Uuid
+  permission      String
+  granted         Boolean
+  updatedByUserId String   @db.Uuid
+  updatedAt       DateTime @updatedAt
+
+  member StockMember @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Cascade)
+
+  @@id([memberId, permission])
+  @@index([organizationId, memberId])
+}
+
+/// Compteur continu par organisation (références SKU, codes internes).
+model StockNumberCounter {
+  organizationId String           @db.Uuid
+  kind           StockCounterKind
+  value          Int              @default(0)
+  updatedAt      DateTime         @updatedAt
+
+  @@id([organizationId, kind])
+}
+
+/// Catégorie (niveau 1) ou sous-catégorie (niveau 2) du catalogue.
+model StockCategory {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  parentId       String?  @db.Uuid
+  name           String
+  isArchived     Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  parent   StockCategory?  @relation("StockCategoryTree", fields: [organizationId, parentId], references: [organizationId, id], onDelete: Restrict)
+  children StockCategory[] @relation("StockCategoryTree")
+  products StockProduct[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, parentId])
+}
+
+model StockBrand {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  name           String
+  isArchived     Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  products StockProduct[]
+
+  @@unique([organizationId, id])
+}
+
+/// Article du catalogue. Ses déclinaisons vendables sont ses variantes : un article sans déclinaison a une
+/// seule variante, dite « par défaut », qui porte ses codes-barres (et plus tard ses stocks).
+model StockProduct {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  /// Référence interne (SKU), unique par organisation ; générée si elle n'est pas saisie.
+  sku            String
+  name           String
+  description    String?
+  categoryId     String?  @db.Uuid
+  brandId        String?  @db.Uuid
+  /// Unité de vente (unité, kg, litre, carton…).
+  unit           String   @default("unité")
+  /// Prix de vente TTC.
+  salePrice      Int
+  /// Prix d'achat HT ; null s'il est inconnu (jamais estimé).
+  purchasePrice  Int?
+  vatRate        Int
+  /// Seuil d'alerte (même unité) ; null = pas d'alerte.
+  minStock       Decimal? @db.Decimal(14, 3)
+  /// Faux pour un service ou un article qui ne se compte pas (aucun stock tenu).
+  isStockable    Boolean  @default(true)
+  isArchived     Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  category StockCategory?       @relation(fields: [organizationId, categoryId], references: [organizationId, id], onDelete: Restrict)
+  brand    StockBrand?          @relation(fields: [organizationId, brandId], references: [organizationId, id], onDelete: Restrict)
+  variants StockVariant[]
+  images   StockProductImage[]
+  history  StockProductHistory[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, sku])
+  @@index([organizationId, isArchived, name])
+  @@index([organizationId, categoryId])
+  @@index([organizationId, brandId])
+}
+
+/// Déclinaison vendable d'un article (taille, couleur, contenance…). Prix propres facultatifs : à défaut,
+/// ceux de l'article.
+model StockVariant {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  productId      String   @db.Uuid
+  /// Null pour la variante par défaut (article sans déclinaison).
+  name           String?
+  isDefault      Boolean  @default(false)
+  /// Référence propre, unique par organisation (même espace que les références d'articles).
+  sku            String
+  salePrice      Int?
+  purchasePrice  Int?
+  isArchived     Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  product  StockProduct        @relation(fields: [organizationId, productId], references: [organizationId, id], onDelete: Restrict)
+  barcodes StockBarcode[]
+  prices   StockPriceHistory[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, sku])
+  @@index([organizationId, productId])
+}
+
+/// Code-barres d'une variante, unique dans l'organisation.
+model StockBarcode {
+  id              String           @id @default(uuid()) @db.Uuid
+  organizationId  String           @db.Uuid
+  variantId       String           @db.Uuid
+  type            StockBarcodeType
+  code            String
+  createdByUserId String           @db.Uuid
+  createdAt       DateTime         @default(now())
+
+  variant StockVariant @relation(fields: [organizationId, variantId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, code])
+  @@index([organizationId, variantId])
+}
+
+/// Photo d'un article : image réencodée en JPEG, sans métadonnées, clé de stockage privée.
+model StockProductImage {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  productId       String   @db.Uuid
+  storageKey      String
+  position        Int
+  bytes           Int
+  createdByUserId String   @db.Uuid
+  createdAt       DateTime @default(now())
+
+  product StockProduct @relation(fields: [organizationId, productId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  /// Quatre photos au plus : positions 0 à 3 (contrôle en base), chacune unique.
+  @@unique([organizationId, productId, position])
+}
+
+/// Historique des prix d'une variante (ajout seul, garanti par la base).
+model StockPriceHistory {
+  id              String         @id @default(uuid()) @db.Uuid
+  organizationId  String         @db.Uuid
+  variantId       String         @db.Uuid
+  kind            StockPriceKind
+  oldPrice        Int?
+  newPrice        Int?
+  changedByUserId String         @db.Uuid
+  createdAt       DateTime       @default(now())
+
+  variant StockVariant @relation(fields: [organizationId, variantId], references: [organizationId, id], onDelete: Restrict)
+
+  @@index([organizationId, variantId, createdAt])
+}
+
+/// Historique des modifications d'un article (ajout seul, garanti par la base) : champs avant et après.
+model StockProductHistory {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  productId      String   @db.Uuid
+  actorUserId    String   @db.Uuid
+  action         String
+  changes        Json
+  createdAt      DateTime @default(now())
+
+  product StockProduct @relation(fields: [organizationId, productId], references: [organizationId, id], onDelete: Restrict)
+
+  @@index([organizationId, productId, createdAt])
+}
+
+/// Fournisseur (fiche). Commandes et réceptions : sprint S3.
+model StockSupplier {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  name           String
+  contactName    String?
+  phone          String?
+  email          String?
+  address        String?
+  city           String?
+  country        String   @default("ML") @db.Char(2)
+  nif            String?
+  /// Délai de livraison habituel, en jours ; null s'il est inconnu.
+  leadTimeDays   Int?
+  notes          String?
+  isArchived     Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([organizationId, id])
+  @@index([organizationId, isArchived, name])
+}

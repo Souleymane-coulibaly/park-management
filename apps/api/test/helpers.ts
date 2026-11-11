@@ -11,6 +11,7 @@ import {
 } from '@ocall/database';
 import { FacturePrismaClient } from '@ocall/facture-database';
 import { SchoolPrismaClient } from '@ocall/school-database';
+import { StockPrismaClient } from '@ocall/stock-database';
 import { type BusinessType, type StoredPlatformRole, platformRoleRequiresMfa } from '@ocall/shared';
 import { hash } from 'argon2';
 import { currentStep, totpCode } from '../src/common/security/totp';
@@ -28,6 +29,7 @@ const APP_DATABASES: NodeJS.ProcessEnv = {
   DIRECT_URL: process.env.DIRECT_URL,
   SCHOOL_DATABASE_URL: process.env.SCHOOL_DATABASE_URL,
   FACTURE_DATABASE_URL: process.env.FACTURE_DATABASE_URL,
+  STOCK_DATABASE_URL: process.env.STOCK_DATABASE_URL,
   NODE_ENV: process.env.OCALL_ORIGINAL_NODE_ENV || process.env.NODE_ENV,
   RAILWAY_ENVIRONMENT_NAME: process.env.RAILWAY_ENVIRONMENT_NAME,
   CI: process.env.CI,
@@ -53,6 +55,7 @@ export async function createTestApp(): Promise<{ app: INestApplication; prisma: 
       testDb.directUrl,
       process.env.SCHOOL_TEST_DATABASE_URL ?? process.env.TEST_SCHOOL_DATABASE_URL,
       process.env.TEST_FACTURE_DATABASE_URL,
+      process.env.TEST_STOCK_DATABASE_URL,
     ],
     APP_DATABASES,
   );
@@ -99,6 +102,27 @@ export async function createTestApp(): Promise<{ app: INestApplication; prisma: 
   }
   process.env.FACTURE_ENABLED = factureUrl ? 'true' : 'false';
   process.env.FACTURE_DATABASE_URL = factureUrl ?? '';
+  // Ocall Stock : activé seulement avec une base de test dédiée, distincte des bases Suite, School et
+  // Facture, soumise au même marqueur.
+  const stockUrl = process.env.TEST_STOCK_DATABASE_URL;
+  if (stockUrl) {
+    const others = [testDb.databaseUrl, schoolUrl, factureUrl].filter((u): u is string =>
+      Boolean(u),
+    );
+    if (others.some((u) => databaseIdentity(u) === databaseIdentity(stockUrl))) {
+      throw new Error(
+        'Refus : la base Stock de test doit être distincte des bases Suite, School et Facture.',
+      );
+    }
+    const stockProbe = new StockPrismaClient({ datasourceUrl: stockUrl });
+    try {
+      await assertTestDatabaseMarker((sql) => stockProbe.$queryRawUnsafe(sql), stockUrl);
+    } finally {
+      await stockProbe.$disconnect();
+    }
+  }
+  process.env.STOCK_ENABLED = stockUrl ? 'true' : 'false';
+  process.env.STOCK_DATABASE_URL = stockUrl ?? '';
   // Clé fictive, propre aux tests.
   process.env.SCHOOL_DATA_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64');
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();

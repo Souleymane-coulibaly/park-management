@@ -9,6 +9,7 @@ import { Prisma } from '@ocall/database';
 import {
   PARK_APP_PRODUCT_CODES,
   FACTURE_PRODUCT_CODE,
+  STOCK_PRODUCT_CODE,
   PARK_PRODUCT_CODE,
   SCHOOL_PRODUCT_CODE,
   type ProductAccess,
@@ -39,6 +40,7 @@ const APP_HREF: Record<string, string> = {
   OCALL_PARK: '/app',
   OCALL_SCHOOL: '/school',
   OCALL_FACTURE: '/facture',
+  OCALL_STOCK: '/stock',
 };
 
 const NOT_FOUND = { code: 'PRODUCT_NOT_FOUND', message: 'Application introuvable.' };
@@ -325,6 +327,10 @@ export class SuiteCommercialService {
     const factureAccess: ProductAccess = this.config.facture.enabled
       ? await loadAppAccess(this.prisma, organizationId, FACTURE_PRODUCT_CODE, now)
       : 'none';
+    // Ocall Stock : même règle que Facture (abonnement et essai, application activée).
+    const stockAccess: ProductAccess = this.config.stock.enabled
+      ? await loadAppAccess(this.prisma, organizationId, STOCK_PRODUCT_CODE, now)
+      : 'none';
     const out: SuitePortalApp[] = [];
     for (const p of products) {
       const status = p.status as SaasProductStatus;
@@ -341,7 +347,9 @@ export class SuiteCommercialService {
           ? schoolAccess
           : p.code === FACTURE_PRODUCT_CODE
             ? factureAccess
-            : 'none';
+            : p.code === STOCK_PRODUCT_CODE
+              ? stockAccess
+              : 'none';
       const trialUsed = trials.some((t) => t.productId === p.id);
       const fee = fees.find((f) => f.productId === (sub?.productId ?? p.id));
       const pendingRequest = pending.find((r) => r.productId === p.id) ?? null;
