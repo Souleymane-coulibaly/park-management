@@ -764,3 +764,109 @@ model FactureUnavailability {
   @@unique([organizationId, id])
   @@index([organizationId, memberId, startsAt])
 }
+
+// ─── F5 — Site vitrine ───
+
+/// Site vitrine d'une organisation (un seul) : brouillon modifiable, version publiée figée. Publié
+/// seulement avec l'offre Facture « avec vitrine » ; jamais de donnée interne (documents, clients).
+model FactureSite {
+  organizationId  String    @id @db.Uuid
+  /// Adresse publique (`/v/<slug>`, `<slug>.<domaine des vitrines>`), unique.
+  slug            String    @unique
+  draft           Json
+  published       Json?
+  isOnline        Boolean   @default(false)
+  publishedAt     DateTime?
+  updatedByUserId String?   @db.Uuid
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+enum FactureSiteMediaKind {
+  LOGO
+  COVER
+  GALLERY
+}
+
+/// Image d'une vitrine (réencodée, sans métadonnées) ; servie publiquement seulement une fois publiée.
+model FactureSiteMedia {
+  id              String               @id @default(uuid()) @db.Uuid
+  organizationId  String               @db.Uuid
+  kind            FactureSiteMediaKind
+  /// Clé publique `<uuid>.jpg`, servie par l'API publique des vitrines Facture seulement.
+  storageKey      String               @unique
+  caption         String?
+  position        Int                  @default(0)
+  isPublished     Boolean              @default(false)
+  createdByUserId String               @db.Uuid
+  createdAt       DateTime             @default(now())
+
+  @@unique([organizationId, id])
+  @@index([organizationId, kind, position])
+}
+
+enum FactureSiteDomainStatus {
+  PENDING
+  VERIFIED
+  ACTIVE
+  ERROR
+  SUSPENDED
+}
+
+/// Domaine personnalisé d'une vitrine : propriété prouvée par TXT, activation par le Super Admin (HTTPS
+/// contrôlé), même vérificateur que les sites Park. Unicité contrôlée aussi contre les domaines Park.
+model FactureSiteDomain {
+  id                String                  @id @default(uuid()) @db.Uuid
+  organizationId    String                  @db.Uuid
+  hostname          String                  @unique
+  status            FactureSiteDomainStatus @default(PENDING)
+  verificationToken String
+  lastCheckedAt     DateTime?
+  lastError         String?
+  activatedAt       DateTime?
+  activatedByUserId String?                 @db.Uuid
+  createdByUserId   String                  @db.Uuid
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
+
+  @@unique([organizationId, id])
+  @@index([organizationId])
+  @@index([status])
+}
+
+enum FactureRequestKind {
+  CONTACT
+  QUOTE
+  INTERVENTION
+  APPOINTMENT
+}
+
+enum FactureRequestStatus {
+  NEW
+  IN_PROGRESS
+  DONE
+  SPAM
+}
+
+/// Demande reçue par la vitrine : arrive dans la boîte de l'entreprise, ne crée JAMAIS de facture, de
+/// devis ni d'intervention ; un rendez-vous demandé n'est jamais confirmé automatiquement.
+model FactureRequest {
+  id              String               @id @default(uuid()) @db.Uuid
+  organizationId  String               @db.Uuid
+  kind            FactureRequestKind
+  status          FactureRequestStatus @default(NEW)
+  name            String
+  phone           String?
+  email           String?
+  message         String
+  /// Prestation du catalogue concernée (copie du libellé : le catalogue peut changer).
+  serviceLabel    String?
+  /// Date souhaitée (rendez-vous, intervention), indicative.
+  preferredDate   DateTime?            @db.Date
+  handledByUserId String?              @db.Uuid
+  handledAt       DateTime?
+  createdAt       DateTime             @default(now())
+
+  @@unique([organizationId, id])
+  @@index([organizationId, status, createdAt])
+}

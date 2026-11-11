@@ -15,9 +15,9 @@ Proposition d'architecture et décisions : `ocall-audits/proposition-architectur
 | **F2 — Facturation**   | Factures émises figées, avoirs, encaissements, relances, exports     | Livré               |
 | **F3 — Interventions** | Techniciens, planning, équipements, temps, pièces, photos, signature | Livré               |
 | **F4 — Rendez-vous**   | Confirmation, report, rappels, annulation : WhatsApp, e-mail secours | Livré               |
-| F5 — Site vitrine      | Site public, formulaires de demande, domaines, SEO local             | À venir             |
+| **F5 — Site vitrine**  | Site public, formulaires de demande, domaines, SEO local             | Livré (ce document) |
 | **F6A — IA (1)**       | Socle IA, rapport d'intervention intelligent, devis intelligent      | Livré               |
-| **F6B — IA (2)**       | Planification intelligente, maintenance préventive intelligente      | Livré (ce document) |
+| **F6B — IA (2)**       | Planification intelligente, maintenance préventive intelligente      | Livré               |
 
 ## 1. Architecture
 
@@ -80,6 +80,8 @@ ne donne aucun droit Facture.
 | Devis intelligent (IA)                                  | Oui    | Oui        | Non       | Non         |
 | Planification intelligente, maintenance préventive (IA) | Oui    | Oui        | Non       | Non         |
 | Compétences des techniciens                             | Oui    | Non        | Non       | Non         |
+| Site vitrine (contenu, publication, domaine)            | Oui    | Non        | Non       | Non         |
+| Demandes reçues par le site                             | Oui    | Oui        | Non       | Non         |
 | Indisponibilités des techniciens                        | Oui    | Oui        | Non       | Non         |
 
 Désactiver un membre ferme aussi son compte Suite et ses sessions : Facture décide d'abord, Suite recopie
@@ -294,7 +296,46 @@ cœur), fournisseur simulé en test (aucun appel payant). **L'IA propose, une pe
   intervention que par le **formulaire de planification** prérempli (« Planifier ») ; elle est alors tracée
   comme appliquée, dans la même transaction ; « Ignorer » la rejette.
 
-## 11. API (`/api/v1/facture`)
+## 11. Site vitrine (F5)
+
+Audit préalable des vitrines existantes (sites Park, sites School, domaines, demandes publiques) : les
+mécanismes communs sont **réutilisés**, rien n'est recopié — règles d'adresses et de domaines
+(`sites.ts`), vérificateur DNS/HTTPS (déplacé de `modules/public-sites` vers `common/sites`, inchangé),
+stockage, anti-spam des demandes publiques (`demoSpamReason` : champ piège, durée de saisie), limitations
+de débit (`@PublicSiteRoute`, `@PublicLeadRoute`), droit « vitrine » (`assertShowcaseAllowed`), boutons
+WhatsApp (`whatsappDigits`). Park et School inchangés (tests d'intégration et E2E de leurs sites verts).
+
+- **Droit** : publication et service public seulement avec l'offre Ocall Facture **« avec vitrine »**
+  (migration Suite `20261118000000_facture_v1_offres` : offres 50 000 / 65 000, inactives, produit
+  toujours « à venir ») et Ocall Facture accessible (essai ou abonnement en cours). Le **droit historique**
+  des clients Park antérieurs au socle S1 **ne vaut pas** pour Facture (`honorGrandfathered: false`).
+  Le brouillon se prépare sans l'offre.
+- **Contenu** (`/facture/site`, gérant) : adresse publique (`slug`, unique, figée pendant la mise en
+  ligne), titre, accroche, présentation, prestations du catalogue mises en avant (prix TTC affiché au
+  choix), téléphone, WhatsApp, e-mail, adresse, horaires, lien de carte (https), description SEO,
+  formulaires proposés ; logo, couverture et 12 réalisations (images réencodées, sans métadonnées).
+  **Brouillon jamais public** ; « Publier » fige une copie (libellés et prix du jour, images publiées).
+- **Adresses** : domaine personnalisé actif > `<slug>.<FACTURE_SITES_BASE_DOMAIN>` (si
+  `FACTURE_SITES_SUBDOMAINS_ENABLED=true`, après la configuration DNS/TLS réelle) > `<origine>/v/<slug>`
+  ; les autres adresses redirigent (301). Préfixe `/v/` distinct des sites Park (`/e/`) et School (`/s/`).
+- **Domaine personnalisé** : table `FactureSiteDomain` (base Facture), enregistrement TXT de propriété,
+  activation par le **Super Admin** (TXT revérifié, page `/.well-known/ocall-site` répondant l'identifiant
+  du site, en HTTPS), mise hors service avec motif. Un domaine déjà déclaré pour un site Park est refusé.
+  Routage web : sites Park d'abord, puis vitrines Facture (un domaine Park n'est jamais masqué).
+- **Demandes des visiteurs** (contact, devis, intervention, rendez-vous ; formulaires choisis par
+  l'entreprise) : téléphone ou e-mail exigé, champ piège et durée minimale de saisie (un envoi suspect
+  reçoit la même réponse sans rien enregistrer), 5 demandes / 10 min par IP. Elles arrivent dans
+  `/facture/demandes` (gérant, commercial ; statuts nouvelle, en cours, traitée, indésirable) et **ne
+  créent jamais** de devis, de facture, d'intervention ni de client ; un rendez-vous demandé n'est jamais
+  confirmé automatiquement.
+- **SEO et référencement local** : titre et description, URL canonique, Open Graph, données structurées
+  `LocalBusiness` (`factureSiteJsonLd` : coordonnées, horaires, prestations et prix affichés), plan du site
+  (`sitemap.xml` selon l'hôte), `robots.txt` commun. Page lue sans cache (publication et retrait visibles
+  aussitôt), identité du visiteur transmise à la limitation de débit comme pour School.
+- **Jamais public** : documents, clients, NIF, données internes.
+- **Hors V1** : plusieurs pages, actualités, blog, réservation en ligne confirmée, paiement en ligne.
+
+## 12. API (`/api/v1/facture`)
 
 | Route                                                                                                                    | Permission          |
 | ------------------------------------------------------------------------------------------------------------------------ | ------------------- |
@@ -327,6 +368,12 @@ cœur), fournisseur simulé en test (aucun appel payant). **L'IA propose, une pe
 | `GET skills` · `GET member-skills`                                                                                       | voir l'équipe       |
 | `POST skills` · `PATCH skills/:id` · `PUT members/:id/skills`                                                            | gérer l'équipe      |
 | `GET unavailabilities` / `POST unavailabilities` · `DELETE unavailabilities/:id`                                         | planifier           |
+| `GET site` · `PUT site/slug` · `PUT site/draft` · `POST/GET/DELETE site/media` · `POST site/{publish,unpublish}`         | site vitrine        |
+| `POST site/domains` · `POST site/domains/:id/verify` · `DELETE site/domains/:id`                                         | site vitrine        |
+| `GET requests` · `PATCH requests/:id`                                                                                    | demandes du site    |
+| Public : `GET public/facture-sites/{resolve,sitemap,well-known,:slug}` · `GET public/facture-media/:key`                 | aucune              |
+| Public : `POST public/facture-sites/:slug/requests` (anti-spam, 5 / 10 min)                                              | aucune              |
+| Super Admin : `GET platform/facture-site-domains` · `POST …/:id/{activate,suspend}`                                      | domaines            |
 | `GET members`                                                                                                            | voir l'équipe       |
 | `POST members` · `PATCH members/:id`                                                                                     | gérer l'équipe      |
 
@@ -338,7 +385,7 @@ et relance d'une facture), `/facture/clients`, `/facture/catalogue`,
 technicien), `/facture/interventions/:id` (travaux, photos, fin, signature à l'écran, rapport,
 facturation) et `/facture/equipements`.
 
-## 12. Base et déploiement
+## 13. Base et déploiement
 
 - Migrations : `20261120000000_facture_v1_socle` (F0), `20261121000000_facture_v1_commercial` (F1 :
   clients, catalogue, documents, lignes, logos ; contrôles `CHECK` et déclencheurs du document figé) et
@@ -350,24 +397,27 @@ facturation) et `/facture/equipements`.
   notifications ; contrôles et déclencheur `FactureNotification_frozen`) et
   `20261125000000_facture_v1_ai` (F6A : réglages IA, consommation, propositions tracées ; contrôles et
   déclencheur `FactureAiProposal_frozen`) et `20261126000000_facture_v1_ai_planning` (F6B : compétences,
-  indisponibilités, priorité, compétences requises, périodicité d'entretien, réglages IA ; contrôles),
-  appliquées par `pnpm db:facture:migrate:deploy` (refus des instructions
+  indisponibilités, priorité, compétences requises, périodicité d'entretien, réglages IA ; contrôles) et
+  `20261127000000_facture_v1_site` (F5 : site, médias, domaines, demandes ; contrôles), appliquées par `pnpm db:facture:migrate:deploy` (refus des instructions
   destructrices et d'une base Suite ou School).
 - Pré-déploiement Railway : `db:migrate:deploy && db:school:migrate:deploy && db:facture:migrate:deploy`
   — sans `FACTURE_ENABLED=true`, l'étape Facture ne fait rien.
 - Variables : `FACTURE_ENABLED`, `FACTURE_DATABASE_URL`, `FACTURE_DIRECT_URL`,
   `FACTURE_WHATSAPP_PROVIDER` (`disabled` par défaut), `FACTURE_AI_MAX_MONTHLY_CALLS` (plafond Ocall,
-  500 par défaut ; l'IA elle-même suit `AI_PROVIDER` et `AI_REAL_CALLS_ENABLED` d'Ocall AI Core).
+  500 par défaut ; l'IA elle-même suit `AI_PROVIDER` et `AI_REAL_CALLS_ENABLED` d'Ocall AI Core),
+  `FACTURE_SITES_BASE_DOMAIN` et `FACTURE_SITES_SUBDOMAINS_ENABLED` (vitrines ; web et API). Base Suite :
+  migration de données `20261118000000_facture_v1_offres` (offres Facture, appliquée nulle part sans GO).
 - **Aucune base Facture n'est créée en préproduction ni en production** sans GO.
 
-## 13. Tests
+## 14. Tests
 
 - Unitaires : `packages/shared/src/facture.spec.ts` (TVA, numérotation, mentions, permissions),
   `facture-interventions.spec.ts` (transitions, durées, référence, portée des rôles),
   `facture-notifications.spec.ts` (heures des rappels, textes, délais des nouvelles tentatives),
   `facture-ai.spec.ts` (droits IA, texte corrigé), `facture-planning.spec.ts` (candidats, conflits,
   urgence, créneaux libres, signaux de maintenance, formulations interdites), `ai-prompt-manifest.spec.ts`
-  (empreintes des prompts),
+  (empreintes des prompts), `facture-site.spec.ts` (adresse canonique, LocalBusiness),
+  `visitor-throttler.guard.spec.ts` (identité du visiteur sur les lectures des vitrines Facture),
   `facture-documents.spec.ts` (montants exacts, remises, TVA par taux, conversions, montant en lettres,
   reste dû, statut d'une facture, échéance dépassée),
   `facture-boundaries.spec.ts` (frontières, configuration), `migration-safety.spec.ts` (cible Facture).
@@ -391,12 +441,16 @@ facturation) et `/facture/equipements`.
   (compétences et indisponibilités, candidats du serveur, conflit évité, urgence, technicien sans
   compétence écarté, créneau pris refusé à l'affectation, candidat inventé écarté, suggestions de
   maintenance sur historique réel sans doublon, panne certaine et intervention étrangère refusées,
-  suggestion appliquée en planifiant, rôles, isolation, plafonds) — exigent `TEST_FACTURE_DATABASE_URL`.
+  suggestion appliquée en planifiant, rôles, isolation, plafonds), `facture-f5.integration.spec.ts`
+  (offre « avec vitrine » et droit historique exclu, brouillon jamais public, publication figée aux prix
+  du catalogue, images publiées seulement, demandes anti-spam sans rien créer d'autre, domaine TXT /
+  HTTPS / Super Admin, unicité avec les domaines Park, plan du site, isolation, rôles) — exigent `TEST_FACTURE_DATABASE_URL`.
 - E2E : `e2e/facture-f0.spec.ts` (portail, identité, logo, équipe), `e2e/facture-f1.spec.ts` (client,
   article, devis → bon de commande → facture brouillon, PDF), `e2e/facture-f2.spec.ts` (facture émise,
   payée en deux fois, avoir, tableau de bord, export), `e2e/facture-f3.spec.ts` (intervention planifiée,
   réalisée, signée à l'écran, facturée), `e2e/facture-f4.spec.ts` (rendez-vous confirmé, reporté,
   annulé, envoyés par le répartiteur avec le fournisseur simulé), `e2e/facture-f6a.spec.ts` (rapport et
   devis intelligents validés par une personne), `e2e/facture-f6b.spec.ts` (maintenance préventive
-  planifiée, technicien compétent proposé et affecté sur décision).
+  planifiée, technicien compétent proposé et affecté sur décision), `e2e/facture-f5.spec.ts` (site
+  publié, visite publique, demande de devis reçue).
 - CI : base `ocall_facture_ci` éphémère, migrée puis utilisée par les tests d'intégration et E2E.

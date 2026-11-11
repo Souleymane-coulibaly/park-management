@@ -49,6 +49,10 @@ export const FACTURE_PERMISSIONS = [
   'facture.ai.planning',
   /** Maintenance préventive intelligente : équipements à entretenir ou à vérifier (F6B). */
   'facture.ai.maintenance',
+  /** Site vitrine : contenu, médias, publication, domaines (F5). */
+  'facture.site.manage',
+  /** Demandes reçues par le site vitrine : consulter et traiter (F5). */
+  'facture.requests.manage',
 ] as const;
 export type FacturePermission = (typeof FACTURE_PERMISSIONS)[number];
 
@@ -68,6 +72,7 @@ const ROLE_PERMISSIONS: Record<FactureRole, readonly FacturePermission[]> = {
     'facture.ai.quote',
     'facture.ai.planning',
     'facture.ai.maintenance',
+    'facture.requests.manage',
   ],
   ACCOUNTANT: [
     'facture.access',

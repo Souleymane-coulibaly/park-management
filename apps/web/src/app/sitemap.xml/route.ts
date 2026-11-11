@@ -1,7 +1,8 @@
 import type { NextRequest } from 'next/server';
 import { fetchSitemap, isAppHost, requestHost } from '@/lib/public-site';
+import { fetchFactureSitemap } from '@/lib/public-facture-site';
 import { fetchSchoolSitemap } from '@/lib/public-school-site';
-import { isSchoolSiteHost } from '@/lib/site-hosts';
+import { isFactureSiteHost, isSchoolSiteHost } from '@/lib/site-hosts';
 
 const escapeXml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -29,9 +30,13 @@ export async function GET(request: NextRequest) {
     });
   }
   const schoolEntries = school ?? [];
+  // Vitrines Ocall Facture : sur leur hôte, leur seule page ; ailleurs, celles servies par cet hôte.
+  const factureEntries = isSchoolSiteHost(host) ? [] : ((await fetchFactureSitemap(host)) ?? []);
   const entries = isSchoolSiteHost(host)
     ? schoolEntries
-    : [...(await fetchSitemap(host)), ...schoolEntries];
+    : isFactureSiteHost(host)
+      ? factureEntries
+      : [...(await fetchSitemap(host)), ...schoolEntries, ...factureEntries];
   const marketing = isAppHost(host)
     ? [
         '/',
@@ -60,7 +65,8 @@ export async function GET(request: NextRequest) {
     headers: {
       'content-type': 'application/xml; charset=utf-8',
       // Périmètre School : jamais mis en cache ; plans des hôtes de sites Park inchangés.
-      'cache-control': schoolScope ? 'no-store' : 'public, max-age=600',
+      'cache-control':
+        schoolScope || factureEntries.length > 0 ? 'no-store' : 'public, max-age=600',
     },
   });
 }

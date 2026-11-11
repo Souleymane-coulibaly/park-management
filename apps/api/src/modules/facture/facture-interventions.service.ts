@@ -1146,7 +1146,7 @@ export function hashReport(row: InterventionRow, signerName: string, signedAt: D
 }
 
 /** Photo vérifiée et réencodée en JPEG (orientation appliquée, métadonnées et GPS retirés). */
-async function normalizePhoto(file: FactureUpload | undefined): Promise<Buffer> {
+export async function normalizePhoto(file: FactureUpload | undefined): Promise<Buffer> {
   if (!file || !PHOTO_TYPES.has(file.mimetype) || file.size > FACTURE_PHOTO_MAX_BYTES) {
     throw new BadRequestException({
       code: 'PHOTO_REFUSED',

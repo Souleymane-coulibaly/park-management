@@ -1,7 +1,7 @@
 import { mkdtemp, readdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SimulatedDomainVerifier, createDomainVerifier } from './domain-verifier';
+import { SimulatedDomainVerifier, createDomainVerifier } from '../../common/sites/domain-verifier';
 import { LocalStorageProvider } from '../../common/storage/storage-provider';
 import { loadSitesConfig } from './sites.config';
 import { siteAvailability } from './sites.service';

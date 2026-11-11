@@ -19,6 +19,11 @@ export interface FactureConfig {
    * règle ses plafonds en dessous.
    */
   aiMonthlyCeiling: number;
+  /**
+   * Vitrines Facture (F5) : sous-domaines `<slug>.<FACTURE_SITES_BASE_DOMAIN>` seulement si activés
+   * (après la configuration DNS/TLS réelle) ; sinon adresse `<origine>/v/<slug>`.
+   */
+  sites: { baseDomain: string | null; subdomainsEnabled: boolean };
 }
 
 export function loadFactureConfig(env: NodeJS.ProcessEnv): FactureConfig {
@@ -35,7 +40,12 @@ export function loadFactureConfig(env: NodeJS.ProcessEnv): FactureConfig {
     throw new Error('FACTURE_AI_MAX_MONTHLY_CALLS invalide : entier de 0 à 100 000.');
   }
   const aiMonthlyCeiling = ceiling;
-  if (!enabled) return { enabled, databaseUrl: null, whatsapp, aiMonthlyCeiling };
+  const baseDomain = env.FACTURE_SITES_BASE_DOMAIN?.trim().toLowerCase() || null;
+  const sites = {
+    baseDomain,
+    subdomainsEnabled: env.FACTURE_SITES_SUBDOMAINS_ENABLED === 'true' && baseDomain !== null,
+  };
+  if (!enabled) return { enabled, databaseUrl: null, whatsapp, aiMonthlyCeiling, sites };
   const databaseUrl = env.FACTURE_DATABASE_URL?.trim() || null;
   if (!databaseUrl) throw new Error('FACTURE_ENABLED=true exige FACTURE_DATABASE_URL.');
   const facture = databaseIdentity(databaseUrl);
@@ -47,5 +57,5 @@ export function loadFactureConfig(env: NodeJS.ProcessEnv): FactureConfig {
       'FACTURE_DATABASE_URL doit désigner une base distincte des bases Ocall Suite et Ocall School.',
     );
   }
-  return { enabled, databaseUrl, whatsapp, aiMonthlyCeiling };
+  return { enabled, databaseUrl, whatsapp, aiMonthlyCeiling, sites };
 }

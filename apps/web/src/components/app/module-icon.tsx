@@ -80,6 +80,8 @@ const ICONS: Record<string, LucideIcon> = {
   'facture-interventions': CalendarClock,
   'facture-clients': Contact,
   'facture-equipment': HardDrive,
+  'facture-site': Globe,
+  'facture-requests': Inbox,
   'facture-catalog': Package,
   'facture-settings': Building2,
   'facture-team': Users,

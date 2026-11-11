@@ -21,8 +21,11 @@ function sameSecret(given: string, expected: string): boolean {
  * web/API (SITES_REVALIDATE_SECRET) — sinon tous les visiteurs partageraient la limite de l'IP du
  * serveur web. Sans secret valide : comportement inchangé.
  */
-/** Seules les lectures publiques des sites School acceptent une identité de visiteur transmise. */
-const VISITOR_ROUTES = /^\/api\/v1\/public\/school-(sites|media)\//i;
+/**
+ * Seules les lectures publiques des sites School et des vitrines Facture (pages lues sans cache par le
+ * serveur web) acceptent une identité de visiteur transmise.
+ */
+const VISITOR_ROUTES = /^\/api\/v1\/public\/(school|facture)-(sites|media)\//i;
 
 export function throttleTracker(
   req: {

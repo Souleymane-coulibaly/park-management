@@ -16,6 +16,15 @@ import { FactureMembersService } from './facture-members.service';
 import { FactureNotificationsController } from './facture-notifications.controller';
 import { FactureNotificationsService } from './facture-notifications.service';
 import { FacturePrismaService } from './facture-prisma.service';
+import { FACTURE_DOMAIN_VERIFIER, FactureSiteDomainsService } from './facture-site-domains.service';
+import {
+  FactureSiteController,
+  PlatformFactureSiteDomainsController,
+  PublicFactureRequestsController,
+  PublicFactureSitesController,
+} from './facture-site.controller';
+import { FactureSiteService } from './facture-site.service';
+import { createDomainVerifier } from '../../common/sites/domain-verifier';
 import { FactureSkillsController } from './facture-skills.controller';
 import { FactureSkillsService } from './facture-skills.service';
 import {
@@ -41,6 +50,10 @@ import { FactureService } from './facture.service';
     FactureNotificationsController,
     FactureAiController,
     FactureSkillsController,
+    FactureSiteController,
+    PublicFactureSitesController,
+    PublicFactureRequestsController,
+    PlatformFactureSiteDomainsController,
   ],
   providers: [
     FacturePrismaService,
@@ -56,6 +69,14 @@ import { FactureService } from './facture.service';
     FactureAiService,
     FactureAiPlanningService,
     FactureSkillsService,
+    FactureSiteService,
+    FactureSiteDomainsService,
+    // Vérification des domaines personnalisés : même vérificateur que les sites Park (simulé en test).
+    {
+      provide: FACTURE_DOMAIN_VERIFIER,
+      inject: [APP_CONFIG],
+      useFactory: (config: AppConfig) => createDomainVerifier(process.env, config.nodeEnv),
+    },
     // WhatsApp : simulé en test, désactivé sinon, tant qu'aucun fournisseur réel n'est choisi.
     {
       provide: FACTURE_WHATSAPP_PROVIDER,

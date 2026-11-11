@@ -12,6 +12,8 @@ const NAV: NavItem[] = [
   { key: 'facture-clients', label: 'Clients', href: '/facture/clients' },
   { key: 'facture-equipment', label: 'Équipements', href: '/facture/equipements' },
   { key: 'facture-catalog', label: 'Catalogue', href: '/facture/catalogue' },
+  { key: 'facture-site', label: 'Site vitrine', href: '/facture/site' },
+  { key: 'facture-requests', label: 'Demandes du site', href: '/facture/demandes' },
   { key: 'facture-settings', label: 'Entreprise et mentions', href: '/facture/parametres' },
   { key: 'facture-team', label: 'Équipe', href: '/facture/equipe' },
 ];

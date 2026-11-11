@@ -55,6 +55,7 @@ describe('configuration Facture', () => {
       databaseUrl: null,
       whatsapp: 'disabled',
       aiMonthlyCeiling: 500,
+      sites: { baseDomain: null, subdomainsEnabled: false },
     });
   });
 
@@ -94,6 +95,24 @@ describe('configuration Facture', () => {
         SCHOOL_DATABASE_URL: school,
         FACTURE_DATABASE_URL: facture,
       }),
-    ).toEqual({ enabled: true, databaseUrl: facture, whatsapp: 'disabled', aiMonthlyCeiling: 500 });
+    ).toEqual({
+      enabled: true,
+      databaseUrl: facture,
+      whatsapp: 'disabled',
+      aiMonthlyCeiling: 500,
+      sites: { baseDomain: null, subdomainsEnabled: false },
+    });
+  });
+});
+
+describe('vitrines Facture : protections des routes publiques', () => {
+  it('formulaires limités comme les demandes publiques ; lectures comme les sites', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const c = require('./facture-site.controller') as typeof import('./facture-site.controller');
+    expect(Reflect.getMetadata('publicLeadRoute', c.PublicFactureRequestsController)).toBe(true);
+    expect(Reflect.getMetadata('publicSiteRoute', c.PublicFactureSitesController)).toBe(true);
+    expect(Reflect.getMetadata('superAdminOnly', c.PlatformFactureSiteDomainsController)).toBe(
+      true,
+    );
   });
 });
