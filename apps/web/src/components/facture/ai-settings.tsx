@@ -14,12 +14,22 @@ import { Alert, ApiErrorAlert, LoadingState } from '@/components/ui/states';
 import { ApiError, api } from '@/lib/api';
 import { useApi } from '@/lib/use-api';
 
-interface AiSettingsView {
+/** Réglages de chaque fonctionnalité : colonne d'activation et de plafond. */
+const FEATURES = [
+  { feature: 'FACTURE_REPORT', enabled: 'reportEnabled', limit: 'reportMonthlyLimit' },
+  { feature: 'FACTURE_QUOTE', enabled: 'quoteEnabled', limit: 'quoteMonthlyLimit' },
+  { feature: 'FACTURE_PLANNING', enabled: 'planningEnabled', limit: 'planningMonthlyLimit' },
+  {
+    feature: 'FACTURE_MAINTENANCE',
+    enabled: 'maintenanceEnabled',
+    limit: 'maintenanceMonthlyLimit',
+  },
+] as const;
+type EnabledKey = (typeof FEATURES)[number]['enabled'];
+type LimitKey = (typeof FEATURES)[number]['limit'];
+
+interface AiSettingsView extends Record<EnabledKey, boolean>, Record<LimitKey, number> {
   enabled: boolean;
-  reportEnabled: boolean;
-  quoteEnabled: boolean;
-  reportMonthlyLimit: number;
-  quoteMonthlyLimit: number;
   ceiling: number;
   configured: boolean;
   usedThisMonth: Record<FactureAiFeature, number>;
@@ -35,10 +45,7 @@ interface ProposalRow {
   promptVersion: number;
 }
 
-type Values = Pick<
-  AiSettingsView,
-  'enabled' | 'reportEnabled' | 'quoteEnabled' | 'reportMonthlyLimit' | 'quoteMonthlyLimit'
->;
+type Values = Pick<AiSettingsView, 'enabled' | EnabledKey | LimitKey>;
 
 const dateTimeFr = (iso: string) =>
   new Date(iso).toLocaleString('fr-FR', {
@@ -48,7 +55,7 @@ const dateTimeFr = (iso: string) =>
   });
 
 /**
- * Module IA (F6A) : activation, fonctionnalités, plafonds mensuels sous le plafond Ocall, consommation du
+ * Module IA (F6A, F6B) : activation, fonctionnalités, plafonds mensuels sous le plafond Ocall, consommation du
  * mois et traçabilité des propositions (qui, quand, appliquée ou rejetée, corrigée ou non).
  */
 export function AiSettings({ editable }: { editable: boolean }) {
@@ -62,18 +69,17 @@ export function AiSettings({ editable }: { editable: boolean }) {
 
   useEffect(() => {
     if (!data) return;
-    setValues({
-      enabled: data.enabled,
-      reportEnabled: data.reportEnabled,
-      quoteEnabled: data.quoteEnabled,
-      reportMonthlyLimit: data.reportMonthlyLimit,
-      quoteMonthlyLimit: data.quoteMonthlyLimit,
-    });
+    const next = { enabled: data.enabled } as Values;
+    for (const f of FEATURES) {
+      next[f.enabled] = data[f.enabled];
+      next[f.limit] = data[f.limit];
+    }
+    setValues(next);
   }, [data]);
 
   if (!data || !values) return res.state === 'error' ? null : <LoadingState />;
 
-  const toggle = (key: 'enabled' | 'reportEnabled' | 'quoteEnabled', label: string) => (
+  const toggle = (key: 'enabled' | EnabledKey, label: string) => (
     <label className="flex min-h-11 items-center gap-2 text-sm font-medium">
       <input
         type="checkbox"
@@ -120,36 +126,21 @@ export function AiSettings({ editable }: { editable: boolean }) {
           )}
           {toggle('enabled', 'Activer l’assistant IA pour mon entreprise')}
           <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              {toggle('reportEnabled', FACTURE_AI_FEATURE_LABELS.FACTURE_REPORT)}
-              <InputField
-                label="Plafond mensuel (rapports)"
-                type="number"
-                min={0}
-                max={data.ceiling}
-                disabled={!editable}
-                value={String(values.reportMonthlyLimit)}
-                hint={`Utilisés ce mois : ${data.usedThisMonth.FACTURE_REPORT} · plafond Ocall : ${data.ceiling}`}
-                onChange={(e) =>
-                  setValues({ ...values, reportMonthlyLimit: Number(e.target.value) })
-                }
-              />
-            </div>
-            <div className="space-y-2">
-              {toggle('quoteEnabled', FACTURE_AI_FEATURE_LABELS.FACTURE_QUOTE)}
-              <InputField
-                label="Plafond mensuel (devis)"
-                type="number"
-                min={0}
-                max={data.ceiling}
-                disabled={!editable}
-                value={String(values.quoteMonthlyLimit)}
-                hint={`Utilisés ce mois : ${data.usedThisMonth.FACTURE_QUOTE} · plafond Ocall : ${data.ceiling}`}
-                onChange={(e) =>
-                  setValues({ ...values, quoteMonthlyLimit: Number(e.target.value) })
-                }
-              />
-            </div>
+            {FEATURES.map((f) => (
+              <div key={f.feature} className="space-y-2">
+                {toggle(f.enabled, FACTURE_AI_FEATURE_LABELS[f.feature])}
+                <InputField
+                  label={`Plafond mensuel — ${FACTURE_AI_FEATURE_LABELS[f.feature]}`}
+                  type="number"
+                  min={0}
+                  max={data.ceiling}
+                  disabled={!editable}
+                  value={String(values[f.limit])}
+                  hint={`Utilisés ce mois : ${data.usedThisMonth[f.feature]} · plafond Ocall : ${data.ceiling}`}
+                  onChange={(e) => setValues({ ...values, [f.limit]: Number(e.target.value) })}
+                />
+              </div>
+            ))}
           </div>
           <ApiErrorAlert error={error} />
           {saved && <p className="text-sm font-medium text-forest">Réglages IA enregistrés.</p>}

@@ -61,6 +61,10 @@ const DEFAULTS = {
   quoteEnabled: true,
   reportMonthlyLimit: 100,
   quoteMonthlyLimit: 100,
+  planningEnabled: true,
+  maintenanceEnabled: true,
+  planningMonthlyLimit: 100,
+  maintenanceMonthlyLimit: 100,
 };
 
 const PROPOSAL_NOT_FOUND = {
@@ -161,6 +165,10 @@ export class FactureAiService implements OnModuleInit {
           quoteEnabled: row.quoteEnabled,
           reportMonthlyLimit: row.reportMonthlyLimit,
           quoteMonthlyLimit: row.quoteMonthlyLimit,
+          planningEnabled: row.planningEnabled,
+          maintenanceEnabled: row.maintenanceEnabled,
+          planningMonthlyLimit: row.planningMonthlyLimit,
+          maintenanceMonthlyLimit: row.maintenanceMonthlyLimit,
         }
       : DEFAULTS;
     const usage = await this.db.factureAiUsage.groupBy({
@@ -182,7 +190,14 @@ export class FactureAiService implements OnModuleInit {
 
   async updateSettings(ctx: FactureContext, dto: FactureAiSettingsDto) {
     const ceiling = this.config.facture.aiMonthlyCeiling;
-    if (dto.reportMonthlyLimit > ceiling || dto.quoteMonthlyLimit > ceiling) {
+    if (
+      [
+        dto.reportMonthlyLimit,
+        dto.quoteMonthlyLimit,
+        dto.planningMonthlyLimit ?? 0,
+        dto.maintenanceMonthlyLimit ?? 0,
+      ].some((limit) => limit > ceiling)
+    ) {
       throw new BadRequestException({
         code: 'FACTURE_AI_LIMIT_ABOVE_CEILING',
         message: `Plafond Ocall : ${ceiling} appels par mois et par fonctionnalité au plus.`,
@@ -536,7 +551,8 @@ export class FactureAiService implements OnModuleInit {
       if (proposal.feature !== 'FACTURE_QUOTE') {
         throw new ConflictException({
           code: 'FACTURE_AI_PROPOSAL_INVALID',
-          message: 'Le rapport proposé s’applique en terminant les travaux.',
+          message:
+            'Cette proposition s’applique ailleurs : rapport en terminant les travaux, affectation par « Affecter », maintenance en planifiant l’intervention.',
         });
       }
       if (proposal.status === 'APPLIED' && proposal.resultId) return proposal.resultId;
@@ -589,18 +605,22 @@ export class FactureAiService implements OnModuleInit {
     return { documentId };
   }
 
-  /** Rejet d'une proposition (rapport ou devis), une seule fois, par qui peut l'utiliser. */
+  /** Rejet d'une proposition, une seule fois, par qui peut utiliser la fonctionnalité. */
   async reject(ctx: FactureContext, proposalId: string) {
     await this.db.$transaction(async (tx) => {
       const proposal = await this.lockProposal(tx, ctx, proposalId);
-      if (proposal.feature === 'FACTURE_QUOTE') this.requireQuoteRights(ctx);
-      else if (
-        !hasFacturePermission(ctx.role, 'facture.ai.report') ||
-        (proposal.createdByUserId !== ctx.userId &&
-          !hasFacturePermission(ctx.role, 'facture.interventions.manage'))
-      ) {
-        throw this.denied();
-      }
+      const allowed =
+        proposal.feature === 'FACTURE_QUOTE'
+          ? hasFacturePermission(ctx.role, 'facture.ai.quote') &&
+            hasFacturePermission(ctx.role, 'facture.documents.manage')
+          : proposal.feature === 'FACTURE_PLANNING'
+            ? hasFacturePermission(ctx.role, 'facture.ai.planning')
+            : proposal.feature === 'FACTURE_MAINTENANCE'
+              ? hasFacturePermission(ctx.role, 'facture.ai.maintenance')
+              : hasFacturePermission(ctx.role, 'facture.ai.report') &&
+                (proposal.createdByUserId === ctx.userId ||
+                  hasFacturePermission(ctx.role, 'facture.interventions.manage'));
+      if (!allowed) throw this.denied();
       if (proposal.status !== 'PROPOSED') throw this.decided();
       await tx.factureAiProposal.update({
         where: { organizationId_id: { organizationId: ctx.organizationId, id: proposalId } },
@@ -612,8 +632,13 @@ export class FactureAiService implements OnModuleInit {
 
   // ─── Outils ───
 
+  /** Modèle utilisé pour une fonctionnalité (tracé avec chaque proposition). */
+  modelOf(feature: FactureAiFeature): string {
+    return this.gateway.model(feature);
+  }
+
   /** Appel IA de Facture par Ocall AI Core ; le contexte vient de la session, jamais du modèle. */
-  private run<T>(
+  run<T>(
     ctx: FactureContext,
     feature: FactureAiFeature,
     prompt: AiPrompt,
@@ -653,7 +678,7 @@ export class FactureAiService implements OnModuleInit {
     return type;
   }
 
-  private async lockProposal(tx: Tx, ctx: FactureContext, id: string) {
+  async lockProposal(tx: Tx, ctx: FactureContext, id: string) {
     const locked = await tx.$queryRaw<{ id: string }[]>`
       SELECT "id" FROM "FactureAiProposal"
       WHERE "organizationId" = ${ctx.organizationId}::uuid AND "id" = ${id}::uuid FOR UPDATE`;
@@ -672,21 +697,21 @@ export class FactureAiService implements OnModuleInit {
     }
   }
 
-  private decided() {
+  decided() {
     return new ConflictException({
       code: 'FACTURE_AI_PROPOSAL_DECIDED',
       message: 'Cette proposition a déjà été appliquée ou rejetée.',
     });
   }
 
-  private denied() {
+  denied() {
     return new ForbiddenException({
       code: 'FORBIDDEN',
       message: "Vous n'avez pas les droits nécessaires.",
     });
   }
 
-  private record(
+  record(
     ctx: FactureContext,
     action: string,
     targetId: string,

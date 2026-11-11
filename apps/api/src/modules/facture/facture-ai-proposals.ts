@@ -42,3 +42,39 @@ export async function applyFactureReportProposal(
     },
   });
 }
+
+/**
+ * Suggestion de maintenance préventive (F6B) appliquée dans la transaction qui crée l'intervention : la
+ * suggestion doit concerner l'équipement de cette intervention et être encore en attente.
+ */
+export async function applyFactureMaintenanceProposal(
+  tx: Prisma.TransactionClient,
+  ctx: { organizationId: string; userId: string },
+  proposalId: string,
+  target: { equipmentId: string | null; interventionId: string },
+  now: Date,
+) {
+  const proposal = await tx.factureAiProposal.findUnique({
+    where: { organizationId_id: { organizationId: ctx.organizationId, id: proposalId } },
+  });
+  if (
+    !proposal ||
+    proposal.feature !== 'FACTURE_MAINTENANCE' ||
+    proposal.targetId !== target.equipmentId ||
+    proposal.status !== 'PROPOSED'
+  ) {
+    throw new ConflictException({
+      code: 'FACTURE_AI_PROPOSAL_INVALID',
+      message: 'Cette suggestion de maintenance n’est plus applicable à cet équipement.',
+    });
+  }
+  await tx.factureAiProposal.update({
+    where: { organizationId_id: { organizationId: ctx.organizationId, id: proposalId } },
+    data: {
+      status: 'APPLIED',
+      decidedByUserId: ctx.userId,
+      decidedAt: now,
+      resultId: target.interventionId,
+    },
+  });
+}

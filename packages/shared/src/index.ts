@@ -37,3 +37,4 @@ export * from './facture-documents';
 export * from './facture-interventions';
 export * from './facture-notifications';
 export * from './facture-ai';
+export * from './facture-planning';

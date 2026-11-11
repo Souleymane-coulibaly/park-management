@@ -42,6 +42,25 @@ export const FACTURE_AI_SIMULATION: AiSimulation = {
             : ['Quantités à confirmer avec le client.'],
       };
     }
+    if (request.schemaName === 'facture_ai_planning') {
+      const refs = [...request.text.matchAll(/^(c\d+) \|/gm)].map((m) => m[1]!);
+      return {
+        summary: 'Candidats classés selon les compétences, la disponibilité et la charge.',
+        ranking: refs.map((ref) => ({
+          ref,
+          reason: 'Créneau libre et compétences adaptées selon les données du planning.',
+        })),
+      };
+    }
+    if (request.schemaName === 'facture_ai_maintenance') {
+      return {
+        suggestions: [...request.text.matchAll(/^(e\d+) \| ([^|]+) \|/gm)].map(([, ref, name]) => ({
+          ref: ref!,
+          title: `Entretien préventif — ${name!.trim()}`,
+          explanation: 'Vérification recommandée au vu de l’historique enregistré.',
+        })),
+      };
+    }
     return undefined;
   },
 };

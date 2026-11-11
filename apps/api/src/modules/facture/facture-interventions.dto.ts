@@ -20,10 +20,12 @@ import {
   ValidateIf,
 } from 'class-validator';
 import {
+  FACTURE_INTERVENTION_PRIORITIES,
   FACTURE_INTERVENTION_STATUSES,
   FACTURE_MAX_INTERVENTION_TECHNICIANS,
   FACTURE_MAX_QUANTITY,
   FACTURE_MAX_TIME_ENTRY_MINUTES,
+  type FactureInterventionPriority,
   type FactureInterventionStatus,
 } from '@ocall/shared';
 
@@ -94,6 +96,14 @@ export class FactureEquipmentDto {
   @IsString()
   @MaxLength(1000)
   notes?: string | null;
+
+  @ApiPropertyOptional({ description: 'Périodicité d’entretien conseillée, en mois (1 à 60)' })
+  @IsOptional()
+  @ValidateIf(notNull)
+  @IsInt()
+  @Min(1)
+  @Max(60)
+  maintenanceIntervalMonths?: number | null;
 }
 
 export class UpdateFactureEquipmentDto extends PartialType(
@@ -179,11 +189,31 @@ export class CreateFactureInterventionDto {
   @ArrayUnique()
   @IsUUID('all', { each: true })
   technicianIds: string[];
+
+  @ApiPropertyOptional({ enum: FACTURE_INTERVENTION_PRIORITIES })
+  @IsOptional()
+  @IsIn(FACTURE_INTERVENTION_PRIORITIES)
+  priority?: FactureInterventionPriority;
+
+  @ApiPropertyOptional({ description: 'Compétences requises', type: [String] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @ArrayUnique()
+  @IsUUID('all', { each: true })
+  requiredSkillIds?: string[];
+
+  @ApiPropertyOptional({
+    description: 'Suggestion de maintenance préventive (F6B) acceptée, tracée comme appliquée',
+  })
+  @IsOptional()
+  @IsUUID()
+  aiProposalId?: string;
 }
 
 /** Modification du planning : le client d'une intervention ne change pas. */
 export class UpdateFactureInterventionDto extends PartialType(
-  OmitType(CreateFactureInterventionDto, ['clientId'] as const),
+  OmitType(CreateFactureInterventionDto, ['clientId', 'aiProposalId'] as const),
 ) {}
 
 export class FactureInterventionQueryDto {

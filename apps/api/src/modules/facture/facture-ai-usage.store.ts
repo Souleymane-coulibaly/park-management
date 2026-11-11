@@ -18,6 +18,8 @@ export const FACTURE_AI_TIMEZONE = 'Africa/Bamako';
 export const FACTURE_AI_FIELDS = {
   FACTURE_REPORT: { enabled: 'reportEnabled', limit: 'reportMonthlyLimit' },
   FACTURE_QUOTE: { enabled: 'quoteEnabled', limit: 'quoteMonthlyLimit' },
+  FACTURE_PLANNING: { enabled: 'planningEnabled', limit: 'planningMonthlyLimit' },
+  FACTURE_MAINTENANCE: { enabled: 'maintenanceEnabled', limit: 'maintenanceMonthlyLimit' },
 } as const satisfies Record<FactureAiFeature, { enabled: string; limit: string }>;
 
 export function factureAiMonthStart(now = new Date()): Date {

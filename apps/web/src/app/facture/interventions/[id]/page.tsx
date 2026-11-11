@@ -22,6 +22,7 @@ import {
 } from '@ocall/shared';
 import { DocumentStatusBadge } from '@/components/facture/document-status-badge';
 import { FacturePage } from '@/components/facture/facture-page';
+import { AiPlanningAssistant } from '@/components/facture/ai-planning-assistant';
 import { AiReportAssistant } from '@/components/facture/ai-report-assistant';
 import { InterventionStatusBadge } from '@/components/facture/intervention-status-badge';
 import { SignaturePad, type SignaturePadHandle } from '@/components/facture/signature-pad';
@@ -63,6 +64,8 @@ interface Intervention {
     location: string | null;
   } | null;
   technicians: { memberId: string; name: string; role: FactureRole }[];
+  priority: 'NORMAL' | 'URGENT';
+  requiredSkills: { id: string; name: string }[];
   timeEntries: {
     id: string;
     memberId: string;
@@ -93,6 +96,27 @@ interface AiSettingsView {
   enabled: boolean;
   reportEnabled: boolean;
   quoteEnabled: boolean;
+  planningEnabled: boolean;
+}
+
+/** Planification intelligente proposée seulement si l'IA et la fonctionnalité sont activées (F6B). */
+function AiPlanningGate({
+  interventionId,
+  onAssigned,
+}: {
+  interventionId: string;
+  onAssigned: () => void;
+}) {
+  const ai = useApi<AiSettingsView>('/facture/ai/settings');
+  if (
+    ai.state !== 'success' ||
+    !ai.data.configured ||
+    !ai.data.enabled ||
+    !ai.data.planningEnabled
+  ) {
+    return null;
+  }
+  return <AiPlanningAssistant interventionId={interventionId} onAssigned={onAssigned} />;
 }
 
 interface CatalogItem {
@@ -129,6 +153,7 @@ export default function FactureInterventionPage() {
           id={id}
           readOnly={context.access !== 'full'}
           aiReport={context.permissions.includes('facture.ai.report')}
+          aiPlanning={context.permissions.includes('facture.ai.planning')}
         />
       )}
     </FacturePage>
@@ -139,10 +164,12 @@ function InterventionView({
   id,
   readOnly,
   aiReport,
+  aiPlanning,
 }: {
   id: string;
   readOnly: boolean;
   aiReport: boolean;
+  aiPlanning: boolean;
 }) {
   const res = useApi<Intervention>(`/facture/interventions/${id}`);
   if (res.state === 'loading') return <LoadingState />;
@@ -154,6 +181,9 @@ function InterventionView({
   return (
     <div className="space-y-6" data-testid="facture-intervention" data-status={i.status}>
       <Summary i={i} can={can} reload={res.reload} />
+      {can.manage && i.status === 'PLANNED' && aiPlanning && (
+        <AiPlanningGate interventionId={i.id} onAssigned={res.reload} />
+      )}
       {can.manage && isFactureInterventionPlanningOpen(i.status) && (
         <EditPlanning i={i} reload={res.reload} />
       )}
@@ -219,6 +249,8 @@ function Summary({
         : '—',
     ],
     ['Techniciens', i.technicians.map((t) => t.name).join(', ') || 'Aucun'],
+    ['Priorité', i.priority === 'URGENT' ? 'Urgente' : 'Normale'],
+    ['Compétences requises', i.requiredSkills.map((s) => s.name).join(', ') || '—'],
     ...(i.startedAt
       ? ([['Début des travaux', dateTimeFr(i.startedAt)]] as [string, string][])
       : []),

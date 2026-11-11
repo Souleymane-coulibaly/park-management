@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { AiMaintenance } from '@/components/facture/ai-maintenance';
 import { FacturePage } from '@/components/facture/facture-page';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -21,6 +22,7 @@ interface EquipmentView {
   serialNumber: string | null;
   location: string | null;
   installedAt: string | null;
+  maintenanceIntervalMonths: number | null;
   notes: string | null;
   isArchived: boolean;
   client: { id: string; name: string };
@@ -38,6 +40,12 @@ const FIELDS = (e?: EquipmentView): SimpleField[] => [
     type: 'date',
     defaultValue: e?.installedAt?.slice(0, 10) ?? '',
   },
+  {
+    name: 'maintenanceIntervalMonths',
+    label: 'Entretien conseillé tous les (mois)',
+    type: 'number',
+    defaultValue: e?.maintenanceIntervalMonths ? String(e.maintenanceIntervalMonths) : '',
+  },
   { name: 'notes', label: 'Notes', defaultValue: e?.notes ?? '' },
 ];
 
@@ -50,7 +58,10 @@ export default function FactureEquipmentPage() {
     >
       {({ canWrite, context }) =>
         context.permissions.includes('facture.interventions.read') ? (
-          <Equipment canManage={canWrite('facture.interventions.manage')} />
+          <>
+            <Equipment canManage={canWrite('facture.interventions.manage')} />
+            {canWrite('facture.ai.maintenance') && <MaintenanceGate />}
+          </>
         ) : (
           <Alert tone="info" title="Le parc d’équipements n’est pas accessible à votre rôle." />
         )
@@ -203,4 +214,20 @@ function Equipment({ canManage }: { canManage: boolean }) {
       )}
     </>
   );
+}
+
+/** Maintenance préventive proposée seulement si l'IA et la fonctionnalité sont activées (F6B). */
+function MaintenanceGate() {
+  const ai = useApi<{ configured: boolean; enabled: boolean; maintenanceEnabled: boolean }>(
+    '/facture/ai/settings',
+  );
+  if (
+    ai.state !== 'success' ||
+    !ai.data.configured ||
+    !ai.data.enabled ||
+    !ai.data.maintenanceEnabled
+  ) {
+    return null;
+  }
+  return <AiMaintenance />;
 }

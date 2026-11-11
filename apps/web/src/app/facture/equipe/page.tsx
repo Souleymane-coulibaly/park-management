@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { FACTURE_ROLE_LABELS, FACTURE_ROLES, type FactureRole } from '@ocall/shared';
 import { FacturePage } from '@/components/facture/facture-page';
+import { TeamPlanning } from '@/components/facture/team-planning';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
@@ -32,7 +33,13 @@ export default function FactureTeamPage() {
     >
       {({ canWrite, context }) =>
         context.permissions.includes('facture.members.read') ? (
-          <Team canManage={canWrite('facture.members.manage')} />
+          <>
+            <Team canManage={canWrite('facture.members.manage')} />
+            <TeamPlanning
+              canManageSkills={canWrite('facture.members.manage')}
+              canManageAbsences={canWrite('facture.interventions.manage')}
+            />
+          </>
         ) : (
           <Alert tone="info" title="Réservé au gérant, aux commerciaux et aux comptables." />
         )

@@ -8,7 +8,12 @@ import {
   SCHOOL_TEACHING_PROMPT,
   SCHOOL_TEACHING_SECTION_PROMPT,
 } from '../modules/school/ai/school-ai.prompts';
-import { FACTURE_QUOTE_PROMPT, FACTURE_REPORT_PROMPT } from '../modules/facture/facture-ai.prompts';
+import {
+  FACTURE_MAINTENANCE_PROMPT,
+  FACTURE_PLANNING_PROMPT,
+  FACTURE_QUOTE_PROMPT,
+  FACTURE_REPORT_PROMPT,
+} from '../modules/facture/facture-ai.prompts';
 import { AI_PROMPT_MANIFEST } from './ai-prompt-manifest';
 
 /**
@@ -26,6 +31,8 @@ describe('Manifeste des prompts d’Ocall AI Core', () => {
     SCHOOL_ANALYSIS_PROMPT,
     FACTURE_REPORT_PROMPT,
     FACTURE_QUOTE_PROMPT,
+    FACTURE_PLANNING_PROMPT,
+    FACTURE_MAINTENANCE_PROMPT,
   ];
 
   it.each(prompts.map((p) => [`${p.id}@${p.version}`, p] as const))(

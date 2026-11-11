@@ -40,6 +40,40 @@ export class FactureAiSettingsDto {
   @Min(0)
   @Max(100_000)
   quoteMonthlyLimit: number;
+
+  @ApiPropertyOptional({ description: 'F6B ; absent : valeur enregistrée conservée' })
+  @IsOptional()
+  @IsBoolean()
+  planningEnabled?: boolean;
+
+  @ApiPropertyOptional({ description: 'F6B ; absent : valeur enregistrée conservée' })
+  @IsOptional()
+  @IsBoolean()
+  maintenanceEnabled?: boolean;
+
+  @ApiPropertyOptional({ description: 'F6B ; absent : valeur enregistrée conservée' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100_000)
+  planningMonthlyLimit?: number;
+
+  @ApiPropertyOptional({ description: 'F6B ; absent : valeur enregistrée conservée' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100_000)
+  maintenanceMonthlyLimit?: number;
+}
+
+/** Affectation choisie parmi les candidats proposés (planification intelligente). */
+export class FactureAiApplyDto {
+  @ApiPropertyOptional({ description: 'Rang du candidat choisi (planification), à partir de 0' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(9)
+  choice?: number;
 }
 
 /** Observations du technicien (formulaire multipart ; l'enregistrement vocal est facultatif). */

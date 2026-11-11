@@ -20,7 +20,13 @@ import {
   type FactureContext,
   RequireFacturePermission,
 } from './facture-access';
-import { FactureAiQuoteDto, FactureAiReportDto, FactureAiSettingsDto } from './facture-ai.dto';
+import {
+  FactureAiApplyDto,
+  FactureAiQuoteDto,
+  FactureAiReportDto,
+  FactureAiSettingsDto,
+} from './facture-ai.dto';
+import { FactureAiPlanningService } from './facture-ai-planning.service';
 import { FactureAiService } from './facture-ai.service';
 import type { FactureUpload } from './facture.service';
 
@@ -35,7 +41,10 @@ const audioFile = FileInterceptor('audio', {
 @UseGuards(FactureAccessGuard)
 @Controller('facture')
 export class FactureAiController {
-  constructor(private readonly ai: FactureAiService) {}
+  constructor(
+    private readonly ai: FactureAiService,
+    private readonly planning: FactureAiPlanningService,
+  ) {}
 
   @RequireFacturePermission('facture.access')
   @Get('ai/settings')
@@ -82,10 +91,48 @@ export class FactureAiController {
     return this.ai.apply(ctx, id);
   }
 
-  @RequireFacturePermission('facture.ai.report', 'facture.ai.quote')
+  @RequireFacturePermission(
+    'facture.ai.report',
+    'facture.ai.quote',
+    'facture.ai.planning',
+    'facture.ai.maintenance',
+  )
   @HttpCode(204)
   @Post('ai/proposals/:id/reject')
   reject(@CurrentFacture() ctx: FactureContext, @Param('id', uuid) id: string) {
     return this.ai.reject(ctx, id);
+  }
+
+  // ─── F6B : planification et maintenance préventive ───
+
+  @RequireFacturePermission('facture.ai.planning')
+  @HttpCode(200)
+  @Post('interventions/:id/ai/planning')
+  suggestPlanning(@CurrentFacture() ctx: FactureContext, @Param('id', uuid) id: string) {
+    return this.planning.planning(ctx, id);
+  }
+
+  @RequireFacturePermission('facture.ai.planning')
+  @HttpCode(200)
+  @Post('ai/proposals/:id/assign')
+  assign(
+    @CurrentFacture() ctx: FactureContext,
+    @Param('id', uuid) id: string,
+    @Body() dto: FactureAiApplyDto,
+  ) {
+    return this.planning.assign(ctx, id, dto.choice ?? 0);
+  }
+
+  @RequireFacturePermission('facture.ai.maintenance')
+  @Get('ai/maintenance')
+  maintenanceSuggestions(@CurrentFacture() ctx: FactureContext) {
+    return this.planning.suggestions(ctx);
+  }
+
+  @RequireFacturePermission('facture.ai.maintenance')
+  @HttpCode(200)
+  @Post('ai/maintenance')
+  analyzeMaintenance(@CurrentFacture() ctx: FactureContext) {
+    return this.planning.maintenance(ctx);
   }
 }

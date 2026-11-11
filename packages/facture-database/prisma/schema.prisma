@@ -86,8 +86,10 @@ model FactureMember {
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
-  assignments FactureInterventionTechnician[]
-  timeEntries FactureTimeEntry[]
+  assignments      FactureInterventionTechnician[]
+  timeEntries      FactureTimeEntry[]
+  skills           FactureMemberSkill[]
+  unavailabilities FactureUnavailability[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, userId])
@@ -362,20 +364,22 @@ model FactureLogo {
 
 /// Équipement du parc d'un client (climatiseur, groupe électrogène, onduleur…). Jamais supprimé : archivé.
 model FactureEquipment {
-  id             String    @id @default(uuid()) @db.Uuid
-  organizationId String    @db.Uuid
-  clientId       String    @db.Uuid
-  name           String
-  brand          String?
-  model          String?
-  serialNumber   String?
+  id                        String    @id @default(uuid()) @db.Uuid
+  organizationId            String    @db.Uuid
+  clientId                  String    @db.Uuid
+  name                      String
+  brand                     String?
+  model                     String?
+  serialNumber              String?
   /// Emplacement chez le client (bâtiment, étage, local).
-  location       String?
-  installedAt    DateTime? @db.Date
-  notes          String?
-  isArchived     Boolean   @default(false)
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  location                  String?
+  installedAt               DateTime? @db.Date
+  /// Périodicité d'entretien conseillée, en mois (1 à 60), pour la maintenance préventive (F6B).
+  maintenanceIntervalMonths Int?
+  notes                     String?
+  isArchived                Boolean   @default(false)
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
 
   client        FactureClient         @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Restrict)
   interventions FactureIntervention[]
@@ -410,14 +414,16 @@ model FactureInterventionCounter {
 /// Les règles de statut et le gel du rapport sont tenus aussi par la base (déclencheurs de la migration
 /// `facture_v1_interventions`).
 model FactureIntervention {
-  id                String                    @id @default(uuid()) @db.Uuid
-  organizationId    String                    @db.Uuid
+  id                String                      @id @default(uuid()) @db.Uuid
+  organizationId    String                      @db.Uuid
   number            String
   year              Int
   sequence          Int
-  status            FactureInterventionStatus @default(PLANNED)
-  clientId          String                    @db.Uuid
-  equipmentId       String?                   @db.Uuid
+  status            FactureInterventionStatus   @default(PLANNED)
+  /// Priorité (F6B) : une urgence est proposée au plus tôt par la planification intelligente.
+  priority          FactureInterventionPriority @default(NORMAL)
+  clientId          String                      @db.Uuid
+  equipmentId       String?                     @db.Uuid
   /// Objet de la demande.
   title             String
   description       String?
@@ -429,7 +435,7 @@ model FactureIntervention {
   scheduledEnd      DateTime
   startedAt         DateTime?
   completedAt       DateTime?
-  completedByUserId String?                   @db.Uuid
+  completedByUserId String?                     @db.Uuid
   /// Rapport : travaux réalisés et recommandations, rédigés à la fin des travaux.
   workSummary       String?
   recommendations   String?
@@ -438,24 +444,25 @@ model FactureIntervention {
   signerName        String?
   signedAt          DateTime?
   signatureKey      String?
-  reportHash        String?                   @db.Char(64)
+  reportHash        String?                     @db.Char(64)
   /// Facture brouillon créée depuis l'intervention (une seule).
-  invoiceId         String?                   @db.Uuid
+  invoiceId         String?                     @db.Uuid
   cancelledAt       DateTime?
   cancelReason      String?
-  createdByUserId   String                    @db.Uuid
-  createdAt         DateTime                  @default(now())
-  updatedAt         DateTime                  @updatedAt
+  createdByUserId   String                      @db.Uuid
+  createdAt         DateTime                    @default(now())
+  updatedAt         DateTime                    @updatedAt
 
-  client        FactureClient                   @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Restrict)
+  client         FactureClient                   @relation(fields: [organizationId, clientId], references: [organizationId, id], onDelete: Restrict)
   /// L'équipement appartient au client de l'intervention (clé composée avec le client).
-  equipment     FactureEquipment?               @relation(fields: [organizationId, clientId, equipmentId], references: [organizationId, clientId, id], onDelete: Restrict)
-  invoice       FactureDocument?                @relation(fields: [organizationId, invoiceId], references: [organizationId, id], onDelete: Restrict)
-  technicians   FactureInterventionTechnician[]
-  timeEntries   FactureTimeEntry[]
-  parts         FacturePartUsage[]
-  photos        FactureInterventionPhoto[]
-  notifications FactureNotification[]
+  equipment      FactureEquipment?               @relation(fields: [organizationId, clientId, equipmentId], references: [organizationId, clientId, id], onDelete: Restrict)
+  invoice        FactureDocument?                @relation(fields: [organizationId, invoiceId], references: [organizationId, id], onDelete: Restrict)
+  technicians    FactureInterventionTechnician[]
+  timeEntries    FactureTimeEntry[]
+  parts          FacturePartUsage[]
+  photos         FactureInterventionPhoto[]
+  notifications  FactureNotification[]
+  requiredSkills FactureInterventionSkill[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, number])
@@ -617,14 +624,18 @@ model FactureNotification {
 /// Réglages IA d'une organisation : désactivée par défaut ; plafond mensuel par fonctionnalité, fixé par
 /// le gérant sous le plafond plateforme Ocall.
 model FactureAiSettings {
-  organizationId     String   @id @db.Uuid
-  enabled            Boolean  @default(false)
-  reportEnabled      Boolean  @default(true)
-  quoteEnabled       Boolean  @default(true)
-  reportMonthlyLimit Int      @default(100)
-  quoteMonthlyLimit  Int      @default(100)
-  updatedByUserId    String?  @db.Uuid
-  updatedAt          DateTime @updatedAt
+  organizationId          String   @id @db.Uuid
+  enabled                 Boolean  @default(false)
+  reportEnabled           Boolean  @default(true)
+  quoteEnabled            Boolean  @default(true)
+  planningEnabled         Boolean  @default(true)
+  maintenanceEnabled      Boolean  @default(true)
+  reportMonthlyLimit      Int      @default(100)
+  quoteMonthlyLimit       Int      @default(100)
+  planningMonthlyLimit    Int      @default(100)
+  maintenanceMonthlyLimit Int      @default(100)
+  updatedByUserId         String?  @db.Uuid
+  updatedAt               DateTime @updatedAt
 }
 
 /// Consommation IA (une ligne par appel réservé) : aucun contenu, seulement le coût et la trace technique.
@@ -687,4 +698,69 @@ model FactureAiProposal {
   @@unique([organizationId, id])
   @@index([organizationId, targetType, targetId])
   @@index([organizationId, feature, createdAt])
+}
+
+// ─── F6B — Planification et maintenance préventive ───
+
+enum FactureInterventionPriority {
+  NORMAL
+  URGENT
+}
+
+/// Compétence définie par l'entreprise (liste libre : climatisation, électricité, groupe électrogène…).
+model FactureSkill {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  name           String
+  isArchived     Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  members       FactureMemberSkill[]
+  interventions FactureInterventionSkill[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, name])
+}
+
+/// Compétence détenue par un membre de l'équipe.
+model FactureMemberSkill {
+  organizationId String @db.Uuid
+  memberId       String @db.Uuid
+  skillId        String @db.Uuid
+
+  member FactureMember @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Cascade)
+  skill  FactureSkill  @relation(fields: [organizationId, skillId], references: [organizationId, id], onDelete: Restrict)
+
+  @@id([memberId, skillId])
+  @@index([organizationId, skillId])
+}
+
+/// Compétence requise par une intervention.
+model FactureInterventionSkill {
+  organizationId String @db.Uuid
+  interventionId String @db.Uuid
+  skillId        String @db.Uuid
+
+  intervention FactureIntervention @relation(fields: [organizationId, interventionId], references: [organizationId, id], onDelete: Restrict)
+  skill        FactureSkill        @relation(fields: [organizationId, skillId], references: [organizationId, id], onDelete: Restrict)
+
+  @@id([interventionId, skillId])
+  @@index([organizationId, skillId])
+}
+
+/// Indisponibilité d'un membre (congé, absence, formation) : jamais proposé sur cette période.
+model FactureUnavailability {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  memberId        String   @db.Uuid
+  startsAt        DateTime
+  endsAt          DateTime
+  reason          String?
+  createdByUserId String   @db.Uuid
+  createdAt       DateTime @default(now())
+
+  member FactureMember @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@index([organizationId, memberId, startsAt])
 }

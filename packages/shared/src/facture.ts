@@ -45,6 +45,10 @@ export const FACTURE_PERMISSIONS = [
   'facture.ai.report',
   /** Devis intelligent : brouillon de devis proposé depuis une demande (F6A). */
   'facture.ai.quote',
+  /** Planification intelligente : techniciens et créneaux proposés, affectés après validation (F6B). */
+  'facture.ai.planning',
+  /** Maintenance préventive intelligente : équipements à entretenir ou à vérifier (F6B). */
+  'facture.ai.maintenance',
 ] as const;
 export type FacturePermission = (typeof FACTURE_PERMISSIONS)[number];
 
@@ -62,6 +66,8 @@ const ROLE_PERMISSIONS: Record<FactureRole, readonly FacturePermission[]> = {
     'facture.interventions.read',
     'facture.interventions.manage',
     'facture.ai.quote',
+    'facture.ai.planning',
+    'facture.ai.maintenance',
   ],
   ACCOUNTANT: [
     'facture.access',

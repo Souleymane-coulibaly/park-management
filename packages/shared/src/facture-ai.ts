@@ -6,13 +6,20 @@
 
 export const FACTURE_AI_APPLICATION = 'facture';
 
-/** Fonctionnalités IA de F6A (la planification et la maintenance suivront en F6B). */
-export const FACTURE_AI_FEATURES = ['FACTURE_REPORT', 'FACTURE_QUOTE'] as const;
+/** Fonctionnalités IA : rapport et devis (F6A), planification et maintenance préventive (F6B). */
+export const FACTURE_AI_FEATURES = [
+  'FACTURE_REPORT',
+  'FACTURE_QUOTE',
+  'FACTURE_PLANNING',
+  'FACTURE_MAINTENANCE',
+] as const;
 export type FactureAiFeature = (typeof FACTURE_AI_FEATURES)[number];
 
 export const FACTURE_AI_FEATURE_LABELS: Record<FactureAiFeature, string> = {
   FACTURE_REPORT: 'Rapport d’intervention intelligent',
   FACTURE_QUOTE: 'Devis intelligent',
+  FACTURE_PLANNING: 'Planification intelligente',
+  FACTURE_MAINTENANCE: 'Maintenance préventive intelligente',
 };
 
 export const FACTURE_AI_PROPOSAL_STATUSES = ['PROPOSED', 'APPLIED', 'REJECTED'] as const;

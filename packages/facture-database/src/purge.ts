@@ -17,6 +17,8 @@ export async function purgeFactureOrganizations(
       const where = { organizationId: { in: organizationIds } };
       // Interventions (F3) : leurs saisies, puis elles-mêmes, avant les factures qu'elles citent.
       await tx.factureAiProposal.deleteMany({ where });
+      await tx.factureUnavailability.deleteMany({ where });
+      await tx.factureMemberSkill.deleteMany({ where });
       await tx.factureAiUsage.deleteMany({ where });
       await tx.factureAiSettings.deleteMany({ where });
       await tx.factureNotification.deleteMany({ where });
@@ -25,9 +27,11 @@ export async function purgeFactureOrganizations(
       await tx.facturePartUsage.deleteMany({ where });
       await tx.factureTimeEntry.deleteMany({ where });
       await tx.factureInterventionTechnician.deleteMany({ where });
+      await tx.factureInterventionSkill.deleteMany({ where });
       await tx.factureIntervention.deleteMany({ where });
       await tx.factureInterventionCounter.deleteMany({ where });
       await tx.factureEquipment.deleteMany({ where });
+      await tx.factureSkill.deleteMany({ where });
       await tx.facturePayment.deleteMany({ where });
       await tx.factureDocumentLine.deleteMany({ where });
       // Chaîne devis → pro forma → bon de commande → facture → avoir : d'abord les documents dont rien

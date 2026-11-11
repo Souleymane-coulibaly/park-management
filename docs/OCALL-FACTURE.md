@@ -16,8 +16,8 @@ Proposition d'architecture et décisions : `ocall-audits/proposition-architectur
 | **F3 — Interventions** | Techniciens, planning, équipements, temps, pièces, photos, signature | Livré               |
 | **F4 — Rendez-vous**   | Confirmation, report, rappels, annulation : WhatsApp, e-mail secours | Livré               |
 | F5 — Site vitrine      | Site public, formulaires de demande, domaines, SEO local             | À venir             |
-| **F6A — IA (1)**       | Socle IA, rapport d'intervention intelligent, devis intelligent      | Livré (ce document) |
-| F6B — IA (2)           | Planification intelligente, maintenance préventive intelligente      | À venir             |
+| **F6A — IA (1)**       | Socle IA, rapport d'intervention intelligent, devis intelligent      | Livré               |
+| **F6B — IA (2)**       | Planification intelligente, maintenance préventive intelligente      | Livré (ce document) |
 
 ## 1. Architecture
 
@@ -59,25 +59,28 @@ Le **propriétaire de l'organisation est gérant d'office**. Les autres comptes 
 avec le rôle Suite `PRODUCT_USER` (aucun droit Park ni School) et un rôle Facture. Un rôle Park ou School
 ne donne aucun droit Facture.
 
-| Permission                                           | Gérant | Commercial | Comptable | Technicien  |
-| ---------------------------------------------------- | ------ | ---------- | --------- | ----------- |
-| Entrer, consulter l'identité de l'entreprise         | Oui    | Oui        | Oui       | Oui         |
-| Modifier l'identité, le logo, la TVA par défaut      | Oui    | Non        | Non       | Non         |
-| Voir l'équipe                                        | Oui    | Oui        | Oui       | Non         |
-| Gérer l'équipe                                       | Oui    | Non        | Non       | Non         |
-| Consulter clients et catalogue                       | Oui    | Oui        | Oui       | Oui         |
-| Gérer les clients                                    | Oui    | Oui        | Oui       | Non         |
-| Gérer le catalogue                                   | Oui    | Oui        | Non       | Non         |
-| Consulter et gérer les documents commerciaux         | Oui    | Oui        | Oui       | Non         |
-| Émettre et relancer les factures                     | Oui    | Oui        | Oui       | Non         |
-| Encaissements et avoirs                              | Oui    | Non        | Oui       | Non         |
-| Exports comptables (journaux CSV)                    | Oui    | Non        | Oui       | Non         |
-| Voir toutes les interventions et les équipements     | Oui    | Oui        | Oui       | Les siennes |
-| Planifier, affecter, annuler ; gérer les équipements | Oui    | Oui        | Non       | Non         |
-| Réaliser : temps, pièces, photos, fin, signature     | Oui    | Non        | Non       | Les siennes |
-| Facturer une intervention signée                     | Oui    | Oui        | Oui       | Non         |
-| Rapport d'intervention intelligent (IA)              | Oui    | Non        | Non       | Les siennes |
-| Devis intelligent (IA)                               | Oui    | Oui        | Non       | Non         |
+| Permission                                              | Gérant | Commercial | Comptable | Technicien  |
+| ------------------------------------------------------- | ------ | ---------- | --------- | ----------- |
+| Entrer, consulter l'identité de l'entreprise            | Oui    | Oui        | Oui       | Oui         |
+| Modifier l'identité, le logo, la TVA par défaut         | Oui    | Non        | Non       | Non         |
+| Voir l'équipe                                           | Oui    | Oui        | Oui       | Non         |
+| Gérer l'équipe                                          | Oui    | Non        | Non       | Non         |
+| Consulter clients et catalogue                          | Oui    | Oui        | Oui       | Oui         |
+| Gérer les clients                                       | Oui    | Oui        | Oui       | Non         |
+| Gérer le catalogue                                      | Oui    | Oui        | Non       | Non         |
+| Consulter et gérer les documents commerciaux            | Oui    | Oui        | Oui       | Non         |
+| Émettre et relancer les factures                        | Oui    | Oui        | Oui       | Non         |
+| Encaissements et avoirs                                 | Oui    | Non        | Oui       | Non         |
+| Exports comptables (journaux CSV)                       | Oui    | Non        | Oui       | Non         |
+| Voir toutes les interventions et les équipements        | Oui    | Oui        | Oui       | Les siennes |
+| Planifier, affecter, annuler ; gérer les équipements    | Oui    | Oui        | Non       | Non         |
+| Réaliser : temps, pièces, photos, fin, signature        | Oui    | Non        | Non       | Les siennes |
+| Facturer une intervention signée                        | Oui    | Oui        | Oui       | Non         |
+| Rapport d'intervention intelligent (IA)                 | Oui    | Non        | Non       | Les siennes |
+| Devis intelligent (IA)                                  | Oui    | Oui        | Non       | Non         |
+| Planification intelligente, maintenance préventive (IA) | Oui    | Oui        | Non       | Non         |
+| Compétences des techniciens                             | Oui    | Non        | Non       | Non         |
+| Indisponibilités des techniciens                        | Oui    | Oui        | Non       | Non         |
 
 Désactiver un membre ferme aussi son compte Suite et ses sessions : Facture décide d'abord, Suite recopie
 l'état validé (même mécanisme que School).
@@ -241,7 +244,7 @@ brouillon n'a pas de numéro.
 - **Hors V1** : accusés de lecture et de remise WhatsApp (webhook du fournisseur), réponse du client
   (confirmer, demander un report), SMS.
 
-## 10. Module IA (F6A)
+## 10. Module IA (F6A, F6B)
 
 Sur **Ocall AI Core** (`apps/api/src/ai-core`) : application `facture` inscrite au démarrage, consommation et
 quotas dans la base Facture (`FactureAiUsageStore`, réservation atomique sous verrou, réservations
@@ -270,7 +273,26 @@ cœur), fournisseur simulé en test (aucun appel payant). **L'IA propose, une pe
 - **Sécurité** : contexte de chaque appel construit depuis la session (organisation, utilisateur, rôle,
   opération), jamais depuis le modèle ; textes saisis ou dictés traités comme des données ; aucune lecture
   hors de l'organisation ; technicien limité à ses interventions.
-- **F6B** (à venir) : planification intelligente, maintenance préventive intelligente.
+- **Données de planification** (F6B) : **compétences** en liste libre propre à chaque entreprise (jamais
+  supprimées : archivées), compétences de chaque technicien (gérant), **indisponibilités** (congés,
+  absences ; gérant et commercial), **priorité** (normale, urgente) et **compétences requises** de chaque
+  intervention, **périodicité d'entretien** de chaque équipement (1 à 60 mois).
+- **Planification intelligente** (gérant, commercial ; intervention planifiée) : le **serveur** calcule les
+  candidats (`facturePlanningCandidates`) — techniciens actifs détenant au moins une compétence requise,
+  créneau demandé gardé s'il est libre, sinon premier créneau libre de même durée dans les journées de
+  travail (8 h – 18 h, heure du Mali, 14 jours) ; une urgence est proposée au plus tôt ; interventions
+  prévues et indisponibilités exclues. L'IA ne fait que **classer et expliquer** ces candidats (référence
+  inconnue écartée ; aucun créneau modifiable). **Affectation sur décision** (« Affecter ») : créneau
+  revérifié sous verrou du technicien au moment d'appliquer (refus s'il a été pris entre-temps), puis
+  modification de l'intervention dans la même transaction (notifications de report comprises).
+- **Maintenance préventive intelligente** (gérant, commercial) : le **serveur** sélectionne les
+  équipements (`factureMaintenanceCandidates`) — entretien périodique échu ou à 30 jours, aucun entretien
+  depuis plus d'un an de service, au moins deux interventions en six mois — avec leurs justificatifs
+  (interventions réelles). L'IA rédige intitulé et explication ; **refusées** : une panne annoncée comme
+  certaine, une intervention citée étrangère à l'équipement, un chiffre absent de l'historique. Une
+  suggestion en attente n'est pas dupliquée (sans nouveau candidat, aucun appel IA). Elle ne devient une
+  intervention que par le **formulaire de planification** prérempli (« Planifier ») ; elle est alors tracée
+  comme appliquée, dans la même transaction ; « Ignorer » la rejette.
 
 ## 11. API (`/api/v1/facture`)
 
@@ -299,7 +321,12 @@ cœur), fournisseur simulé en test (aucun appel payant). **L'IA propose, une pe
 | `PUT ai/settings` · `GET ai/proposals`                                                                                   | gérer l'identité    |
 | `POST interventions/:id/ai/report`                                                                                       | rapport IA          |
 | `POST ai/quote` · `POST ai/proposals/:id/apply`                                                                          | devis IA            |
-| `POST ai/proposals/:id/reject`                                                                                           | rapport ou devis IA |
+| `POST ai/proposals/:id/reject`                                                                                           | fonctionnalité IA   |
+| `POST interventions/:id/ai/planning` · `POST ai/proposals/:id/assign`                                                    | planification IA    |
+| `GET ai/maintenance` · `POST ai/maintenance`                                                                             | maintenance IA      |
+| `GET skills` · `GET member-skills`                                                                                       | voir l'équipe       |
+| `POST skills` · `PATCH skills/:id` · `PUT members/:id/skills`                                                            | gérer l'équipe      |
+| `GET unavailabilities` / `POST unavailabilities` · `DELETE unavailabilities/:id`                                         | planifier           |
 | `GET members`                                                                                                            | voir l'équipe       |
 | `POST members` · `PATCH members/:id`                                                                                     | gérer l'équipe      |
 
@@ -322,7 +349,9 @@ facturation) et `/facture/equipements`.
   `20261124000000_facture_v1_notifications` (F4 : réglages, consentement WhatsApp du client, file des
   notifications ; contrôles et déclencheur `FactureNotification_frozen`) et
   `20261125000000_facture_v1_ai` (F6A : réglages IA, consommation, propositions tracées ; contrôles et
-  déclencheur `FactureAiProposal_frozen`), appliquées par `pnpm db:facture:migrate:deploy` (refus des instructions
+  déclencheur `FactureAiProposal_frozen`) et `20261126000000_facture_v1_ai_planning` (F6B : compétences,
+  indisponibilités, priorité, compétences requises, périodicité d'entretien, réglages IA ; contrôles),
+  appliquées par `pnpm db:facture:migrate:deploy` (refus des instructions
   destructrices et d'une base Suite ou School).
 - Pré-déploiement Railway : `db:migrate:deploy && db:school:migrate:deploy && db:facture:migrate:deploy`
   — sans `FACTURE_ENABLED=true`, l'étape Facture ne fait rien.
@@ -336,7 +365,9 @@ facturation) et `/facture/equipements`.
 - Unitaires : `packages/shared/src/facture.spec.ts` (TVA, numérotation, mentions, permissions),
   `facture-interventions.spec.ts` (transitions, durées, référence, portée des rôles),
   `facture-notifications.spec.ts` (heures des rappels, textes, délais des nouvelles tentatives),
-  `facture-ai.spec.ts` (droits IA, texte corrigé), `ai-prompt-manifest.spec.ts` (empreintes des prompts),
+  `facture-ai.spec.ts` (droits IA, texte corrigé), `facture-planning.spec.ts` (candidats, conflits,
+  urgence, créneaux libres, signaux de maintenance, formulations interdites), `ai-prompt-manifest.spec.ts`
+  (empreintes des prompts),
   `facture-documents.spec.ts` (montants exacts, remises, TVA par taux, conversions, montant en lettres,
   reste dû, statut d'une facture, échéance dépassée),
   `facture-boundaries.spec.ts` (frontières, configuration), `migration-safety.spec.ts` (cible Facture).
@@ -356,11 +387,16 @@ facturation) et `/facture/equipements`.
   `facture-f6a.integration.spec.ts` (réglages et plafond Ocall, rapport sur données réelles et dictée,
   validation à la fin des travaux, chiffres inventés refusés, proposition d'une autre intervention,
   devis aux prix du catalogue, article inconnu / quantité absurde / prix du modèle écartés, brouillon jamais
-  émis, quotas sous concurrence, rôles, isolation, proposition figée) — exigent `TEST_FACTURE_DATABASE_URL`.
+  émis, quotas sous concurrence, rôles, isolation, proposition figée), `facture-f6b.integration.spec.ts`
+  (compétences et indisponibilités, candidats du serveur, conflit évité, urgence, technicien sans
+  compétence écarté, créneau pris refusé à l'affectation, candidat inventé écarté, suggestions de
+  maintenance sur historique réel sans doublon, panne certaine et intervention étrangère refusées,
+  suggestion appliquée en planifiant, rôles, isolation, plafonds) — exigent `TEST_FACTURE_DATABASE_URL`.
 - E2E : `e2e/facture-f0.spec.ts` (portail, identité, logo, équipe), `e2e/facture-f1.spec.ts` (client,
   article, devis → bon de commande → facture brouillon, PDF), `e2e/facture-f2.spec.ts` (facture émise,
   payée en deux fois, avoir, tableau de bord, export), `e2e/facture-f3.spec.ts` (intervention planifiée,
   réalisée, signée à l'écran, facturée), `e2e/facture-f4.spec.ts` (rendez-vous confirmé, reporté,
   annulé, envoyés par le répartiteur avec le fournisseur simulé), `e2e/facture-f6a.spec.ts` (rapport et
-  devis intelligents validés par une personne).
+  devis intelligents validés par une personne), `e2e/facture-f6b.spec.ts` (maintenance préventive
+  planifiée, technicien compétent proposé et affecté sur décision).
 - CI : base `ocall_facture_ci` éphémère, migrée puis utilisée par les tests d'intégration et E2E.

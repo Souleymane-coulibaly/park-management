@@ -39,7 +39,11 @@ import {
   type FactureInterventionReport,
   renderFactureInterventionReport,
 } from './facture-intervention-pdf';
-import { applyFactureReportProposal } from './facture-ai-proposals';
+import {
+  applyFactureMaintenanceProposal,
+  applyFactureReportProposal,
+} from './facture-ai-proposals';
+import { FactureSkillsService } from './facture-skills.service';
 import { FactureNotificationsService } from './facture-notifications.service';
 import { loadFactureLogos } from './facture-pdf';
 import { FacturePrismaService } from './facture-prisma.service';
@@ -97,6 +101,7 @@ const INCLUDE = {
     orderBy: { createdAt: 'asc' },
   },
   invoice: { select: { id: true, number: true, status: true } },
+  requiredSkills: { select: { skill: { select: { id: true, name: true } } } },
   notifications: {
     select: {
       id: true,
@@ -135,6 +140,7 @@ export class FactureInterventionsService {
     private readonly audit: AuditService,
     private readonly documents: FactureDocumentsService,
     private readonly notifications: FactureNotificationsService,
+    private readonly skills: FactureSkillsService,
     @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
   ) {}
 
@@ -222,6 +228,7 @@ export class FactureInterventionsService {
         id: true,
         number: true,
         status: true,
+        priority: true,
         title: true,
         siteAddress: true,
         scheduledStart: true,
@@ -253,6 +260,7 @@ export class FactureInterventionsService {
       if (dto.equipmentId)
         await this.assertEquipment(tx, ctx.organizationId, dto.clientId, dto.equipmentId);
       await this.assertTechnicians(tx, ctx.organizationId, dto.technicianIds);
+      await this.skills.assertSkills(tx, ctx.organizationId, dto.requiredSkillIds ?? []);
       const year = now.getUTCFullYear();
       const [counter] = await tx.$queryRaw<{ value: number }[]>`
         INSERT INTO "FactureInterventionCounter" ("organizationId", "year", "value", "updatedAt")
@@ -277,10 +285,30 @@ export class FactureInterventionsService {
           contactPhone: dto.contactPhone ?? client.phone ?? null,
           scheduledStart: start,
           scheduledEnd: end,
+          priority: dto.priority ?? 'NORMAL',
           createdByUserId: ctx.userId,
         },
         select: { id: true },
       });
+      if (dto.requiredSkillIds?.length) {
+        await tx.factureInterventionSkill.createMany({
+          data: dto.requiredSkillIds.map((skillId) => ({
+            organizationId: ctx.organizationId,
+            interventionId: intervention.id,
+            skillId,
+          })),
+        });
+      }
+      // Suggestion de maintenance préventive acceptée (F6B) : tracée comme appliquée, même transaction.
+      if (dto.aiProposalId) {
+        await applyFactureMaintenanceProposal(
+          tx,
+          ctx,
+          dto.aiProposalId,
+          { equipmentId: dto.equipmentId ?? null, interventionId: intervention.id },
+          now,
+        );
+      }
       if (dto.technicianIds.length > 0) {
         await tx.factureInterventionTechnician.createMany({
           data: dto.technicianIds.map((memberId) => ({
@@ -304,7 +332,23 @@ export class FactureInterventionsService {
     dto: UpdateFactureInterventionDto,
     now = new Date(),
   ) {
-    await this.db.$transaction(async (tx) => {
+    await this.db.$transaction((tx) => this.updateInTx(tx, ctx, id, dto, now));
+    await this.record(ctx, 'facture.intervention_updated', 'FactureIntervention', id);
+    return this.get(ctx, id);
+  }
+
+  /**
+   * Modification du planning dans la transaction de l'appelant (modification directe, affectation
+   * proposée par la planification intelligente) : verrou, contrôles, notifications de report.
+   */
+  async updateInTx(
+    tx: Tx,
+    ctx: FactureContext,
+    id: string,
+    dto: UpdateFactureInterventionDto,
+    now: Date,
+  ) {
+    {
       const row = await this.lock(tx, ctx, id);
       if (!isFactureInterventionPlanningOpen(row.status)) {
         throw conflict(
@@ -362,15 +406,29 @@ export class FactureInterventionsService {
           ...(dto.siteAddress !== undefined ? { siteAddress: dto.siteAddress } : {}),
           ...(dto.contactName !== undefined ? { contactName: dto.contactName } : {}),
           ...(dto.contactPhone !== undefined ? { contactPhone: dto.contactPhone } : {}),
+          ...(dto.priority !== undefined ? { priority: dto.priority } : {}),
         },
       });
+      if (dto.requiredSkillIds) {
+        await this.skills.assertSkills(tx, ctx.organizationId, dto.requiredSkillIds);
+        await tx.factureInterventionSkill.deleteMany({
+          where: { organizationId: ctx.organizationId, interventionId: id },
+        });
+        if (dto.requiredSkillIds.length > 0) {
+          await tx.factureInterventionSkill.createMany({
+            data: dto.requiredSkillIds.map((skillId) => ({
+              organizationId: ctx.organizationId,
+              interventionId: id,
+              skillId,
+            })),
+          });
+        }
+      }
       // Rendez-vous déplacé avant son début : rappels obsolètes annulés, client prévenu du report.
       if (row.status === 'PLANNED' && slot.start.getTime() !== row.scheduledStart.getTime()) {
         await this.notifications.onRescheduled(tx, ctx.organizationId, id, now);
       }
-    });
-    await this.record(ctx, 'facture.intervention_updated', 'FactureIntervention', id);
-    return this.get(ctx, id);
+    }
   }
 
   async cancel(ctx: FactureContext, id: string, reason: string, now = new Date()) {
@@ -979,7 +1037,16 @@ export class FactureInterventionsService {
 
   private view(ctx: FactureContext, row: InterventionRow) {
     const assigned = row.technicians.some((t) => t.memberId === ctx.memberId);
-    const { signatureKey, photos, timeEntries, parts, technicians, notifications, ...rest } = row;
+    const {
+      signatureKey,
+      photos,
+      timeEntries,
+      parts,
+      technicians,
+      notifications,
+      requiredSkills,
+      ...rest
+    } = row;
     return {
       ...rest,
       hasSignature: Boolean(signatureKey),
@@ -998,6 +1065,7 @@ export class FactureInterventionsService {
         quantity: Number(p.quantity.toString()),
       })),
       photos: photos.map(({ storageKey: _k, ...p }) => p),
+      requiredSkills: requiredSkills.map((s) => s.skill),
       /** Notifications au client (F4) : numéros et adresses masqués. */
       notifications: notifications.map((n) => ({ ...n, recipient: maskRecipient(n.recipient) })),
       /** Droits de l'utilisateur sur cette intervention (affichage des actions ; l'API décide). */

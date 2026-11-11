@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, useEffect, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import {
   type FactureInterventionStatus,
@@ -189,6 +189,22 @@ function NewIntervention() {
     description: '',
   });
   const [technicianIds, setTechnicianIds] = useState<string[]>([]);
+  const skills = useApi<{ id: string; name: string; isArchived: boolean }[]>('/facture/skills');
+  const [priority, setPriority] = useState<'NORMAL' | 'URGENT'>('NORMAL');
+  const [requiredSkillIds, setRequiredSkillIds] = useState<string[]>([]);
+  // Suggestion de maintenance préventive acceptée (F6B) : formulaire prérempli, tracée à la création.
+  const [aiProposalId, setAiProposalId] = useState<string | null>(null);
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    if (!q.get('maintenance')) return;
+    setAiProposalId(q.get('maintenance'));
+    setClientId(q.get('clientId') ?? '');
+    setForm((f) => ({
+      ...f,
+      title: q.get('title') ?? '',
+      equipmentId: q.get('equipmentId') ?? '',
+    }));
+  }, []);
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
   const set = (key: keyof typeof form) => ({
@@ -213,6 +229,9 @@ function NewIntervention() {
           scheduledStart: `${form.date}T${form.start}:00Z`,
           scheduledEnd: `${form.date}T${form.end}:00Z`,
           technicianIds,
+          priority,
+          requiredSkillIds,
+          ...(aiProposalId ? { aiProposalId } : {}),
         },
       });
       router.push(`/facture/interventions/${created.id}`);
@@ -293,6 +312,36 @@ function NewIntervention() {
               </p>
             )}
           </div>
+          <SelectField
+            label="Priorité"
+            value={priority}
+            onChange={(e) => setPriority(e.target.value as 'NORMAL' | 'URGENT')}
+            options={[
+              { value: 'NORMAL', label: 'Normale' },
+              { value: 'URGENT', label: 'Urgente' },
+            ]}
+          />
+          {skills.state === 'success' && skills.data.some((sk) => !sk.isArchived) && (
+            <div className="sm:col-span-2">
+              <CheckboxGroup
+                legend="Compétences requises"
+                options={skills.data
+                  .filter((sk) => !sk.isArchived)
+                  .map((sk) => ({ value: sk.id, label: sk.name }))}
+                value={requiredSkillIds}
+                onChange={setRequiredSkillIds}
+              />
+            </div>
+          )}
+          {aiProposalId && (
+            <p
+              className="text-sm text-forest sm:col-span-2"
+              data-testid="facture-maintenance-prefill"
+            >
+              Planification d’un entretien suggéré par la maintenance préventive : vérifiez le
+              créneau.
+            </p>
+          )}
           <div className="sm:col-span-2">
             <TextareaField
               label="Description de la demande"
