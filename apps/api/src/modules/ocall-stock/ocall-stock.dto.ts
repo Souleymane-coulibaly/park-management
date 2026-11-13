@@ -26,13 +26,21 @@ import {
   STOCK_LABEL_FIELDS,
   STOCK_LABEL_FORMATS,
   STOCK_LABEL_MAX_COPIES,
+  STOCK_LOCATION_CODE_PATTERN,
+  STOCK_LOCATION_KINDS,
+  STOCK_MANUAL_MOVEMENT_KINDS,
   STOCK_MAX_PRICE,
+  STOCK_MAX_QUANTITY,
   STOCK_PREFIX_PATTERN,
   STOCK_ROLES,
+  STOCK_SITE_CODE_PATTERN,
+  STOCK_SITE_KINDS,
   STOCK_SKU_PATTERN,
   type StockBarcodeType,
   type StockLabelField,
   type StockLabelFormat,
+  type StockManualMovementKind,
+  type StockSiteKind,
   type StockPermission,
   type StockRole,
 } from '@ocall/shared';
@@ -65,6 +73,11 @@ export class StockSettingsDto {
   )
   @Matches(STOCK_PREFIX_PATTERN, { message: 'Préfixe : 2 à 4 lettres majuscules.' })
   internalCodePrefix: string;
+
+  @ApiPropertyOptional({ description: 'Autoriser le stock négatif (refusé par défaut)' })
+  @IsOptional()
+  @IsBoolean()
+  allowNegativeStock?: boolean;
 }
 
 export class CreateStockMemberDto {
@@ -485,4 +498,689 @@ export class StockLabelsDto {
   @ValidateNested({ each: true })
   @Type(() => StockLabelItemDto)
   items: StockLabelItemDto[];
+}
+
+// ─── S2 : sites et emplacements ───
+
+const upper = ({ value }: { value: unknown }) =>
+  typeof value === 'string' ? value.trim().toUpperCase() : value;
+
+/** Quantité saisie : positive, 3 décimales au plus. */
+function Quantity(): PropertyDecorator {
+  return (target, key) => {
+    IsNumber({ maxDecimalPlaces: 3 })(target, key);
+    Min(0.001)(target, key);
+    Max(STOCK_MAX_QUANTITY)(target, key);
+  };
+}
+
+/** Clé d'idempotence fournie par l'appareil : un envoi répété (réseau instable) n'est compté qu'une fois. */
+function IdempotencyKey(): PropertyDecorator {
+  return (target, key) => {
+    IsString()(target, key);
+    Matches(/^[A-Za-z0-9_-]{8,80}$/, { message: 'Clé d’idempotence invalide.' })(target, key);
+  };
+}
+
+export class StockSiteDto {
+  @ApiProperty({
+    description: 'Code court, unique (2 à 8 lettres ou chiffres) ; ne change plus ensuite',
+  })
+  @Transform(upper)
+  @Matches(STOCK_SITE_CODE_PATTERN, { message: 'Code : 2 à 8 lettres ou chiffres.' })
+  code: string;
+
+  @ApiProperty()
+  @Transform(trim)
+  @IsString()
+  @Length(2, 120)
+  name: string;
+
+  @ApiProperty({ enum: STOCK_SITE_KINDS })
+  @IsIn(STOCK_SITE_KINDS)
+  kind: StockSiteKind;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(trimOrNull)
+  @ValidateIf(notNull)
+  @IsString()
+  @MaxLength(240)
+  address?: string | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(trimOrNull)
+  @ValidateIf(notNull)
+  @IsString()
+  @MaxLength(80)
+  city?: string | null;
+}
+
+export class UpdateStockSiteDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @Length(2, 120)
+  name?: string;
+
+  @ApiPropertyOptional({ enum: STOCK_SITE_KINDS })
+  @IsOptional()
+  @IsIn(STOCK_SITE_KINDS)
+  kind?: StockSiteKind;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(trimOrNull)
+  @ValidateIf(notNull)
+  @IsString()
+  @MaxLength(240)
+  address?: string | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(trimOrNull)
+  @ValidateIf(notNull)
+  @IsString()
+  @MaxLength(80)
+  city?: string | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  isArchived?: boolean;
+}
+
+export class StockLocationDto {
+  @ApiProperty({ enum: STOCK_LOCATION_KINDS })
+  @IsIn(STOCK_LOCATION_KINDS)
+  kind: (typeof STOCK_LOCATION_KINDS)[number];
+
+  @ApiProperty({ description: 'Code unique dans le site (A-01-03) ; ne change plus ensuite' })
+  @Transform(upper)
+  @Matches(STOCK_LOCATION_CODE_PATTERN, {
+    message: 'Code : lettres, chiffres et tirets (A-01-03).',
+  })
+  code: string;
+
+  @ApiProperty()
+  @Transform(trim)
+  @IsString()
+  @Length(1, 80)
+  name: string;
+
+  @ApiPropertyOptional({ description: 'Emplacement parent (même site, niveau plus large)' })
+  @IsOptional()
+  @ValidateIf(notNull)
+  @IsUUID()
+  parentId?: string | null;
+}
+
+export class UpdateStockLocationDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @Length(1, 80)
+  name?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  isArchived?: boolean;
+}
+
+export class StockLocationLabelsDto {
+  @ApiProperty({ enum: STOCK_LABEL_FORMATS })
+  @IsIn(STOCK_LABEL_FORMATS)
+  format: StockLabelFormat;
+
+  @ApiProperty({ type: [String] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(500)
+  @IsUUID('all', { each: true })
+  locationIds: string[];
+}
+
+export class StockMemberSitesDto {
+  @ApiProperty({ type: [String], description: 'Sites du membre ; vide = tous les sites' })
+  @IsArray()
+  @ArrayMaxSize(200)
+  @IsUUID('all', { each: true })
+  siteIds: string[];
+}
+
+export class StockSiteQueryDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(bool)
+  @IsBoolean()
+  archived?: boolean;
+}
+
+// ─── S2 : stocks et mouvements ───
+
+export class StockLevelsQueryDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  siteId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  locationId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  productId?: string;
+
+  @ApiPropertyOptional({ description: 'Nom, référence ou code' })
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(80)
+  q?: string;
+
+  @ApiPropertyOptional({ description: 'Seulement les articles sous leur seuil d’alerte' })
+  @IsOptional()
+  @Transform(bool)
+  @IsBoolean()
+  belowMin?: boolean;
+
+  @ApiPropertyOptional({ default: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(10_000)
+  page?: number;
+
+  @ApiPropertyOptional({ default: 50, maximum: 200 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  pageSize?: number;
+}
+
+export class StockMovementDto {
+  @ApiProperty({ enum: STOCK_MANUAL_MOVEMENT_KINDS })
+  @IsIn(STOCK_MANUAL_MOVEMENT_KINDS)
+  kind: StockManualMovementKind;
+
+  @ApiProperty()
+  @IsUUID()
+  variantId: string;
+
+  @ApiProperty()
+  @IsUUID()
+  locationId: string;
+
+  @ApiProperty({ description: 'Entrée et sortie : positive ; ajustement : signée, non nulle' })
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @Min(-STOCK_MAX_QUANTITY)
+  @Max(STOCK_MAX_QUANTITY)
+  quantity: number;
+
+  @ApiPropertyOptional({ description: 'Motif (obligatoire pour une sortie ou un ajustement)' })
+  @IsOptional()
+  @Transform(trimOrNull)
+  @ValidateIf(notNull)
+  @IsString()
+  @Length(3, 240)
+  reason?: string | null;
+
+  @ApiPropertyOptional({ description: 'Coût unitaire HT (entrée)' })
+  @IsOptional()
+  @ValidateIf(notNull)
+  @IsInt()
+  @Min(0)
+  @Max(STOCK_MAX_PRICE)
+  unitCost?: number | null;
+
+  @ApiProperty()
+  @IdempotencyKey()
+  idempotencyKey: string;
+}
+
+export class StockMoveDto {
+  @ApiProperty()
+  @IsUUID()
+  variantId: string;
+
+  @ApiProperty()
+  @IsUUID()
+  fromLocationId: string;
+
+  @ApiProperty()
+  @IsUUID()
+  toLocationId: string;
+
+  @ApiProperty()
+  @Quantity()
+  quantity: number;
+
+  @ApiProperty()
+  @IdempotencyKey()
+  idempotencyKey: string;
+}
+
+export class StockMovementsQueryDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  siteId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  productId?: string;
+
+  @ApiPropertyOptional({ default: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(10_000)
+  page?: number;
+
+  @ApiPropertyOptional({ default: 50, maximum: 200 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(200)
+  pageSize?: number;
+}
+
+// ─── S2 : transferts ───
+
+export class StockTransferLineDto {
+  @ApiProperty()
+  @IsUUID()
+  variantId: string;
+
+  @ApiProperty()
+  @Quantity()
+  quantity: number;
+}
+
+export class CreateStockTransferDto {
+  @ApiProperty()
+  @IsUUID()
+  fromSiteId: string;
+
+  @ApiProperty()
+  @IsUUID()
+  toSiteId: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(trimOrNull)
+  @ValidateIf(notNull)
+  @IsString()
+  @MaxLength(500)
+  note?: string | null;
+
+  @ApiProperty({ type: [StockTransferLineDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => StockTransferLineDto)
+  lines: StockTransferLineDto[];
+}
+
+export class StockTransferPickDto {
+  @ApiProperty()
+  @IsUUID()
+  lineId: string;
+
+  @ApiProperty({ description: 'Emplacement de prélèvement (site de départ)' })
+  @IsUUID()
+  fromLocationId: string;
+}
+
+export class PrepareStockTransferDto {
+  @ApiProperty({ type: [StockTransferPickDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => StockTransferPickDto)
+  lines: StockTransferPickDto[];
+}
+
+export class StockTransferReceiptLineDto {
+  @ApiProperty()
+  @IsUUID()
+  lineId: string;
+
+  @ApiProperty()
+  @Quantity()
+  quantity: number;
+
+  @ApiProperty({ description: 'Emplacement de rangement (site d’arrivée)' })
+  @IsUUID()
+  toLocationId: string;
+}
+
+export class ReceiveStockTransferDto {
+  @ApiProperty()
+  @IdempotencyKey()
+  idempotencyKey: string;
+
+  @ApiProperty({ type: [StockTransferReceiptLineDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => StockTransferReceiptLineDto)
+  lines: StockTransferReceiptLineDto[];
+}
+
+export class StockTransferLossDto {
+  @ApiProperty()
+  @IsUUID()
+  lineId: string;
+
+  @ApiProperty({ description: 'Motif du manque (casse, vol, erreur de préparation…)' })
+  @Transform(trim)
+  @IsString()
+  @Length(3, 240)
+  reason: string;
+}
+
+export class DeclareStockTransferLossDto {
+  @ApiProperty({ type: [StockTransferLossDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => StockTransferLossDto)
+  lines: StockTransferLossDto[];
+}
+
+export class StockOperationsQueryDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  siteId?: string;
+
+  @ApiPropertyOptional({ description: 'Seulement les opérations en cours' })
+  @IsOptional()
+  @Transform(bool)
+  @IsBoolean()
+  open?: boolean;
+}
+
+// ─── S2 : inventaires ───
+
+export class CreateStockCountDto {
+  @ApiProperty()
+  @IsUUID()
+  siteId: string;
+
+  @ApiProperty()
+  @Transform(trim)
+  @IsString()
+  @Length(2, 120)
+  name: string;
+
+  @ApiProperty({ enum: ['FULL', 'PARTIAL'] })
+  @IsIn(['FULL', 'PARTIAL'])
+  scope: 'FULL' | 'PARTIAL';
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'Emplacements inventoriés ; vide = tout le site',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @IsUUID('all', { each: true })
+  locationIds?: string[];
+}
+
+export class StockCountLineDto {
+  @ApiProperty()
+  @IsUUID()
+  variantId: string;
+
+  @ApiProperty()
+  @IsUUID()
+  locationId: string;
+
+  @ApiProperty({ description: 'Quantité comptée (SET) ou à ajouter au comptage (ADD, scan)' })
+  @IsNumber({ maxDecimalPlaces: 3 })
+  @Min(0)
+  @Max(STOCK_MAX_QUANTITY)
+  quantity: number;
+
+  @ApiProperty({ enum: ['SET', 'ADD'] })
+  @IsIn(['SET', 'ADD'])
+  mode: 'SET' | 'ADD';
+}
+
+// ─── S3 : achats ───
+
+export class StockPurchaseLineDto {
+  @ApiProperty()
+  @IsUUID()
+  variantId: string;
+
+  @ApiProperty()
+  @Quantity()
+  quantity: number;
+
+  @ApiProperty({ description: 'Coût unitaire HT convenu' })
+  @IsInt()
+  @Min(0)
+  @Max(STOCK_MAX_PRICE)
+  unitCost: number;
+
+  @ApiProperty({ description: 'TVA (0 à 30 %)' })
+  @IsInt()
+  @Min(0)
+  @Max(30)
+  vatRate: number;
+}
+
+export class CreateStockPurchaseOrderDto {
+  @ApiProperty()
+  @IsUUID()
+  supplierId: string;
+
+  @ApiProperty({ description: 'Site de livraison' })
+  @IsUUID()
+  siteId: string;
+
+  @ApiPropertyOptional({ description: 'Livraison attendue (AAAA-MM-JJ)' })
+  @IsOptional()
+  @ValidateIf(notNull)
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'Date au format AAAA-MM-JJ.' })
+  expectedAt?: string | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(trimOrNull)
+  @ValidateIf(notNull)
+  @IsString()
+  @MaxLength(1000)
+  note?: string | null;
+
+  @ApiProperty({ type: [StockPurchaseLineDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => StockPurchaseLineDto)
+  lines: StockPurchaseLineDto[];
+}
+
+/** Brouillon seulement : les lignes envoyées remplacent les précédentes. */
+export class UpdateStockPurchaseOrderDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  supplierId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  siteId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @ValidateIf(notNull)
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'Date au format AAAA-MM-JJ.' })
+  expectedAt?: string | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(trimOrNull)
+  @ValidateIf(notNull)
+  @IsString()
+  @MaxLength(1000)
+  note?: string | null;
+
+  @ApiPropertyOptional({ type: [StockPurchaseLineDto] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => StockPurchaseLineDto)
+  lines?: StockPurchaseLineDto[];
+}
+
+export class StockPurchaseQueryDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  supplierId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  siteId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Seulement les commandes en cours (brouillon, commandée, reçue en partie)',
+  })
+  @IsOptional()
+  @Transform(bool)
+  @IsBoolean()
+  open?: boolean;
+}
+
+export class StockReceiptLineDto {
+  @ApiProperty()
+  @IsUUID()
+  orderLineId: string;
+
+  @ApiProperty()
+  @Quantity()
+  quantity: number;
+
+  @ApiProperty({ description: 'Emplacement de rangement (site de livraison)' })
+  @IsUUID()
+  locationId: string;
+
+  @ApiPropertyOptional({
+    description: 'Coût HT réellement facturé ; à défaut, celui de la commande',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(STOCK_MAX_PRICE)
+  unitCost?: number;
+}
+
+export class ReceiveStockPurchaseDto {
+  @ApiProperty()
+  @IdempotencyKey()
+  idempotencyKey: string;
+
+  @ApiPropertyOptional({ description: 'Référence du bon de livraison' })
+  @IsOptional()
+  @Transform(trimOrNull)
+  @ValidateIf(notNull)
+  @IsString()
+  @MaxLength(80)
+  deliveryRef?: string | null;
+
+  @ApiPropertyOptional({ description: 'Reporter les coûts reçus comme prix d’achat des articles' })
+  @IsOptional()
+  @IsBoolean()
+  updatePurchasePrices?: boolean;
+
+  @ApiProperty({ type: [StockReceiptLineDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => StockReceiptLineDto)
+  lines: StockReceiptLineDto[];
+}
+
+export class CancelStockReceiptDto {
+  @ApiProperty({ description: 'Motif (erreur de saisie, mauvaise livraison…)' })
+  @Transform(trim)
+  @IsString()
+  @Length(3, 240)
+  reason: string;
+}
+
+export class StockSupplierReturnLineDto {
+  @ApiProperty()
+  @IsUUID()
+  variantId: string;
+
+  @ApiProperty({ description: 'Emplacement d’où part la marchandise' })
+  @IsUUID()
+  locationId: string;
+
+  @ApiProperty()
+  @Quantity()
+  quantity: number;
+}
+
+export class CreateStockSupplierReturnDto {
+  @ApiProperty()
+  @IsUUID()
+  supplierId: string;
+
+  @ApiProperty()
+  @IsUUID()
+  siteId: string;
+
+  @ApiPropertyOptional({ description: 'Commande d’origine (facultatif)' })
+  @IsOptional()
+  @ValidateIf(notNull)
+  @IsUUID()
+  orderId?: string | null;
+
+  @ApiProperty({ description: 'Motif (produit défectueux, erreur de livraison…)' })
+  @Transform(trim)
+  @IsString()
+  @Length(3, 240)
+  reason: string;
+
+  @ApiProperty()
+  @IdempotencyKey()
+  idempotencyKey: string;
+
+  @ApiProperty({ type: [StockSupplierReturnLineDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => StockSupplierReturnLineDto)
+  lines: StockSupplierReturnLineDto[];
 }

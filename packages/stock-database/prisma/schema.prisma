@@ -45,6 +45,11 @@ enum StockBarcodeType {
 enum StockCounterKind {
   SKU
   INTERNAL_CODE
+  TRANSFER
+  COUNT
+  PURCHASE
+  RECEIPT
+  SUPPLIER_RETURN
 }
 
 /// Prix suivi dans l'historique des prix.
@@ -62,6 +67,8 @@ model StockSettings {
   defaultVatRate     Int      @default(18)
   /// Préfixe des codes internes et des références générées (2 à 4 lettres majuscules).
   internalCodePrefix String   @default("OC")
+  /// Stock négatif autorisé (sortie au-delà du stock). Refusé par défaut (S2).
+  allowNegativeStock Boolean  @default(false)
   updatedByUserId    String?  @db.Uuid
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
@@ -81,6 +88,7 @@ model StockMember {
   updatedAt      DateTime  @updatedAt
 
   permissions StockMemberPermission[]
+  sites       StockMemberSite[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, userId])
@@ -169,8 +177,8 @@ model StockProduct {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  category StockCategory?       @relation(fields: [organizationId, categoryId], references: [organizationId, id], onDelete: Restrict)
-  brand    StockBrand?          @relation(fields: [organizationId, brandId], references: [organizationId, id], onDelete: Restrict)
+  category StockCategory?        @relation(fields: [organizationId, categoryId], references: [organizationId, id], onDelete: Restrict)
+  brand    StockBrand?           @relation(fields: [organizationId, brandId], references: [organizationId, id], onDelete: Restrict)
   variants StockVariant[]
   images   StockProductImage[]
   history  StockProductHistory[]
@@ -199,9 +207,11 @@ model StockVariant {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  product  StockProduct        @relation(fields: [organizationId, productId], references: [organizationId, id], onDelete: Restrict)
-  barcodes StockBarcode[]
-  prices   StockPriceHistory[]
+  product   StockProduct        @relation(fields: [organizationId, productId], references: [organizationId, id], onDelete: Restrict)
+  barcodes  StockBarcode[]
+  levels    StockLevel[]
+  movements StockMovement[]
+  prices    StockPriceHistory[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, sku])
@@ -292,6 +302,471 @@ model StockSupplier {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
+  purchaseOrders StockPurchaseOrder[]
+  returns        StockSupplierReturn[]
+  prices         StockSupplierPrice[]
+
   @@unique([organizationId, id])
   @@index([organizationId, isArchived, name])
+}
+
+// ─── S2 : sites, emplacements, stocks, mouvements, transferts, inventaires ───
+
+/// Type de site.
+enum StockSiteKind {
+  STORE
+  DEPOT
+  WAREHOUSE
+}
+
+/// Niveau d'un emplacement dans son site : zone, allée, rayonnage, emplacement. L'emplacement par défaut
+/// d'un site (« Général ») sert quand le site n'est pas découpé.
+enum StockLocationKind {
+  DEFAULT
+  ZONE
+  AISLE
+  SHELF
+  BIN
+}
+
+/// Nature d'un mouvement de stock. Ventes, retours et réceptions fournisseurs s'ajoutent avec leurs sprints.
+enum StockMovementKind {
+  IN
+  OUT
+  ADJUSTMENT
+  MOVE_OUT
+  MOVE_IN
+  TRANSFER_OUT
+  TRANSFER_IN
+  COUNT
+  RECEIPT
+  RECEIPT_CANCEL
+  SUPPLIER_RETURN
+}
+
+enum StockTransferStatus {
+  REQUESTED
+  PREPARED
+  SHIPPED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CANCELLED
+}
+
+enum StockCountStatus {
+  OPEN
+  VALIDATED
+  CANCELLED
+}
+
+/// Inventaire complet (tout le périmètre : non compté = 0) ou partiel (seules les lignes comptées).
+enum StockCountScope {
+  FULL
+  PARTIAL
+}
+
+/// Magasin, dépôt ou entrepôt.
+model StockSite {
+  id             String        @id @default(uuid()) @db.Uuid
+  organizationId String        @db.Uuid
+  /// Code court, unique par organisation (imprimé dans les QR codes des emplacements).
+  code           String
+  name           String
+  kind           StockSiteKind
+  address        String?
+  city           String?
+  isArchived     Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  locations     StockLocation[]
+  members       StockMemberSite[]
+  levels        StockLevel[]
+  movements     StockMovement[]
+  transfersFrom StockTransfer[]      @relation("StockTransferFrom")
+  transfersTo   StockTransfer[]      @relation("StockTransferTo")
+  counts        StockCount[]
+  purchases     StockPurchaseOrder[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, code])
+}
+
+/// Rattachement d'un membre à un site. Sans aucun rattachement, le membre agit sur tous les sites.
+model StockMemberSite {
+  organizationId String   @db.Uuid
+  memberId       String   @db.Uuid
+  siteId         String   @db.Uuid
+  createdAt      DateTime @default(now())
+
+  member StockMember @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Cascade)
+  site   StockSite   @relation(fields: [organizationId, siteId], references: [organizationId, id], onDelete: Restrict)
+
+  @@id([memberId, siteId])
+  @@index([organizationId, siteId])
+}
+
+/// Emplacement physique d'un site (Zone A → Allée 01 → Rayon 03 → Emplacement A-01-03).
+model StockLocation {
+  id             String            @id @default(uuid()) @db.Uuid
+  organizationId String            @db.Uuid
+  siteId         String            @db.Uuid
+  parentId       String?           @db.Uuid
+  kind           StockLocationKind
+  /// Code unique dans le site (A-01-03), lu dans le QR code de l'emplacement.
+  code           String
+  name           String
+  isArchived     Boolean           @default(false)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  site      StockSite       @relation(fields: [organizationId, siteId], references: [organizationId, id], onDelete: Restrict)
+  parent    StockLocation?  @relation("StockLocationTree", fields: [organizationId, parentId], references: [organizationId, id], onDelete: Restrict)
+  children  StockLocation[] @relation("StockLocationTree")
+  levels    StockLevel[]
+  movements StockMovement[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, siteId, code])
+  @@index([organizationId, siteId, parentId])
+}
+
+/// Quantité d'une variante à un emplacement. Ne change que par un mouvement (même transaction, ligne
+/// verrouillée). `reserved` : quantité préparée pour un transfert, pas encore expédiée.
+model StockLevel {
+  organizationId String   @db.Uuid
+  variantId      String   @db.Uuid
+  locationId     String   @db.Uuid
+  siteId         String   @db.Uuid
+  onHand         Decimal  @default(0) @db.Decimal(14, 3)
+  reserved       Decimal  @default(0) @db.Decimal(14, 3)
+  updatedAt      DateTime @updatedAt
+
+  variant  StockVariant  @relation(fields: [organizationId, variantId], references: [organizationId, id], onDelete: Restrict)
+  location StockLocation @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Restrict)
+  site     StockSite     @relation(fields: [organizationId, siteId], references: [organizationId, id], onDelete: Restrict)
+
+  @@id([locationId, variantId])
+  @@index([organizationId, siteId, variantId])
+  @@index([organizationId, variantId])
+}
+
+/// Registre des mouvements : ajout seul (garanti par la base), quantité signée, quantité à l'emplacement
+/// après le mouvement, opération source, clé d'idempotence (une même opération n'est jamais comptée deux
+/// fois). Une correction est un mouvement compensatoire.
+model StockMovement {
+  id             String            @id @default(uuid()) @db.Uuid
+  organizationId String            @db.Uuid
+  variantId      String            @db.Uuid
+  siteId         String            @db.Uuid
+  locationId     String            @db.Uuid
+  kind           StockMovementKind
+  quantity       Decimal           @db.Decimal(14, 3)
+  quantityAfter  Decimal           @db.Decimal(14, 3)
+  /// Coût unitaire HT facultatif (entrée) ; jamais estimé.
+  unitCost       Int?
+  reason         String?
+  /// Opération à l'origine : MANUAL, TRANSFER, COUNT (puis SALE, RECEIPT, FACTURE…).
+  sourceType     String
+  sourceId       String?           @db.Uuid
+  idempotencyKey String
+  actorUserId    String            @db.Uuid
+  createdAt      DateTime          @default(now())
+
+  variant  StockVariant  @relation(fields: [organizationId, variantId], references: [organizationId, id], onDelete: Restrict)
+  site     StockSite     @relation(fields: [organizationId, siteId], references: [organizationId, id], onDelete: Restrict)
+  location StockLocation @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, variantId, createdAt])
+  @@index([organizationId, siteId, createdAt])
+  @@index([organizationId, sourceType, sourceId])
+}
+
+/// Transfert entre deux sites : demandé → préparé (quantités réservées à la source) → expédié (sorties de
+/// la source ; en transit) → reçu en une ou plusieurs fois (entrées à la destination), ou annulé avant
+/// l'expédition. Un manque à la réception est déclaré et clôt la ligne.
+model StockTransfer {
+  id              String              @id @default(uuid()) @db.Uuid
+  organizationId  String              @db.Uuid
+  number          Int
+  fromSiteId      String              @db.Uuid
+  toSiteId        String              @db.Uuid
+  status          StockTransferStatus @default(REQUESTED)
+  note            String?
+  createdByUserId String              @db.Uuid
+  preparedAt      DateTime?
+  shippedAt       DateTime?
+  receivedAt      DateTime?
+  cancelledAt     DateTime?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  fromSite StockSite           @relation("StockTransferFrom", fields: [organizationId, fromSiteId], references: [organizationId, id], onDelete: Restrict)
+  toSite   StockSite           @relation("StockTransferTo", fields: [organizationId, toSiteId], references: [organizationId, id], onDelete: Restrict)
+  lines    StockTransferLine[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, number])
+  @@index([organizationId, status])
+}
+
+model StockTransferLine {
+  id               String  @id @default(uuid()) @db.Uuid
+  organizationId   String  @db.Uuid
+  transferId       String  @db.Uuid
+  variantId        String  @db.Uuid
+  quantity         Decimal @db.Decimal(14, 3)
+  /// Emplacement de prélèvement, fixé à la préparation.
+  fromLocationId   String? @db.Uuid
+  shippedQuantity  Decimal @default(0) @db.Decimal(14, 3)
+  receivedQuantity Decimal @default(0) @db.Decimal(14, 3)
+  /// Manque déclaré à la réception (sorti de la source, jamais arrivé).
+  lostQuantity     Decimal @default(0) @db.Decimal(14, 3)
+  lossReason       String?
+
+  transfer StockTransfer @relation(fields: [organizationId, transferId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@unique([transferId, variantId])
+  @@index([organizationId, variantId])
+}
+
+/// Inventaire d'un site (tout le site ou des emplacements choisis). L'écart est calculé à la validation :
+/// ajustement = quantité comptée − stock au moment de la validation.
+model StockCount {
+  id                String           @id @default(uuid()) @db.Uuid
+  organizationId    String           @db.Uuid
+  number            Int
+  siteId            String           @db.Uuid
+  scope             StockCountScope
+  name              String
+  /// Emplacements inventoriés ; vide = tout le site.
+  locationIds       String[]         @db.Uuid
+  status            StockCountStatus @default(OPEN)
+  createdByUserId   String           @db.Uuid
+  validatedByUserId String?          @db.Uuid
+  validatedAt       DateTime?
+  cancelledAt       DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  site  StockSite        @relation(fields: [organizationId, siteId], references: [organizationId, id], onDelete: Restrict)
+  lines StockCountLine[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, number])
+  @@index([organizationId, status])
+}
+
+/// Quantité comptée d'une variante à un emplacement ; stock et écart figés à la validation.
+model StockCountLine {
+  id                 String   @id @default(uuid()) @db.Uuid
+  organizationId     String   @db.Uuid
+  countId            String   @db.Uuid
+  variantId          String   @db.Uuid
+  locationId         String   @db.Uuid
+  countedQuantity    Decimal  @db.Decimal(14, 3)
+  /// Stock au moment de la validation (null tant que l'inventaire est ouvert).
+  expectedQuantity   Decimal? @db.Decimal(14, 3)
+  /// Écart appliqué à la validation (compté − stock).
+  differenceQuantity Decimal? @db.Decimal(14, 3)
+  countedByUserId    String   @db.Uuid
+  updatedAt          DateTime @updatedAt
+
+  count StockCount @relation(fields: [organizationId, countId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@unique([countId, locationId, variantId])
+}
+
+// ─── S3 : achats (commandes fournisseurs, réceptions, retours, prix d'achat, documents) ───
+
+/// Commande fournisseur : brouillon (modifiable) → commandée (figée) → reçue en partie ou en totalité,
+/// close (reste non attendu) ou annulée (avant toute réception).
+enum StockPurchaseStatus {
+  DRAFT
+  ORDERED
+  PARTIALLY_RECEIVED
+  RECEIVED
+  CLOSED
+  CANCELLED
+}
+
+/// Réception validée (entrées en stock) ou annulée (sorties compensatoires).
+enum StockReceiptStatus {
+  VALIDATED
+  CANCELLED
+}
+
+/// Pièce à laquelle un document est joint.
+enum StockDocumentOwner {
+  PURCHASE_ORDER
+  RECEIPT
+  SUPPLIER_RETURN
+}
+
+model StockPurchaseOrder {
+  id              String              @id @default(uuid()) @db.Uuid
+  organizationId  String              @db.Uuid
+  number          Int
+  supplierId      String              @db.Uuid
+  /// Site de livraison.
+  siteId          String              @db.Uuid
+  status          StockPurchaseStatus @default(DRAFT)
+  /// Date de livraison attendue (indicative).
+  expectedAt      DateTime?           @db.Date
+  note            String?
+  createdByUserId String              @db.Uuid
+  orderedAt       DateTime?
+  closedAt        DateTime?
+  cancelledAt     DateTime?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  supplier StockSupplier       @relation(fields: [organizationId, supplierId], references: [organizationId, id], onDelete: Restrict)
+  site     StockSite           @relation(fields: [organizationId, siteId], references: [organizationId, id], onDelete: Restrict)
+  lines    StockPurchaseLine[]
+  receipts StockReceipt[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, number])
+  @@index([organizationId, status])
+  @@index([organizationId, supplierId])
+}
+
+model StockPurchaseLine {
+  id               String  @id @default(uuid()) @db.Uuid
+  organizationId   String  @db.Uuid
+  orderId          String  @db.Uuid
+  variantId        String  @db.Uuid
+  quantity         Decimal @db.Decimal(14, 3)
+  /// Coût unitaire HT convenu.
+  unitCost         Int
+  vatRate          Int
+  receivedQuantity Decimal @default(0) @db.Decimal(14, 3)
+
+  order        StockPurchaseOrder @relation(fields: [organizationId, orderId], references: [organizationId, id], onDelete: Restrict)
+  receiptLines StockReceiptLine[]
+
+  @@unique([organizationId, id])
+  @@unique([orderId, variantId])
+  @@index([organizationId, variantId])
+}
+
+/// Réception d'une commande : une ou plusieurs par commande (livraisons partielles).
+model StockReceipt {
+  id                String             @id @default(uuid()) @db.Uuid
+  organizationId    String             @db.Uuid
+  number            Int
+  orderId           String             @db.Uuid
+  siteId            String             @db.Uuid
+  status            StockReceiptStatus @default(VALIDATED)
+  /// Référence du bon de livraison du fournisseur.
+  deliveryRef       String?
+  /// Clé de l'appareil : une réception envoyée deux fois n'est enregistrée qu'une fois.
+  idempotencyKey    String
+  receivedByUserId  String             @db.Uuid
+  cancelReason      String?
+  cancelledByUserId String?            @db.Uuid
+  cancelledAt       DateTime?
+  createdAt         DateTime           @default(now())
+
+  order StockPurchaseOrder @relation(fields: [organizationId, orderId], references: [organizationId, id], onDelete: Restrict)
+  lines StockReceiptLine[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, number])
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, orderId])
+}
+
+/// Ligne reçue (ajout seul, garanti par la base) : quantité, emplacement de rangement, coût reçu.
+model StockReceiptLine {
+  id             String  @id @default(uuid()) @db.Uuid
+  organizationId String  @db.Uuid
+  receiptId      String  @db.Uuid
+  orderLineId    String  @db.Uuid
+  variantId      String  @db.Uuid
+  locationId     String  @db.Uuid
+  quantity       Decimal @db.Decimal(14, 3)
+  unitCost       Int
+
+  receipt   StockReceipt      @relation(fields: [organizationId, receiptId], references: [organizationId, id], onDelete: Restrict)
+  orderLine StockPurchaseLine @relation(fields: [organizationId, orderLineId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@unique([receiptId, orderLineId])
+}
+
+/// Retour de marchandise au fournisseur : sorties de stock tracées (ajout seul).
+model StockSupplierReturn {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  number          Int
+  supplierId      String   @db.Uuid
+  siteId          String   @db.Uuid
+  /// Commande d'origine, si elle est connue.
+  orderId         String?  @db.Uuid
+  reason          String
+  idempotencyKey  String
+  createdByUserId String   @db.Uuid
+  createdAt       DateTime @default(now())
+
+  supplier StockSupplier             @relation(fields: [organizationId, supplierId], references: [organizationId, id], onDelete: Restrict)
+  lines    StockSupplierReturnLine[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, number])
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, supplierId])
+}
+
+model StockSupplierReturnLine {
+  id             String  @id @default(uuid()) @db.Uuid
+  organizationId String  @db.Uuid
+  returnId       String  @db.Uuid
+  variantId      String  @db.Uuid
+  locationId     String  @db.Uuid
+  quantity       Decimal @db.Decimal(14, 3)
+
+  supplierReturn StockSupplierReturn @relation(fields: [organizationId, returnId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@unique([returnId, variantId, locationId])
+}
+
+/// Historique des prix d'achat par fournisseur et par variante (ajout seul) : un enregistrement par
+/// ligne reçue.
+model StockSupplierPrice {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  supplierId     String   @db.Uuid
+  variantId      String   @db.Uuid
+  unitCost       Int
+  receiptId      String   @db.Uuid
+  createdAt      DateTime @default(now())
+
+  supplier StockSupplier @relation(fields: [organizationId, supplierId], references: [organizationId, id], onDelete: Restrict)
+
+  @@index([organizationId, variantId, createdAt])
+  @@index([organizationId, supplierId, createdAt])
+}
+
+/// Document joint à une commande, une réception ou un retour (bon de livraison, facture, photo) : fichier
+/// vérifié, stockage privé.
+model StockDocument {
+  id              String             @id @default(uuid()) @db.Uuid
+  organizationId  String             @db.Uuid
+  ownerType       StockDocumentOwner
+  ownerId         String             @db.Uuid
+  fileName        String
+  mimeType        String
+  bytes           Int
+  storageKey      String
+  createdByUserId String             @db.Uuid
+  createdAt       DateTime           @default(now())
+
+  @@unique([organizationId, id])
+  @@index([organizationId, ownerType, ownerId])
 }

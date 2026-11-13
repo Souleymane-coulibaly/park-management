@@ -1,8 +1,9 @@
 'use client';
 
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react';
-import { ScanLine } from 'lucide-react';
+import { Camera, ScanLine, Volume2, VolumeX } from 'lucide-react';
 import { normalizeScannedCode } from '@ocall/shared';
+import { CameraBarcodeScanner } from './camera-barcode-scanner';
 
 /** Une même lecture répétée dans ce délai est ignorée (gâchette pressée deux fois, rebond). */
 export const SCAN_REPEAT_MS = 1500;
@@ -63,6 +64,7 @@ export function ScanField({
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
   const [sound, setSound] = useState(false);
+  const [camera, setCamera] = useState(false);
 
   useEffect(() => {
     try {
@@ -79,9 +81,15 @@ export function ScanField({
   async function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
     if (event.key !== 'Enter') return;
     event.preventDefault();
-    const code = normalizeScannedCode(value);
+    const raw = value;
     setValue('');
-    if (!code || !gate.current(code)) return;
+    await submit(raw);
+  }
+
+  /** Lecture commune au clavier (lecteur HID, saisie) et à la caméra. */
+  async function submit(raw: string) {
+    const code = normalizeScannedCode(raw);
+    if (!code || busy || !gate.current(code)) return;
     setBusy(true);
     try {
       await onScan(code);
@@ -132,15 +140,33 @@ export function ScanField({
           placeholder="Code-barres, QR code ou référence, puis Entrée"
           className="min-w-0 flex-1 bg-transparent py-3 text-base outline-none"
         />
+        {/* Téléphone : icônes seules (le nom reste lu par les lecteurs d'écran) ; texte à partir de 640 px. */}
         <button
           type="button"
           onClick={toggleSound}
-          className="shrink-0 rounded-lg px-2 py-1 text-xs text-charcoal-soft hover:bg-ivory-dark/50"
+          className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs text-charcoal-soft hover:bg-ivory-dark/50"
           aria-pressed={sound}
+          aria-label={`Son ${sound ? 'activé' : 'coupé'}`}
         >
-          Son {sound ? 'activé' : 'coupé'}
+          {sound ? (
+            <Volume2 className="h-4 w-4" aria-hidden />
+          ) : (
+            <VolumeX className="h-4 w-4" aria-hidden />
+          )}
+          <span className="hidden sm:inline">Son {sound ? 'activé' : 'coupé'}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setCamera((v) => !v)}
+          className="flex shrink-0 items-center gap-1 rounded-lg px-2 py-1 text-xs text-charcoal-soft hover:bg-ivory-dark/50"
+          aria-pressed={camera}
+          aria-label={camera ? 'Fermer la caméra' : 'Caméra'}
+        >
+          <Camera className="h-4 w-4" aria-hidden />
+          <span className="hidden sm:inline">{camera ? 'Fermer la caméra' : 'Caméra'}</span>
         </button>
       </div>
+      {camera && <CameraBarcodeScanner onDetect={(text) => void submit(text)} />}
       <p className="min-h-5 text-sm" role="status" aria-live="polite">
         {feedback?.message ?? ''}
       </p>

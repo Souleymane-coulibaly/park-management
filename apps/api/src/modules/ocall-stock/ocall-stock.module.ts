@@ -12,6 +12,16 @@ import { OcallStockPrismaService } from './ocall-stock-prisma.service';
 import { OcallStockSearchService } from './ocall-stock-search.service';
 import { OcallStockSuppliersService } from './ocall-stock-suppliers.service';
 import { OcallStockController } from './ocall-stock.controller';
+import { OcallStockCountsService } from './ocall-stock-counts.service';
+import { OcallStockLedgerService } from './ocall-stock-ledger.service';
+import { OcallStockMovementsService } from './ocall-stock-movements.service';
+import { OcallStockSitesService } from './ocall-stock-sites.service';
+import { OcallStockTransfersService } from './ocall-stock-transfers.service';
+import { OcallStockWarehouseController } from './ocall-stock-warehouse.controller';
+import { OcallStockDocumentsService } from './ocall-stock-documents.service';
+import { OcallStockPurchasesController } from './ocall-stock-purchases.controller';
+import { OcallStockPurchasesService } from './ocall-stock-purchases.service';
+import { OcallStockReturnsService } from './ocall-stock-returns.service';
 import { OcallStockService } from './ocall-stock.service';
 
 /**
@@ -22,7 +32,12 @@ import { OcallStockService } from './ocall-stock.service';
 @Global()
 @Module({
   imports: [OrganizationsModule],
-  controllers: [OcallStockController, OcallStockCatalogController],
+  controllers: [
+    OcallStockController,
+    OcallStockCatalogController,
+    OcallStockWarehouseController,
+    OcallStockPurchasesController,
+  ],
   providers: [
     OcallStockPrismaService,
     OcallStockAccessGuard,
@@ -34,6 +49,14 @@ import { OcallStockService } from './ocall-stock.service';
     OcallStockSearchService,
     OcallStockLabelsService,
     OcallStockCatalogReader,
+    OcallStockLedgerService,
+    OcallStockSitesService,
+    OcallStockMovementsService,
+    OcallStockTransfersService,
+    OcallStockCountsService,
+    OcallStockPurchasesService,
+    OcallStockReturnsService,
+    OcallStockDocumentsService,
     { provide: STOCK_CATALOG_READER, useExisting: OcallStockCatalogReader },
   ],
   exports: [STOCK_CATALOG_READER],

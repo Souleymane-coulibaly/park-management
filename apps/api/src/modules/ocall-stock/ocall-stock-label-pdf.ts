@@ -131,3 +131,46 @@ export async function renderLabelsPdf(
     }
   });
 }
+
+export interface LocationLabelContent {
+  siteName: string;
+  code: string;
+  name: string;
+  /** Contenu du QR code (« L:SITE/CODE »), lu par Ocall Stock. */
+  qr: string;
+}
+
+/** Étiquettes d'emplacements : grand QR code, code de l'emplacement en gros, site et nom. */
+export async function renderLocationLabelsPdf(
+  format: StockLabelFormat,
+  labels: readonly LocationLabelContent[],
+): Promise<Buffer> {
+  const { widthMm, heightMm } = STOCK_LABEL_SIZES[format];
+  const W = widthMm * MM;
+  const H = heightMm * MM;
+  const pad = 1.5 * MM;
+  const qrs = new Map<string, Buffer>();
+  for (const l of labels) if (!qrs.has(l.qr)) qrs.set(l.qr, await renderQrPng(l.qr));
+  return renderPdfDocument({ title: 'Emplacements', creator: 'Ocall Stock' }, (doc) => {
+    for (const l of labels) {
+      doc.addPage({ size: [W, H], margin: 0 });
+      const qrSize = H - 2 * pad;
+      doc.image(qrs.get(l.qr)!, pad, pad, { width: qrSize, height: qrSize });
+      const x = pad * 2 + qrSize;
+      const textW = W - x - pad;
+      doc
+        .font('sansBold')
+        .fontSize(format === '60x40' ? 14 : 11)
+        .fillColor('#000000');
+      doc.text(l.code, x, pad, { width: textW, height: H / 2, ellipsis: true });
+      doc.font('sans').fontSize(6);
+      doc.text(l.name, x, doc.y + 1, { width: textW, height: 16, ellipsis: true });
+      doc.text(l.siteName, x, H - pad - 8, {
+        width: textW,
+        height: 8,
+        ellipsis: true,
+        lineBreak: false,
+      });
+    }
+  });
+}

@@ -11,7 +11,11 @@ import {
   stockRolePermissions,
 } from '@ocall/shared';
 import { StockPage } from '@/components/stock/stock-page';
-import { type StockMemberView, asApiError } from '@/components/stock/stock-types';
+import {
+  type StockMemberView,
+  type StockSiteView,
+  asApiError,
+} from '@/components/stock/stock-types';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
@@ -50,6 +54,7 @@ function Team({ manage }: { manage: boolean }) {
     null,
   );
   const [adjusting, setAdjusting] = useState<StockMemberView | null>(null);
+  const [siting, setSiting] = useState<StockMemberView | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
 
   async function update(m: StockMemberView, body: { role?: StockRole; isActive?: boolean }) {
@@ -132,6 +137,9 @@ function Team({ manage }: { manage: boolean }) {
                             <Button size="sm" variant="secondary" onClick={() => setAdjusting(m)}>
                               Permissions
                             </Button>
+                            <Button size="sm" variant="secondary" onClick={() => setSiting(m)}>
+                              Sites{m.siteIds.length ? ` (${m.siteIds.length})` : ''}
+                            </Button>
                             <Button
                               size="sm"
                               variant="secondary"
@@ -149,6 +157,17 @@ function Team({ manage }: { manage: boolean }) {
             </div>
           )}
         </Card>
+      )}
+      {manage && siting && (
+        <MemberSites
+          key={siting.id}
+          member={siting}
+          onClose={() => setSiting(null)}
+          onSaved={() => {
+            setSiting(null);
+            members.reload();
+          }}
+        />
       )}
       {manage && adjusting && (
         <Adjustments
@@ -260,6 +279,70 @@ function Adjustments({
             </div>
           ))}
         </div>
+        <div className="flex gap-3">
+          <Button onClick={() => void save()}>Enregistrer</Button>
+          <Button variant="ghost" onClick={onClose}>
+            Annuler
+          </Button>
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+/** Sites d'un membre : sans aucun site coché, il agit sur tous les sites. */
+function MemberSites({
+  member,
+  onClose,
+  onSaved,
+}: {
+  member: StockMemberView;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const sites = useApi<StockSiteView[]>('/ocall-stock/sites');
+  const [chosen, setChosen] = useState<string[]>(member.siteIds);
+  const [error, setError] = useState<ApiError | null>(null);
+
+  async function save() {
+    setError(null);
+    try {
+      await api(`/ocall-stock/members/${member.id}/sites`, {
+        method: 'PUT',
+        body: { siteIds: chosen },
+      });
+      onSaved();
+    } catch (e) {
+      setError(asApiError(e));
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader
+        title={`Sites de ${member.firstName} ${member.lastName}`}
+        description="Aucun site coché : le membre agit sur tous les sites. Sinon, seulement sur ceux cochés."
+      />
+      <CardBody className="space-y-4">
+        <ApiErrorAlert error={error} />
+        {sites.state === 'success' && (
+          <div className="grid gap-2 text-sm sm:grid-cols-2" data-testid="stock-member-sites">
+            {sites.data.map((s) => (
+              <label key={s.id} className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={chosen.includes(s.id)}
+                  onChange={(e) =>
+                    setChosen((cur) =>
+                      e.target.checked ? [...cur, s.id] : cur.filter((x) => x !== s.id),
+                    )
+                  }
+                />
+                {s.code} · {s.name}
+              </label>
+            ))}
+          </div>
+        )}
         <div className="flex gap-3">
           <Button onClick={() => void save()}>Enregistrer</Button>
           <Button variant="ghost" onClick={onClose}>

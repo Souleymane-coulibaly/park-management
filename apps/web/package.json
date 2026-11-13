@@ -4,7 +4,10 @@
   "private": true,
   "description": "Frontend Ocall Park (Next.js App Router).",
   "scripts": {
+    "vendor": "node scripts/copy-vendor.mjs",
+    "predev": "node scripts/copy-vendor.mjs",
     "dev": "next dev -p 3000",
+    "prebuild": "node scripts/copy-vendor.mjs",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit -p tsconfig.json"
@@ -18,7 +21,8 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "server-only": "^0.0.1",
-    "sharp": "0.33.5"
+    "sharp": "0.33.5",
+    "zxing-wasm": "2.2.4"
   },
   "devDependencies": {
     "@types/node": "^22.10.7",

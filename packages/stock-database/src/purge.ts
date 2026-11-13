@@ -15,6 +15,28 @@ export async function purgeStockOrganizations(
     async (tx) => {
       await tx.$executeRaw`SELECT set_config('ocall.stock_purge', 'on', true)`;
       const where = { organizationId: { in: organizationIds } };
+      // S3 : documents, prix, retours, réceptions et commandes avant les fournisseurs et les sites.
+      await tx.stockDocument.deleteMany({ where });
+      await tx.stockSupplierPrice.deleteMany({ where });
+      await tx.stockSupplierReturnLine.deleteMany({ where });
+      await tx.stockSupplierReturn.deleteMany({ where });
+      await tx.stockReceiptLine.deleteMany({ where });
+      await tx.stockReceipt.deleteMany({ where });
+      await tx.stockPurchaseLine.deleteMany({ where });
+      await tx.stockPurchaseOrder.deleteMany({ where });
+      // S2 : inventaires, transferts, mouvements et niveaux avant les emplacements et les sites.
+      await tx.stockCountLine.deleteMany({ where });
+      await tx.stockCount.deleteMany({ where });
+      await tx.stockTransferLine.deleteMany({ where });
+      await tx.stockTransfer.deleteMany({ where });
+      await tx.stockMovement.deleteMany({ where });
+      await tx.stockLevel.deleteMany({ where });
+      await tx.stockMemberSite.deleteMany({ where });
+      // Emplacements : du plus fin au plus large (chaque parent n'a plus d'enfant quand il part).
+      for (const kind of ['BIN', 'SHELF', 'AISLE', 'ZONE', 'DEFAULT'] as const) {
+        await tx.stockLocation.deleteMany({ where: { ...where, kind } });
+      }
+      await tx.stockSite.deleteMany({ where });
       await tx.stockProductHistory.deleteMany({ where });
       await tx.stockPriceHistory.deleteMany({ where });
       await tx.stockBarcode.deleteMany({ where });

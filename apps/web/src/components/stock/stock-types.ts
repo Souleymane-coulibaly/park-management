@@ -104,6 +104,8 @@ export interface StockMemberView {
   isActive: boolean;
   permissions: { permission: string; granted: boolean }[];
   effectivePermissions: string[];
+  /** Sites rattachés ; vide = tous les sites. */
+  siteIds: string[];
 }
 
 export type StockLookup =
@@ -125,3 +127,118 @@ export function categoryLabel(c: StockCategoryView, all: readonly StockCategoryV
   const parent = c.parentId ? all.find((p) => p.id === c.parentId) : null;
   return parent ? `${parent.name} › ${c.name}` : c.name;
 }
+
+// ─── S2 : sites, stocks, mouvements, transferts, inventaires ───
+
+export interface StockSiteRef {
+  id: string;
+  code: string;
+  name: string;
+}
+
+export interface StockLocationView {
+  id: string;
+  parentId: string | null;
+  kind: 'DEFAULT' | 'ZONE' | 'AISLE' | 'SHELF' | 'BIN';
+  code: string;
+  name: string;
+  isArchived: boolean;
+  qr: string;
+}
+
+export interface StockSiteView extends StockSiteRef {
+  kind: 'STORE' | 'DEPOT' | 'WAREHOUSE';
+  address: string | null;
+  city: string | null;
+  isArchived: boolean;
+  locations?: StockLocationView[];
+}
+
+export interface StockVariantRef {
+  id: string;
+  name: string | null;
+  sku: string;
+  product: { id: string; name: string; unit?: string };
+}
+
+export interface StockLevelRow {
+  site: StockSiteRef;
+  variant: StockVariantRef;
+  onHand: number;
+  reserved: number;
+  available: number;
+  inTransit: number;
+  minStock: number | null;
+  belowMin: boolean;
+}
+
+export interface StockMovementRow {
+  id: string;
+  kind: string;
+  quantity: number;
+  quantityAfter: number;
+  reason: string | null;
+  sourceType: string;
+  createdAt: string;
+  site: StockSiteRef;
+  location: { id: string; code: string };
+  variant: StockVariantRef;
+}
+
+export interface Paged<T> {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface StockTransferView {
+  id: string;
+  label: string;
+  status: string;
+  note: string | null;
+  fromSite: StockSiteRef;
+  toSite: StockSiteRef;
+  createdAt: string;
+  lines: {
+    id: string;
+    variant: StockVariantRef;
+    quantity: number;
+    fromLocation: { id: string; code: string; name: string } | null;
+    shippedQuantity: number;
+    receivedQuantity: number;
+    lostQuantity: number;
+    inTransit: number;
+    lossReason: string | null;
+  }[];
+}
+
+export interface StockCountView {
+  id: string;
+  label: string;
+  name: string;
+  scope: 'FULL' | 'PARTIAL';
+  status: 'OPEN' | 'VALIDATED' | 'CANCELLED';
+  site: StockSiteRef;
+  locationIds: string[];
+  lines: {
+    lineId: string | null;
+    variantId: string;
+    locationId: string;
+    counted: number | null;
+    onHand: number;
+    difference: number;
+    variant: StockVariantRef;
+    location: { id: string; code: string; name: string };
+  }[];
+}
+
+/** Libellé d'une variante : article, puis déclinaison. */
+export const variantLabel = (v: StockVariantRef) =>
+  v.name ? `${v.product.name} — ${v.name}` : v.product.name;
+
+/** Clé d'idempotence d'un envoi : un double clic ou un réseau instable ne compte jamais deux fois. */
+export const newIdempotencyKey = () =>
+  typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? crypto.randomUUID().replace(/-/g, '')
+    : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;

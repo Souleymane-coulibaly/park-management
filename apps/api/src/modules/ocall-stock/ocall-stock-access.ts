@@ -37,6 +37,11 @@ export interface StockContext {
   /** Ligne Stock du compte ; null pour le propriétaire de l'organisation, administrateur d'office. */
   memberId: string | null;
   isOwner: boolean;
+  /**
+   * Sites accessibles : null = tous (administrateur, ou membre rattaché à aucun site) ; sinon les sites
+   * auxquels le membre est rattaché.
+   */
+  siteIds: string[] | null;
 }
 
 type StockRequest = Request & { ocallStock?: StockContext };
@@ -48,6 +53,14 @@ export const RequireStockPermission = (...permissions: StockPermission[]) =>
 export const CurrentStock = createParamDecorator((_data: unknown, ctx: ExecutionContext) => {
   return ctx.switchToHttp().getRequest<StockRequest>().ocallStock as StockContext;
 });
+
+/** Vrai si le membre peut agir sur ce site. */
+export const stockSiteAllowed = (ctx: StockContext, siteId: string) =>
+  ctx.siteIds === null || ctx.siteIds.includes(siteId);
+
+/** Filtre Prisma des sites accessibles (objet vide si tous). */
+export const stockSiteWhere = (ctx: StockContext, field = 'siteId') =>
+  ctx.siteIds === null ? {} : { [field]: { in: ctx.siteIds } };
 
 /** Vrai si le contexte porte la permission (contrôles fins dans les services). */
 export const stockCan = (ctx: StockContext, permission: StockPermission) =>
@@ -100,6 +113,7 @@ export class OcallStockAccessGuard implements CanActivate {
               id: true,
               role: true,
               permissions: { select: { permission: true, granted: true } },
+              sites: { select: { siteId: true } },
             },
           })
         : null;
@@ -121,6 +135,7 @@ export class OcallStockAccessGuard implements CanActivate {
       permissions,
       memberId: member?.id ?? null,
       isOwner,
+      siteIds: role === 'ADMIN' || !member?.sites.length ? null : member.sites.map((s) => s.siteId),
     };
     return true;
   }

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { HTMLAttributes, ReactNode } from 'react';
 
 export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
@@ -28,12 +28,18 @@ export function CardHeader({
   );
 }
 
+/** Corps de carte ; les attributs HTML (data-testid, aria-*) sont transmis au conteneur. */
 export function CardBody({
   children,
   className = '',
-}: {
+  ...rest
+}: HTMLAttributes<HTMLDivElement> & {
   children: ReactNode;
   className?: string;
 }) {
-  return <div className={`px-5 py-5 sm:px-6 ${className}`}>{children}</div>;
+  return (
+    <div {...rest} className={`px-5 py-5 sm:px-6 ${className}`}>
+      {children}
+    </div>
+  );
 }

@@ -43,6 +43,7 @@ export class OcallStockService {
       storeName: settings?.storeName ?? organization.name.slice(0, 80),
       defaultVatRate: settings?.defaultVatRate ?? STOCK_DEFAULT_VAT_RATE,
       internalCodePrefix: settings?.internalCodePrefix ?? 'OC',
+      allowNegativeStock: settings?.allowNegativeStock ?? false,
       currency: organization.currency,
       saved: Boolean(settings),
     };

@@ -386,6 +386,22 @@ export class OcallStockCatalogService {
           );
         }
         if (Object.keys(next).length === 0) return [];
+        // Un article qui a du stock (ou une réservation) reste stocké : sinon son stock deviendrait intouchable.
+        if (next.isStockable === false) {
+          const stocked = await tx.stockLevel.count({
+            where: {
+              organizationId: ctx.organizationId,
+              variant: { productId: id },
+              OR: [{ onHand: { not: 0 } }, { reserved: { not: 0 } }],
+            },
+          });
+          if (stocked > 0) {
+            throw new ConflictException({
+              code: 'STOCK_PRODUCT_HAS_STOCK',
+              message: 'Cet article a du stock : videz-le avant de le déclarer non stocké.',
+            });
+          }
+        }
         if ('categoryId' in next || 'brandId' in next) {
           await this.assertLinks(
             tx,

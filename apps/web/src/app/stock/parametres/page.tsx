@@ -15,6 +15,7 @@ interface SettingsView {
   storeName: string;
   defaultVatRate: number;
   internalCodePrefix: string;
+  allowNegativeStock: boolean;
   currency: string;
   saved: boolean;
 }
@@ -58,6 +59,7 @@ function SettingsForm({
   const [storeName, setStoreName] = useState(initial.storeName);
   const [vat, setVat] = useState(String(initial.defaultVatRate));
   const [prefix, setPrefix] = useState(initial.internalCodePrefix);
+  const [allowNegative, setAllowNegative] = useState(initial.allowNegativeStock);
   const [error, setError] = useState<ApiError | null>(null);
   const [done, setDone] = useState(false);
 
@@ -68,7 +70,12 @@ function SettingsForm({
     try {
       await api('/ocall-stock/settings', {
         method: 'PUT',
-        body: { storeName, defaultVatRate: Number(vat), internalCodePrefix: prefix },
+        body: {
+          storeName,
+          defaultVatRate: Number(vat),
+          internalCodePrefix: prefix,
+          allowNegativeStock: allowNegative,
+        },
       });
       setDone(true);
       onSaved();
@@ -116,6 +123,22 @@ function SettingsForm({
               onChange={(e) => setPrefix(e.target.value.toUpperCase())}
             />
           </div>
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-1"
+              disabled={!manage}
+              checked={allowNegative}
+              onChange={(e) => setAllowNegative(e.target.checked)}
+            />
+            <span>
+              Autoriser le stock négatif
+              <span className="block text-xs text-muted">
+                Une sortie au-delà du stock est alors acceptée (par exemple quand les entrées sont
+                saisies en retard). Refusé par défaut.
+              </span>
+            </span>
+          </label>
           {manage && <Button type="submit">Enregistrer</Button>}
         </form>
       </CardBody>

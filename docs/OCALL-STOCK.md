@@ -6,8 +6,9 @@ Elle s'adresse aux commerces, grossistes, distributeurs, quincailleries, superma
 Elle est vendue indépendamment d'Ocall Facture. Les deux applications fonctionnent ensemble quand une
 organisation a les deux abonnements (sprint S5).
 
-**État : sprint S1 livré (socle et catalogue).** Les stocks, achats, caisse, interconnexion avec Facture,
-tableaux de bord, vitrine et IA suivent, sprint par sprint (§11). Plan complet :
+**État : sprints S1 (socle et catalogue), S2 (sites, stocks, transferts, inventaires) et S3 (achats)
+livrés.** La caisse, l'interconnexion avec Facture, les tableaux de bord, la vitrine et l'IA suivent, sprint
+par sprint (§12). Plan complet :
 `ocall-audits/plan-ocall-stock-v1.md` (hors dépôt).
 
 ## 1. Activation
@@ -28,13 +29,13 @@ tableaux de bord, vitrine et IA suivent, sprint par sprint (§11). Plan complet 
 
 ## 2. Architecture
 
-| Élément | Emplacement |
-|---|---|
-| Base et migrations | `packages/stock-database` (`@ocall/stock-database`, client `.prisma/stock-client`) |
-| API | `apps/api/src/modules/ocall-stock`, routes `/api/v1/ocall-stock/...` |
-| Contrat avec Facture | `apps/api/src/common/integration/catalog-integration.ts` |
-| Règles partagées | `packages/shared/src/stock.ts`, `stock-barcodes.ts`, `stock-labels.ts` |
-| Web | `apps/web/src/app/stock` (route `/stock`), `components/stock`, `components/scan` |
+| Élément              | Emplacement                                                                        |
+| -------------------- | ---------------------------------------------------------------------------------- |
+| Base et migrations   | `packages/stock-database` (`@ocall/stock-database`, client `.prisma/stock-client`) |
+| API                  | `apps/api/src/modules/ocall-stock`, routes `/api/v1/ocall-stock/...`               |
+| Contrat avec Facture | `apps/api/src/common/integration/catalog-integration.ts`                           |
+| Règles partagées     | `packages/shared/src/stock.ts`, `stock-barcodes.ts`, `stock-labels.ts`             |
+| Web                  | `apps/web/src/app/stock` (route `/stock`), `components/stock`, `components/scan`   |
 
 - **Préfixe `/ocall-stock`.** Côté API, `/stock` appartient déjà au stock d'ingrédients du restaurant
   d'Ocall Park.
@@ -56,32 +57,54 @@ Commercial, Lecteur / auditeur. Le propriétaire de l'organisation est administr
 **Permissions du sprint S1.** Chaque sprint ajoute les siennes : une permission n'existe que si une
 fonction l'exige.
 
-| Permission | Admin. | Resp. magasin | Resp. entrepôt | Magasinier | Caissier | Commercial | Lecteur |
-|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
-| Accéder | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
-| Réglages | ✔ | | | | | | |
-| Voir l'équipe | ✔ | ✔ | ✔ | | | | ✔ |
-| Gérer l'équipe et les permissions | ✔ | | | | | | |
-| Consulter le catalogue | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ | ✔ |
-| Gérer le catalogue (hors prix) | ✔ | ✔ | ✔ | | | | |
-| Voir les prix d'achat | ✔ | ✔ | ✔ | | | | ✔ |
-| Modifier les prix | ✔ | ✔ | | | | | |
-| Consulter les fournisseurs | ✔ | ✔ | ✔ | ✔ | | | ✔ |
-| Gérer les fournisseurs | ✔ | ✔ | ✔ | | | | |
-| Imprimer les étiquettes | ✔ | ✔ | ✔ | ✔ | | ✔ | |
+| Permission                                    | Admin. | Resp. magasin | Resp. entrepôt | Magasinier | Caissier | Commercial | Lecteur |
+| --------------------------------------------- | :----: | :-----------: | :------------: | :--------: | :------: | :--------: | :-----: |
+| Accéder                                       |   ✔    |       ✔       |       ✔        |     ✔      |    ✔     |     ✔      |    ✔    |
+| Réglages                                      |   ✔    |               |                |            |          |            |         |
+| Voir l'équipe                                 |   ✔    |       ✔       |       ✔        |            |          |            |    ✔    |
+| Gérer l'équipe et les permissions             |   ✔    |               |                |            |          |            |         |
+| Consulter le catalogue                        |   ✔    |       ✔       |       ✔        |     ✔      |    ✔     |     ✔      |    ✔    |
+| Gérer le catalogue (hors prix)                |   ✔    |       ✔       |       ✔        |            |          |            |         |
+| Voir les prix d'achat                         |   ✔    |       ✔       |       ✔        |            |          |            |    ✔    |
+| Modifier les prix                             |   ✔    |       ✔       |                |            |          |            |         |
+| Consulter les fournisseurs                    |   ✔    |       ✔       |       ✔        |     ✔      |          |            |    ✔    |
+| Gérer les fournisseurs                        |   ✔    |       ✔       |       ✔        |            |          |            |         |
+| Imprimer les étiquettes                       |   ✔    |       ✔       |       ✔        |     ✔      |          |     ✔      |         |
+| Gérer les sites et leurs équipes (S2)         |   ✔    |               |                |            |          |            |         |
+| Gérer les emplacements                        |   ✔    |       ✔       |       ✔        |            |          |            |         |
+| Consulter les stocks                          |   ✔    |       ✔       |       ✔        |     ✔      |    ✔     |     ✔      |    ✔    |
+| Consulter mouvements, transferts, inventaires |   ✔    |       ✔       |       ✔        |     ✔      |          |            |    ✔    |
+| Saisir entrées, sorties, déplacements         |   ✔    |       ✔       |       ✔        |     ✔      |          |            |         |
+| Ajuster le stock                              |   ✔    |       ✔       |       ✔        |            |          |            |         |
+| Préparer et expédier les transferts           |   ✔    |       ✔       |       ✔        |     ✔      |          |            |         |
+| Réceptionner les transferts                   |   ✔    |       ✔       |       ✔        |     ✔      |          |            |         |
+| Compter un inventaire                         |   ✔    |       ✔       |       ✔        |     ✔      |          |            |         |
+| Valider un inventaire                         |   ✔    |       ✔       |       ✔        |            |          |            |         |
+| Consulter les achats (S3)                     |   ✔    |       ✔       |       ✔        |     ✔      |          |            |    ✔    |
+| Gérer les commandes fournisseurs              |   ✔    |       ✔       |       ✔        |            |          |            |         |
+| Réceptionner les commandes                    |   ✔    |       ✔       |       ✔        |     ✔      |          |            |         |
+| Retourner aux fournisseurs                    |   ✔    |       ✔       |       ✔        |            |          |            |         |
 
 **Ajustements par membre.** Un administrateur accorde ou retire une permission à un membre, en plus de son
 rôle.
-- L'accès, les réglages et la gestion de l'équipe ne sont jamais ajustables.
+
+- L'accès, les réglages, la gestion de l'équipe et celle des sites ne sont jamais ajustables.
 - Personne ne modifie son propre accès.
 - Désactiver un membre ferme aussitôt ses sessions.
 
 **Contrôle côté serveur, à chaque requête :**
+
 - un champ autre qu'un prix exige « Gérer le catalogue » ;
 - un prix exige « Modifier les prix » ;
 - un prix d'achat exige en plus « Voir les prix d'achat ».
 
 Sans ce droit, le prix d'achat est retiré de toutes les réponses, historiques compris.
+
+**Périmètre des sites (S2).** Un membre rattaché à des sites ne voit et ne touche qu'eux : sites, stocks,
+mouvements, inventaires, transferts dont il est le départ ou l'arrivée. Un site hors périmètre est
+« introuvable ». Sans aucun rattachement, il agit sur tous les sites (décision du 12/11/2026) ;
+l'administrateur agit toujours sur tous. Préparer, expédier ou annuler un transfert exige le site de départ ;
+le réceptionner, le site d'arrivée.
 
 ## 4. Catalogue
 
@@ -132,7 +155,12 @@ Sans ce droit, le prix d'achat est retiré de toutes les réponses, historiques 
   - donne un retour visuel, et sonore si on l'active (le réglage est mémorisé sur l'appareil).
 - **Limites du matériel :**
   - un lecteur 1D ne lit pas les QR codes : il faut un lecteur 2D ;
-  - le scan par la caméra du téléphone ou de la tablette arrive au sprint S2.
+  - le scan par la caméra (S2) exige HTTPS et l'autorisation du navigateur.
+- **Caméra (S2)** : bouton « Caméra » du champ de scan (`components/scan/camera-barcode-scanner.tsx`).
+  Détecteur natif du navigateur s'il lit tous les formats (Chrome Android), sinon `zxing-wasm` (iPhone,
+  iPad) : EAN-13, EAN-8, UPC-A, Code 128, QR. Le fichier WebAssembly est servi par le site
+  (`/vendor/zxing_reader.wasm`, copié par `apps/web/scripts/copy-vendor.mjs` avant `next dev` et
+  `next build`), sans aucun appel à un service tiers.
 
 ## 6. Étiquettes
 
@@ -164,6 +192,7 @@ Sans ce droit, le prix d'achat est retiré de toutes les réponses, historiques 
 
 `StockCatalogReader` (`common/integration/catalog-integration.ts`) se lit dans un seul sens : de Stock vers
 Facture.
+
 - `isAvailable` : Stock est activé et l'organisation y a droit (consultation seule comprise).
 - `search` : recherche des articles actifs.
 - `variants` : articles désignés, de cette organisation seulement.
@@ -172,11 +201,81 @@ Chaque article renvoie : libellé (article et variante), référence, unité, pr
 principal, stocké ou non.
 
 Facture ne modifie jamais un article Stock. Les demandes de mouvement passeront par un contrat distinct :
+
 - déstockage unique à l'émission d'une facture ;
 - retours ;
 - file de sortie idempotente.
 
-## 9. Base et déploiement
+## 9. Sites, stocks, transferts et inventaires (S2)
+
+- **Sites** : magasins, dépôts, entrepôts. Code court unique (2 à 8 caractères) qui ne change plus : il est
+  imprimé dans les QR codes. Chaque site naît avec un emplacement « Général » : un site non découpé
+  fonctionne sans configuration.
+- **Emplacements** : zone → allée → rayonnage → emplacement (A-01-03), dans cet ordre, dans le même site
+  (contrôlé par la base). Code unique dans le site, inchangeable. **QR code** : `L:<site>/<emplacement>`,
+  imprimé sur étiquette (formats des étiquettes d'articles) et lu par le champ de scan. Un site ou un
+  emplacement qui contient du stock ou une opération en cours ne s'archive pas.
+- **Moteur de stock** (`ocall-stock-ledger.service.ts`) : seule porte d'écriture des quantités.
+  - **Niveau** par variante et par emplacement : en stock, réservé (transfert préparé) ; disponible =
+    en stock − réservé.
+  - **Registre des mouvements** en ajout seul (garanti par la base), avec la quantité à l'emplacement
+    après chaque mouvement et l'opération d'origine (saisie, transfert, inventaire). Une correction est
+    un mouvement compensatoire.
+  - **Idempotence** : chaque écriture a une clé unique ; l'appareil envoie une clé par saisie. Une
+    requête répétée (double clic, réseau instable), même simultanée, n'est comptée qu'une fois (verrou
+    consultatif sur la clé, puis contrôle).
+  - **Concurrence** : niveaux verrouillés (`FOR UPDATE`) dans un ordre fixe. Deux caisses qui sortent
+    le dernier article : la seconde attend puis est refusée (`STOCK_INSUFFICIENT`).
+  - **Stock négatif** refusé par défaut (une sortie ne puise que dans le disponible) ; l'administrateur
+    peut l'autoriser dans les réglages.
+  - Un article non stocké (service) n'a aucun mouvement ; un article qui a du stock ne peut pas devenir
+    « non stocké ».
+- **Saisies** : entrée (coût unitaire facultatif), sortie et ajustement (motif obligatoire ; ajuster exige
+  son propre droit), déplacement entre deux emplacements du même site.
+- **Stocks** : par site et par variante, avec la quantité **en transit** (expédiée vers le site, ni reçue ni
+  déclarée manquante), même si le site n'a encore aucun stock de l'article ; filtre « sous le seuil
+  d'alerte » (seuil de l'article comparé au stock du site). Détail par emplacement sur la fiche article.
+- **Transferts** : demandé → préparé (emplacement de prélèvement par ligne, quantités réservées) →
+  expédié (sorties de la source, réservations consommées, en transit) → reçu, en une ou plusieurs fois,
+  rangé à l'emplacement choisi du site d'arrivée. Un **manque** se déclare avec un motif : il clôt le
+  reste attendu sans entrée. Annulation possible avant l'expédition (réservations libérées). Chaque
+  transition verrouille le transfert ; une expédition ou une réception rejouée n'est pas recomptée ; une
+  réception supérieure au reste attendu est refusée.
+- **Inventaires** : complet (tout article en stock dans le périmètre et non compté est ramené à 0) ou
+  partiel (seules les lignes comptées), sur tout le site ou des emplacements choisis ; deux inventaires
+  ouverts ne couvrent jamais le même emplacement. Comptage par saisie ou par scan (+1 par lecture),
+  sans toucher au stock. **Validation** par une personne habilitée : **écart = compté − stock au moment
+  de la validation**, lu sous le verrou de chaque ligne (décision du 12/11/2026) : un mouvement fait
+  pendant le comptage n'est pas perdu. Stock et écart figés sur chaque ligne ; rapports CSV (tableur) et
+  PDF.
+
+## 10. Achats (S3)
+
+- **Commandes fournisseurs** : fournisseur, site de livraison, date attendue, lignes (article, quantité,
+  coût HT, TVA), totaux HT, TVA, TTC. **Brouillon** modifiable, puis **commandée** : ses lignes ne
+  changent plus (déclencheur en base). Reçue en partie, reçue, **close** (le reste n'est plus attendu) ou
+  **annulée** (seulement avant toute réception). Bon de commande en PDF.
+- **Réceptions** : une ou plusieurs par commande (livraisons partielles), référence du bon de livraison,
+  rangement à l'emplacement choisi du site de livraison, **jamais au-delà du reste commandé**. Entrées en
+  stock par le moteur (mouvement « Réception fournisseur », coût reçu). Une réception envoyée deux fois
+  (même clé) n'est enregistrée qu'une fois. Coût réellement facturé facultatif, et report sur le prix
+  d'achat de l'article au choix (droit de modifier les prix).
+- **Annulation d'une réception** (erreur de saisie, livraison refusée) : motif obligatoire, sorties
+  compensatoires aux mêmes emplacements (refusées si la marchandise n'y est plus, sauf stock négatif
+  autorisé), commande rouverte ; rien n'est supprimé. Réception et lignes reçues figées par la base (seule
+  l'annulation est admise, une fois).
+- **Retours fournisseurs** : sorties tracées avec motif, commande d'origine facultative ; soumis à la
+  politique de stock négatif ; idempotents ; ajout seul.
+- **Prix d'achat** : historique par fournisseur et par article (une entrée par ligne reçue, ajout seul).
+- **Coûts** : montrés seulement avec le droit de voir les prix d'achat. Un magasinier réceptionne (quantités,
+  emplacements) sans voir ni saisir de coût ; le bon de commande lui est fermé.
+- **Documents joints** à une commande, une réception ou un retour : PDF, JPEG ou PNG de 10 Mo au plus,
+  10 par pièce, **type vérifié par la signature du fichier** (un faux PDF est refusé), nom nettoyé, stockage
+  privé, téléchargement réservé à l'organisation et au site.
+- **Étiquettes** après une réception : un clic imprime les étiquettes des articles reçus (une par unité,
+  200 au plus par article).
+
+## 11. Base et déploiement
 
 - **Migration** `20261201000000_stock_v1_catalogue` (additive) :
   - 13 tables ;
@@ -187,6 +286,15 @@ Facture ne modifie jamais un article Stock. Les demandes de mouvement passeront 
   - déclencheurs : profondeur des catégories, historiques en ajout seul.
   - Une purge d'organisation (`purgeStockOrganizations`, réglage local `ocall.stock_purge`) est seule admise
     à supprimer les historiques.
+- **Migration** `20261202000000_stock_v1_entrepots` (S2, additive) : 9 tables (sites, rattachements,
+  emplacements, niveaux, mouvements, transferts et lignes, inventaires et lignes), réglage
+  `allowNegativeStock` ; contrôles (codes, quantités, réception ≤ expédition, deux sites distincts),
+  « Général » unique par site, déclencheurs : arborescence des emplacements, emplacement dans le bon site,
+  registre en ajout seul.
+- **Migration** `20261203000000_stock_v1_achats` (S3, additive) : 8 tables (commandes et lignes,
+  réceptions et lignes, retours et lignes, prix fournisseurs, documents) ; contrôles (quantités, reçu ≤
+  commandé, coûts, motif d'annulation, types de documents) ; déclencheurs : lignes de commande figées dès la
+  commande, réception figée sauf annulation, lignes reçues, retours et prix en ajout seul.
 - **Base Suite** : migration de données `20261201000100_stock_v1_offres` (2 offres inactives).
 - **Pré-déploiement** : `apps/api/railway.json` contient `db:stock:migrate:deploy`.
 
@@ -195,47 +303,63 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
 
 **Variables.**
 
-| Variable | Rôle |
-|---|---|
-| `STOCK_ENABLED` | `true` pour activer l'application |
-| `STOCK_DATABASE_URL` | URL de la base Stock |
-| `STOCK_DIRECT_URL` | URL directe, pour les migrations ; même base |
+| Variable             | Rôle                                         |
+| -------------------- | -------------------------------------------- |
+| `STOCK_ENABLED`      | `true` pour activer l'application            |
+| `STOCK_DATABASE_URL` | URL de la base Stock                         |
+| `STOCK_DIRECT_URL`   | URL directe, pour les migrations ; même base |
 
-## 10. Tests
+## 12. Tests
 
-| Type | Fichier | Contenu |
-|---|---|---|
-| Unitaires, partagés | `packages/shared/src/stock.spec.ts` | Rôles, ajustements, montants, clés GTIN, détection, nettoyage des lectures, équivalence UPC-A ↔ EAN-13 |
-| Unitaires, API | `ocall-stock.config.spec.ts`, `ocall-stock-boundaries.spec.ts`, `ocall-stock-label-pdf.spec.ts` | Configuration, frontières, codes relus par zxing, PDF à la taille du format |
-| Unitaires, base | `packages/database/src/migration-safety.spec.ts` | Garde de la cible des migrations Stock |
-| Intégration | `apps/api/test/stock-s1.integration.spec.ts` (`TEST_STOCK_DATABASE_URL`) | Voir le détail ci-dessous |
-| E2E | `e2e/stock-s1.spec.ts` | Voir le détail ci-dessous |
+| Type                | Fichier                                                                                         | Contenu                                                                                                |
+| ------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Unitaires, partagés | `packages/shared/src/stock.spec.ts`                                                             | Rôles, ajustements, montants, clés GTIN, détection, nettoyage des lectures, équivalence UPC-A ↔ EAN-13 |
+| Unitaires, API      | `ocall-stock.config.spec.ts`, `ocall-stock-boundaries.spec.ts`, `ocall-stock-label-pdf.spec.ts` | Configuration, frontières, codes relus par zxing, PDF à la taille du format                            |
+| Unitaires, base     | `packages/database/src/migration-safety.spec.ts`                                                | Garde de la cible des migrations Stock                                                                 |
+| Unitaires, S2       | `packages/shared/src/stock-warehouse.spec.ts`                                                   | QR codes d'emplacement, ordre des niveaux, permissions S2                                              |
+| Intégration         | `apps/api/test/stock-s1…s3.integration.spec.ts` (`TEST_STOCK_DATABASE_URL`)                     | Voir le détail ci-dessous                                                                              |
+| E2E                 | `e2e/stock-s1.spec.ts`, `stock-s2.spec.ts`, `stock-s3.spec.ts`                                  | Voir le détail ci-dessous                                                                              |
 
 **Intégration**, sur bases locales jetables :
+
 - accès, essai, portail et lecture seule ;
 - catégories sur deux niveaux, articles, historiques en ajout seul (refusés par la base) ;
 - codes-barres : clé, doublons, UPC-A ↔ EAN-13, code interne, contrainte en base ;
 - lecture des scanners et recherche (fautes, accents, pagination) ;
 - variantes, équipe et ajustements, photos, fournisseurs, étiquettes ;
 - contrat de lecture ;
-- isolation entre organisations.
+- isolation entre organisations ;
+- S2 : sites et emplacements (arborescence refusée par la base, QR codes, étiquettes) ; entrée rejouée
+  une seule fois ; stock insuffisant, service refusé ; déplacements ; deux sorties simultanées du dernier
+  article (une seule passe) ; même clé envoyée deux fois en même temps ; stock négatif selon le réglage ;
+  transfert réservé, expédié une fois, en transit, reçu en partie (rejeu sans effet), manque, annulation ;
+  inventaire complet avec mouvement pendant le comptage, validation réservée, rapports ; périmètre des
+  sites ; registre en ajout seul ; isolation ;
+- S3 : commande brouillon puis figée par la base, totaux, bon de commande PDF ; réception partielle,
+  rejouée, au-delà du commandé ou hors site refusée ; magasinier sans coûts ; report du coût réel et
+  historique des prix ; annulation d'une réception (compensation, une seule fois, refusée si vendue) ;
+  clôture, annulation ; retour fournisseur (rejeu, stock insuffisant, ajout seul) ; documents (signature
+  vérifiée, isolation) ; isolation.
 
 **E2E**, parcours navigateur :
+
 - portail et réglages ;
 - catégories, article, codes ;
 - scan d'un code connu, puis d'un code inconnu suivi de la création de l'article ;
 - recherche, étiquettes PDF, équipe ;
-- format téléphone.
+- format téléphone ;
+- S2 : sites et emplacement, entrée, transfert préparé, expédié, reçu en partie puis manque, stocks par
+  site, inventaire compté au scan et validé, panneau caméra ;
+- S3 : commande passée, réception partielle puis du reste, annulation d'une réception, document joint,
+  retour fournisseur.
 
-## 11. Suite de la feuille de route
+## 13. Suite de la feuille de route
 
-| Sprint | Contenu |
-|---|---|
-| S2 | Sites, emplacements et QR, registre des mouvements, transferts, inventaires, scan caméra |
-| S3 | Achats et réceptions |
-| S4 | Caisse et tickets thermiques |
-| S5 | Interconnexion Facture |
-| S6 | Tableaux de bord et recherche complète |
-| S7 | Vitrine |
-| S8 | IA : réapprovisionnement, ruptures, analyse, images d'articles |
-| S9 | Stabilisation |
+| Sprint | Contenu                                                        |
+| ------ | -------------------------------------------------------------- |
+| S4     | Caisse et tickets thermiques                                   |
+| S5     | Interconnexion Facture                                         |
+| S6     | Tableaux de bord et recherche complète                         |
+| S7     | Vitrine                                                        |
+| S8     | IA : réapprovisionnement, ruptures, analyse, images d'articles |
+| S9     | Stabilisation                                                  |

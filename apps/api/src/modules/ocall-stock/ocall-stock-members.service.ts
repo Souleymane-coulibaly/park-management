@@ -32,6 +32,7 @@ const MEMBER_SELECT = {
   isActive: true,
   createdAt: true,
   permissions: { select: { permission: true, granted: true } },
+  sites: { select: { siteId: true } },
 } as const;
 
 /**
@@ -52,8 +53,9 @@ export class OcallStockMembersService {
       orderBy: [{ isActive: 'desc' }, { lastName: 'asc' }],
       select: MEMBER_SELECT,
     });
-    return members.map(({ userId: _u, ...m }) => ({
+    return members.map(({ userId: _u, sites, ...m }) => ({
       ...m,
+      siteIds: sites.map((x) => x.siteId),
       effectivePermissions: stockEffectivePermissions(m.role, m.permissions),
     }));
   }

@@ -50,6 +50,36 @@ export const STOCK_PERMISSIONS = [
   'stock.suppliers.manage',
   /** Imprimer les étiquettes autocollantes. */
   'stock.labels.print',
+  // ─── S2 : sites, stocks, transferts, inventaires ───
+  /** Créer et modifier les sites ; rattacher les membres aux sites. */
+  'stock.sites.manage',
+  /** Créer et modifier les emplacements d'un site, imprimer leurs QR codes. */
+  'stock.locations.manage',
+  /** Consulter les quantités en stock. */
+  'stock.levels.read',
+  /** Consulter le registre des mouvements, les transferts et les inventaires. */
+  'stock.movements.read',
+  /** Entrées, sorties et déplacements internes. */
+  'stock.movements.create',
+  /** Ajustements manuels (correction motivée). */
+  'stock.adjust',
+  /** Demander, préparer, expédier et annuler un transfert. */
+  'stock.transfers.manage',
+  /** Réceptionner un transfert, déclarer un manque. */
+  'stock.transfers.receive',
+  /** Ouvrir un inventaire et compter. */
+  'stock.counts.count',
+  /** Valider (ajustements) ou annuler un inventaire. */
+  'stock.counts.validate',
+  // ─── S3 : achats ───
+  /** Consulter les commandes fournisseurs, réceptions et retours. */
+  'stock.purchases.read',
+  /** Créer, passer, clore ou annuler une commande ; annuler une réception. */
+  'stock.purchases.manage',
+  /** Réceptionner une commande (entrées en stock). */
+  'stock.purchases.receive',
+  /** Retourner de la marchandise au fournisseur (sorties de stock). */
+  'stock.returns.manage',
 ] as const;
 export type StockPermission = (typeof STOCK_PERMISSIONS)[number];
 
@@ -65,6 +95,20 @@ export const STOCK_PERMISSION_LABELS: Record<StockPermission, string> = {
   'stock.suppliers.read': 'Consulter les fournisseurs',
   'stock.suppliers.manage': 'Gérer les fournisseurs',
   'stock.labels.print': 'Imprimer les étiquettes',
+  'stock.sites.manage': 'Gérer les sites et leurs équipes',
+  'stock.locations.manage': 'Gérer les emplacements',
+  'stock.levels.read': 'Consulter les stocks',
+  'stock.movements.read': 'Consulter les mouvements, transferts et inventaires',
+  'stock.movements.create': 'Saisir entrées, sorties et déplacements',
+  'stock.adjust': 'Ajuster le stock',
+  'stock.transfers.manage': 'Préparer et expédier les transferts',
+  'stock.transfers.receive': 'Réceptionner les transferts',
+  'stock.counts.count': 'Compter un inventaire',
+  'stock.counts.validate': 'Valider un inventaire',
+  'stock.purchases.read': 'Consulter les achats',
+  'stock.purchases.manage': 'Gérer les commandes fournisseurs',
+  'stock.purchases.receive': 'Réceptionner les commandes',
+  'stock.returns.manage': 'Retourner aux fournisseurs',
 };
 
 const ALL: readonly StockPermission[] = STOCK_PERMISSIONS;
@@ -81,6 +125,19 @@ const ROLE_PERMISSIONS: Record<StockRole, readonly StockPermission[]> = {
     'stock.suppliers.read',
     'stock.suppliers.manage',
     'stock.labels.print',
+    'stock.locations.manage',
+    'stock.levels.read',
+    'stock.movements.read',
+    'stock.movements.create',
+    'stock.adjust',
+    'stock.transfers.manage',
+    'stock.transfers.receive',
+    'stock.counts.count',
+    'stock.counts.validate',
+    'stock.purchases.read',
+    'stock.purchases.manage',
+    'stock.purchases.receive',
+    'stock.returns.manage',
   ],
   WAREHOUSE_MANAGER: [
     'stock.access',
@@ -91,25 +148,62 @@ const ROLE_PERMISSIONS: Record<StockRole, readonly StockPermission[]> = {
     'stock.suppliers.read',
     'stock.suppliers.manage',
     'stock.labels.print',
+    'stock.locations.manage',
+    'stock.levels.read',
+    'stock.movements.read',
+    'stock.movements.create',
+    'stock.adjust',
+    'stock.transfers.manage',
+    'stock.transfers.receive',
+    'stock.counts.count',
+    'stock.counts.validate',
+    'stock.purchases.read',
+    'stock.purchases.manage',
+    'stock.purchases.receive',
+    'stock.returns.manage',
   ],
-  STOREKEEPER: ['stock.access', 'stock.catalog.read', 'stock.suppliers.read', 'stock.labels.print'],
-  CASHIER: ['stock.access', 'stock.catalog.read'],
-  SALES: ['stock.access', 'stock.catalog.read', 'stock.labels.print'],
+  STOREKEEPER: [
+    'stock.access',
+    'stock.catalog.read',
+    'stock.suppliers.read',
+    'stock.labels.print',
+    'stock.levels.read',
+    'stock.movements.read',
+    'stock.movements.create',
+    'stock.transfers.manage',
+    'stock.transfers.receive',
+    'stock.counts.count',
+    'stock.purchases.read',
+    'stock.purchases.receive',
+  ],
+  CASHIER: ['stock.access', 'stock.catalog.read', 'stock.levels.read'],
+  SALES: ['stock.access', 'stock.catalog.read', 'stock.labels.print', 'stock.levels.read'],
   AUDITOR: [
     'stock.access',
     'stock.members.read',
     'stock.catalog.read',
     'stock.prices.purchase.read',
     'stock.suppliers.read',
+    'stock.levels.read',
+    'stock.movements.read',
+    'stock.purchases.read',
   ],
 };
 
+/** Droits d'administration et accès : toujours liés au rôle, jamais ajustés membre par membre. */
+const ROLE_ONLY: readonly StockPermission[] = [
+  'stock.access',
+  'stock.settings.manage',
+  'stock.members.manage',
+  'stock.sites.manage',
+];
+
 /**
  * Permissions qu'un administrateur peut accorder ou retirer à un membre en plus de son rôle. Les droits
- * d'administration (réglages, équipe) et l'accès lui-même restent liés au rôle.
+ * d'administration (réglages, équipe, sites) et l'accès lui-même restent liés au rôle.
  */
 export const STOCK_ADJUSTABLE_PERMISSIONS: readonly StockPermission[] = STOCK_PERMISSIONS.filter(
-  (p) => p !== 'stock.access' && p !== 'stock.settings.manage' && p !== 'stock.members.manage',
+  (p) => !ROLE_ONLY.includes(p),
 );
 
 export const isStockPermission = (value: unknown): value is StockPermission =>

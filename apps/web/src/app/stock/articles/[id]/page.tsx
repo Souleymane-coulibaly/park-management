@@ -3,7 +3,12 @@
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { type FormEvent, Suspense, useState } from 'react';
-import { STOCK_BARCODE_TYPE_LABELS, type StockBarcodeType, formatStockMoney } from '@ocall/shared';
+import {
+  STOCK_BARCODE_TYPE_LABELS,
+  type StockBarcodeType,
+  formatStockMoney,
+  formatStockQuantity,
+} from '@ocall/shared';
 import { ProductForm } from '@/components/stock/product-form';
 import { StockPage, type StockPageProps } from '@/components/stock/stock-page';
 import {
@@ -212,6 +217,8 @@ function Product({ context, can, canWrite }: StockPageProps) {
         )}
       </Card>
 
+      {can('stock.levels.read') && p.isStockable && <Levels product={p} />}
+
       <Images product={p} manage={manage} onChange={reload} onError={setError} />
 
       <Card>
@@ -269,6 +276,55 @@ function describe(changes: Record<string, [unknown, unknown]>): string {
         : (FIELDS[k] ?? k);
     })
     .join(', ')}`;
+}
+
+interface ProductLevel {
+  variantId: string;
+  onHand: number;
+  reserved: number;
+  available: number;
+  site: { id: string; code: string; name: string };
+  location: { id: string; code: string; name: string };
+}
+
+/** Stock de l'article par site et par emplacement (sites accessibles au membre). */
+function Levels({ product }: { product: StockProductDetail }) {
+  const levels = useApi<ProductLevel[]>(`/ocall-stock/products/${product.id}/levels`);
+  const variantName = (id: string) => product.variants.find((v) => v.id === id)?.name ?? 'Article';
+  const total = levels.state === 'success' ? levels.data.reduce((n, l) => n + l.onHand, 0) : null;
+  return (
+    <Card>
+      <CardHeader
+        title="Stock par emplacement"
+        description={
+          total === null ? undefined : `${formatStockQuantity(total)} ${product.unit} au total`
+        }
+      />
+      {levels.state === 'success' && levels.data.length === 0 ? (
+        <CardBody>
+          <p className="text-sm text-muted">Aucun stock enregistré.</p>
+        </CardBody>
+      ) : levels.state === 'success' ? (
+        <div data-testid="stock-product-levels">
+          <Table head={['Site / emplacement', 'Variante', 'En stock', 'Réservé', 'Disponible']}>
+            {levels.data.map((l) => (
+              <tr key={`${l.location.id}:${l.variantId}`}>
+                <Td>
+                  {l.site.code} / {l.location.code}
+                </Td>
+                <Td>{variantName(l.variantId)}</Td>
+                <Td>{formatStockQuantity(l.onHand)}</Td>
+                <Td>{formatStockQuantity(l.reserved)}</Td>
+                <Td className="font-semibold">{formatStockQuantity(l.available)}</Td>
+              </tr>
+            ))}
+          </Table>
+        </div>
+      ) : (
+        <LoadingState />
+      )}
+    </Card>
+  );
 }
 
 function Info({ label, value }: { label: string; value: string }) {

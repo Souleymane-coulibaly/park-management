@@ -34,3 +34,6 @@ apps/android/local.properties
 
 # Stockage local des fichiers
 .media/
+
+# Fichiers d’exécution copiés depuis node_modules (scripts/copy-vendor.cjs)
+apps/web/public/vendor/

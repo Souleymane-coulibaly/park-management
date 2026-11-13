@@ -42,3 +42,4 @@ export * from './facture-site';
 export * from './stock';
 export * from './stock-barcodes';
 export * from './stock-labels';
+export * from './stock-warehouse';
