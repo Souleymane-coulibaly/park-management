@@ -22,6 +22,10 @@ import { OcallStockDocumentsService } from './ocall-stock-documents.service';
 import { OcallStockPurchasesController } from './ocall-stock-purchases.controller';
 import { OcallStockPurchasesService } from './ocall-stock-purchases.service';
 import { OcallStockReturnsService } from './ocall-stock-returns.service';
+import { OcallStockCustomersService } from './ocall-stock-customers.service';
+import { OcallStockPosController } from './ocall-stock-pos.controller';
+import { OcallStockRegistersService } from './ocall-stock-registers.service';
+import { OcallStockSalesService } from './ocall-stock-sales.service';
 import { OcallStockService } from './ocall-stock.service';
 
 /**
@@ -37,6 +41,7 @@ import { OcallStockService } from './ocall-stock.service';
     OcallStockCatalogController,
     OcallStockWarehouseController,
     OcallStockPurchasesController,
+    OcallStockPosController,
   ],
   providers: [
     OcallStockPrismaService,
@@ -57,6 +62,9 @@ import { OcallStockService } from './ocall-stock.service';
     OcallStockPurchasesService,
     OcallStockReturnsService,
     OcallStockDocumentsService,
+    OcallStockRegistersService,
+    OcallStockSalesService,
+    OcallStockCustomersService,
     { provide: STOCK_CATALOG_READER, useExisting: OcallStockCatalogReader },
   ],
   exports: [STOCK_CATALOG_READER],

@@ -15,6 +15,16 @@ export async function purgeStockOrganizations(
     async (tx) => {
       await tx.$executeRaw`SELECT set_config('ocall.stock_purge', 'on', true)`;
       const where = { organizationId: { in: organizationIds } };
+      // S4 : retours, paiements et ventes avant les sessions, caisses, clients et sites.
+      await tx.stockSaleReturnLine.deleteMany({ where });
+      await tx.stockPayment.deleteMany({ where });
+      await tx.stockSaleReturn.deleteMany({ where });
+      await tx.stockSaleLine.deleteMany({ where });
+      await tx.stockSale.deleteMany({ where });
+      await tx.stockHeldCart.deleteMany({ where });
+      await tx.stockCashSession.deleteMany({ where });
+      await tx.stockRegister.deleteMany({ where });
+      await tx.stockCustomer.deleteMany({ where });
       // S3 : documents, prix, retours, réceptions et commandes avant les fournisseurs et les sites.
       await tx.stockDocument.deleteMany({ where });
       await tx.stockSupplierPrice.deleteMany({ where });

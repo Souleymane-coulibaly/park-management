@@ -31,6 +31,8 @@ import {
   STOCK_MANUAL_MOVEMENT_KINDS,
   STOCK_MAX_PRICE,
   STOCK_MAX_QUANTITY,
+  STOCK_MAX_SALE_LINES,
+  STOCK_PAYMENT_METHODS,
   STOCK_PREFIX_PATTERN,
   STOCK_ROLES,
   STOCK_SITE_CODE_PATTERN,
@@ -40,6 +42,7 @@ import {
   type StockLabelField,
   type StockLabelFormat,
   type StockManualMovementKind,
+  type StockPaymentMethod,
   type StockSiteKind,
   type StockPermission,
   type StockRole,
@@ -78,6 +81,37 @@ export class StockSettingsDto {
   @IsOptional()
   @IsBoolean()
   allowNegativeStock?: boolean;
+
+  @ApiPropertyOptional({ description: 'Remise maximale en caisse (% de la ligne), 0 à 100' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100)
+  maxDiscountPercent?: number;
+
+  @ApiPropertyOptional({ description: 'Téléphone imprimé sur les tickets' })
+  @IsOptional()
+  @Transform(trimOrNull)
+  @ValidateIf(notNull)
+  @IsString()
+  @MaxLength(40)
+  receiptPhone?: string | null;
+
+  @ApiPropertyOptional({ description: 'Adresse imprimée sur les tickets' })
+  @IsOptional()
+  @Transform(trimOrNull)
+  @ValidateIf(notNull)
+  @IsString()
+  @MaxLength(160)
+  receiptAddress?: string | null;
+
+  @ApiPropertyOptional({ description: 'Mention de pied de ticket' })
+  @IsOptional()
+  @Transform(trimOrNull)
+  @ValidateIf(notNull)
+  @IsString()
+  @MaxLength(160)
+  receiptFooter?: string | null;
 }
 
 export class CreateStockMemberDto {
@@ -1183,4 +1217,315 @@ export class CreateStockSupplierReturnDto {
   @ValidateNested({ each: true })
   @Type(() => StockSupplierReturnLineDto)
   lines: StockSupplierReturnLineDto[];
+}
+
+// ─── S4 : caisse ───
+
+const PRINTER_CONNECTIONS = [
+  'NONE',
+  'SIMULATED',
+  'NETWORK',
+  'BLUETOOTH',
+  'USB',
+  'WEBUSB',
+  'WEBBLUETOOTH',
+] as const;
+export type StockPrinterConnection = (typeof PRINTER_CONNECTIONS)[number];
+
+export class StockCustomerDto {
+  @ApiProperty()
+  @Transform(trim)
+  @IsString()
+  @Length(1, 120)
+  name: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(trimOrNull)
+  @ValidateIf(notNull)
+  @IsString()
+  @MaxLength(40)
+  phone?: string | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(trimOrNull)
+  @ValidateIf(notNull)
+  @IsEmail()
+  @MaxLength(160)
+  email?: string | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(trimOrNull)
+  @ValidateIf(notNull)
+  @IsString()
+  @MaxLength(500)
+  note?: string | null;
+}
+
+export class UpdateStockCustomerDto extends PartialType(StockCustomerDto) {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  isArchived?: boolean;
+}
+
+export class StockRegisterDto {
+  @ApiProperty({ description: 'Code court (CAISSE1), unique' })
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim().toUpperCase() : value,
+  )
+  @Matches(/^[A-Z0-9][A-Z0-9-]{0,15}$/, { message: 'Code : lettres, chiffres et tirets.' })
+  code: string;
+
+  @ApiProperty()
+  @Transform(trim)
+  @IsString()
+  @Length(1, 80)
+  name: string;
+
+  @ApiProperty({ description: 'Emplacement d’où sort la marchandise vendue' })
+  @IsUUID()
+  locationId: string;
+
+  @ApiPropertyOptional({ enum: [58, 80] })
+  @IsOptional()
+  @IsIn([58, 80])
+  paperWidth?: 58 | 80;
+
+  @ApiPropertyOptional({ enum: PRINTER_CONNECTIONS })
+  @IsOptional()
+  @IsIn(PRINTER_CONNECTIONS)
+  printerConnection?: StockPrinterConnection;
+
+  @ApiPropertyOptional({ description: 'Adresse IP:port, MAC Bluetooth ou nom USB' })
+  @IsOptional()
+  @Transform(trimOrNull)
+  @ValidateIf(notNull)
+  @IsString()
+  @MaxLength(120)
+  printerAddress?: string | null;
+}
+
+export class UpdateStockRegisterDto extends PartialType(StockRegisterDto) {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  isArchived?: boolean;
+}
+
+export class OpenStockCashSessionDto {
+  @ApiProperty({ description: 'Fond de caisse (espèces à l’ouverture)' })
+  @IsInt()
+  @Min(0)
+  @Max(STOCK_MAX_PRICE)
+  openingFloat: number;
+}
+
+export class CloseStockCashSessionDto {
+  @ApiProperty({ description: 'Espèces comptées dans le tiroir' })
+  @IsInt()
+  @Min(0)
+  @Max(STOCK_MAX_PRICE)
+  countedCash: number;
+
+  @ApiPropertyOptional({ description: 'Motif de l’écart (obligatoire s’il y en a un)' })
+  @IsOptional()
+  @Transform(trimOrNull)
+  @ValidateIf(notNull)
+  @IsString()
+  @MaxLength(300)
+  differenceReason?: string | null;
+}
+
+export class StockSaleLineDto {
+  @ApiProperty()
+  @IsUUID()
+  variantId: string;
+
+  @ApiProperty()
+  @Quantity()
+  quantity: number;
+
+  @ApiPropertyOptional({ description: 'Remise sur la ligne (montant TTC)' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(STOCK_MAX_PRICE)
+  discount?: number;
+}
+
+export class StockPaymentDto {
+  @ApiProperty({ enum: STOCK_PAYMENT_METHODS })
+  @IsIn(STOCK_PAYMENT_METHODS)
+  method: StockPaymentMethod;
+
+  @ApiProperty()
+  @IsInt()
+  @Min(1)
+  @Max(STOCK_MAX_PRICE)
+  amount: number;
+
+  @ApiPropertyOptional({ description: 'Espèces : somme remise par le client' })
+  @IsOptional()
+  @ValidateIf(notNull)
+  @IsInt()
+  @Min(1)
+  @Max(STOCK_MAX_PRICE)
+  tendered?: number | null;
+
+  @ApiPropertyOptional({ description: 'Référence de la transaction (mobile money, carte)' })
+  @IsOptional()
+  @Transform(trimOrNull)
+  @ValidateIf(notNull)
+  @IsString()
+  @MaxLength(80)
+  reference?: string | null;
+}
+
+export class CreateStockSaleDto {
+  @ApiProperty()
+  @IdempotencyKey()
+  idempotencyKey: string;
+
+  @ApiProperty()
+  @IsUUID()
+  registerId: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @ValidateIf(notNull)
+  @IsUUID()
+  customerId?: string | null;
+
+  @ApiProperty({ type: [StockSaleLineDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(STOCK_MAX_SALE_LINES)
+  @ValidateNested({ each: true })
+  @Type(() => StockSaleLineDto)
+  lines: StockSaleLineDto[];
+
+  @ApiProperty({ type: [StockPaymentDto] })
+  @IsArray()
+  @ArrayMaxSize(4)
+  @ValidateNested({ each: true })
+  @Type(() => StockPaymentDto)
+  payments: StockPaymentDto[];
+}
+
+export class StockSaleQueryDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  sessionId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  customerId?: string;
+
+  @ApiPropertyOptional({ description: 'Numéro de vente (VTE-000012 ou 12)' })
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(20)
+  q?: string;
+}
+
+export class StockSaleReturnLineDto {
+  @ApiProperty()
+  @IsUUID()
+  saleLineId: string;
+
+  @ApiProperty()
+  @Quantity()
+  quantity: number;
+}
+
+export class CreateStockSaleReturnDto {
+  @ApiProperty()
+  @IdempotencyKey()
+  idempotencyKey: string;
+
+  @ApiProperty({ description: 'Caisse dont la session ouverte rembourse' })
+  @IsUUID()
+  registerId: string;
+
+  @ApiProperty()
+  @Transform(trim)
+  @IsString()
+  @Length(3, 300)
+  reason: string;
+
+  @ApiProperty({ description: 'Remettre la marchandise en stock (faux : défectueuse)' })
+  @IsBoolean()
+  restock: boolean;
+
+  @ApiProperty({ enum: STOCK_PAYMENT_METHODS })
+  @IsIn(STOCK_PAYMENT_METHODS)
+  refundMethod: StockPaymentMethod;
+
+  @ApiProperty({ type: [StockSaleReturnLineDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(STOCK_MAX_SALE_LINES)
+  @ValidateNested({ each: true })
+  @Type(() => StockSaleReturnLineDto)
+  lines: StockSaleReturnLineDto[];
+}
+
+export class StockHeldCartLineDto {
+  @ApiProperty()
+  @IsUUID()
+  variantId: string;
+
+  @ApiProperty()
+  @Quantity()
+  quantity: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(STOCK_MAX_PRICE)
+  discount?: number;
+}
+
+export class HoldStockCartDto {
+  @ApiProperty({ description: 'Libellé (nom du client, numéro…)' })
+  @Transform(trim)
+  @IsString()
+  @Length(1, 60)
+  label: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @ValidateIf(notNull)
+  @IsUUID()
+  customerId?: string | null;
+
+  @ApiProperty({ type: [StockHeldCartLineDto] })
+  @IsArray()
+  @ArrayMinSize(1)
+  @ArrayMaxSize(STOCK_MAX_SALE_LINES)
+  @ValidateNested({ each: true })
+  @Type(() => StockHeldCartLineDto)
+  lines: StockHeldCartLineDto[];
+}
+
+export class StockReceiptQueryDto {
+  @ApiPropertyOptional({ enum: [58, 80] })
+  @IsOptional()
+  @Type(() => Number)
+  @IsIn([58, 80])
+  width?: 58 | 80;
+}
+
+export class StockCashSessionQueryDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  registerId?: string;
 }

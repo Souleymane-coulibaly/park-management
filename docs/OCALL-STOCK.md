@@ -6,9 +6,9 @@ Elle s'adresse aux commerces, grossistes, distributeurs, quincailleries, superma
 Elle est vendue indépendamment d'Ocall Facture. Les deux applications fonctionnent ensemble quand une
 organisation a les deux abonnements (sprint S5).
 
-**État : sprints S1 (socle et catalogue), S2 (sites, stocks, transferts, inventaires) et S3 (achats)
-livrés.** La caisse, l'interconnexion avec Facture, les tableaux de bord, la vitrine et l'IA suivent, sprint
-par sprint (§12). Plan complet :
+**État : sprints S1 (socle et catalogue), S2 (sites, stocks, transferts, inventaires), S3 (achats) et S4
+(caisse) livrés.** L'interconnexion avec Facture, les tableaux de bord, la vitrine et l'IA suivent, sprint
+par sprint (§14). Plan complet :
 `ocall-audits/plan-ocall-stock-v1.md` (hors dépôt).
 
 ## 1. Activation
@@ -84,11 +84,21 @@ fonction l'exige.
 | Gérer les commandes fournisseurs              |   ✔    |       ✔       |       ✔        |            |          |            |         |
 | Réceptionner les commandes                    |   ✔    |       ✔       |       ✔        |     ✔      |          |            |         |
 | Retourner aux fournisseurs                    |   ✔    |       ✔       |       ✔        |            |          |            |         |
+| Gérer les caisses (S4)                        |   ✔    |       ✔       |                |            |          |            |         |
+| Ouvrir et clôturer la caisse                  |   ✔    |       ✔       |                |            |    ✔     |     ✔      |         |
+| Encaisser des ventes                          |   ✔    |       ✔       |                |            |    ✔     |     ✔      |         |
+| Consulter les ventes et sessions              |   ✔    |       ✔       |       ✔        |            |    ✔     |     ✔      |    ✔    |
+| Accorder des remises (plafonnées)             |   ✔    |       ✔       |                |            |          |     ✔      |         |
+| Accorder des remises sans plafond             |   ✔    |       ✔       |                |            |          |            |         |
+| Retours et remboursements                     |   ✔    |       ✔       |                |            |          |            |         |
+| Consulter les clients                         |   ✔    |       ✔       |       ✔        |            |    ✔     |     ✔      |    ✔    |
+| Gérer les clients                             |   ✔    |       ✔       |                |            |    ✔     |     ✔      |         |
 
 **Ajustements par membre.** Un administrateur accorde ou retire une permission à un membre, en plus de son
 rôle.
 
-- L'accès, les réglages, la gestion de l'équipe et celle des sites ne sont jamais ajustables.
+- L'accès, les réglages, la gestion de l'équipe, celle des sites et celle des caisses ne sont jamais
+  ajustables.
 - Personne ne modifie son propre accès.
 - Désactiver un membre ferme aussitôt ses sessions.
 
@@ -275,7 +285,48 @@ Facture ne modifie jamais un article Stock. Les demandes de mouvement passeront 
 - **Étiquettes** après une réception : un clic imprime les étiquettes des articles reçus (une par unité,
   200 au plus par article).
 
-## 11. Base et déploiement
+## 11. Caisse (S4)
+
+Décisions du 13/11/2026 : liste de clients propre à Stock ; remises soumises à un droit et plafonnées ;
+écart de caisse enregistré avec un motif obligatoire.
+
+- **Caisses** : une caisse appartient à un site et vend depuis un de ses emplacements. Elle a une
+  imprimante de tickets (simulation, réseau, Bluetooth ou USB par le connecteur Android, WebUSB ou
+  Bluetooth BLE depuis le navigateur) et une largeur de papier (58 ou 80 mm). Créées par un responsable.
+- **Sessions** : fond de caisse à l'ouverture. **Une seule session ouverte par caisse**, garanti par la
+  base. Clôture : espèces comptées contre espèces attendues (fond + espèces encaissées − espèces
+  remboursées). Un écart exige un motif ; la session se clôt quand même et l'écart figure au rapport. Une
+  session close ne change plus (déclencheur).
+- **Vente** :
+  - articles trouvés au scan (code-barres, référence) ou par une recherche tolérante aux fautes ;
+  - prix TTC et TVA **relus dans le catalogue par le serveur**, jamais fournis par la caisse ;
+  - client facultatif, choisi ou créé depuis la caisse ;
+  - sortie de stock par le moteur à l'emplacement de la caisse (clé `stock-sale:<vente>:<ligne>`) ;
+  - deux caisses qui vendent le dernier article : la seconde est refusée ;
+  - une vente envoyée deux fois (même clé) n'est enregistrée qu'une fois ;
+  - un article non stocké (service) se vend sans mouvement.
+- **Remises** : par ligne, avec le droit « Accorder des remises », dans la limite du plafond des réglages
+  (10 % par défaut). Le droit « remises sans plafond » permet de le dépasser. Le caissier n'en a pas par
+  défaut ; un administrateur peut le lui accorder.
+- **Paiements** : espèces, mobile money, carte, autre, **saisis à la main**. Aucune confirmation d'un
+  prestataire n'est simulée ; la référence de la transaction est enregistrée. Paiements mixtes ; leur somme
+  égale le total ; seules les espèces rendent la monnaie (un seul paiement en espèces par vente).
+- **Paniers en attente** : 20 par caisse au plus. À la reprise, les prix et disponibilités sont relus ; un
+  panier ne se reprend qu'une fois.
+- **Ticket** : numéro, magasin, adresse et téléphone, caisse, caissier, client, articles, remises, TVA par
+  taux, total, paiements et références, monnaie rendue, QR code du numéro de vente, pied de ticket. La même
+  mise en page sert à l'aperçu, à l'impression ESC/POS (58 et 80 mm) et au PDF. Réimpression : mention
+  DUPLICATA, comptée et tracée. **Impression réelle à valider sur matériel**, comme pour Ocall Park.
+- **Retours** : quantités rendues, jamais plus que vendu (retours précédents déduits) ; remboursement au
+  prorata du montant payé, le dernier retour rembourse exactement le reste ; dans la session ouverte d'une
+  caisse du même magasin ; marchandise remise en stock ou non (défectueuse). Rejoué, un retour n'est fait
+  qu'une fois.
+- **Base** : une vente encaissée est figée (seul le compteur de réimpressions augmente) ; ses lignes aussi
+  (seules les quantités et montants retournés augmentent) ; paiements et retours en ajout seul.
+- **Clients** : nom, téléphone, e-mail, note ; archivés, jamais supprimés. Rapprochement avec les clients
+  Ocall Facture au sprint S5.
+
+## 12. Base et déploiement
 
 - **Migration** `20261201000000_stock_v1_catalogue` (additive) :
   - 13 tables ;
@@ -295,6 +346,11 @@ Facture ne modifie jamais un article Stock. Les demandes de mouvement passeront 
   réceptions et lignes, retours et lignes, prix fournisseurs, documents) ; contrôles (quantités, reçu ≤
   commandé, coûts, motif d'annulation, types de documents) ; déclencheurs : lignes de commande figées dès la
   commande, réception figée sauf annulation, lignes reçues, retours et prix en ajout seul.
+- **Migration** `20261204000000_stock_v1_caisse` (S4, additive) : 9 tables (clients, caisses, sessions,
+  ventes et lignes, paiements, retours et lignes, paniers en attente), réglages de caisse (plafond des
+  remises, coordonnées et pied des tickets) ; contrôles (totaux, quantités retournées ≤ vendues, paiements,
+  motif d'écart) ; une session ouverte par caisse ; déclencheurs : session close figée, vente et lignes
+  figées, paiements et retours en ajout seul.
 - **Base Suite** : migration de données `20261201000100_stock_v1_offres` (2 offres inactives).
 - **Pré-déploiement** : `apps/api/railway.json` contient `db:stock:migrate:deploy`.
 
@@ -309,7 +365,7 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
 | `STOCK_DATABASE_URL` | URL de la base Stock                         |
 | `STOCK_DIRECT_URL`   | URL directe, pour les migrations ; même base |
 
-## 12. Tests
+## 13. Tests
 
 | Type                | Fichier                                                                                         | Contenu                                                                                                |
 | ------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -317,8 +373,9 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
 | Unitaires, API      | `ocall-stock.config.spec.ts`, `ocall-stock-boundaries.spec.ts`, `ocall-stock-label-pdf.spec.ts` | Configuration, frontières, codes relus par zxing, PDF à la taille du format                            |
 | Unitaires, base     | `packages/database/src/migration-safety.spec.ts`                                                | Garde de la cible des migrations Stock                                                                 |
 | Unitaires, S2       | `packages/shared/src/stock-warehouse.spec.ts`                                                   | QR codes d'emplacement, ordre des niveaux, permissions S2                                              |
-| Intégration         | `apps/api/test/stock-s1…s3.integration.spec.ts` (`TEST_STOCK_DATABASE_URL`)                     | Voir le détail ci-dessous                                                                              |
-| E2E                 | `e2e/stock-s1.spec.ts`, `stock-s2.spec.ts`, `stock-s3.spec.ts`                                  | Voir le détail ci-dessous                                                                              |
+| Unitaires, S4       | `packages/shared/src/stock-sales.spec.ts`                                                       | Montants, remises plafonnées, paiements et monnaie, remboursements, ticket 58 / 80 mm, droits          |
+| Intégration         | `apps/api/test/stock-s1…s4.integration.spec.ts` (`TEST_STOCK_DATABASE_URL`)                     | Voir le détail ci-dessous                                                                              |
+| E2E                 | `e2e/stock-s1.spec.ts` à `stock-s4.spec.ts`                                                     | Voir le détail ci-dessous                                                                              |
 
 **Intégration**, sur bases locales jetables :
 
@@ -339,7 +396,13 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
   rejouée, au-delà du commandé ou hors site refusée ; magasinier sans coûts ; report du coût réel et
   historique des prix ; annulation d'une réception (compensation, une seule fois, refusée si vendue) ;
   clôture, annulation ; retour fournisseur (rejeu, stock insuffisant, ajout seul) ; documents (signature
-  vérifiée, isolation) ; isolation.
+  vérifiée, isolation) ; isolation ;
+- S4 : caisses et sessions (une seule ouverte, vente refusée sans session) ; articles en caisse ; vente aux
+  prix du catalogue, paiements mixtes, monnaie, rejeu ; paiements refusés, article archivé ; remises selon
+  le rôle et le plafond ; dernier article vendu par deux caisses ; ticket (aperçu, ESC/POS, PDF, duplicata),
+  vente figée par la base ; retours (droit, prorata, remise en stock ou non, jamais plus que vendu, autre
+  magasin refusé) ; clôture avec écart motivé, session figée ; paniers en attente ; clients ; sites ;
+  isolation.
 
 **E2E**, parcours navigateur :
 
@@ -351,13 +414,15 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
 - S2 : sites et emplacement, entrée, transfert préparé, expédié, reçu en partie puis manque, stocks par
   site, inventaire compté au scan et validé, panneau caméra ;
 - S3 : commande passée, réception partielle puis du reste, annulation d'une réception, document joint,
-  retour fournisseur.
+  retour fournisseur ;
+- S4 : caisse avec imprimante simulée, session, vente à la recherche avec monnaie et ticket imprimé, vente
+  au scan mise en attente puis reprise et payée en deux moyens, retour remboursé, clôture avec écart, client,
+  caisse sur téléphone.
 
-## 13. Suite de la feuille de route
+## 14. Suite de la feuille de route
 
 | Sprint | Contenu                                                        |
 | ------ | -------------------------------------------------------------- |
-| S4     | Caisse et tickets thermiques                                   |
 | S5     | Interconnexion Facture                                         |
 | S6     | Tableaux de bord et recherche complète                         |
 | S7     | Vitrine                                                        |

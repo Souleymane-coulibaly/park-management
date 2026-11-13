@@ -7,6 +7,9 @@ export const dynamic = 'force-dynamic';
 
 const NAV: NavItem[] = [
   { key: 'stock-home', label: 'Tableau de bord', href: '/stock' },
+  { key: 'stock-pos', label: 'Caisse', href: '/stock/caisse' },
+  { key: 'stock-sales', label: 'Ventes', href: '/stock/ventes' },
+  { key: 'stock-customers', label: 'Clients', href: '/stock/clients' },
   { key: 'stock-products', label: 'Articles', href: '/stock/articles' },
   { key: 'stock-categories', label: 'Catégories et marques', href: '/stock/categories' },
   { key: 'stock-levels', label: 'Stocks', href: '/stock/stocks' },
@@ -15,6 +18,7 @@ const NAV: NavItem[] = [
   { key: 'stock-counts', label: 'Inventaires', href: '/stock/inventaires' },
   { key: 'stock-purchases', label: 'Achats', href: '/stock/achats' },
   { key: 'stock-sites', label: 'Sites et emplacements', href: '/stock/sites' },
+  { key: 'stock-registers', label: 'Caisses et sessions', href: '/stock/caisses' },
   { key: 'stock-suppliers', label: 'Fournisseurs', href: '/stock/fournisseurs' },
   { key: 'stock-labels', label: 'Étiquettes', href: '/stock/etiquettes' },
   { key: 'stock-search', label: 'Recherche', href: '/stock/recherche' },

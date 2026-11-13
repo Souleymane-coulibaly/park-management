@@ -43,3 +43,4 @@ export * from './stock';
 export * from './stock-barcodes';
 export * from './stock-labels';
 export * from './stock-warehouse';
+export * from './stock-sales';

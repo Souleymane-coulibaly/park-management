@@ -50,6 +50,9 @@ enum StockCounterKind {
   PURCHASE
   RECEIPT
   SUPPLIER_RETURN
+  SALE
+  SALE_RETURN
+  CASH_SESSION
 }
 
 /// Prix suivi dans l'historique des prix.
@@ -69,6 +72,13 @@ model StockSettings {
   internalCodePrefix String   @default("OC")
   /// Stock négatif autorisé (sortie au-delà du stock). Refusé par défaut (S2).
   allowNegativeStock Boolean  @default(false)
+  /// Remise la plus forte (en % du montant de la ligne) qu'un membre autorisé peut accorder en caisse ;
+  /// au-delà, le droit « remises sans plafond » est exigé (S4).
+  maxDiscountPercent Int      @default(10)
+  /// Coordonnées et mention de pied imprimées sur les tickets (S4).
+  receiptPhone       String?
+  receiptAddress     String?
+  receiptFooter      String?
   updatedByUserId    String?  @db.Uuid
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
@@ -342,6 +352,8 @@ enum StockMovementKind {
   RECEIPT
   RECEIPT_CANCEL
   SUPPLIER_RETURN
+  SALE
+  SALE_RETURN
 }
 
 enum StockTransferStatus {
@@ -387,6 +399,7 @@ model StockSite {
   transfersTo   StockTransfer[]      @relation("StockTransferTo")
   counts        StockCount[]
   purchases     StockPurchaseOrder[]
+  registers     StockRegister[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, code])
@@ -425,6 +438,7 @@ model StockLocation {
   children  StockLocation[] @relation("StockLocationTree")
   levels    StockLevel[]
   movements StockMovement[]
+  registers StockRegister[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, siteId, code])
@@ -769,4 +783,253 @@ model StockDocument {
 
   @@unique([organizationId, id])
   @@index([organizationId, ownerType, ownerId])
+}
+
+// ─── S4 : caisse ───
+
+/// Moyen de paiement saisi en caisse. Mobile money et carte sont saisis à la main : aucune confirmation
+/// d'un prestataire n'est simulée.
+enum StockPaymentMethod {
+  CASH
+  MOBILE_MONEY
+  CARD
+  OTHER
+}
+
+enum StockCashSessionStatus {
+  OPEN
+  CLOSED
+}
+
+/// Connexion de l'imprimante de tickets d'une caisse (mêmes valeurs que le matériel Ocall Park).
+enum StockPrinterConnection {
+  NONE
+  SIMULATED
+  NETWORK
+  BLUETOOTH
+  USB
+  WEBUSB
+  WEBBLUETOOTH
+}
+
+/// Client d'un magasin (facultatif sur une vente). Rapproché des clients Ocall Facture au sprint S5.
+model StockCustomer {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  name           String
+  phone          String?
+  email          String?
+  note           String?
+  isArchived     Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  sales StockSale[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, isArchived, name])
+  @@index([organizationId, phone])
+}
+
+/// Caisse d'un site : vend depuis un emplacement de ce site, imprime sur son imprimante de tickets.
+model StockRegister {
+  id                String                 @id @default(uuid()) @db.Uuid
+  organizationId    String                 @db.Uuid
+  siteId            String                 @db.Uuid
+  /// Emplacement d'où sort la marchandise vendue (rayon, magasin).
+  locationId        String                 @db.Uuid
+  code              String
+  name              String
+  paperWidth        Int                    @default(80)
+  printerConnection StockPrinterConnection @default(NONE)
+  printerAddress    String?
+  isArchived        Boolean                @default(false)
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  site      StockSite          @relation(fields: [organizationId, siteId], references: [organizationId, id], onDelete: Restrict)
+  location  StockLocation      @relation(fields: [organizationId, locationId], references: [organizationId, id], onDelete: Restrict)
+  sessions  StockCashSession[]
+  sales     StockSale[]
+  heldCarts StockHeldCart[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, code])
+  @@index([organizationId, siteId])
+}
+
+/// Session de caisse : fond de caisse à l'ouverture ; à la clôture, espèces comptées, attendues et écart
+/// (motif obligatoire s'il n'est pas nul). Une seule session ouverte par caisse (garanti par la base).
+model StockCashSession {
+  id               String                 @id @default(uuid()) @db.Uuid
+  organizationId   String                 @db.Uuid
+  number           Int
+  registerId       String                 @db.Uuid
+  siteId           String                 @db.Uuid
+  status           StockCashSessionStatus @default(OPEN)
+  openingFloat     Int
+  openedByUserId   String                 @db.Uuid
+  openedAt         DateTime               @default(now())
+  expectedCash     Int?
+  countedCash      Int?
+  difference       Int?
+  differenceReason String?
+  closedByUserId   String?                @db.Uuid
+  closedAt         DateTime?
+
+  register StockRegister     @relation(fields: [organizationId, registerId], references: [organizationId, id], onDelete: Restrict)
+  sales    StockSale[]
+  returns  StockSaleReturn[]
+  payments StockPayment[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, number])
+  @@index([organizationId, registerId, openedAt])
+}
+
+/// Vente encaissée : prix, remises, TVA et paiements figés à l'encaissement (le prix est lu dans le
+/// catalogue par le serveur, jamais fourni par la caisse). Sortie de stock par le moteur, idempotente.
+model StockSale {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  number         Int
+  registerId     String   @db.Uuid
+  sessionId      String   @db.Uuid
+  siteId         String   @db.Uuid
+  locationId     String   @db.Uuid
+  customerId     String?  @db.Uuid
+  cashierUserId  String   @db.Uuid
+  /// Nom du caissier au moment de la vente (imprimé sur le ticket).
+  cashierName    String
+  /// Total TTC avant remises.
+  grossTotal     Int
+  discountTotal  Int
+  /// Total TTC dû.
+  total          Int
+  vatTotal       Int
+  /// Monnaie rendue (espèces).
+  changeGiven    Int      @default(0)
+  idempotencyKey String
+  /// Réimpressions (duplicata) : seul champ qui change après l'encaissement.
+  reprintCount   Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  register StockRegister     @relation(fields: [organizationId, registerId], references: [organizationId, id], onDelete: Restrict)
+  session  StockCashSession  @relation(fields: [organizationId, sessionId], references: [organizationId, id], onDelete: Restrict)
+  customer StockCustomer?    @relation(fields: [organizationId, customerId], references: [organizationId, id], onDelete: Restrict)
+  lines    StockSaleLine[]
+  payments StockPayment[]
+  returns  StockSaleReturn[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, number])
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, createdAt])
+  @@index([organizationId, sessionId])
+  @@index([organizationId, customerId])
+}
+
+/// Ligne de vente : instantané de l'article (référence, libellé, prix TTC, TVA). Seuls la quantité et le
+/// montant retournés évoluent (retours).
+model StockSaleLine {
+  id               String  @id @default(uuid()) @db.Uuid
+  organizationId   String  @db.Uuid
+  saleId           String  @db.Uuid
+  variantId        String  @db.Uuid
+  sku              String
+  label            String
+  isStockable      Boolean
+  quantity         Decimal @db.Decimal(14, 3)
+  unitPrice        Int
+  vatRate          Int
+  discount         Int     @default(0)
+  /// Montant TTC de la ligne après remise.
+  total            Int
+  vatAmount        Int
+  returnedQuantity Decimal @default(0) @db.Decimal(14, 3)
+  refundedAmount   Int     @default(0)
+
+  sale StockSale @relation(fields: [organizationId, saleId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@index([organizationId, saleId])
+  @@index([organizationId, variantId])
+}
+
+/// Paiement d'une vente (positif) ou remboursement d'un retour (négatif). Mobile money et carte : saisis à
+/// la main, la référence est celle donnée par le client ou le terminal.
+model StockPayment {
+  id             String             @id @default(uuid()) @db.Uuid
+  organizationId String             @db.Uuid
+  saleId         String             @db.Uuid
+  sessionId      String             @db.Uuid
+  returnId       String?            @db.Uuid
+  method         StockPaymentMethod
+  amount         Int
+  /// Espèces : somme remise par le client (la monnaie rendue est la différence).
+  tendered       Int?
+  reference      String?
+  createdAt      DateTime           @default(now())
+
+  sale    StockSale        @relation(fields: [organizationId, saleId], references: [organizationId, id], onDelete: Restrict)
+  session StockCashSession @relation(fields: [organizationId, sessionId], references: [organizationId, id], onDelete: Restrict)
+
+  @@index([organizationId, saleId])
+  @@index([organizationId, sessionId])
+}
+
+/// Retour en caisse : marchandise rendue (remise en stock ou non), remboursée dans une session ouverte.
+model StockSaleReturn {
+  id              String             @id @default(uuid()) @db.Uuid
+  organizationId  String             @db.Uuid
+  number          Int
+  saleId          String             @db.Uuid
+  sessionId       String             @db.Uuid
+  reason          String
+  /// Faux : marchandise défectueuse, non remise en stock.
+  restock         Boolean
+  refundMethod    StockPaymentMethod
+  refundAmount    Int
+  idempotencyKey  String
+  createdByUserId String             @db.Uuid
+  createdAt       DateTime           @default(now())
+
+  sale    StockSale             @relation(fields: [organizationId, saleId], references: [organizationId, id], onDelete: Restrict)
+  session StockCashSession      @relation(fields: [organizationId, sessionId], references: [organizationId, id], onDelete: Restrict)
+  lines   StockSaleReturnLine[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, number])
+  @@unique([organizationId, idempotencyKey])
+  @@index([organizationId, saleId])
+}
+
+model StockSaleReturnLine {
+  id             String  @id @default(uuid()) @db.Uuid
+  organizationId String  @db.Uuid
+  returnId       String  @db.Uuid
+  saleLineId     String  @db.Uuid
+  variantId      String  @db.Uuid
+  quantity       Decimal @db.Decimal(14, 3)
+  amount         Int
+
+  saleReturn StockSaleReturn @relation(fields: [organizationId, returnId], references: [organizationId, id], onDelete: Restrict)
+
+  @@index([organizationId, returnId])
+}
+
+/// Panier mis en attente sur une caisse (client parti chercher un article…) ; supprimé à la reprise.
+model StockHeldCart {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  registerId      String   @db.Uuid
+  label           String
+  /// Lignes { variantId, quantity, discount } et client facultatif : les prix sont relus à l'encaissement.
+  payload         Json
+  createdByUserId String   @db.Uuid
+  createdAt       DateTime @default(now())
+
+  register StockRegister @relation(fields: [organizationId, registerId], references: [organizationId, id], onDelete: Cascade)
+
+  @@index([organizationId, registerId, createdAt])
 }

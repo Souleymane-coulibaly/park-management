@@ -80,6 +80,24 @@ export const STOCK_PERMISSIONS = [
   'stock.purchases.receive',
   /** Retourner de la marchandise au fournisseur (sorties de stock). */
   'stock.returns.manage',
+  // ─── S4 : caisse ───
+  /** Créer et configurer les caisses (site, emplacement vendu, imprimante). */
+  'stock.registers.manage',
+  /** Ouvrir et clôturer une session de caisse. */
+  'stock.cash.session',
+  /** Encaisser des ventes, mettre des paniers en attente. */
+  'stock.sales.create',
+  /** Consulter l'historique des ventes, les sessions et réimprimer un ticket. */
+  'stock.sales.read',
+  /** Accorder des remises, dans la limite du plafond des réglages. */
+  'stock.sales.discount',
+  /** Accorder des remises au-delà du plafond. */
+  'stock.sales.discount.unlimited',
+  /** Retours et remboursements en caisse. */
+  'stock.sales.refund',
+  'stock.customers.read',
+  /** Créer et modifier les clients. */
+  'stock.customers.manage',
 ] as const;
 export type StockPermission = (typeof STOCK_PERMISSIONS)[number];
 
@@ -109,6 +127,15 @@ export const STOCK_PERMISSION_LABELS: Record<StockPermission, string> = {
   'stock.purchases.manage': 'Gérer les commandes fournisseurs',
   'stock.purchases.receive': 'Réceptionner les commandes',
   'stock.returns.manage': 'Retourner aux fournisseurs',
+  'stock.registers.manage': 'Gérer les caisses',
+  'stock.cash.session': 'Ouvrir et clôturer la caisse',
+  'stock.sales.create': 'Encaisser des ventes',
+  'stock.sales.read': 'Consulter les ventes et sessions',
+  'stock.sales.discount': 'Accorder des remises (plafonnées)',
+  'stock.sales.discount.unlimited': 'Accorder des remises sans plafond',
+  'stock.sales.refund': 'Retours et remboursements',
+  'stock.customers.read': 'Consulter les clients',
+  'stock.customers.manage': 'Gérer les clients',
 };
 
 const ALL: readonly StockPermission[] = STOCK_PERMISSIONS;
@@ -138,6 +165,15 @@ const ROLE_PERMISSIONS: Record<StockRole, readonly StockPermission[]> = {
     'stock.purchases.manage',
     'stock.purchases.receive',
     'stock.returns.manage',
+    'stock.registers.manage',
+    'stock.cash.session',
+    'stock.sales.create',
+    'stock.sales.read',
+    'stock.sales.discount',
+    'stock.sales.discount.unlimited',
+    'stock.sales.refund',
+    'stock.customers.read',
+    'stock.customers.manage',
   ],
   WAREHOUSE_MANAGER: [
     'stock.access',
@@ -161,6 +197,8 @@ const ROLE_PERMISSIONS: Record<StockRole, readonly StockPermission[]> = {
     'stock.purchases.manage',
     'stock.purchases.receive',
     'stock.returns.manage',
+    'stock.sales.read',
+    'stock.customers.read',
   ],
   STOREKEEPER: [
     'stock.access',
@@ -176,8 +214,28 @@ const ROLE_PERMISSIONS: Record<StockRole, readonly StockPermission[]> = {
     'stock.purchases.read',
     'stock.purchases.receive',
   ],
-  CASHIER: ['stock.access', 'stock.catalog.read', 'stock.levels.read'],
-  SALES: ['stock.access', 'stock.catalog.read', 'stock.labels.print', 'stock.levels.read'],
+  CASHIER: [
+    'stock.access',
+    'stock.catalog.read',
+    'stock.levels.read',
+    'stock.cash.session',
+    'stock.sales.create',
+    'stock.sales.read',
+    'stock.customers.read',
+    'stock.customers.manage',
+  ],
+  SALES: [
+    'stock.access',
+    'stock.catalog.read',
+    'stock.labels.print',
+    'stock.levels.read',
+    'stock.cash.session',
+    'stock.sales.create',
+    'stock.sales.read',
+    'stock.sales.discount',
+    'stock.customers.read',
+    'stock.customers.manage',
+  ],
   AUDITOR: [
     'stock.access',
     'stock.members.read',
@@ -187,6 +245,8 @@ const ROLE_PERMISSIONS: Record<StockRole, readonly StockPermission[]> = {
     'stock.levels.read',
     'stock.movements.read',
     'stock.purchases.read',
+    'stock.sales.read',
+    'stock.customers.read',
   ],
 };
 
@@ -196,6 +256,7 @@ const ROLE_ONLY: readonly StockPermission[] = [
   'stock.settings.manage',
   'stock.members.manage',
   'stock.sites.manage',
+  'stock.registers.manage',
 ];
 
 /**

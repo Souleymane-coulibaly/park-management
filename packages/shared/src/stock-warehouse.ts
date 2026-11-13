@@ -64,6 +64,8 @@ export const STOCK_MOVEMENT_KIND_LABELS: Record<string, string> = {
   RECEIPT: 'Réception fournisseur',
   RECEIPT_CANCEL: 'Réception annulée',
   SUPPLIER_RETURN: 'Retour fournisseur',
+  SALE: 'Vente en caisse',
+  SALE_RETURN: 'Retour client',
 };
 
 /** Saisies manuelles possibles (les autres mouvements naissent d'une opération : transfert, inventaire). */

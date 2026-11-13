@@ -16,16 +16,23 @@ interface SettingsView {
   defaultVatRate: number;
   internalCodePrefix: string;
   allowNegativeStock: boolean;
+  maxDiscountPercent: number;
+  receiptPhone: string | null;
+  receiptAddress: string | null;
+  receiptFooter: string | null;
   currency: string;
   saved: boolean;
 }
 
-/** Réglages Ocall Stock : nom imprimé sur les étiquettes, TVA par défaut, préfixe des codes. */
+/**
+ * Réglages Ocall Stock : nom imprimé sur les étiquettes et les tickets, TVA par défaut, préfixe des codes,
+ * stock négatif, plafond des remises en caisse, coordonnées et pied des tickets.
+ */
 export default function StockSettingsPage() {
   return (
     <StockPage
       title="Réglages"
-      description="Nom du magasin, TVA proposée et préfixe des codes internes."
+      description="Nom du magasin, TVA proposée, codes internes, caisse et tickets."
     >
       {({ canWrite }) => <Settings manage={canWrite('stock.settings.manage')} />}
     </StockPage>
@@ -60,6 +67,10 @@ function SettingsForm({
   const [vat, setVat] = useState(String(initial.defaultVatRate));
   const [prefix, setPrefix] = useState(initial.internalCodePrefix);
   const [allowNegative, setAllowNegative] = useState(initial.allowNegativeStock);
+  const [maxDiscount, setMaxDiscount] = useState(String(initial.maxDiscountPercent));
+  const [phone, setPhone] = useState(initial.receiptPhone ?? '');
+  const [address, setAddress] = useState(initial.receiptAddress ?? '');
+  const [footer, setFooter] = useState(initial.receiptFooter ?? '');
   const [error, setError] = useState<ApiError | null>(null);
   const [done, setDone] = useState(false);
 
@@ -75,6 +86,10 @@ function SettingsForm({
           defaultVatRate: Number(vat),
           internalCodePrefix: prefix,
           allowNegativeStock: allowNegative,
+          maxDiscountPercent: Number(maxDiscount),
+          receiptPhone: phone,
+          receiptAddress: address,
+          receiptFooter: footer,
         },
       });
       setDone(true);
@@ -98,7 +113,7 @@ function SettingsForm({
           )}
           <div className="grid gap-4 sm:grid-cols-3">
             <InputField
-              label="Nom imprimé sur les étiquettes"
+              label="Nom imprimé sur les étiquettes et les tickets"
               required
               disabled={!manage}
               value={storeName}
@@ -139,6 +154,41 @@ function SettingsForm({
               </span>
             </span>
           </label>
+          <div className="border-t border-line pt-4">
+            <p className="text-sm font-semibold">Caisse et tickets</p>
+            <div className="mt-3 grid gap-4 sm:grid-cols-2">
+              <InputField
+                label="Remise maximale en caisse (%)"
+                type="number"
+                min={0}
+                max={100}
+                required
+                disabled={!manage}
+                value={maxDiscount}
+                hint="Plafond par ligne pour les membres autorisés à accorder des remises ; le droit « remises sans plafond » permet de le dépasser."
+                onChange={(e) => setMaxDiscount(e.target.value)}
+              />
+              <InputField
+                label="Téléphone sur les tickets"
+                disabled={!manage}
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+              />
+              <InputField
+                label="Adresse sur les tickets"
+                disabled={!manage}
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+              />
+              <InputField
+                label="Pied de ticket"
+                disabled={!manage}
+                value={footer}
+                hint="Par défaut : « Merci de votre visite ! »"
+                onChange={(e) => setFooter(e.target.value)}
+              />
+            </div>
+          </div>
           {manage && <Button type="submit">Enregistrer</Button>}
         </form>
       </CardBody>

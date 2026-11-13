@@ -17,7 +17,9 @@ export type LedgerKind =
   | 'COUNT'
   | 'RECEIPT'
   | 'RECEIPT_CANCEL'
-  | 'SUPPLIER_RETURN';
+  | 'SUPPLIER_RETURN'
+  | 'SALE'
+  | 'SALE_RETURN';
 
 /** Une écriture du registre : quantité signée à un emplacement. */
 export interface LedgerEntry {
@@ -33,7 +35,8 @@ export interface LedgerEntry {
   setTo?: Decimal;
   /** Unique dans l'organisation : une même écriture n'est jamais appliquée deux fois. */
   idempotencyKey: string;
-  sourceType: 'MANUAL' | 'TRANSFER' | 'COUNT' | 'RECEIPT' | 'SUPPLIER_RETURN';
+  sourceType:
+    'MANUAL' | 'TRANSFER' | 'COUNT' | 'RECEIPT' | 'SUPPLIER_RETURN' | 'SALE' | 'SALE_RETURN';
   sourceId?: string | null;
   reason?: string | null;
   unitCost?: number | null;

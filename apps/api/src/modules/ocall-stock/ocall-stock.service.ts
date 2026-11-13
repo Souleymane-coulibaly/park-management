@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import { STOCK_DEFAULT_VAT_RATE, STOCK_ROLE_LABELS } from '@ocall/shared';
+import {
+  STOCK_DEFAULT_MAX_DISCOUNT_PERCENT,
+  STOCK_DEFAULT_VAT_RATE,
+  STOCK_ROLE_LABELS,
+} from '@ocall/shared';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { StockContext } from './ocall-stock-access';
@@ -44,6 +48,10 @@ export class OcallStockService {
       defaultVatRate: settings?.defaultVatRate ?? STOCK_DEFAULT_VAT_RATE,
       internalCodePrefix: settings?.internalCodePrefix ?? 'OC',
       allowNegativeStock: settings?.allowNegativeStock ?? false,
+      maxDiscountPercent: settings?.maxDiscountPercent ?? STOCK_DEFAULT_MAX_DISCOUNT_PERCENT,
+      receiptPhone: settings?.receiptPhone ?? null,
+      receiptAddress: settings?.receiptAddress ?? null,
+      receiptFooter: settings?.receiptFooter ?? null,
       currency: organization.currency,
       saved: Boolean(settings),
     };

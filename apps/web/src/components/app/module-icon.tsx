@@ -37,6 +37,7 @@ import {
   Ticket,
   Users,
   MessageSquare,
+  ShoppingCart,
 } from 'lucide-react';
 
 const ICONS: Record<string, LucideIcon> = {
@@ -99,6 +100,10 @@ const ICONS: Record<string, LucideIcon> = {
   'stock-counts': Calculator,
   'stock-sites': Building2,
   'stock-purchases': Receipt,
+  'stock-pos': ShoppingCart,
+  'stock-sales': Banknote,
+  'stock-customers': Contact,
+  'stock-registers': Calculator,
   'school-grading': Calculator,
   'platform-payments': Receipt,
   'platform-online-payments': CreditCard,
