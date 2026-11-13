@@ -98,6 +98,10 @@ export const STOCK_PERMISSIONS = [
   'stock.customers.read',
   /** Créer et modifier les clients. */
   'stock.customers.manage',
+  /** S7 : site vitrine (contenu, publication, domaine, articles publiés). */
+  'stock.showcase.manage',
+  /** S7 : demandes reçues par le site vitrine. */
+  'stock.showcase.requests',
 ] as const;
 export type StockPermission = (typeof STOCK_PERMISSIONS)[number];
 
@@ -136,6 +140,8 @@ export const STOCK_PERMISSION_LABELS: Record<StockPermission, string> = {
   'stock.sales.refund': 'Retours et remboursements',
   'stock.customers.read': 'Consulter les clients',
   'stock.customers.manage': 'Gérer les clients',
+  'stock.showcase.manage': 'Gérer le site vitrine',
+  'stock.showcase.requests': 'Traiter les demandes du site vitrine',
 };
 
 const ALL: readonly StockPermission[] = STOCK_PERMISSIONS;
@@ -174,6 +180,8 @@ const ROLE_PERMISSIONS: Record<StockRole, readonly StockPermission[]> = {
     'stock.sales.refund',
     'stock.customers.read',
     'stock.customers.manage',
+    'stock.showcase.manage',
+    'stock.showcase.requests',
   ],
   WAREHOUSE_MANAGER: [
     'stock.access',
@@ -235,6 +243,7 @@ const ROLE_PERMISSIONS: Record<StockRole, readonly StockPermission[]> = {
     'stock.sales.discount',
     'stock.customers.read',
     'stock.customers.manage',
+    'stock.showcase.requests',
   ],
   AUDITOR: [
     'stock.access',

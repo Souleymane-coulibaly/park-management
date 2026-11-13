@@ -6,7 +6,20 @@ describe('loadStockConfig', () => {
   const stock = 'postgresql://u:p@ep-stock-pooler.neon.tech/neondb';
 
   it('désactivée par défaut : aucune base exigée', () => {
-    expect(loadStockConfig({})).toEqual({ enabled: false, databaseUrl: null });
+    expect(loadStockConfig({})).toEqual({
+      enabled: false,
+      databaseUrl: null,
+      sites: { baseDomain: null, subdomainsEnabled: false },
+    });
+    expect(
+      loadStockConfig({
+        STOCK_SITES_BASE_DOMAIN: 'Boutique.Ocall.ml',
+        STOCK_SITES_SUBDOMAINS_ENABLED: 'true',
+      }).sites,
+    ).toEqual({ baseDomain: 'boutique.ocall.ml', subdomainsEnabled: true });
+    expect(
+      loadStockConfig({ STOCK_SITES_SUBDOMAINS_ENABLED: 'true' }).sites.subdomainsEnabled,
+    ).toBe(false);
   });
 
   it('activée : base exigée, distincte des bases Suite, School et Facture', () => {
@@ -28,6 +41,10 @@ describe('loadStockConfig', () => {
         FACTURE_DATABASE_URL: facture,
         STOCK_DATABASE_URL: stock,
       }),
-    ).toEqual({ enabled: true, databaseUrl: stock });
+    ).toEqual({
+      enabled: true,
+      databaseUrl: stock,
+      sites: { baseDomain: null, subdomainsEnabled: false },
+    });
   });
 });

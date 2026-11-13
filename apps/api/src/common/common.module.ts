@@ -4,10 +4,25 @@ import { MailService } from './mail/mail.service';
 import { PasswordService } from './security/password.service';
 import { PortalAccounts } from './security/portal-accounts';
 import { SessionService } from './security/session.service';
+import { SiteDomainRegistry } from './sites/site-domain-registry';
 
 @Global()
 @Module({
-  providers: [AuditService, PasswordService, SessionService, PortalAccounts, MailService],
-  exports: [AuditService, PasswordService, SessionService, PortalAccounts, MailService],
+  providers: [
+    AuditService,
+    PasswordService,
+    SessionService,
+    PortalAccounts,
+    MailService,
+    SiteDomainRegistry,
+  ],
+  exports: [
+    AuditService,
+    PasswordService,
+    SessionService,
+    PortalAccounts,
+    MailService,
+    SiteDomainRegistry,
+  ],
 })
 export class CommonModule {}

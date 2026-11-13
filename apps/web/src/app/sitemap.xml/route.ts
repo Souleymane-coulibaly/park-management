@@ -1,8 +1,9 @@
 import type { NextRequest } from 'next/server';
 import { fetchSitemap, isAppHost, requestHost } from '@/lib/public-site';
 import { fetchFactureSitemap } from '@/lib/public-facture-site';
+import { fetchStockSitemap } from '@/lib/public-stock-site';
 import { fetchSchoolSitemap } from '@/lib/public-school-site';
-import { isFactureSiteHost, isSchoolSiteHost } from '@/lib/site-hosts';
+import { isFactureSiteHost, isSchoolSiteHost, isStockSiteHost } from '@/lib/site-hosts';
 
 const escapeXml = (s: string) =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -31,12 +32,22 @@ export async function GET(request: NextRequest) {
   }
   const schoolEntries = school ?? [];
   // Vitrines Ocall Facture : sur leur hôte, leur seule page ; ailleurs, celles servies par cet hôte.
-  const factureEntries = isSchoolSiteHost(host) ? [] : ((await fetchFactureSitemap(host)) ?? []);
+  const factureEntries =
+    isSchoolSiteHost(host) || isStockSiteHost(host)
+      ? []
+      : ((await fetchFactureSitemap(host)) ?? []);
+  // Vitrines Ocall Stock (S7) : accueil, catalogue et fiches des articles publiés.
+  const stockEntries =
+    isSchoolSiteHost(host) || isFactureSiteHost(host)
+      ? []
+      : ((await fetchStockSitemap(host)) ?? []);
   const entries = isSchoolSiteHost(host)
     ? schoolEntries
     : isFactureSiteHost(host)
       ? factureEntries
-      : [...(await fetchSitemap(host)), ...schoolEntries, ...factureEntries];
+      : isStockSiteHost(host)
+        ? stockEntries
+        : [...(await fetchSitemap(host)), ...schoolEntries, ...factureEntries, ...stockEntries];
   const marketing = isAppHost(host)
     ? [
         '/',
@@ -66,7 +77,9 @@ export async function GET(request: NextRequest) {
       'content-type': 'application/xml; charset=utf-8',
       // Périmètre School : jamais mis en cache ; plans des hôtes de sites Park inchangés.
       'cache-control':
-        schoolScope || factureEntries.length > 0 ? 'no-store' : 'public, max-age=600',
+        schoolScope || factureEntries.length > 0 || stockEntries.length > 0
+          ? 'no-store'
+          : 'public, max-age=600',
     },
   });
 }

@@ -191,6 +191,8 @@ model StockProduct {
   /// Faux pour un service ou un article qui ne se compte pas (aucun stock tenu).
   isStockable    Boolean  @default(true)
   isArchived     Boolean  @default(false)
+  /// S7 : article publié dans le catalogue du site vitrine (choix explicite, faux par défaut).
+  showcasePublished Boolean @default(false)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -1077,4 +1079,105 @@ model StockInboundEvent {
   @@unique([organizationId, key])
   @@index([organizationId, createdAt])
   @@index([organizationId, source, sourceId])
+}
+
+// ─── S7 — Site vitrine ───
+
+enum StockShowcaseMediaKind {
+  LOGO
+  COVER
+  GALLERY
+}
+
+enum StockShowcaseDomainStatus {
+  PENDING
+  VERIFIED
+  ACTIVE
+  ERROR
+  SUSPENDED
+}
+
+enum StockShowcaseRequestKind {
+  CONTACT
+  QUOTE
+}
+
+enum StockShowcaseRequestStatus {
+  NEW
+  IN_PROGRESS
+  DONE
+  SPAM
+}
+
+/// Site vitrine d'une organisation : brouillon modifiable, version publiée figée (contenu, images). Le
+/// catalogue public est lu en direct parmi les articles cochés « Publier sur la vitrine ».
+model StockShowcase {
+  organizationId  String    @id @db.Uuid
+  /// Adresse publique (`/m/<slug>`, `<slug>.<domaine des vitrines Stock>`), unique.
+  slug            String    @unique
+  draft           Json
+  published       Json?
+  isOnline        Boolean   @default(false)
+  publishedAt     DateTime?
+  updatedByUserId String?   @db.Uuid
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+/// Image de la vitrine (logo, couverture, galerie), réencodée en JPEG sans métadonnées.
+model StockShowcaseMedia {
+  id              String                 @id @default(uuid()) @db.Uuid
+  organizationId  String                 @db.Uuid
+  kind            StockShowcaseMediaKind
+  /// Clé publique `<uuid>.jpg`, servie par l'API publique des vitrines Stock seulement.
+  storageKey      String                 @unique
+  caption         String?
+  position        Int                    @default(0)
+  isPublished     Boolean                @default(false)
+  createdByUserId String                 @db.Uuid
+  createdAt       DateTime               @default(now())
+
+  @@unique([organizationId, id])
+  @@index([organizationId, kind, position])
+}
+
+/// Domaine personnalisé d'une vitrine : propriété prouvée (TXT), activation par Ocall.
+model StockShowcaseDomain {
+  id                String                    @id @default(uuid()) @db.Uuid
+  organizationId    String                    @db.Uuid
+  hostname          String                    @unique
+  status            StockShowcaseDomainStatus @default(PENDING)
+  verificationToken String
+  lastCheckedAt     DateTime?
+  lastError         String?
+  activatedAt       DateTime?
+  activatedByUserId String?                   @db.Uuid
+  createdByUserId   String                    @db.Uuid
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+
+  @@unique([organizationId, id])
+  @@index([organizationId])
+  @@index([status])
+}
+
+/// Demande d'un visiteur (renseignement, devis), avec les articles qui l'intéressent ; ne crée jamais de
+/// vente ni de commande.
+model StockShowcaseRequest {
+  id              String                     @id @default(uuid()) @db.Uuid
+  organizationId  String                     @db.Uuid
+  kind            StockShowcaseRequestKind
+  status          StockShowcaseRequestStatus @default(NEW)
+  name            String
+  phone           String?
+  email           String?
+  message         String
+  /// Articles demandés : [{ productId, name, quantity }] (libellés copiés : le catalogue peut changer).
+  items           Json                       @default("[]")
+  handledByUserId String?                    @db.Uuid
+  handledAt       DateTime?
+  createdAt       DateTime                   @default(now())
+
+  @@unique([organizationId, id])
+  @@index([organizationId, status, createdAt])
 }

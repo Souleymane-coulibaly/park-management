@@ -15,6 +15,7 @@ import {
 } from '@ocall/shared';
 import { AuditService } from '../../common/audit/audit.service';
 import type { DomainVerifier } from '../../common/sites/domain-verifier';
+import { SiteDomainRegistry } from '../../common/sites/site-domain-registry';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { FactureContext } from './facture-access';
@@ -42,7 +43,15 @@ export class FactureSiteDomainsService {
     private readonly audit: AuditService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     @Inject(FACTURE_DOMAIN_VERIFIER) private readonly verifier: DomainVerifier,
-  ) {}
+    private readonly registry: SiteDomainRegistry,
+  ) {
+    // Domaines déclarés pour une vitrine Facture : consultés par les autres applications (S7 Stock).
+    registry.register('FACTURE', async (hostname) =>
+      this.config.facture.enabled
+        ? (await this.db.factureSiteDomain.count({ where: { hostname } })) > 0
+        : false,
+    );
+  }
 
   /** Instructions DNS d'un domaine (affichées dans le back-office). */
   instructions(domain: { hostname: string; verificationToken: string }) {
@@ -67,6 +76,7 @@ export class FactureSiteDomainsService {
     const platform = [
       this.config.sites.baseDomain,
       this.config.facture.sites.baseDomain,
+      this.config.stock.sites.baseDomain,
       new URL(this.config.sites.publicOrigin).hostname,
     ].filter((d): d is string => !!d);
     const normalized = normalizeCustomDomain(input, platform);
@@ -94,6 +104,8 @@ export class FactureSiteDomainsService {
     ) {
       throw this.taken();
     }
+    // Ni une vitrine d'une autre application (Ocall Stock).
+    if (await this.registry.takenElsewhere('FACTURE', normalized.hostname)) throw this.taken();
     try {
       const domain = await this.db.factureSiteDomain.create({
         data: {

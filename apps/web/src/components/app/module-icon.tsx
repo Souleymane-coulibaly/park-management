@@ -104,6 +104,8 @@ const ICONS: Record<string, LucideIcon> = {
   'stock-purchases': Receipt,
   'stock-pos': ShoppingCart,
   'stock-alerts': BellRing,
+  'stock-showcase': Globe,
+  'stock-showcase-requests': Inbox,
   'stock-sales': Banknote,
   'stock-customers': Contact,
   'stock-registers': Calculator,

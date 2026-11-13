@@ -1,12 +1,14 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { parseSchoolSitePath, slugFromHost } from '@ocall/shared';
+import { parseSchoolSitePath, parseStockShowcasePath, slugFromHost } from '@ocall/shared';
 import {
   factureSitesBaseDomain,
   isAppHost,
   isFactureSiteHost,
   isSchoolSiteHost,
+  isStockSiteHost,
   requestHost,
   schoolSitesBaseDomain,
+  stockSitesBaseDomain,
 } from '@/lib/site-hosts';
 
 const API_URL = process.env.API_URL ?? 'http://localhost:4000';
@@ -28,6 +30,10 @@ const SITE_HOST_HEADER = 'x-ocall-site-host';
 /** Sur un hôte de vitrine Facture : ressources, API publique des vitrines Facture, contrôle, SEO. */
 const FACTURE_SITE_PASSTHROUGH =
   /^\/(_next\/|api\/v1\/public\/facture-(sites|media)\/|\.well-known\/ocall-site$|sitemap\.xml$|robots\.txt$|favicon\.ico$|icon\.svg$)/i;
+
+/** Sur un hôte de vitrine Stock : ressources, API publique des vitrines Stock, contrôle, SEO. */
+const STOCK_SITE_PASSTHROUGH =
+  /^\/(_next\/|api\/v1\/public\/stock-(sites|media|images)\/|\.well-known\/ocall-site$|sitemap\.xml$|robots\.txt$|favicon\.ico$|icon\.svg$)/i;
 
 /** Cache court des domaines personnalisés résolus (évite un appel à l'API par requête). */
 const hostCache = new Map<string, { slug: string | null; expires: number }>();
@@ -51,6 +57,36 @@ async function factureSlugForHost(host: string): Promise<string | null> {
   if (factureHostCache.size > 5_000) factureHostCache.clear();
   factureHostCache.set(host, { slug, expires: Date.now() + 60_000 });
   return slug;
+}
+
+/** Domaine personnalisé d'une vitrine Stock (après les sites Park et Facture) : cache court. */
+const stockHostCache = new Map<string, { slug: string | null; expires: number }>();
+
+async function stockSlugForHost(host: string): Promise<string | null> {
+  const cached = stockHostCache.get(host);
+  if (cached && cached.expires > Date.now()) return cached.slug;
+  let slug: string | null = null;
+  try {
+    const res = await fetch(
+      `${API_URL}/api/v1/public/stock-sites/resolve?host=${encodeURIComponent(host)}`,
+      { cache: 'no-store', signal: AbortSignal.timeout(3_000) },
+    );
+    if (res.ok) slug = ((await res.json()) as { slug: string }).slug;
+  } catch {
+    return null;
+  }
+  if (stockHostCache.size > 5_000) stockHostCache.clear();
+  stockHostCache.set(host, { slug, expires: Date.now() + 60_000 });
+  return slug;
+}
+
+/** Page d'une vitrine Stock servie sur son hôte : `/m/<slug>[/catalogue|/article/<id>]`, requête comprise. */
+function stockTarget(slug: string | null, path: string, search: string): string | null {
+  const route = parseStockShowcasePath(path);
+  if (!slug || !route) return null;
+  const sub =
+    route.page === 'home' ? '' : route.page === 'catalog' ? '/catalogue' : `/article/${route.id}`;
+  return `/m/${slug}${sub}${search}`;
 }
 
 async function slugForHost(host: string): Promise<string | null> {
@@ -126,13 +162,24 @@ export async function middleware(request: NextRequest) {
     return NextResponse.rewrite(new URL(target, request.url), { request: { headers } });
   }
 
+  // Vitrines Ocall Stock (`<slug>.<domaine Stock>`, S7) : accueil, catalogue et fiches article (réécrits
+  // vers /m/<slug>/…) et leur API publique ; jamais résolu par les sites Park, School ni Facture.
+  if (isStockSiteHost(host)) {
+    if (STOCK_SITE_PASSTHROUGH.test(path)) return NextResponse.next({ request: { headers } });
+    const stockSlug = slugFromHost(host, stockSitesBaseDomain());
+    headers.set(SITE_HOST_HEADER, '1');
+    const target = stockTarget(stockSlug, path, request.nextUrl.search) ?? '/m/__introuvable';
+    return NextResponse.rewrite(new URL(target, request.url), { request: { headers } });
+  }
+
   // Hôte de site Park : routes publiques des sites School exclues.
   if (SITE_PASSTHROUGH.test(path) && !SCHOOL_PUBLIC_API.test(path)) {
     return NextResponse.next({ request: { headers } });
   }
   const slug = await slugForHost(host);
   headers.set(SITE_HOST_HEADER, '1');
-  // Domaine personnalisé inconnu des sites Park : vitrine Facture éventuelle (Park reste prioritaire).
+  // Domaine personnalisé inconnu des sites Park : vitrine Facture éventuelle (Park reste prioritaire),
+  // puis vitrine Stock (accueil, catalogue, fiches article).
   if (!slug && path === '/') {
     const factureSlug = await factureSlugForHost(host);
     if (factureSlug) {
@@ -140,6 +187,10 @@ export async function middleware(request: NextRequest) {
         request: { headers },
       });
     }
+  }
+  if (!slug && parseStockShowcasePath(path)) {
+    const target = stockTarget(await stockSlugForHost(host), path, request.nextUrl.search);
+    if (target) return NextResponse.rewrite(new URL(target, request.url), { request: { headers } });
   }
   const target = slug && path === '/' ? `/e/${slug}` : '/e/__introuvable';
   return NextResponse.rewrite(new URL(target, request.url), { request: { headers } });

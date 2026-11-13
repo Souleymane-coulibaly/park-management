@@ -338,7 +338,8 @@ WhatsApp (`whatsappDigits`). Park et School inchangés (tests d'intégration et 
   activation par le **Super Admin** (TXT revérifié, page `/.well-known/ocall-site` répondant l'identifiant
   du site, en HTTPS), mise hors service avec motif ; seul le Super Admin lève une suspension (l'entreprise ne
   peut ni revérifier ni supprimer un domaine suspendu ; « Vérifier » un domaine actif ne change rien). Un
-  domaine déjà déclaré pour un site Park est refusé.
+  domaine déjà déclaré pour un site Park ou une vitrine Ocall Stock (registre commun des domaines, S7)
+  est refusé.
   Routage web : sites Park d'abord, puis vitrines Facture (un domaine Park n'est jamais masqué).
 - **Demandes des visiteurs** (contact, devis, intervention, rendez-vous ; formulaires choisis par
   l'entreprise) : téléphone ou e-mail exigé, champ piège et durée minimale de saisie (un envoi suspect

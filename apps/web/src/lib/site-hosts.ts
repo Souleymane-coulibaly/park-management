@@ -24,10 +24,13 @@ export function isAppHost(host: string): boolean {
   const school = process.env.SCHOOL_SITES_BASE_DOMAIN?.trim().toLowerCase();
   // Domaine des vitrines Facture : de même, son apex, www et app restent des hôtes de l'application.
   const facture = process.env.FACTURE_SITES_BASE_DOMAIN?.trim().toLowerCase();
+  // Domaine des vitrines Stock (S7) : de même.
+  const stock = process.env.STOCK_SITES_BASE_DOMAIN?.trim().toLowerCase();
   return (
     configured.includes(h) ||
     (!!school && (h === school || h === `www.${school}` || h === `app.${school}`)) ||
     (!!facture && (h === facture || h === `www.${facture}` || h === `app.${facture}`)) ||
+    (!!stock && (h === stock || h === `www.${stock}` || h === `app.${stock}`)) ||
     h === 'localhost' ||
     h === '127.0.0.1' ||
     h.endsWith('.railway.app') ||
@@ -68,6 +71,24 @@ export function factureSitesBaseDomain(): string | null {
  */
 export function isFactureSiteHost(host: string): boolean {
   const base = factureSitesBaseDomain();
+  const h = host.toLowerCase().split(':')[0]!;
+  return !!base && h.endsWith(`.${base}`) && !isAppHost(h);
+}
+
+// ─── Vitrines Ocall Stock (S7) ───
+
+/** Domaine des vitrines Stock (`<slug>.<domaine>`), seulement si les sous-domaines sont activés. */
+export function stockSitesBaseDomain(): string | null {
+  if (process.env.STOCK_SITES_SUBDOMAINS_ENABLED !== 'true') return null;
+  return process.env.STOCK_SITES_BASE_DOMAIN?.trim().toLowerCase() || null;
+}
+
+/**
+ * Hôte placé sous le domaine des vitrines Stock : servi QUE par le routage des vitrines Stock (jamais par
+ * celui des sites Park, School ou Facture ni par l'application).
+ */
+export function isStockSiteHost(host: string): boolean {
+  const base = stockSitesBaseDomain();
   const h = host.toLowerCase().split(':')[0]!;
   return !!base && h.endsWith(`.${base}`) && !isAppHost(h);
 }

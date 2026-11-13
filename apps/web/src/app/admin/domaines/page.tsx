@@ -14,6 +14,7 @@ import { type ApiError, api } from '@/lib/api';
 import { formatDateTime } from '@/lib/format';
 import { useApi } from '@/lib/use-api';
 import { FactureDomains } from '@/components/admin/facture-domains';
+import { StockDomains } from '@/components/admin/stock-domains';
 
 interface PlatformDomains {
   customDomainTarget: string | null;
@@ -183,6 +184,7 @@ export default function AdminDomainsPage() {
           ))}
       </Card>
       <FactureDomains />
+      <StockDomains />
     </>
   );
 }

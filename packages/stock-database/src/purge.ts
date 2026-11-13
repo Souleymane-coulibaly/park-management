@@ -15,6 +15,11 @@ export async function purgeStockOrganizations(
     async (tx) => {
       await tx.$executeRaw`SELECT set_config('ocall.stock_purge', 'on', true)`;
       const where = { organizationId: { in: organizationIds } };
+      // S7 : vitrine, images, domaines et demandes.
+      await tx.stockShowcaseRequest.deleteMany({ where });
+      await tx.stockShowcaseDomain.deleteMany({ where });
+      await tx.stockShowcaseMedia.deleteMany({ where });
+      await tx.stockShowcase.deleteMany({ where });
       // S5 : journal des demandes Facture ; l'emplacement des ventes Facture est délié avant les emplacements.
       await tx.stockInboundEvent.deleteMany({ where });
       await tx.stockSettings.updateMany({ where, data: { factureLocationId: null } });

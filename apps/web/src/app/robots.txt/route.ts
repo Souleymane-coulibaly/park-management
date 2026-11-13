@@ -5,7 +5,15 @@ import { isAppHost, requestHost } from '@/lib/public-site';
 export function GET(request: NextRequest) {
   const host = requestHost(request.headers);
   const origin = `${request.nextUrl.protocol}//${host}`;
-  const lines = ['User-agent: *', 'Allow: /', 'Disallow: /api/', 'Disallow: /.well-known/'];
+  const lines = [
+    'User-agent: *',
+    'Allow: /',
+    // Images publiques des vitrines Stock (photos d'articles publiés) : indexables (S7).
+    'Allow: /api/v1/public/stock-images/',
+    'Allow: /api/v1/public/stock-media/',
+    'Disallow: /api/',
+    'Disallow: /.well-known/',
+  ];
   if (isAppHost(host)) {
     lines.push(
       'Disallow: /app',

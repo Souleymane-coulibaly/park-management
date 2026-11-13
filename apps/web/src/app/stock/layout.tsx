@@ -27,6 +27,8 @@ const NAV: NavItem[] = [
   { key: 'stock-registers', label: 'Caisses et sessions', href: '/stock/caisses' },
   { key: 'stock-suppliers', label: 'Fournisseurs', href: '/stock/fournisseurs' },
   { key: 'stock-labels', label: 'Étiquettes', href: '/stock/etiquettes' },
+  { key: 'stock-showcase', label: 'Site vitrine', href: '/stock/vitrine' },
+  { key: 'stock-showcase-requests', label: 'Demandes du site', href: '/stock/demandes' },
   { key: 'stock-search', label: 'Recherche', href: '/stock/recherche' },
   { key: 'stock-team', label: 'Équipe', href: '/stock/equipe' },
   { key: 'stock-settings', label: 'Réglages', href: '/stock/parametres' },

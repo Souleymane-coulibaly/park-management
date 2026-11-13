@@ -22,6 +22,19 @@ import { OcallStockTransfersService } from './ocall-stock-transfers.service';
 import { OcallStockWarehouseController } from './ocall-stock-warehouse.controller';
 import { OcallStockDocumentsService } from './ocall-stock-documents.service';
 import { OcallStockReportsController } from './ocall-stock-reports.controller';
+import {
+  OcallStockShowcaseDomainsService,
+  STOCK_DOMAIN_VERIFIER,
+} from './ocall-stock-showcase-domains.service';
+import {
+  OcallStockShowcaseController,
+  PlatformStockShowcaseDomainsController,
+  PublicStockShowcaseController,
+  PublicStockShowcaseRequestsController,
+} from './ocall-stock-showcase.controller';
+import { OcallStockShowcaseService } from './ocall-stock-showcase.service';
+import { createDomainVerifier } from '../../common/sites/domain-verifier';
+import { APP_CONFIG, type AppConfig } from '../../config/app-config';
 import { OcallStockReportsService } from './ocall-stock-reports.service';
 import { OcallStockPurchasesController } from './ocall-stock-purchases.controller';
 import { OcallStockPurchasesService } from './ocall-stock-purchases.service';
@@ -48,6 +61,10 @@ import { OcallStockService } from './ocall-stock.service';
     OcallStockPurchasesController,
     OcallStockPosController,
     OcallStockReportsController,
+    OcallStockShowcaseController,
+    PublicStockShowcaseController,
+    PublicStockShowcaseRequestsController,
+    PlatformStockShowcaseDomainsController,
   ],
   providers: [
     OcallStockPrismaService,
@@ -73,6 +90,14 @@ import { OcallStockService } from './ocall-stock.service';
     OcallStockCustomersService,
     OcallStockFactureGateway,
     OcallStockReportsService,
+    OcallStockShowcaseService,
+    OcallStockShowcaseDomainsService,
+    // Vérification des domaines personnalisés : même vérificateur que les sites Park (simulé en test).
+    {
+      provide: STOCK_DOMAIN_VERIFIER,
+      inject: [APP_CONFIG],
+      useFactory: (config: AppConfig) => createDomainVerifier(process.env, config.nodeEnv),
+    },
     { provide: STOCK_CATALOG_READER, useExisting: OcallStockCatalogReader },
     { provide: STOCK_MOVEMENT_GATEWAY, useExisting: OcallStockFactureGateway },
   ],

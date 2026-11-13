@@ -7,8 +7,8 @@ Elle est vendue indépendamment d'Ocall Facture. Les deux applications fonctionn
 organisation a les deux abonnements (sprint S5).
 
 **État : sprints S1 (socle et catalogue), S2 (sites, stocks, transferts, inventaires), S3 (achats), S4
-(caisse), S5 (interconnexion Facture) et S6 (tableaux de bord, alertes, recherche globale) livrés.** La
-vitrine et l'IA suivent, sprint par sprint (§15). Plan complet :
+(caisse), S5 (interconnexion Facture), S6 (tableaux de bord, alertes, recherche globale) et S7 (site
+vitrine) livrés.** L'IA et la stabilisation suivent (§16). Plan complet :
 `ocall-audits/plan-ocall-stock-v1.md` (hors dépôt).
 
 ## 1. Activation
@@ -445,7 +445,42 @@ et la page `/stock/recherche`.
 - Filtre par type, paginé (20 par page) ; lien vers chaque fiche.
 - Droits et sites du membre respectés : un type non autorisé n'apparaît pas.
 
-## 13. Base et déploiement
+## 13. Site vitrine (S7)
+
+Sur le modèle des vitrines Facture (adresse, brouillon puis publication, images, domaine personnalisé,
+demandes), avec un **catalogue public facultatif**. Ce n'est pas un e-commerce : ni panier payant ni
+commande en ligne.
+
+- **Publication** : offre Ocall Stock « avec vitrine » exigée (sans droit historique), Stock accessible en
+  plein, organisation active. Le brouillon reste toujours modifiable ; seule la version **publiée** est
+  lue par le public. Une fois en ligne, l'adresse ne change plus.
+- **Adresse** : domaine personnalisé actif, sinon sous-domaine des vitrines Stock
+  (`STOCK_SITES_BASE_DOMAIN`, `STOCK_SITES_SUBDOMAINS_ENABLED`), sinon `/m/<slug>`. Les autres adresses
+  redirigent (301) vers l'adresse canonique. Pages : accueil, `/catalogue`, `/article/<id>`.
+- **Catalogue public** (réglage « Catalogue public ») : seulement les articles cochés **« Publier sur la
+  vitrine »**, un par un (faux par défaut : rien n'est public sans décision). Lu en direct : un article
+  archivé ou décoché disparaît aussitôt.
+  - Prix de vente TTC si « Afficher les prix » est coché (le plus bas des variantes, « à partir de »),
+    sinon « Prix sur demande ».
+  - Disponibilité réduite à un badge **« Disponible »** (somme du disponible des sites actifs > 0) ou
+    **« Sur commande »** ; un service est toujours disponible.
+  - Photos des fiches article, servies seulement pour un article publié d'un site en ligne.
+  - **Jamais publiés** : prix d'achat, marges, quantités, fournisseurs, clients.
+  - Filtre par catégorie, recherche (fautes tolérées), 24 articles par page.
+- **Demandes** (renseignement, devis) : le visiteur ajoute des articles à « ma demande » (quantités
+  modifiables, gardées dans son navigateur), puis envoie le formulaire. Anti-spam (champ piège, durée de
+  saisie), limitation de débit, téléphone ou e-mail exigé, articles publiés seulement. La demande arrive
+  dans **« Demandes du site »** (Stock) ; rien n'est envoyé au visiteur, aucune vente ni commande créée.
+- **Référencement** : métadonnées et Open Graph par page, adresse canonique, plan du site (accueil,
+  catalogue, fiches), données structurées `Store` (accueil) et `Product` + `Offer` (fiche : prix s'il est
+  affiché, `InStock` ou `BackOrder`). `robots.txt` autorise les images publiques des vitrines Stock.
+- **Domaine personnalisé** : propriété prouvée par TXT, activation par le Super Admin (TXT revérifié, page
+  de contrôle HTTPS). **Registre commun des domaines** (`common/sites/site-domain-registry.ts`) : un nom
+  déclaré pour une vitrine Facture n'est jamais repris par Stock, et réciproquement (ni un site Park).
+- **Droits** : « Gérer le site vitrine » (administrateur, responsable de magasin) ; « Traiter les demandes
+  du site » (responsable de magasin, commercial).
+
+## 14. Base et déploiement
 
 - **Migration** `20261201000000_stock_v1_catalogue` (additive) :
   - 13 tables ;
@@ -474,6 +509,9 @@ et la page `/stock/recherche`.
   réglage `factureLocationId`, table `StockInboundEvent` (une ligne par clé, en ajout seul).
 - **Migration** `20261206000000_stock_v1_rapports` (S6, additive) : réglage `slowMovingDays` (15 à 365),
   index des remboursements par date, index de recherche (clients, sites, emplacements).
+- **Migration** `20261207000000_stock_v1_vitrine` (S7, additive) : `StockProduct.showcasePublished` (faux
+  par défaut), vitrine, images, domaines, demandes ; contrôles (adresse, site en ligne publié, domaine,
+  contact et longueur des demandes, 20 articles au plus) ; index partiel du catalogue public.
 - **Base Facture** : migration `20261129000000_facture_v1_stock` (S5, additive) :
   - colonnes facultatives : `FactureItem.stock*`, `FactureDocument.stockSale*`, `stockCovered`,
     `stockReturnGoods` ;
@@ -489,13 +527,15 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
 
 **Variables.**
 
-| Variable             | Rôle                                         |
-| -------------------- | -------------------------------------------- |
-| `STOCK_ENABLED`      | `true` pour activer l'application            |
-| `STOCK_DATABASE_URL` | URL de la base Stock                         |
-| `STOCK_DIRECT_URL`   | URL directe, pour les migrations ; même base |
+| Variable                         | Rôle                                                        |
+| -------------------------------- | ----------------------------------------------------------- |
+| `STOCK_ENABLED`                  | `true` pour activer l'application                           |
+| `STOCK_DATABASE_URL`             | URL de la base Stock                                        |
+| `STOCK_DIRECT_URL`               | URL directe, pour les migrations ; même base                |
+| `STOCK_SITES_BASE_DOMAIN`        | Domaine des vitrines Stock (`<slug>.<domaine>`), API et web |
+| `STOCK_SITES_SUBDOMAINS_ENABLED` | `true` pour servir les vitrines sur leur sous-domaine       |
 
-## 14. Tests
+## 15. Tests
 
 | Type                | Fichier                                                                                         | Contenu                                                                                                |
 | ------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -504,10 +544,11 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
 | Unitaires, base     | `packages/database/src/migration-safety.spec.ts`                                                | Garde de la cible des migrations Stock                                                                 |
 | Unitaires, S2       | `packages/shared/src/stock-warehouse.spec.ts`                                                   | QR codes d'emplacement, ordre des niveaux, permissions S2                                              |
 | Unitaires, S4       | `packages/shared/src/stock-sales.spec.ts`                                                       | Montants, remises plafonnées, paiements et monnaie, remboursements, ticket 58 / 80 mm, droits          |
+| Unitaires, S7       | `packages/shared/src/stock-showcase.spec.ts`                                                    | Adresse canonique, pages servies, données structurées (prix seulement s'il est affiché)                |
 | Unitaires, S6       | `packages/shared/src/stock-reports.spec.ts`                                                     | CMUP, coût retenu, marges et exclusions, valeur, faible rotation, période                              |
 | Unitaires, S5       | `packages/shared/src/stock-facture.spec.ts`                                                     | TTC → HT, quantités par article, sortie nette de la source, plafond des retours, délais de relance     |
-| Intégration         | `apps/api/test/stock-s1…s6.integration.spec.ts` (`TEST_STOCK_DATABASE_URL`)                     | Voir le détail ci-dessous                                                                              |
-| E2E                 | `e2e/stock-s1.spec.ts` à `stock-s6.spec.ts`                                                     | Voir le détail ci-dessous                                                                              |
+| Intégration         | `apps/api/test/stock-s1…s7.integration.spec.ts` (`TEST_STOCK_DATABASE_URL`)                     | Voir le détail ci-dessous                                                                              |
+| E2E                 | `e2e/stock-s1.spec.ts` à `stock-s7.spec.ts`                                                     | Voir le détail ci-dessous                                                                              |
 
 **Intégration**, sur bases locales jetables :
 
@@ -546,7 +587,12 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
   brute (CMUP), exclusions ; valeur du stock (repli signalé, non valorisé), achats, écarts d'inventaire,
   sites ; droits (caissier sans coûts), périmètre des sites, site d'une autre organisation refusé ; alertes
   et réglage de rotation, compteur ; recherche de tous les types, fautes, pagination, multi-sites, droits,
-  isolation.
+  isolation ;
+- S7 : brouillon puis publication (offre « avec vitrine » exigée, version publiée seule), catalogue des
+  seuls articles cochés (prix au choix, badge, aucune donnée interne), fiche, photos des seuls articles
+  publiés, catalogue désactivé, article archivé ; demandes (articles, contact, anti-spam, formulaire
+  fermé, droits, isolation) ; domaine (TXT, activation, adresse canonique, plan du site, unicité entre
+  applications) ; garanties en base.
 
 **E2E**, parcours navigateur :
 
@@ -567,12 +613,14 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
   Stock ; facture d'une vente en caisse ; miroir en lecture seule au catalogue ;
 - S6 : tableau de bord (CA, marge et méthode, meilleures ventes), compteur d'alertes du menu et page des
   alertes, autocomplétion jusqu'à la fiche d'une vente, filtre par type et disponible par site, tableau de
-  bord sur téléphone.
+  bord sur téléphone ;
+- S7 : site créé, contenu et prix, article publié, mise en ligne ; accueil, catalogue (article interne
+  absent), fiche (prix, « Disponible », données structurées), fiche sur téléphone ; demande de devis avec
+  l'article, reçue dans « Demandes du site ».
 
-## 15. Suite de la feuille de route
+## 16. Suite de la feuille de route
 
 | Sprint | Contenu                                                        |
 | ------ | -------------------------------------------------------------- |
-| S7     | Vitrine                                                        |
 | S8     | IA : réapprovisionnement, ruptures, analyse, images d'articles |
 | S9     | Stabilisation                                                  |
