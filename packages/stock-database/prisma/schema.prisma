@@ -79,9 +79,14 @@ model StockSettings {
   receiptPhone       String?
   receiptAddress     String?
   receiptFooter      String?
+  /// Emplacement d'où sortent (et où reviennent) les marchandises vendues par Ocall Facture : factures,
+  /// pièces d'interventions, avoirs « marchandise retournée » (S5). Sans lui, ces demandes échouent.
+  factureLocationId  String?  @db.Uuid
   updatedByUserId    String?  @db.Uuid
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
+
+  factureLocation StockLocation? @relation("StockFactureLocation", fields: [organizationId, factureLocationId], references: [organizationId, id], onDelete: Restrict)
 }
 
 /// Membre Ocall Stock : compte Suite (rôle PRODUCT_USER) avec un rôle Stock.
@@ -354,6 +359,10 @@ enum StockMovementKind {
   SUPPLIER_RETURN
   SALE
   SALE_RETURN
+  /// S5 : demandes d'Ocall Facture (facture émise, pièces d'intervention signée, avoir avec retour).
+  FACTURE_INVOICE
+  FACTURE_PART
+  FACTURE_CREDIT
 }
 
 enum StockTransferStatus {
@@ -439,6 +448,8 @@ model StockLocation {
   levels    StockLevel[]
   movements StockMovement[]
   registers StockRegister[]
+  /// Réglages qui en font l'emplacement des ventes Facture (S5).
+  factureSettings StockSettings[] @relation("StockFactureLocation")
 
   @@unique([organizationId, id])
   @@unique([organizationId, siteId, code])
@@ -1032,4 +1043,34 @@ model StockHeldCart {
   register StockRegister @relation(fields: [organizationId, registerId], references: [organizationId, id], onDelete: Cascade)
 
   @@index([organizationId, registerId, createdAt])
+}
+
+// ─── S5 — Interconnexion Ocall Facture ───
+
+/// Demande de mouvement reçue d'une autre application (Ocall Facture) et appliquée : une par clé, jamais
+/// deux (la clé est celle de la file de sortie de Facture). Trace de ce qui a été déstocké, pour quel
+/// document, et rejeu sans effet. Jamais modifiée ni supprimée (contrôlé par la base).
+model StockInboundEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  /// Application émettrice (FACTURE).
+  origin         String
+  /// Clé unique de la demande (« facture-invoice:<document> », « facture-part:<intervention> »…).
+  key            String
+  /// Nature de la demande : INVOICE, INTERVENTION, CREDIT_NOTE.
+  source         String
+  /// Document ou intervention d'origine, dans l'application émettrice.
+  sourceId       String   @db.Uuid
+  /// Numéro lisible du document d'origine (FAC-2026-00012, INT-2026-00003).
+  reference      String
+  locationId     String   @db.Uuid
+  /// Lignes appliquées : [{ variantId, quantity }] (quantité signée).
+  lines          Json
+  actorUserId    String   @db.Uuid
+  createdAt      DateTime @default(now())
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, key])
+  @@index([organizationId, createdAt])
+  @@index([organizationId, source, sourceId])
 }

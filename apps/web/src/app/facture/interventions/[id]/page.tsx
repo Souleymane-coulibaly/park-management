@@ -22,6 +22,7 @@ import {
 } from '@ocall/shared';
 import { DocumentStatusBadge } from '@/components/facture/document-status-badge';
 import { FacturePage } from '@/components/facture/facture-page';
+import { StockItemPicker } from '@/components/facture/stock-picker';
 import { AiPlanningAssistant } from '@/components/facture/ai-planning-assistant';
 import { AiReportAssistant } from '@/components/facture/ai-report-assistant';
 import { InterventionStatusBadge } from '@/components/facture/intervention-status-badge';
@@ -188,7 +189,7 @@ function InterventionView({
         <EditPlanning i={i} reload={res.reload} />
       )}
       <TimeCard i={i} working={working} canManage={can.manage} reload={res.reload} />
-      <PartsCard i={i} working={working} reload={res.reload} />
+      <PartsCard i={i} working={working} canSearchStock={can.manage} reload={res.reload} />
       <PhotosCard i={i} working={working} reload={res.reload} />
       {working && <CompleteCard id={i.id} draft={i} reload={res.reload} aiReport={aiReport} />}
       {i.workSummary && i.status !== 'IN_PROGRESS' && i.status !== 'PLANNED' && (
@@ -520,13 +521,19 @@ function TimeCard({
 function PartsCard({
   i,
   working,
+  canSearchStock,
   reload,
 }: {
   i: Intervention;
   working: boolean;
+  /** S5 : un gérant cherche aussi dans Ocall Stock (article miroir créé à l'ajout). */
+  canSearchStock: boolean;
   reload: () => void;
 }) {
   const items = useApi<CatalogItem[]>(working ? '/facture/items' : null);
+  const stock = useApi<{ available: boolean }>(
+    working && canSearchStock ? '/facture/stock/status' : null,
+  );
   const { error, busy, run } = useAction(reload);
   const [itemId, setItemId] = useState('');
   const [quantity, setQuantity] = useState('1');
@@ -605,6 +612,14 @@ function PartsCard({
               Ajouter
             </Button>
           </form>
+        )}
+        {working && stock.state === 'success' && stock.data.available && (
+          <StockItemPicker
+            onPicked={(item) => {
+              items.reload();
+              setItemId(item.id);
+            }}
+          />
         )}
         <ApiErrorAlert error={error} />
       </CardBody>

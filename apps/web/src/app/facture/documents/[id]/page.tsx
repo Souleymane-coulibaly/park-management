@@ -27,6 +27,11 @@ import {
   type InvoicePayment,
 } from '@/components/facture/invoice-billing';
 import { FacturePage } from '@/components/facture/facture-page';
+import {
+  StockItemPicker,
+  StockSyncNote,
+  type StockSyncView,
+} from '@/components/facture/stock-picker';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { InputField, SelectField } from '@/components/ui/field';
@@ -74,6 +79,13 @@ interface DocumentView {
   creditedInvoice: { id: string; number: string | null } | null;
   /** Facture créée depuis une intervention (F3) : son client ne change pas. */
   intervention: { id: string; number: string } | null;
+  /** S5 : facture d'une vente en caisse Ocall Stock (lignes déjà sorties du stock). */
+  stockSaleNumber: string | null;
+  /** S5 : avoir dont la marchandise revient en stock. */
+  stockReturnGoods: boolean;
+  /** S5 : demande de mouvement transmise (ou non) à Ocall Stock. */
+  stockSync: StockSyncView | null;
+  updatedAt: string;
   totalHt: number;
   totalVat: number;
   totalTtc: number;
@@ -151,8 +163,19 @@ function DocumentScreen({
           {doc.number ? 'PDF' : 'Aperçu PDF'}
         </a>
       </div>
-      {(doc.source || doc.derived.length > 0 || doc.creditedInvoice || doc.intervention) && (
+      {doc.stockSync && <StockSyncNote sync={doc.stockSync} />}
+      {(doc.source ||
+        doc.derived.length > 0 ||
+        doc.creditedInvoice ||
+        doc.intervention ||
+        doc.stockSaleNumber) && (
         <p className="text-sm text-muted">
+          {doc.stockSaleNumber && (
+            <>
+              Facture de la vente en caisse {doc.stockSaleNumber} (Ocall Stock) : ses articles sont
+              déjà sortis du stock.{' '}
+            </>
+          )}
           {doc.intervention && (
             <>
               Facture de l’
@@ -212,6 +235,9 @@ function DraftEditor({ doc, onSaved }: { doc: DocumentView; onSaved: () => void 
   const router = useRouter();
   const clients = useApi<{ id: string; name: string }[]>('/facture/clients');
   const items = useApi<FactureItemView[]>('/facture/items');
+  const stock = useApi<{ available: boolean; writable: boolean }>('/facture/stock/status');
+  const stockOn = stock.state === 'success' && stock.data.available;
+  const [returnGoods, setReturnGoods] = useState(doc.stockReturnGoods);
   const [form, setForm] = useState(() => ({
     clientId: doc.clientId,
     subject: doc.subject ?? '',
@@ -249,7 +275,10 @@ function DraftEditor({ doc, onSaved }: { doc: DocumentView; onSaved: () => void 
 
   function addFromCatalog(itemId: string) {
     const item = items.state === 'success' ? items.data.find((i) => i.id === itemId) : undefined;
-    if (!item) return;
+    if (item) addItem(item);
+  }
+
+  function addItem(item: FactureItemView) {
     setLines((all) => [
       ...all,
       {
@@ -294,6 +323,7 @@ function DraftEditor({ doc, onSaved }: { doc: DocumentView; onSaved: () => void 
       ? { validityDays: form.validityDays }
       : {}),
     ...(doc.type === 'INVOICE' ? { paymentTermsDays: form.paymentTermsDays } : {}),
+    ...(doc.type === 'CREDIT_NOTE' ? { stockReturnGoods: returnGoods } : {}),
     lines: lines.map((l) => ({
       itemId: l.itemId,
       reference: l.reference ?? '',
@@ -521,8 +551,37 @@ function DraftEditor({ doc, onSaved }: { doc: DocumentView; onSaved: () => void 
               <Plus className="h-4 w-4" aria-hidden /> Ligne libre
             </Button>
           </div>
+          {stockOn && doc.type !== 'CREDIT_NOTE' && (
+            <StockItemPicker
+              onPicked={(item) => {
+                addItem(item);
+                items.reload();
+              }}
+            />
+          )}
         </CardBody>
       </Card>
+
+      {stockOn && doc.type === 'INVOICE' && <StockPreview doc={doc} />}
+      {stockOn && doc.type === 'CREDIT_NOTE' && (
+        <Card>
+          <CardBody>
+            <label className="flex items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={returnGoods}
+                onChange={(e) => setReturnGoods(e.target.checked)}
+                data-testid="facture-stock-return"
+              />
+              <span>
+                <strong>Marchandise retournée</strong> : à l’émission de l’avoir, les articles Ocall
+                Stock reviennent en stock (jamais plus que ce que la facture a sorti).
+              </span>
+            </label>
+          </CardBody>
+        </Card>
+      )}
 
       <Card>
         <CardHeader title="Conditions et mentions" />
@@ -872,5 +931,63 @@ function Totals({
         </dl>
       </CardBody>
     </Card>
+  );
+}
+
+// ─── Ocall Stock (S5) ───
+
+interface StockPreviewView {
+  available: boolean;
+  writable: boolean;
+  availabilityKnown: boolean;
+  shortages: number;
+  lines: {
+    variantId: string;
+    label: string;
+    quantity: number;
+    available: number | null;
+    short: boolean;
+  }[];
+}
+
+/**
+ * Avant l'émission d'une facture (selon le brouillon enregistré) : ce qui sortira du stock et ce qui manque
+ * à l'emplacement des ventes Facture. Avertissement seulement : la facture s'émet, la demande en échec se
+ * relance une fois le stock corrigé.
+ */
+function StockPreview({ doc }: { doc: DocumentView }) {
+  const preview = useApi<StockPreviewView>(
+    `/facture/stock/documents/${doc.id}/preview?v=${encodeURIComponent(doc.updatedAt)}`,
+  );
+  if (preview.state !== 'success' || preview.data.lines.length === 0) return null;
+  const p = preview.data;
+  return (
+    <div data-testid="facture-stock-preview">
+      <Alert
+        tone={p.shortages > 0 || !p.writable ? 'error' : 'info'}
+        title={
+          !p.writable
+            ? 'Ocall Stock en consultation seule : le stock ne sera pas mis à jour'
+            : p.shortages > 0
+              ? `Stock insuffisant pour ${p.shortages} article(s)`
+              : 'À l’émission, ces articles sortiront du stock'
+        }
+      >
+        <ul className="list-disc pl-5">
+          {p.lines.map((l) => (
+            <li key={l.variantId}>
+              {l.label} : {l.quantity}
+              {l.available !== null && ` (disponible : ${l.available})`}
+            </li>
+          ))}
+        </ul>
+        {p.shortages > 0 && (
+          <p>
+            La facture peut être émise ; la mise à jour du stock sera en échec jusqu’à ce que le
+            stock soit corrigé dans Ocall Stock, puis relancée.
+          </p>
+        )}
+      </Alert>
+    </div>
   );
 }

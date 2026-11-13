@@ -28,6 +28,7 @@ import {
   formatXof,
   hasFacturePermission,
   isFactureOverdue,
+  type StockFactureLine,
 } from '@ocall/shared';
 import { AuditService } from '../../common/audit/audit.service';
 import { composeMail } from '../../common/mail/mail-compose';
@@ -43,6 +44,7 @@ import {
 import { allocateFactureNumber } from './facture-numbering';
 import { loadFactureLogos } from './facture-pdf';
 import { FacturePrismaService } from './facture-prisma.service';
+import { FactureStockService } from './facture-stock.service';
 import type {
   CreateFactureDocumentDto,
   FactureDocumentQueryDto,
@@ -84,6 +86,7 @@ export class FactureDocumentsService {
     private readonly audit: AuditService,
     private readonly mail: MailService,
     @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
+    private readonly stock: FactureStockService,
   ) {}
 
   // ─── Lecture ───
@@ -143,10 +146,27 @@ export class FactureDocumentsService {
         },
         payments: { orderBy: [{ paidAt: 'asc' }, { createdAt: 'asc' }] },
         intervention: { select: { id: true, number: true } },
+        stockOutbox: {
+          select: {
+            id: true,
+            source: true,
+            status: true,
+            lastError: true,
+            doneAt: true,
+            lines: true,
+          },
+        },
       },
     });
     if (!doc) throw new NotFoundException(NOT_FOUND);
-    const { sellerSnapshot: _s, clientSnapshot, client, ...rest } = doc;
+    const {
+      sellerSnapshot: _s,
+      clientSnapshot,
+      client,
+      stockOutbox,
+      stockCovered: _c,
+      ...rest
+    } = doc;
     const amounts = invoiceAmounts(doc);
     const billed = doc.type === 'INVOICE' && doc.status !== 'DRAFT';
     return {
@@ -170,6 +190,13 @@ export class FactureDocumentsService {
         id: client.id,
       },
       clientArchived: client.isArchived,
+      /** S5 : demande de mouvement transmise (ou non) à Ocall Stock pour ce document. */
+      stockSync: stockOutbox[0]
+        ? {
+            ...stockOutbox[0],
+            lines: stockOutbox[0].lines as unknown as StockFactureLine[],
+          }
+        : null,
     };
   }
 
@@ -248,6 +275,9 @@ export class FactureDocumentsService {
           ...(doc.type === 'INVOICE' && dto.paymentTermsDays !== undefined
             ? { paymentTermsDays: dto.paymentTermsDays ?? DEFAULT_PAYMENT_TERMS_DAYS }
             : {}),
+          ...(doc.type === 'CREDIT_NOTE' && dto.stockReturnGoods !== undefined
+            ? { stockReturnGoods: dto.stockReturnGoods }
+            : {}),
         },
       });
       await this.writeLines(tx, ctx.organizationId, id, dto.lines);
@@ -313,6 +343,8 @@ export class FactureDocumentsService {
    * brouillon : la seconde attend le verrou puis échoue (un seul numéro attribué).
    */
   async issue(ctx: FactureContext, id: string, now: Date = new Date()) {
+    // Stock lu avant la transaction (autre base) : indisponible → la demande sera « non transmise ».
+    const writable = await this.stock.writable(ctx.organizationId);
     const number = await this.db.$transaction(async (tx) => {
       const doc = await this.lock(tx, ctx.organizationId, id);
       if (doc.status !== 'DRAFT') {
@@ -371,8 +403,14 @@ export class FactureDocumentsService {
           clientSnapshot: identityOf(client) as unknown as Prisma.InputJsonValue,
         },
       });
+      // S5 : seul déclencheur de déstockage d'un document (facture, avoir « marchandise retournée »).
+      const issued = { ...doc, number: allocated.number };
+      if (doc.type === 'INVOICE') await this.stock.onInvoiceIssued(tx, ctx, issued, writable);
+      if (doc.type === 'CREDIT_NOTE')
+        await this.stock.onCreditNoteIssued(tx, ctx, issued, writable);
       return allocated.number;
     });
+    this.stock.kick();
     await this.record(ctx, 'facture.document_issued', id, { number });
     return this.get(ctx, id);
   }

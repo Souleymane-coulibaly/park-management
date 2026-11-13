@@ -343,6 +343,14 @@ export class FactureDraftDto {
   @ValidateNested({ each: true })
   @Type(() => FactureLineDto)
   lines: FactureLineDto[];
+
+  @ApiPropertyOptional({
+    description:
+      'Avoir : la marchandise revient en stock Ocall Stock (cas C), décidé sur le brouillon',
+  })
+  @IsOptional()
+  @IsBoolean()
+  stockReturnGoods?: boolean;
 }
 
 export class CreateFactureDocumentDto extends FactureDraftDto {

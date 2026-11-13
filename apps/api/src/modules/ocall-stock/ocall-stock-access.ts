@@ -104,22 +104,14 @@ export class OcallStockAccessGuard implements CanActivate {
       });
     }
 
-    const isOwner = auth.membership.role === 'OWNER';
-    const member =
-      !isOwner && auth.membership.role === 'PRODUCT_USER'
-        ? await this.db.stockMember.findFirst({
-            where: { organizationId, userId: auth.user.id, isActive: true },
-            select: {
-              id: true,
-              role: true,
-              permissions: { select: { permission: true, granted: true } },
-              sites: { select: { siteId: true } },
-            },
-          })
-        : null;
-    if (!isOwner && !member) throw this.denied();
-    const role: StockRole = member?.role ?? 'ADMIN';
-    const permissions = stockEffectivePermissions(role, member?.permissions ?? []);
+    const member = await stockMemberRights(
+      this.db,
+      organizationId,
+      auth.user.id,
+      auth.membership.role,
+    );
+    if (!member) throw this.denied();
+    const { permissions } = member;
 
     const required = this.reflector.getAllAndOverride<StockPermission[] | undefined>(
       STOCK_PERMISSION,
@@ -131,11 +123,7 @@ export class OcallStockAccessGuard implements CanActivate {
       organizationId,
       userId: auth.user.id,
       access,
-      role,
-      permissions,
-      memberId: member?.id ?? null,
-      isOwner,
-      siteIds: role === 'ADMIN' || !member?.sites.length ? null : member.sites.map((s) => s.siteId),
+      ...member,
     };
     return true;
   }
@@ -146,4 +134,39 @@ export class OcallStockAccessGuard implements CanActivate {
       message: "Vous n'avez pas les droits nécessaires.",
     });
   }
+}
+
+/**
+ * Droits Stock d'un compte de l'organisation : le propriétaire est administrateur d'office ; sinon, membre
+ * Stock actif (rôle et ajustements). Null si le compte n'a aucun droit Stock. Seule source de ce calcul
+ * (garde des routes, lectures demandées par une autre application).
+ */
+export async function stockMemberRights(
+  db: OcallStockPrismaService,
+  organizationId: string,
+  userId: string,
+  membershipRole: string,
+): Promise<Pick<StockContext, 'role' | 'permissions' | 'memberId' | 'isOwner' | 'siteIds'> | null> {
+  const isOwner = membershipRole === 'OWNER';
+  const member =
+    !isOwner && membershipRole === 'PRODUCT_USER'
+      ? await db.stockMember.findFirst({
+          where: { organizationId, userId, isActive: true },
+          select: {
+            id: true,
+            role: true,
+            permissions: { select: { permission: true, granted: true } },
+            sites: { select: { siteId: true } },
+          },
+        })
+      : null;
+  if (!isOwner && !member) return null;
+  const role: StockRole = member?.role ?? 'ADMIN';
+  return {
+    role,
+    permissions: stockEffectivePermissions(role, member?.permissions ?? []),
+    memberId: member?.id ?? null,
+    isOwner,
+    siteIds: role === 'ADMIN' || !member?.sites.length ? null : member.sites.map((s) => s.siteId),
+  };
 }

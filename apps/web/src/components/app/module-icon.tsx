@@ -84,6 +84,7 @@ const ICONS: Record<string, LucideIcon> = {
   'facture-site': Globe,
   'facture-requests': Inbox,
   'facture-catalog': Package,
+  'facture-stock': Boxes,
   'facture-settings': Building2,
   'facture-team': Users,
   'stock-home': LayoutDashboard,

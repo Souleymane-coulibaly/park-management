@@ -3,7 +3,7 @@
  *
  * Sens unique pour les articles : Stock → Facture, en lecture seule. Facture ne modifie jamais un article
  * Stock ; Stock ne modifie jamais un document Facture. Les demandes de mouvement de stock (déstockage à
- * l'émission d'une facture, retours) passeront par un contrat distinct, idempotent, au sprint S5.
+ * l'émission d'une facture, retours) passent par un contrat distinct et idempotent (`stock-movements.ts`).
  *
  * Le module Stock fournit l'implémentation sous le jeton `STOCK_CATALOG_READER` (module global) ; un
  * consommateur l'injecte en facultatif (`@Optional()`), car Stock peut être désactivé.
@@ -39,4 +39,42 @@ export interface StockCatalogReader {
   search(organizationId: string, q: string, limit: number): Promise<StockCatalogEntry[]>;
   /** Articles désignés, de cette organisation seulement (les autres identifiants sont ignorés). */
   variants(organizationId: string, variantIds: readonly string[]): Promise<StockCatalogEntry[]>;
+  /**
+   * Disponible (en stock − réservé) à l'emplacement des ventes Facture, par article. Droits vérifiés côté
+   * Stock : null si ce compte n'a pas le droit de consulter les stocks, ou si l'emplacement n'est pas réglé.
+   */
+  availability(
+    organizationId: string,
+    userId: string,
+    variantIds: readonly string[],
+  ): Promise<Map<string, number> | null>;
+  /**
+   * Vente en caisse à facturer (numéro « VTE-000123 » ou identifiant), de cette organisation seulement.
+   * Droits vérifiés côté Stock (consulter les ventes) ; null si introuvable ou non autorisée.
+   */
+  sale(organizationId: string, userId: string, ref: string): Promise<StockSaleForInvoice | null>;
+}
+
+/** Vente en caisse lue par Facture : quantités nettes des retours déjà faits en caisse. */
+export interface StockSaleForInvoice {
+  id: string;
+  /** « VTE-000123 ». */
+  number: string;
+  createdAt: Date;
+  customer: { name: string; phone: string | null; email: string | null } | null;
+  /** Total TTC encaissé. */
+  total: number;
+  lines: {
+    variantId: string;
+    productId: string;
+    sku: string;
+    label: string;
+    unit: string;
+    /** Quantité vendue moins la quantité déjà reprise en caisse. */
+    quantity: number;
+    /** Montant TTC restant de la ligne (après remise et remboursements). */
+    total: number;
+    vatRate: number;
+    isStockable: boolean;
+  }[];
 }

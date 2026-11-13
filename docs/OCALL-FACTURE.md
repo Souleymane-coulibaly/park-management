@@ -392,6 +392,12 @@ WhatsApp (`whatsappDigits`). Park et School inchangés (tests d'intégration et 
 | Public : `GET public/facture-sites/{resolve,sitemap,well-known,:slug}` · `GET public/facture-media/:key`                 | aucune              |
 | Public : `POST public/facture-sites/:slug/requests` (anti-spam, 5 / 10 min)                                              | aucune              |
 | Super Admin : `GET platform/facture-site-domains` · `POST …/:id/{activate,suspend}`                                      | domaines            |
+| S5 : `GET stock/status`                                                                                                  | entrer              |
+| S5 : `GET stock/search` · `POST stock/items`                                                                             | gérer les documents |
+| S5 : `POST stock/items/:id/unlink`                                                                                       | catalogue           |
+| S5 : `GET stock/documents/:id/preview` · `GET stock/sync`                                                                | voir les documents  |
+| S5 : `POST stock/sales/invoice`                                                                                          | gérer les documents |
+| S5 : `POST stock/sync/:id/retry`                                                                                         | gérer l'identité    |
 | `GET members`                                                                                                            | voir l'équipe       |
 | `POST members` · `PATCH members/:id`                                                                                     | gérer l'équipe      |
 
@@ -401,7 +407,15 @@ et relance d'une facture), `/facture/clients`, `/facture/catalogue`,
 `/facture/parametres` (identité, présentation, logos par emplacement), `/facture/equipe`,
 `/facture/interventions` (planning de la semaine, planification ; « mes interventions » pour un
 technicien), `/facture/interventions/:id` (travaux, photos, fin, signature à l'écran, rapport,
-facturation) et `/facture/equipements`.
+facturation), `/facture/equipements` et `/facture/stock` (S5 : facture d'une vente en caisse, mise à jour
+du stock et relance).
+
+**Ocall Stock (S5).** Avec les deux abonnements, les documents et les pièces d'interventions cherchent les
+articles Ocall Stock (articles miroirs en lecture seule), l'émission d'une facture, la signature d'une
+intervention et l'émission d'un avoir « marchandise retournée » mettent le stock à jour par une file de
+sortie, sans jamais déstocker deux fois. Chercher et ajouter un article Stock est ouvert à qui gère les documents,
+le catalogue ou les interventions. Détail : `docs/OCALL-STOCK.md` §8. Sans Stock, Facture fonctionne
+comme avant.
 
 ## 13. Base et déploiement
 
@@ -418,7 +432,9 @@ facturation) et `/facture/equipements`.
   indisponibilités, priorité, compétences requises, périodicité d'entretien, réglages IA ; contrôles) et
   `20261127000000_facture_v1_site` (F5 : site, médias, domaines, demandes ; contrôles) et
   `20261128000000_facture_v1_audit` (corrections de l'audit de fin de V1 : instantané du rapport signé,
-  contrôle et déclencheur), appliquées par `pnpm db:facture:migrate:deploy` (refus des instructions
+  contrôle et déclencheur) et `20261129000000_facture_v1_stock` (S5 Stock, additive : articles miroirs,
+  facture d'une vente en caisse, avoir avec retour de marchandise, file `FactureStockOutbox` ; contrôles et
+  déclencheurs `FactureDocument_stock_frozen`, `FactureStockOutbox_frozen`), appliquées par `pnpm db:facture:migrate:deploy` (refus des instructions
   destructrices et d'une base Suite ou School).
 - Pré-déploiement Railway : `db:migrate:deploy && db:school:migrate:deploy && db:facture:migrate:deploy`
   — sans `FACTURE_ENABLED=true`, l'étape Facture ne fait rien.

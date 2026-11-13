@@ -66,6 +66,9 @@ export const STOCK_MOVEMENT_KIND_LABELS: Record<string, string> = {
   SUPPLIER_RETURN: 'Retour fournisseur',
   SALE: 'Vente en caisse',
   SALE_RETURN: 'Retour client',
+  FACTURE_INVOICE: 'Facture émise (Ocall Facture)',
+  FACTURE_PART: 'Pièces d’intervention (Ocall Facture)',
+  FACTURE_CREDIT: 'Avoir — marchandise retournée (Ocall Facture)',
 };
 
 /** Saisies manuelles possibles (les autres mouvements naissent d'une opération : transfert, inventaire). */

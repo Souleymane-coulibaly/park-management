@@ -47,6 +47,7 @@ import { FactureSkillsService } from './facture-skills.service';
 import { FactureNotificationsService } from './facture-notifications.service';
 import { loadFactureLogos } from './facture-pdf';
 import { FacturePrismaService } from './facture-prisma.service';
+import { FactureStockService } from './facture-stock.service';
 import type {
   CompleteFactureInterventionDto,
   CreateFactureInterventionDto,
@@ -142,6 +143,7 @@ export class FactureInterventionsService {
     private readonly notifications: FactureNotificationsService,
     private readonly skills: FactureSkillsService,
     @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
+    private readonly stock: FactureStockService,
   ) {}
 
   // ─── Équipements ───
@@ -713,6 +715,8 @@ export class FactureInterventionsService {
     now = new Date(),
   ) {
     const png = await normalizeSignature(file);
+    // Stock lu avant la transaction (autre base) : indisponible → la demande sera « non transmise ».
+    const writable = await this.stock.writable(ctx.organizationId);
     const key = privateKey(ctx.organizationId, null, randomUUID(), 'png');
     await this.storage.put(key, png, 'image/png');
     try {
@@ -735,7 +739,10 @@ export class FactureInterventionsService {
             reportSnapshot: reportSnapshot as unknown as Prisma.InputJsonValue,
           },
         });
+        // S5 : pièces posées sorties du stock à la signature (la facture de l'intervention ne les ressort pas).
+        await this.stock.onInterventionSigned(tx, ctx, row, writable);
       });
+      this.stock.kick();
     } catch (error) {
       await this.storage.delete(key).catch(() => undefined);
       throw error;

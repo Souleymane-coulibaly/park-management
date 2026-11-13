@@ -6,8 +6,8 @@ Elle s'adresse aux commerces, grossistes, distributeurs, quincailleries, superma
 Elle est vendue indépendamment d'Ocall Facture. Les deux applications fonctionnent ensemble quand une
 organisation a les deux abonnements (sprint S5).
 
-**État : sprints S1 (socle et catalogue), S2 (sites, stocks, transferts, inventaires), S3 (achats) et S4
-(caisse) livrés.** L'interconnexion avec Facture, les tableaux de bord, la vitrine et l'IA suivent, sprint
+**État : sprints S1 (socle et catalogue), S2 (sites, stocks, transferts, inventaires), S3 (achats), S4
+(caisse) et S5 (interconnexion Facture) livrés.** Les tableaux de bord, la vitrine et l'IA suivent, sprint
 par sprint (§14). Plan complet :
 `ocall-audits/plan-ocall-stock-v1.md` (hors dépôt).
 
@@ -42,7 +42,8 @@ par sprint (§14). Plan complet :
 - **Frontières.** Elles sont vérifiées par un test (`ocall-stock-boundaries.spec.ts`) :
   - le module n'importe que le socle commun et `organizations` ;
   - aucun autre module ne l'importe.
-- **Seul lien avec les autres modules** : le jeton `STOCK_CATALOG_READER`, défini dans `common/integration`.
+- **Seul lien avec les autres modules** : les jetons `STOCK_CATALOG_READER` (lecture du catalogue) et
+  `STOCK_MOVEMENT_GATEWAY` (demandes de mouvement, S5), définis dans `common/integration`.
 - **Comptes de l'équipe.** Ce sont des comptes Suite au rôle `PRODUCT_USER`, sans droit Park ni School.
   Leur rôle Stock est enregistré dans la base Stock.
   - Ils sont créés par `ProductUserAccountsService` (module `organizations`), un service réutilisable par
@@ -198,23 +199,97 @@ le réceptionner, le site d'arrivée.
 - **Sécurité.** Requêtes paramétrées, toujours limitées à l'organisation et aux droits (fournisseurs selon
   la permission). Pas d'Elasticsearch.
 
-## 8. Contrat avec Ocall Facture (préparé au S1, utilisé au S5)
+## 8. Interconnexion avec Ocall Facture (S5)
 
-`StockCatalogReader` (`common/integration/catalog-integration.ts`) se lit dans un seul sens : de Stock vers
-Facture.
+**Principe : Stock est la seule source des quantités ; la synchronisation est à sens unique.** Les articles
+vont de Stock vers Facture (lecture seule) ; les demandes de mouvement vont de Facture vers Stock, par le
+moteur de stock uniquement. Facture ne modifie jamais un article Stock, Stock ne modifie jamais un document
+Facture. Les deux applications restent indépendantes :
 
-- `isAvailable` : Stock est activé et l'organisation y a droit (consultation seule comprise).
-- `search` : recherche des articles actifs.
-- `variants` : articles désignés, de cette organisation seulement.
+- **Facture seul (cas A)** : catalogue Facture autonome, aucune fonction Stock.
+- **Stock seul (cas B)** : Stock ne dépend pas de Facture.
+- **Les deux (cas C)** : ce qui suit.
 
-Chaque article renvoie : libellé (article et variante), référence, unité, prix TTC du jour, TVA, code
-principal, stocké ou non.
+**Contrats** (`common/integration`) :
 
-Facture ne modifie jamais un article Stock. Les demandes de mouvement passeront par un contrat distinct :
+- `StockCatalogReader` : `isAvailable`, `search`, `variants` (S1) ; `availability` (disponible à
+  l'emplacement des ventes Facture) et `sale` (vente en caisse à facturer). **Droits vérifiés côté Stock**
+  (consulter les stocks, consulter les ventes, périmètre des sites) : un compte Facture sans droit Stock ne
+  voit ni quantités ni ventes.
+- `StockMovementGateway` : `canWrite` (Stock activé et abonnement en cours) et `apply` (une demande, une clé,
+  toutes ses lignes ou aucune). Refus typés : `STOCK_UNAVAILABLE`, `STOCK_LOCATION_NOT_SET`,
+  `STOCK_INSUFFICIENT`, `STOCK_VARIANT_NOT_FOUND`.
 
-- déstockage unique à l'émission d'une facture ;
-- retours ;
-- file de sortie idempotente.
+**Articles dans Facture.**
+
+- Dans un document (et les pièces d'une intervention, pour le gérant), « Articles Ocall Stock » cherche par
+  nom, référence ou code-barres : prix du jour (TTC et hors taxe), TVA, disponibilité si le compte peut la
+  voir.
+- Ajouter un article crée ou réutilise un **article miroir** `FactureItem` (`stockVariantId`, un seul par
+  article Stock). Nom, unité, prix hors taxe (`TTC × 100 / (100 + TVA)`, arrondi) et TVA sont relus dans
+  Stock à chaque ajout. Le miroir est en **lecture seule** dans Facture (archivage seul) tant que le lien
+  existe. Une TVA au-delà de 20 % est refusée (plage de Facture).
+- **Doublon** : un article Facture qui porte la référence de l'article Stock est **proposé** ; l'utilisateur
+  choisit « Rapprocher » (l'article existant devient le miroir, tracé) ou « Créer un article distinct ».
+  Jamais de rapprochement automatique. **Délier** reste possible tant qu'aucune demande de mouvement ni
+  facture de vente en caisse ne cite l'article.
+- Les documents émis gardent leur instantané : un changement de prix ne touche jamais un document émis.
+
+**Déclencheur unique de déstockage, par source.**
+
+| Source                | Déclencheur                            | Clé                             |
+| --------------------- | -------------------------------------- | ------------------------------- |
+| Vente en caisse Stock | Vente encaissée (S4)                   | `stock-sale:<vente>:<ligne>`    |
+| Facture               | **Émission** de la facture             | `facture-invoice:<document>`    |
+| Intervention          | **Signature** (pièces posées)          | `facture-part:<intervention>`   |
+| Avoir                 | Émission, si « marchandise retournée » | `facture-credit:<avoir>`        |
+| Retour en caisse      | Retour validé (S4)                     | `stock-return:<retour>:<ligne>` |
+
+Un devis, une pro forma, un bon de commande ou un brouillon ne demandent jamais rien. Seuls les articles
+miroirs **stockés** comptent : un service ne sort jamais du stock.
+
+**Jamais deux déstockages.** Une facture ne demande que ce que sa source n'a pas déjà sorti, article par
+article :
+
+- la **facture d'une vente en caisse** (« Facturer une vente en caisse », une seule par vente ; quantités
+  nettes des retours en caisse, figées sur la facture) ;
+- la **facture d'une intervention** (pièces sorties à la signature).
+
+Rien à sortir : la demande est close d'emblée, gardée pour la traçabilité. La clé unique protège en dernier
+recours.
+
+**Avoir « marchandise retournée »** (case du brouillon d'avoir, figée à l'émission) : retour en stock,
+jamais plus que ce qui est sorti pour la facture (sa demande et sa source), avoirs précédents déduits.
+
+**Transport sans transaction commune.**
+
+1. À l'émission (ou à la signature), Facture écrit la demande dans sa file de sortie `FactureStockOutbox`,
+   **dans la même transaction**.
+2. Un répartiteur (toutes les 30 s, et aussitôt après l'émission) la réserve sous bail (`SKIP LOCKED`) et
+   l'envoie à Stock.
+3. Stock l'applique en une transaction : verrou sur la clé, rejeu reconnu par son journal
+   `StockInboundEvent`, mouvements par le moteur (politique de stock négatif comprise) à l'**emplacement des
+   ventes Facture** (réglage Stock).
+4. **Reprise** :
+   - refus de Stock (stock insuffisant, emplacement non réglé, Stock indisponible) : « synchronisation en
+     échec », avec le motif, visible du gérant (page « Ocall Stock » de Facture, et sur le document) ; il
+     corrige, puis clique « Relancer » ;
+   - incident passager : nouvelles tentatives espacées (1, 2, 4… min, 6 au plus), puis « en échec » ;
+   - aucune perte : la demande n'est jamais supprimée, et un résultat perdu est rejoué sans effet.
+
+**Avant l'émission**, la facture affiche ce qui sortira du stock et ce qui manque. C'est un avertissement,
+jamais un blocage : une facture émise est un document légal.
+
+**Abonnements.**
+
+- **Stock échu** (consultation seule) : Facture continue ; articles miroirs et documents intacts ; les
+  factures émises ne demandent rien et portent « stock non mis à jour » (définitif, non relançable).
+- **Facture échu** : Stock n'en dépend pas.
+- Aucune suppression de données, dans les deux cas.
+
+**Côté Stock** : le réglage « Emplacement des ventes Facture » et la liste « Mises à jour reçues d'Ocall
+Facture » (Réglages) ; mouvements « Facture émise », « Pièces d'intervention », « Avoir — marchandise
+retournée ».
 
 ## 9. Sites, stocks, transferts et inventaires (S2)
 
@@ -323,8 +398,8 @@ Décisions du 13/11/2026 : liste de clients propre à Stock ; remises soumises �
   qu'une fois.
 - **Base** : une vente encaissée est figée (seul le compteur de réimpressions augmente) ; ses lignes aussi
   (seules les quantités et montants retournés augmentent) ; paiements et retours en ajout seul.
-- **Clients** : nom, téléphone, e-mail, note ; archivés, jamais supprimés. Rapprochement avec les clients
-  Ocall Facture au sprint S5.
+- **Clients** : nom, téléphone, e-mail, note ; archivés, jamais supprimés. La facture d'une vente en caisse
+  se fait dans Facture, au client Facture choisi (§8).
 
 ## 12. Base et déploiement
 
@@ -351,6 +426,15 @@ Décisions du 13/11/2026 : liste de clients propre à Stock ; remises soumises �
   remises, coordonnées et pied des tickets) ; contrôles (totaux, quantités retournées ≤ vendues, paiements,
   motif d'écart) ; une session ouverte par caisse ; déclencheurs : session close figée, vente et lignes
   figées, paiements et retours en ajout seul.
+- **Migration** `20261205000000_stock_v1_facture` (S5, additive) : 3 natures de mouvement (Facture),
+  réglage `factureLocationId`, table `StockInboundEvent` (une ligne par clé, en ajout seul).
+- **Base Facture** : migration `20261129000000_facture_v1_stock` (S5, additive) :
+  - colonnes facultatives : `FactureItem.stock*`, `FactureDocument.stockSale*`, `stockCovered`,
+    `stockReturnGoods` ;
+  - table `FactureStockOutbox` ;
+  - contrôles : lien complet ou absent, vente sur une facture seulement, retour sur un avoir seulement ;
+  - déclencheurs : colonnes S5 figées à l'émission, vente d'une facture immuable, demande jamais supprimée,
+    états « transmise » et « non transmise » définitifs.
 - **Base Suite** : migration de données `20261201000100_stock_v1_offres` (2 offres inactives).
 - **Pré-déploiement** : `apps/api/railway.json` contient `db:stock:migrate:deploy`.
 
@@ -374,8 +458,9 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
 | Unitaires, base     | `packages/database/src/migration-safety.spec.ts`                                                | Garde de la cible des migrations Stock                                                                 |
 | Unitaires, S2       | `packages/shared/src/stock-warehouse.spec.ts`                                                   | QR codes d'emplacement, ordre des niveaux, permissions S2                                              |
 | Unitaires, S4       | `packages/shared/src/stock-sales.spec.ts`                                                       | Montants, remises plafonnées, paiements et monnaie, remboursements, ticket 58 / 80 mm, droits          |
-| Intégration         | `apps/api/test/stock-s1…s4.integration.spec.ts` (`TEST_STOCK_DATABASE_URL`)                     | Voir le détail ci-dessous                                                                              |
-| E2E                 | `e2e/stock-s1.spec.ts` à `stock-s4.spec.ts`                                                     | Voir le détail ci-dessous                                                                              |
+| Unitaires, S5       | `packages/shared/src/stock-facture.spec.ts`                                                     | TTC → HT, quantités par article, sortie nette de la source, plafond des retours, délais de relance     |
+| Intégration         | `apps/api/test/stock-s1…s5.integration.spec.ts` (`TEST_STOCK_DATABASE_URL`)                     | Voir le détail ci-dessous                                                                              |
+| E2E                 | `e2e/stock-s1.spec.ts` à `stock-s5.spec.ts`                                                     | Voir le détail ci-dessous                                                                              |
 
 **Intégration**, sur bases locales jetables :
 
@@ -402,7 +487,14 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
   le rôle et le plafond ; dernier article vendu par deux caisses ; ticket (aperçu, ESC/POS, PDF, duplicata),
   vente figée par la base ; retours (droit, prorata, remise en stock ou non, jamais plus que vendu, autre
   magasin refusé) ; clôture avec écart motivé, session figée ; paniers en attente ; clients ; sites ;
-  isolation.
+  isolation ;
+- S5 (bases Stock et Facture) : Facture seul sans fonction Stock ; recherche, miroir en lecture seule, prix
+  du jour, doublon proposé, rapproché, délié ; devis et brouillon sans effet, facture émise déstockée une
+  fois (rejeu sans effet, service ignoré) ; emplacement non réglé et stock insuffisant en échec, relance
+  réservée au gérant ; vente en caisse puis facture (deux demandes simultanées : une facture ; seul l'ajout
+  sort) ; intervention signée puis facturée sans second déstockage, lien plus déliable ; avoir avec et sans
+  retour, plafonné ; Stock échu (« stock non mis à jour ») ; garanties en base ; deux répartiteurs
+  simultanés.
 
 **E2E**, parcours navigateur :
 
@@ -417,13 +509,15 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
   retour fournisseur ;
 - S4 : caisse avec imprimante simulée, session, vente à la recherche avec monnaie et ticket imprimé, vente
   au scan mise en attente puis reprise et payée en deux moyens, retour remboursé, clôture avec écart, client,
-  caisse sur téléphone.
+  caisse sur téléphone ;
+- S5 : emplacement des ventes Facture réglé ; article Stock cherché et ajouté dans une facture (prix,
+  disponibilité, recherche sur téléphone), avertissement, émission puis « Stock mis à jour », trace dans
+  Stock ; facture d'une vente en caisse ; miroir en lecture seule au catalogue.
 
 ## 14. Suite de la feuille de route
 
 | Sprint | Contenu                                                        |
 | ------ | -------------------------------------------------------------- |
-| S5     | Interconnexion Facture                                         |
 | S6     | Tableaux de bord et recherche complète                         |
 | S7     | Vitrine                                                        |
 | S8     | IA : réapprovisionnement, ruptures, analyse, images d'articles |

@@ -28,6 +28,8 @@ export interface FactureItemView {
   unitPrice: number;
   vatRate: number;
   isArchived: boolean;
+  /** S5 : article miroir d'Ocall Stock (lecture seule tant que le lien existe). */
+  stockVariantId?: string | null;
 }
 
 const VAT_OPTIONS = FACTURE_VAT_RATES.map((r) => ({ value: String(r), label: formatVatRate(r) }));
@@ -83,6 +85,16 @@ function Catalog({ canManage }: { canManage: boolean }) {
   const items = useApi<FactureItemView[]>(
     `/facture/items?${new URLSearchParams({ ...(q.trim() ? { q: q.trim() } : {}), archived: String(archived) })}`,
   );
+
+  async function unlink(item: FactureItemView) {
+    setError(null);
+    try {
+      await api(`/facture/stock/items/${item.id}/unlink`, { method: 'POST' });
+      items.reload();
+    } catch (e) {
+      setError(e instanceof ApiError ? e : new ApiError(0, 'UNKNOWN', 'Une erreur est survenue.'));
+    }
+  }
 
   async function toggleArchive(item: FactureItemView) {
     setError(null);
@@ -145,11 +157,23 @@ function Catalog({ canManage }: { canManage: boolean }) {
                     <Td className="text-right">
                       <span className="inline-flex flex-wrap justify-end gap-2">
                         {i.isArchived && <Badge>Archivé</Badge>}
+                        {i.stockVariantId && <Badge tone="forest">Ocall Stock</Badge>}
                         {canManage && (
                           <>
-                            <Button size="sm" variant="secondary" onClick={() => setEditing(i)}>
-                              Modifier
-                            </Button>
+                            {i.stockVariantId ? (
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                onClick={() => void unlink(i)}
+                                title="L’article redevient un article Facture ordinaire"
+                              >
+                                Délier
+                              </Button>
+                            ) : (
+                              <Button size="sm" variant="secondary" onClick={() => setEditing(i)}>
+                                Modifier
+                              </Button>
+                            )}
                             <Button
                               size="sm"
                               variant="secondary"

@@ -56,6 +56,13 @@ export class OcallStockController {
     return this.stock.updateSettings(ctx, dto);
   }
 
+  /** S5 — demandes reçues d'Ocall Facture (factures, pièces d'interventions, avoirs), les plus récentes. */
+  @RequireStockPermission('stock.movements.read')
+  @Get('facture-events')
+  factureEvents(@CurrentStock() ctx: StockContext) {
+    return this.stock.factureEvents(ctx);
+  }
+
   @RequireStockPermission('stock.members.read')
   @Get('members')
   listMembers(@CurrentStock() ctx: StockContext) {

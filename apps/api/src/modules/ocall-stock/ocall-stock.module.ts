@@ -1,10 +1,12 @@
 import { Global, Module } from '@nestjs/common';
 import { STOCK_CATALOG_READER } from '../../common/integration/catalog-integration';
+import { STOCK_MOVEMENT_GATEWAY } from '../../common/integration/stock-movements';
 import { OrganizationsModule } from '../organizations/organizations.module';
 import { OcallStockAccessGuard } from './ocall-stock-access';
 import { OcallStockCatalogReader } from './ocall-stock-catalog-reader';
 import { OcallStockCatalogController } from './ocall-stock-catalog.controller';
 import { OcallStockCatalogService } from './ocall-stock-catalog.service';
+import { OcallStockFactureGateway } from './ocall-stock-facture-gateway';
 import { OcallStockLabelsService } from './ocall-stock-labels.service';
 import { OcallStockMediaService } from './ocall-stock-media.service';
 import { OcallStockMembersService } from './ocall-stock-members.service';
@@ -31,7 +33,8 @@ import { OcallStockService } from './ocall-stock.service';
 /**
  * Domaine Ocall Stock. N'importe aucun module métier d'une autre application (règle vérifiée par un
  * test) : seul le socle commun (identité, organisations, abonnements, stockage, PDF) est partagé. Le seul
- * élément exposé aux autres modules est la lecture du catalogue (`STOCK_CATALOG_READER`, contrat commun).
+ * élément exposé aux autres modules : les contrats communs de lecture du catalogue (`STOCK_CATALOG_READER`)
+ * et de demandes de mouvement (`STOCK_MOVEMENT_GATEWAY`, S5).
  */
 @Global()
 @Module({
@@ -65,8 +68,10 @@ import { OcallStockService } from './ocall-stock.service';
     OcallStockRegistersService,
     OcallStockSalesService,
     OcallStockCustomersService,
+    OcallStockFactureGateway,
     { provide: STOCK_CATALOG_READER, useExisting: OcallStockCatalogReader },
+    { provide: STOCK_MOVEMENT_GATEWAY, useExisting: OcallStockFactureGateway },
   ],
-  exports: [STOCK_CATALOG_READER],
+  exports: [STOCK_CATALOG_READER, STOCK_MOVEMENT_GATEWAY],
 })
 export class OcallStockModule {}

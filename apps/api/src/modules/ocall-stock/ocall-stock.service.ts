@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   STOCK_DEFAULT_MAX_DISCOUNT_PERCENT,
   STOCK_DEFAULT_VAT_RATE,
@@ -37,7 +37,19 @@ export class OcallStockService {
   /** Réglages enregistrés, ou valeurs proposées (nom de l'organisation, TVA 18 %, préfixe OC). */
   async settings(ctx: StockContext) {
     const [settings, organization] = await Promise.all([
-      this.db.stockSettings.findUnique({ where: { organizationId: ctx.organizationId } }),
+      this.db.stockSettings.findUnique({
+        where: { organizationId: ctx.organizationId },
+        include: {
+          factureLocation: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              site: { select: { id: true, name: true } },
+            },
+          },
+        },
+      }),
       this.core.organization.findUniqueOrThrow({
         where: { id: ctx.organizationId },
         select: { name: true, currency: true },
@@ -52,12 +64,28 @@ export class OcallStockService {
       receiptPhone: settings?.receiptPhone ?? null,
       receiptAddress: settings?.receiptAddress ?? null,
       receiptFooter: settings?.receiptFooter ?? null,
+      factureLocationId: settings?.factureLocationId ?? null,
+      factureLocation: settings?.factureLocation ?? null,
       currency: organization.currency,
       saved: Boolean(settings),
     };
   }
 
   async updateSettings(ctx: StockContext, dto: StockSettingsDto) {
+    if (dto.factureLocationId) {
+      const location = await this.db.stockLocation.findUnique({
+        where: {
+          organizationId_id: { organizationId: ctx.organizationId, id: dto.factureLocationId },
+        },
+        select: { isArchived: true },
+      });
+      if (!location || location.isArchived) {
+        throw new NotFoundException({
+          code: 'STOCK_LOCATION_NOT_FOUND',
+          message: 'Emplacement introuvable.',
+        });
+      }
+    }
     const data = { ...dto, updatedByUserId: ctx.userId };
     await this.db.stockSettings.upsert({
       where: { organizationId: ctx.organizationId },
@@ -73,5 +101,44 @@ export class OcallStockService {
       metadata: { fields: Object.keys(dto) },
     });
     return this.settings(ctx);
+  }
+
+  /** Demandes appliquées pour Ocall Facture (200 dernières), avec le libellé des articles. */
+  async factureEvents(ctx: StockContext) {
+    const events = await this.db.stockInboundEvent.findMany({
+      where: { organizationId: ctx.organizationId },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+    });
+    const ids = [
+      ...new Set(
+        events.flatMap((e) =>
+          (e.lines as unknown as { variantId: string }[]).map((l) => l.variantId),
+        ),
+      ),
+    ];
+    const variants = new Map(
+      (
+        await this.db.stockVariant.findMany({
+          where: { organizationId: ctx.organizationId, id: { in: ids } },
+          select: { id: true, sku: true, name: true, product: { select: { name: true } } },
+        })
+      ).map((v) => [
+        v.id,
+        { sku: v.sku, label: v.name ? `${v.product.name} — ${v.name}` : v.product.name },
+      ]),
+    );
+    return events.map((e) => ({
+      id: e.id,
+      source: e.source,
+      reference: e.reference,
+      createdAt: e.createdAt,
+      lines: (e.lines as unknown as { variantId: string; quantity: number }[]).map((l) => ({
+        variantId: l.variantId,
+        quantity: l.quantity,
+        sku: variants.get(l.variantId)?.sku ?? null,
+        label: variants.get(l.variantId)?.label ?? 'Article',
+      })),
+    }));
   }
 }

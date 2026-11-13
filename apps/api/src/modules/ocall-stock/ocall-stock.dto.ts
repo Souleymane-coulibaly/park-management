@@ -112,6 +112,15 @@ export class StockSettingsDto {
   @IsString()
   @MaxLength(160)
   receiptFooter?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Emplacement des ventes Ocall Facture (factures, pièces, avoirs) ; null pour aucun',
+  })
+  @IsOptional()
+  @ValidateIf(notNull)
+  @IsUUID()
+  factureLocationId?: string | null;
 }
 
 export class CreateStockMemberDto {

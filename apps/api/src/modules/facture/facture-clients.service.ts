@@ -125,8 +125,17 @@ export class FactureClientsService {
 
   async updateItem(ctx: FactureContext, id: string, dto: UpdateFactureItemDto) {
     const where = { organizationId_id: { organizationId: ctx.organizationId, id } };
-    if (!(await this.db.factureItem.findUnique({ where, select: { id: true } }))) {
-      throw new NotFoundException(ITEM_NOT_FOUND);
+    const current = await this.db.factureItem.findUnique({
+      where,
+      select: { stockVariantId: true },
+    });
+    if (!current) throw new NotFoundException(ITEM_NOT_FOUND);
+    // S5 : un article miroir d'Ocall Stock est en lecture seule (Stock est la référence), sauf l'archivage.
+    if (current.stockVariantId && Object.keys(dto).some((k) => k !== 'isArchived')) {
+      throw new ConflictException({
+        code: 'FACTURE_ITEM_STOCK_LINKED',
+        message: 'Article lié à Ocall Stock : modifiez-le dans Ocall Stock, ou déliez-le d’abord.',
+      });
     }
     const item = await this.referenceUnique(() => this.db.factureItem.update({ where, data: dto }));
     await this.record(ctx, 'facture.item_updated', 'FactureItem', id, Object.keys(dto));

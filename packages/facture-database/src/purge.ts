@@ -25,6 +25,8 @@ export async function purgeFactureOrganizations(
       await tx.factureMemberSkill.deleteMany({ where });
       await tx.factureAiUsage.deleteMany({ where });
       await tx.factureAiSettings.deleteMany({ where });
+      // S5 : demandes de mouvement vers Stock avant les documents et les interventions qu'elles citent.
+      await tx.factureStockOutbox.deleteMany({ where });
       await tx.factureNotification.deleteMany({ where });
       await tx.factureNotificationSettings.deleteMany({ where });
       await tx.factureInterventionPhoto.deleteMany({ where });

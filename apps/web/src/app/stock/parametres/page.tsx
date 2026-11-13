@@ -1,9 +1,15 @@
 'use client';
 
 import { type FormEvent, useState } from 'react';
-import { STOCK_VAT_RATES } from '@ocall/shared';
+import {
+  STOCK_FACTURE_SOURCE_LABELS,
+  STOCK_VAT_RATES,
+  type StockFactureSource,
+  formatStockQuantity,
+} from '@ocall/shared';
+import { LocationPicker } from '@/components/stock/pickers';
 import { StockPage } from '@/components/stock/stock-page';
-import { asApiError } from '@/components/stock/stock-types';
+import { type StockSiteView, asApiError } from '@/components/stock/stock-types';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { InputField, SelectField } from '@/components/ui/field';
@@ -20,8 +26,24 @@ interface SettingsView {
   receiptPhone: string | null;
   receiptAddress: string | null;
   receiptFooter: string | null;
+  /** S5 : emplacement des ventes Ocall Facture (factures, pièces, avoirs). */
+  factureLocationId: string | null;
+  factureLocation: {
+    id: string;
+    code: string;
+    name: string;
+    site: { id: string; name: string };
+  } | null;
   currency: string;
   saved: boolean;
+}
+
+interface FactureEventView {
+  id: string;
+  source: StockFactureSource;
+  reference: string;
+  createdAt: string;
+  lines: { variantId: string; quantity: number; sku: string | null; label: string }[];
 }
 
 /**
@@ -34,7 +56,12 @@ export default function StockSettingsPage() {
       title="Réglages"
       description="Nom du magasin, TVA proposée, codes internes, caisse et tickets."
     >
-      {({ canWrite }) => <Settings manage={canWrite('stock.settings.manage')} />}
+      {({ canWrite, can }) => (
+        <>
+          <Settings manage={canWrite('stock.settings.manage')} />
+          {can('stock.movements.read') && <FactureEvents />}
+        </>
+      )}
     </StockPage>
   );
 }
@@ -71,6 +98,9 @@ function SettingsForm({
   const [phone, setPhone] = useState(initial.receiptPhone ?? '');
   const [address, setAddress] = useState(initial.receiptAddress ?? '');
   const [footer, setFooter] = useState(initial.receiptFooter ?? '');
+  const sites = useApi<StockSiteView[]>(manage ? '/ocall-stock/sites' : null);
+  const [factureSite, setFactureSite] = useState(initial.factureLocation?.site.id ?? '');
+  const [factureLocation, setFactureLocation] = useState(initial.factureLocationId ?? '');
   const [error, setError] = useState<ApiError | null>(null);
   const [done, setDone] = useState(false);
 
@@ -90,6 +120,7 @@ function SettingsForm({
           receiptPhone: phone,
           receiptAddress: address,
           receiptFooter: footer,
+          factureLocationId: factureLocation || null,
         },
       });
       setDone(true);
@@ -189,8 +220,71 @@ function SettingsForm({
               />
             </div>
           </div>
+          <div className="border-t border-line pt-4" data-testid="stock-facture-location">
+            <p className="text-sm font-semibold">Ventes Ocall Facture</p>
+            <p className="mt-1 text-xs text-muted">
+              Avec Ocall Facture, les factures émises, les pièces des interventions signées et les
+              avoirs « marchandise retournée » sortent du stock (ou y reviennent) à cet emplacement.
+              Sans emplacement, ces mises à jour sont en échec jusqu’à ce qu’il soit choisi.
+            </p>
+            <div className="mt-3">
+              {manage && sites.state === 'success' ? (
+                <LocationPicker
+                  sites={sites.data.filter((s) => !s.isArchived)}
+                  siteId={factureSite}
+                  onSite={setFactureSite}
+                  locationId={factureLocation}
+                  onLocation={setFactureLocation}
+                  label="Emplacement des ventes Facture"
+                />
+              ) : (
+                <p className="text-sm">
+                  {initial.factureLocation
+                    ? `${initial.factureLocation.site.name} · ${initial.factureLocation.code} ${initial.factureLocation.name}`
+                    : 'Aucun emplacement choisi.'}
+                </p>
+              )}
+            </div>
+          </div>
           {manage && <Button type="submit">Enregistrer</Button>}
         </form>
+      </CardBody>
+    </Card>
+  );
+}
+
+/** Dernières demandes reçues d'Ocall Facture et appliquées au stock (traçabilité). */
+function FactureEvents() {
+  const events = useApi<FactureEventView[]>('/ocall-stock/facture-events');
+  if (events.state !== 'success' || events.data.length === 0) return null;
+  return (
+    <Card>
+      <CardHeader
+        title="Mises à jour reçues d’Ocall Facture"
+        description="Factures émises, pièces d’interventions signées et avoirs avec retour de marchandise."
+      />
+      <CardBody>
+        <ul className="divide-y divide-line text-sm" data-testid="stock-facture-events">
+          {events.data.slice(0, 20).map((e) => (
+            <li key={e.id} className="py-2">
+              <p className="font-semibold">
+                {e.reference}{' '}
+                <span className="font-normal text-muted">
+                  · {STOCK_FACTURE_SOURCE_LABELS[e.source]} ·{' '}
+                  {new Date(e.createdAt).toLocaleString('fr-FR')}
+                </span>
+              </p>
+              <p className="text-muted">
+                {e.lines
+                  .map(
+                    (l) =>
+                      `${l.label} : ${l.quantity > 0 ? '+' : '−'}${formatStockQuantity(Math.abs(l.quantity))}`,
+                  )
+                  .join(' · ') || 'Aucun article stocké'}
+              </p>
+            </li>
+          ))}
+        </ul>
       </CardBody>
     </Card>
   );

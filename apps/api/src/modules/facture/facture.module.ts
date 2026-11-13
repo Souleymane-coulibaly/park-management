@@ -27,6 +27,9 @@ import { FactureSiteService } from './facture-site.service';
 import { createDomainVerifier } from '../../common/sites/domain-verifier';
 import { FactureSkillsController } from './facture-skills.controller';
 import { FactureSkillsService } from './facture-skills.service';
+import { FactureStockCatalogService } from './facture-stock-catalog.service';
+import { FactureStockController } from './facture-stock.controller';
+import { FactureStockService } from './facture-stock.service';
 import {
   DisabledWhatsAppProvider,
   FACTURE_WHATSAPP_PROVIDER,
@@ -54,6 +57,7 @@ import { FactureService } from './facture.service';
     PublicFactureSitesController,
     PublicFactureRequestsController,
     PlatformFactureSiteDomainsController,
+    FactureStockController,
   ],
   providers: [
     FacturePrismaService,
@@ -71,6 +75,8 @@ import { FactureService } from './facture.service';
     FactureSkillsService,
     FactureSiteService,
     FactureSiteDomainsService,
+    FactureStockService,
+    FactureStockCatalogService,
     // Vérification des domaines personnalisés : même vérificateur que les sites Park (simulé en test).
     {
       provide: FACTURE_DOMAIN_VERIFIER,

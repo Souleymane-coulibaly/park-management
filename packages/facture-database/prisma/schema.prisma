@@ -168,6 +168,11 @@ model FactureItem {
   unitPrice      Int
   vatRate        Int
   isArchived     Boolean         @default(false)
+  /// S5 — article miroir d'un article Ocall Stock (cas C) : lecture seule tant que le lien existe ; nom,
+  /// unité, prix et TVA relus dans Stock à chaque nouvel ajout. Lien posé sur décision de l'utilisateur.
+  stockProductId String?         @db.Uuid
+  stockVariantId String?         @db.Uuid
+  stockLinkedAt  DateTime?
   createdAt      DateTime        @default(now())
   updatedAt      DateTime        @updatedAt
 
@@ -176,6 +181,8 @@ model FactureItem {
 
   @@unique([organizationId, id])
   @@unique([organizationId, reference])
+  /// Un article Stock n'a qu'un miroir par organisation.
+  @@unique([organizationId, stockVariantId])
   @@index([organizationId, isArchived, name])
 }
 
@@ -258,6 +265,14 @@ model FactureDocument {
   lastReminderAt     DateTime?
   /// Avoir : facture corrigée (plusieurs avoirs possibles par facture, jamais au-delà de son TTC).
   creditedInvoiceId  String?               @db.Uuid
+  /// S5 — facture d'une vente en caisse Ocall Stock : ses lignes sont déjà sorties du stock. Une seule
+  /// facture par vente. Fixé à la création, figé ensuite.
+  stockSaleId        String?               @db.Uuid
+  stockSaleNumber    String?
+  /// S5 — quantités déjà sorties du stock par cette vente : [{ variantId, quantity }] (déduites à l'émission).
+  stockCovered       Json?
+  /// S5 — avoir : la marchandise revient en stock (case cochée sur le brouillon, figée à l'émission).
+  stockReturnGoods   Boolean               @default(false)
   createdAt          DateTime              @default(now())
   updatedAt          DateTime              @updatedAt
 
@@ -270,11 +285,13 @@ model FactureDocument {
   payments        FacturePayment[]
   /// Intervention facturée par ce document (F3).
   intervention    FactureIntervention?
+  stockOutbox     FactureStockOutbox[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, type, number])
   /// Une seule conversion par document d'origine et par type (conversion idempotente).
   @@unique([organizationId, sourceDocumentId, type])
+  @@unique([organizationId, stockSaleId])
   @@index([organizationId, type, status, createdAt])
   @@index([organizationId, clientId])
   @@index([organizationId, creditedInvoiceId])
@@ -466,6 +483,7 @@ model FactureIntervention {
   photos         FactureInterventionPhoto[]
   notifications  FactureNotification[]
   requiredSkills FactureInterventionSkill[]
+  stockOutbox    FactureStockOutbox[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, number])
@@ -872,4 +890,59 @@ model FactureRequest {
 
   @@unique([organizationId, id])
   @@index([organizationId, status, createdAt])
+}
+
+// ─── S5 — Interconnexion Ocall Stock ───
+
+enum FactureStockSource {
+  INVOICE
+  INTERVENTION
+  CREDIT_NOTE
+}
+
+enum FactureStockSyncStatus {
+  PENDING
+  DONE
+  FAILED
+  SKIPPED
+}
+
+/// File de sortie vers Ocall Stock : une demande de mouvement par document émis (facture, avoir
+/// « marchandise retournée ») ou par intervention signée, écrite dans la transaction de l'émission ou de la
+/// signature. Un répartiteur la transmet ensuite à Stock (aucune transaction commune aux deux bases) ; la
+/// clé rend tout rejeu sans effet. Jamais supprimée (contrôlé par la base) : aucune demande perdue.
+model FactureStockOutbox {
+  id             String                 @id @default(uuid()) @db.Uuid
+  organizationId String                 @db.Uuid
+  /// « facture-invoice:<document> », « facture-part:<intervention> », « facture-credit:<avoir> ».
+  key            String
+  source         FactureStockSource
+  documentId     String?                @db.Uuid
+  interventionId String?                @db.Uuid
+  /// Numéro du document ou de l'intervention, transmis à Stock.
+  reference      String
+  /// Mouvements demandés : [{ variantId, quantity }] (quantité signée, négative = sortie).
+  lines          Json
+  /// Déjà sorti du stock par la source (vente en caisse, pièces d'une intervention) : [{ variantId,
+  /// quantity }], positif. Sert au plafond des avoirs « marchandise retournée ».
+  covered        Json                   @default("[]")
+  status         FactureStockSyncStatus @default(PENDING)
+  attempts       Int                    @default(0)
+  nextAttemptAt  DateTime
+  lastError      String?
+  doneAt         DateTime?
+  /// Auteur de l'émission ou de la signature (inscrit dans les mouvements de Stock).
+  actorUserId    String                 @db.Uuid
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
+
+  document     FactureDocument?     @relation(fields: [organizationId, documentId], references: [organizationId, id], onDelete: Restrict)
+  intervention FactureIntervention? @relation(fields: [organizationId, interventionId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, key])
+  @@index([status, nextAttemptAt])
+  @@index([organizationId, status, createdAt])
+  @@index([organizationId, documentId])
+  @@index([organizationId, interventionId])
 }

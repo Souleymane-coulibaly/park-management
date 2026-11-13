@@ -1,17 +1,20 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { STOCK_PRODUCT_CODE } from '@ocall/shared';
+import { STOCK_PRODUCT_CODE, type StockPermission, stockSaleNumber } from '@ocall/shared';
 import { loadAppAccess } from '../../common/app-access';
 import type {
   StockCatalogEntry,
   StockCatalogReader,
+  StockSaleForInvoice,
 } from '../../common/integration/catalog-integration';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
 import { PrismaService } from '../../prisma/prisma.service';
+import { stockMemberRights } from './ocall-stock-access';
 import { OcallStockCatalogService } from './ocall-stock-catalog.service';
 import { OcallStockPrismaService } from './ocall-stock-prisma.service';
 
 const ORDER = { EAN13: 0, UPCA: 1, EAN8: 2, INTERNAL: 3 } as const;
 const MAX = 50;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Implémentation Stock du contrat de lecture du catalogue (voir `common/integration`). */
 @Injectable()
@@ -53,6 +56,107 @@ export class OcallStockCatalogReader implements StockCatalogReader {
   ): Promise<StockCatalogEntry[]> {
     if (variantIds.length === 0 || !(await this.isAvailable(organizationId))) return [];
     return this.load(organizationId, { id: { in: [...variantIds].slice(0, 200) } });
+  }
+
+  async availability(
+    organizationId: string,
+    userId: string,
+    variantIds: readonly string[],
+  ): Promise<Map<string, number> | null> {
+    if (!(await this.isAvailable(organizationId))) return null;
+    const settings = await this.db.stockSettings.findUnique({
+      where: { organizationId },
+      select: { factureLocation: { select: { id: true, siteId: true } } },
+    });
+    const location = settings?.factureLocation;
+    if (!location) return null;
+    const rights = await this.rights(organizationId, userId, 'stock.levels.read');
+    if (!rights || (rights.siteIds !== null && !rights.siteIds.includes(location.siteId))) {
+      return null;
+    }
+    // Articles stockés seulement : un service n'a pas de disponibilité (absent du résultat).
+    const ids = (
+      await this.db.stockVariant.findMany({
+        where: {
+          organizationId,
+          id: { in: [...new Set(variantIds)].slice(0, 200) },
+          product: { isStockable: true },
+        },
+        select: { id: true },
+      })
+    ).map((v) => v.id);
+    const levels = await this.db.stockLevel.findMany({
+      where: { organizationId, locationId: location.id, variantId: { in: ids } },
+      select: { variantId: true, onHand: true, reserved: true },
+    });
+    const out = new Map(ids.map((id) => [id, 0]));
+    for (const l of levels) out.set(l.variantId, l.onHand.minus(l.reserved).toNumber());
+    return out;
+  }
+
+  async sale(
+    organizationId: string,
+    userId: string,
+    ref: string,
+  ): Promise<StockSaleForInvoice | null> {
+    if (!(await this.isAvailable(organizationId))) return null;
+    const rights = await this.rights(organizationId, userId, 'stock.sales.read');
+    if (!rights) return null;
+    const value = ref.trim().toUpperCase();
+    const number = /^(VTE-)?0*(\d{1,9})$/.exec(value);
+    const where = UUID.test(value)
+      ? { organizationId, id: value.toLowerCase() }
+      : number
+        ? { organizationId, number: Number(number[2]) }
+        : null;
+    if (!where) return null;
+    const sale = await this.db.stockSale.findFirst({
+      where,
+      include: {
+        customer: { select: { name: true, phone: true, email: true } },
+        lines: { orderBy: { id: 'asc' } },
+      },
+    });
+    if (!sale || (rights.siteIds !== null && !rights.siteIds.includes(sale.siteId))) return null;
+    const products = new Map(
+      (
+        await this.db.stockVariant.findMany({
+          where: { organizationId, id: { in: sale.lines.map((l) => l.variantId) } },
+          select: { id: true, product: { select: { id: true, unit: true } } },
+        })
+      ).map((v) => [v.id, v.product]),
+    );
+    return {
+      id: sale.id,
+      number: stockSaleNumber(sale.number),
+      createdAt: sale.createdAt,
+      customer: sale.customer,
+      total: sale.total,
+      lines: sale.lines
+        .map((l) => ({
+          variantId: l.variantId,
+          productId: products.get(l.variantId)?.id ?? '',
+          sku: l.sku,
+          label: l.label,
+          unit: products.get(l.variantId)?.unit ?? 'unité',
+          quantity: l.quantity.minus(l.returnedQuantity).toNumber(),
+          total: l.total - l.refundedAmount,
+          vatRate: l.vatRate,
+          isStockable: l.isStockable,
+        }))
+        .filter((l) => l.quantity > 0),
+    };
+  }
+
+  /** Droits Stock du compte, s'il porte la permission demandée (vérifiés ici, jamais par l'appelant). */
+  private async rights(organizationId: string, userId: string, permission: StockPermission) {
+    const membership = await this.core.organizationMembership.findFirst({
+      where: { organizationId, userId, isActive: true },
+      select: { role: true },
+    });
+    if (!membership) return null;
+    const rights = await stockMemberRights(this.db, organizationId, userId, membership.role);
+    return rights?.permissions.includes(permission) ? rights : null;
   }
 
   private async load(
