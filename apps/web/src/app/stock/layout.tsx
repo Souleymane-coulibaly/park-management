@@ -7,6 +7,12 @@ export const dynamic = 'force-dynamic';
 
 const NAV: NavItem[] = [
   { key: 'stock-home', label: 'Tableau de bord', href: '/stock' },
+  {
+    key: 'stock-alerts',
+    label: 'Alertes',
+    href: '/stock/alertes',
+    countPath: '/ocall-stock/reports/alerts/count',
+  },
   { key: 'stock-pos', label: 'Caisse', href: '/stock/caisse' },
   { key: 'stock-sales', label: 'Ventes', href: '/stock/ventes' },
   { key: 'stock-customers', label: 'Clients', href: '/stock/clients' },

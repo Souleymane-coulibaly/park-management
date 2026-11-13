@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import {
   STOCK_DEFAULT_MAX_DISCOUNT_PERCENT,
+  STOCK_DEFAULT_SLOW_MOVING_DAYS,
   STOCK_DEFAULT_VAT_RATE,
   STOCK_ROLE_LABELS,
 } from '@ocall/shared';
@@ -61,6 +62,7 @@ export class OcallStockService {
       internalCodePrefix: settings?.internalCodePrefix ?? 'OC',
       allowNegativeStock: settings?.allowNegativeStock ?? false,
       maxDiscountPercent: settings?.maxDiscountPercent ?? STOCK_DEFAULT_MAX_DISCOUNT_PERCENT,
+      slowMovingDays: settings?.slowMovingDays ?? STOCK_DEFAULT_SLOW_MOVING_DAYS,
       receiptPhone: settings?.receiptPhone ?? null,
       receiptAddress: settings?.receiptAddress ?? null,
       receiptFooter: settings?.receiptFooter ?? null,

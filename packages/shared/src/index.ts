@@ -45,3 +45,4 @@ export * from './stock-labels';
 export * from './stock-warehouse';
 export * from './stock-sales';
 export * from './stock-facture';
+export * from './stock-reports';

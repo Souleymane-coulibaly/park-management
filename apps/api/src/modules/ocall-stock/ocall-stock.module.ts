@@ -21,6 +21,8 @@ import { OcallStockSitesService } from './ocall-stock-sites.service';
 import { OcallStockTransfersService } from './ocall-stock-transfers.service';
 import { OcallStockWarehouseController } from './ocall-stock-warehouse.controller';
 import { OcallStockDocumentsService } from './ocall-stock-documents.service';
+import { OcallStockReportsController } from './ocall-stock-reports.controller';
+import { OcallStockReportsService } from './ocall-stock-reports.service';
 import { OcallStockPurchasesController } from './ocall-stock-purchases.controller';
 import { OcallStockPurchasesService } from './ocall-stock-purchases.service';
 import { OcallStockReturnsService } from './ocall-stock-returns.service';
@@ -45,6 +47,7 @@ import { OcallStockService } from './ocall-stock.service';
     OcallStockWarehouseController,
     OcallStockPurchasesController,
     OcallStockPosController,
+    OcallStockReportsController,
   ],
   providers: [
     OcallStockPrismaService,
@@ -69,6 +72,7 @@ import { OcallStockService } from './ocall-stock.service';
     OcallStockSalesService,
     OcallStockCustomersService,
     OcallStockFactureGateway,
+    OcallStockReportsService,
     { provide: STOCK_CATALOG_READER, useExisting: OcallStockCatalogReader },
     { provide: STOCK_MOVEMENT_GATEWAY, useExisting: OcallStockFactureGateway },
   ],

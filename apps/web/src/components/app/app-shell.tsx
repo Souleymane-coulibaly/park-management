@@ -7,6 +7,7 @@ import { LayoutGrid, Menu } from 'lucide-react';
 import { ROLE_LABELS } from '@ocall/shared';
 import { Logo } from '@/components/brand/logo';
 import { ConnectivityBadge } from '@/components/pwa/pwa-runtime';
+import { api } from '@/lib/api';
 import { initials } from '@/lib/format';
 import type { Me } from '@/lib/types';
 import { LogoutButton } from './logout-button';
@@ -18,6 +19,8 @@ export interface NavItem {
   label: string;
   href: string;
   upcoming?: boolean;
+  /** Compteur à afficher (alertes…) : route d'API renvoyant `{ count }`, relue à chaque page. */
+  countPath?: string;
 }
 
 interface ShellProps {
@@ -79,6 +82,7 @@ function Sidebar({
             >
               <ModuleIcon moduleKey={item.key} />
               <span className="flex-1 truncate">{item.label}</span>
+              {item.countPath && <NavCount path={item.countPath} pathname={pathname} />}
               {item.upcoming && (
                 <span className="rounded-full bg-savanna/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-savanna">
                   À venir
@@ -208,5 +212,31 @@ export function AppShell({
         </div>
       </div>
     </SessionProvider>
+  );
+}
+
+/**
+ * Pastille de compteur d'une entrée du menu : relue à chaque changement de page ; rien n'est affiché si le
+ * compteur est nul ou illisible (droit absent, application non activée).
+ */
+function NavCount({ path, pathname }: { path: string; pathname: string }) {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    let live = true;
+    api<{ count: number }>(path)
+      .then((r) => live && setCount(r.count))
+      .catch(() => live && setCount(0));
+    return () => {
+      live = false;
+    };
+  }, [path, pathname]);
+  if (count <= 0) return null;
+  return (
+    <span
+      className="rounded-full bg-terracotta px-2 py-0.5 text-[11px] font-semibold text-white"
+      aria-label={`${count} à traiter`}
+    >
+      {count > 99 ? '99+' : count}
+    </span>
   );
 }

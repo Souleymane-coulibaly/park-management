@@ -46,6 +46,10 @@ import {
   type StockSiteKind,
   type StockPermission,
   type StockRole,
+  STOCK_SLOW_MOVING_DAYS_MAX,
+  STOCK_SLOW_MOVING_DAYS_MIN,
+  STOCK_SEARCH_GROUPS,
+  type StockSearchGroup,
 } from '@ocall/shared';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
@@ -88,6 +92,13 @@ export class StockSettingsDto {
   @Min(0)
   @Max(100)
   maxDiscountPercent?: number;
+
+  @ApiPropertyOptional({ description: 'Faible rotation : jours sans aucune sortie (15 à 365)' })
+  @IsOptional()
+  @IsInt()
+  @Min(STOCK_SLOW_MOVING_DAYS_MIN)
+  @Max(STOCK_SLOW_MOVING_DAYS_MAX)
+  slowMovingDays?: number;
 
   @ApiPropertyOptional({ description: 'Téléphone imprimé sur les tickets' })
   @IsOptional()
@@ -233,6 +244,55 @@ export class StockSearchQueryDto {
   @IsString()
   @Length(1, 80)
   q: string;
+}
+
+/** Recherche globale (S6) : un type choisi est paginé ; `limit` réduit les groupes (autocomplétion). */
+export class StockGlobalSearchQueryDto extends StockSearchQueryDto {
+  @ApiPropertyOptional({ enum: STOCK_SEARCH_GROUPS })
+  @IsOptional()
+  @IsIn(STOCK_SEARCH_GROUPS)
+  type?: StockSearchGroup;
+
+  @ApiPropertyOptional({ description: 'Page (à partir de 0), avec un type' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @Max(500)
+  page?: number;
+
+  @ApiPropertyOptional({ description: 'Résultats par groupe (1 à 8)' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(8)
+  limit?: number;
+}
+
+/** Tableau de bord (S6) : période en dates (AAAA-MM-JJ), 30 derniers jours par défaut ; un site. */
+export class StockReportQueryDto {
+  @ApiPropertyOptional({ description: 'Début (AAAA-MM-JJ)' })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  from?: string;
+
+  @ApiPropertyOptional({ description: 'Fin incluse (AAAA-MM-JJ)' })
+  @IsOptional()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  to?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  siteId?: string;
+}
+
+export class StockReportSiteQueryDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  siteId?: string;
 }
 
 export class StockLookupQueryDto {

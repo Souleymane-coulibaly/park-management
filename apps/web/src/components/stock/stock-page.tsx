@@ -6,6 +6,7 @@ import type { ProductAccess, StockPermission, StockRole } from '@ocall/shared';
 import { PageHeader } from '@/components/ui/page-header';
 import { Alert, ErrorState, LoadingState } from '@/components/ui/states';
 import { useApi } from '@/lib/use-api';
+import { StockSearchBox } from './search-box';
 
 export interface StockContextView {
   organization: { id: string; name: string };
@@ -32,11 +33,14 @@ export function StockPage({
   title,
   description,
   action,
+  searchBox = true,
   children,
 }: {
   title: string;
   description?: string;
   action?: ReactNode;
+  /** Recherche globale en tête de page (S6) ; absente de la page de recherche elle-même. */
+  searchBox?: boolean;
   children: (props: StockPageProps) => ReactNode;
 }) {
   const context = useApi<StockContextView>('/ocall-stock/context');
@@ -58,6 +62,7 @@ export function StockPage({
         ))}
       {context.state === 'success' && (
         <div className="space-y-6">
+          {searchBox && <StockSearchBox />}
           {context.data.access === 'read_only' && (
             <Alert tone="info" title="Consultation seulement">
               Votre essai ou votre abonnement Ocall Stock est échu : vos données restent

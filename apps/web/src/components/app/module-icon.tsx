@@ -1,5 +1,6 @@
 import {
   Banknote,
+  BellRing,
   BarChart3,
   BookOpen,
   Boxes,
@@ -102,6 +103,7 @@ const ICONS: Record<string, LucideIcon> = {
   'stock-sites': Building2,
   'stock-purchases': Receipt,
   'stock-pos': ShoppingCart,
+  'stock-alerts': BellRing,
   'stock-sales': Banknote,
   'stock-customers': Contact,
   'stock-registers': Calculator,

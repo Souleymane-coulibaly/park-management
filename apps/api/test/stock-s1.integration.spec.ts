@@ -450,7 +450,7 @@ const UPCA = '036000291452';
     const brands = (
       await orgA.agent.get(api('/ocall-stock/search')).query({ q: 'seigneuri' }).expect(200)
     ).body;
-    expect(brands.brands.map((b: { name: string }) => b.name)).toContain('Seigneurie');
+    expect(brands.groups.brands.map((b: { label: string }) => b.label)).toContain('Seigneurie');
 
     // La requête de recherche elle-même est limitée à l'organisation (sinon les articles des autres
     // occuperaient la limite de résultats).
@@ -466,7 +466,7 @@ const UPCA = '036000291452';
     const globalB = (
       await orgB.agent.get(api('/ocall-stock/search')).query({ q: 'seigneurie' }).expect(200)
     ).body;
-    expect(globalB.brands).toEqual([]);
+    expect(globalB.groups.brands).toEqual([]);
     await orgB.agent.get(api(`/ocall-stock/products/${productId}`)).expect(404);
     await orgB.agent
       .patch(api(`/ocall-stock/products/${productId}`))
@@ -635,7 +635,7 @@ const UPCA = '036000291452';
     const found = (
       await orgA.agent.get(api('/ocall-stock/search')).query({ q: 'grosiste sahel' }).expect(200)
     ).body;
-    expect(found.suppliers.map((s: { id: string }) => s.id)).toContain(supplier.id);
+    expect(found.groups.suppliers.map((s: { id: string }) => s.id)).toContain(supplier.id);
     await orgB.agent.get(api(`/ocall-stock/suppliers/${supplier.id}`)).expect(404);
   });
 

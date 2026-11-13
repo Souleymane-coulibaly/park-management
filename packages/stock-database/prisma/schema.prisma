@@ -82,6 +82,8 @@ model StockSettings {
   /// Emplacement d'où sortent (et où reviennent) les marchandises vendues par Ocall Facture : factures,
   /// pièces d'interventions, avoirs « marchandise retournée » (S5). Sans lui, ces demandes échouent.
   factureLocationId  String?  @db.Uuid
+  /// Faible rotation (S6) : article en stock sans aucune sortie depuis ce nombre de jours (15 à 365).
+  slowMovingDays     Int      @default(90)
   updatedByUserId    String?  @db.Uuid
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
@@ -1013,6 +1015,8 @@ model StockSaleReturn {
   @@unique([organizationId, number])
   @@unique([organizationId, idempotencyKey])
   @@index([organizationId, saleId])
+  /// Remboursements d'une période (tableaux de bord, S6).
+  @@index([organizationId, createdAt])
 }
 
 model StockSaleReturnLine {

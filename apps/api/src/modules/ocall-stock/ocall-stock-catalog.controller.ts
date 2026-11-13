@@ -43,7 +43,7 @@ import {
   StockLookupQueryDto,
   StockProductDto,
   StockProductQueryDto,
-  StockSearchQueryDto,
+  StockGlobalSearchQueryDto,
   StockSupplierDto,
   StockVariantDto,
   UpdateStockBrandDto,
@@ -281,8 +281,8 @@ export class OcallStockCatalogController {
 
   @RequireStockPermission('stock.catalog.read')
   @Get('search')
-  search(@CurrentStock() ctx: StockContext, @Query() q: StockSearchQueryDto) {
-    return this.searchService.search(ctx, q.q);
+  search(@CurrentStock() ctx: StockContext, @Query() q: StockGlobalSearchQueryDto) {
+    return this.searchService.search(ctx, q.q, { type: q.type, page: q.page, limit: q.limit });
   }
 
   @RequireStockPermission('stock.labels.print')

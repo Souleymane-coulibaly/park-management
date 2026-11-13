@@ -7,8 +7,8 @@ Elle est vendue indépendamment d'Ocall Facture. Les deux applications fonctionn
 organisation a les deux abonnements (sprint S5).
 
 **État : sprints S1 (socle et catalogue), S2 (sites, stocks, transferts, inventaires), S3 (achats), S4
-(caisse) et S5 (interconnexion Facture) livrés.** Les tableaux de bord, la vitrine et l'IA suivent, sprint
-par sprint (§14). Plan complet :
+(caisse), S5 (interconnexion Facture) et S6 (tableaux de bord, alertes, recherche globale) livrés.** La
+vitrine et l'IA suivent, sprint par sprint (§15). Plan complet :
 `ocall-audits/plan-ocall-stock-v1.md` (hors dépôt).
 
 ## 1. Activation
@@ -401,7 +401,51 @@ Décisions du 13/11/2026 : liste de clients propre à Stock ; remises soumises �
 - **Clients** : nom, téléphone, e-mail, note ; archivés, jamais supprimés. La facture d'une vente en caisse
   se fait dans Facture, au client Facture choisi (§8).
 
-## 12. Base et déploiement
+## 12. Tableaux de bord, alertes et recherche globale (S6)
+
+**Tableau de bord** (`/stock`, `GET reports/dashboard?from&to&siteId`) : 30 derniers jours par défaut, un an
+au plus, un site ou tous ceux du membre. Chaque bloc n'apparaît qu'avec son droit ; sinon il vaut `null` :
+
+| Bloc                                           | Droit                           |
+| ---------------------------------------------- | ------------------------------- |
+| Ventes, CA, ventes par jour, meilleures ventes | Consulter les ventes            |
+| Marges, valeur du stock, valeur des réceptions | Voir les prix d'achat (en plus) |
+| Stock, alertes                                 | Consulter les stocks            |
+| Achats (commandes passées, réceptions)         | Consulter les achats            |
+| Écarts d'inventaire                            | Consulter les mouvements        |
+
+**Méthodes de calcul**, renvoyées par l'API et affichées à côté de chaque chiffre :
+
+- **Chiffre d'affaires** : ventes encaissées en caisse Ocall Stock sur la période, moins les remboursements
+  de la période. Les factures Ocall Facture restent dans Facture (aucun double compte).
+- **Marge estimée** : CA hors taxe − quantités vendues × prix d'achat de la fiche article ; les articles sans
+  prix d'achat sont exclus et comptés.
+- **Marge brute** : CA hors taxe − quantités vendues × **coût moyen pondéré (CMUP)** des réceptions
+  fournisseurs validées ; à défaut de réception, prix d'achat de la fiche (signalé).
+- **Bénéfice net** : non calculé (aucune charge n'est saisie dans Ocall Stock).
+- **Valeur du stock** : quantité × CMUP, ou prix de la fiche (signalé) ; sans aucun coût : non valorisé,
+  compté à part.
+- Les marges portent sur les ventes de la période, nettes de leurs retours.
+
+**Alertes** (`/stock/alertes`, `GET reports/alerts`) : dans l'application seulement, rien n'est envoyé.
+
+- **Rupture** : plus rien en stock sur le site.
+- **À réapprovisionner** : disponible ≤ seuil d'alerte de la fiche, par site.
+- **Faible rotation** : en stock, sans aucune sortie (vente, facture, pièce d'intervention, transfert, retour
+  fournisseur, sortie manuelle) depuis N jours ; N = 90 par défaut, de 15 à 365 dans les réglages.
+- Le menu affiche le nombre de ruptures et de stocks sous le seuil (`GET reports/alerts/count`).
+
+**Recherche globale** : un champ en tête de chaque page (autocomplétion dès 2 caractères, flèches, Entrée)
+et la page `/stock/recherche`.
+
+- Types : articles (nom, référence, code-barres, **disponible par site**), catégories, marques,
+  fournisseurs, clients (nom ou téléphone), ventes (numéro ou client), commandes fournisseurs (numéro ou
+  fournisseur), sites et emplacements (code ou nom).
+- Sans accents ni casse, fautes tolérées (`pg_trgm`, index GIN), requêtes paramétrées et limitées.
+- Filtre par type, paginé (20 par page) ; lien vers chaque fiche.
+- Droits et sites du membre respectés : un type non autorisé n'apparaît pas.
+
+## 13. Base et déploiement
 
 - **Migration** `20261201000000_stock_v1_catalogue` (additive) :
   - 13 tables ;
@@ -428,6 +472,8 @@ Décisions du 13/11/2026 : liste de clients propre à Stock ; remises soumises �
   figées, paiements et retours en ajout seul.
 - **Migration** `20261205000000_stock_v1_facture` (S5, additive) : 3 natures de mouvement (Facture),
   réglage `factureLocationId`, table `StockInboundEvent` (une ligne par clé, en ajout seul).
+- **Migration** `20261206000000_stock_v1_rapports` (S6, additive) : réglage `slowMovingDays` (15 à 365),
+  index des remboursements par date, index de recherche (clients, sites, emplacements).
 - **Base Facture** : migration `20261129000000_facture_v1_stock` (S5, additive) :
   - colonnes facultatives : `FactureItem.stock*`, `FactureDocument.stockSale*`, `stockCovered`,
     `stockReturnGoods` ;
@@ -449,7 +495,7 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
 | `STOCK_DATABASE_URL` | URL de la base Stock                         |
 | `STOCK_DIRECT_URL`   | URL directe, pour les migrations ; même base |
 
-## 13. Tests
+## 14. Tests
 
 | Type                | Fichier                                                                                         | Contenu                                                                                                |
 | ------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -458,9 +504,10 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
 | Unitaires, base     | `packages/database/src/migration-safety.spec.ts`                                                | Garde de la cible des migrations Stock                                                                 |
 | Unitaires, S2       | `packages/shared/src/stock-warehouse.spec.ts`                                                   | QR codes d'emplacement, ordre des niveaux, permissions S2                                              |
 | Unitaires, S4       | `packages/shared/src/stock-sales.spec.ts`                                                       | Montants, remises plafonnées, paiements et monnaie, remboursements, ticket 58 / 80 mm, droits          |
+| Unitaires, S6       | `packages/shared/src/stock-reports.spec.ts`                                                     | CMUP, coût retenu, marges et exclusions, valeur, faible rotation, période                              |
 | Unitaires, S5       | `packages/shared/src/stock-facture.spec.ts`                                                     | TTC → HT, quantités par article, sortie nette de la source, plafond des retours, délais de relance     |
-| Intégration         | `apps/api/test/stock-s1…s5.integration.spec.ts` (`TEST_STOCK_DATABASE_URL`)                     | Voir le détail ci-dessous                                                                              |
-| E2E                 | `e2e/stock-s1.spec.ts` à `stock-s5.spec.ts`                                                     | Voir le détail ci-dessous                                                                              |
+| Intégration         | `apps/api/test/stock-s1…s6.integration.spec.ts` (`TEST_STOCK_DATABASE_URL`)                     | Voir le détail ci-dessous                                                                              |
+| E2E                 | `e2e/stock-s1.spec.ts` à `stock-s6.spec.ts`                                                     | Voir le détail ci-dessous                                                                              |
 
 **Intégration**, sur bases locales jetables :
 
@@ -494,7 +541,12 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
   réservée au gérant ; vente en caisse puis facture (deux demandes simultanées : une facture ; seul l'ajout
   sort) ; intervention signée puis facturée sans second déstockage, lien plus déliable ; avoir avec et sans
   retour, plafonné ; Stock échu (« stock non mis à jour ») ; garanties en base ; deux répartiteurs
-  simultanés.
+  simultanés ;
+- S6 : CA net des remboursements, hors taxe, jours, meilleures ventes, période refusée ; marges estimée et
+  brute (CMUP), exclusions ; valeur du stock (repli signalé, non valorisé), achats, écarts d'inventaire,
+  sites ; droits (caissier sans coûts), périmètre des sites, site d'une autre organisation refusé ; alertes
+  et réglage de rotation, compteur ; recherche de tous les types, fautes, pagination, multi-sites, droits,
+  isolation.
 
 **E2E**, parcours navigateur :
 
@@ -512,13 +564,15 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
   caisse sur téléphone ;
 - S5 : emplacement des ventes Facture réglé ; article Stock cherché et ajouté dans une facture (prix,
   disponibilité, recherche sur téléphone), avertissement, émission puis « Stock mis à jour », trace dans
-  Stock ; facture d'une vente en caisse ; miroir en lecture seule au catalogue.
+  Stock ; facture d'une vente en caisse ; miroir en lecture seule au catalogue ;
+- S6 : tableau de bord (CA, marge et méthode, meilleures ventes), compteur d'alertes du menu et page des
+  alertes, autocomplétion jusqu'à la fiche d'une vente, filtre par type et disponible par site, tableau de
+  bord sur téléphone.
 
-## 14. Suite de la feuille de route
+## 15. Suite de la feuille de route
 
 | Sprint | Contenu                                                        |
 | ------ | -------------------------------------------------------------- |
-| S6     | Tableaux de bord et recherche complète                         |
 | S7     | Vitrine                                                        |
 | S8     | IA : réapprovisionnement, ruptures, analyse, images d'articles |
 | S9     | Stabilisation                                                  |

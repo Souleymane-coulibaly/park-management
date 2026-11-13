@@ -23,6 +23,7 @@ interface SettingsView {
   internalCodePrefix: string;
   allowNegativeStock: boolean;
   maxDiscountPercent: number;
+  slowMovingDays: number;
   receiptPhone: string | null;
   receiptAddress: string | null;
   receiptFooter: string | null;
@@ -95,6 +96,7 @@ function SettingsForm({
   const [prefix, setPrefix] = useState(initial.internalCodePrefix);
   const [allowNegative, setAllowNegative] = useState(initial.allowNegativeStock);
   const [maxDiscount, setMaxDiscount] = useState(String(initial.maxDiscountPercent));
+  const [slowDays, setSlowDays] = useState(String(initial.slowMovingDays));
   const [phone, setPhone] = useState(initial.receiptPhone ?? '');
   const [address, setAddress] = useState(initial.receiptAddress ?? '');
   const [footer, setFooter] = useState(initial.receiptFooter ?? '');
@@ -117,6 +119,7 @@ function SettingsForm({
           internalCodePrefix: prefix,
           allowNegativeStock: allowNegative,
           maxDiscountPercent: Number(maxDiscount),
+          slowMovingDays: Number(slowDays),
           receiptPhone: phone,
           receiptAddress: address,
           receiptFooter: footer,
@@ -185,6 +188,19 @@ function SettingsForm({
               </span>
             </span>
           </label>
+          <div className="max-w-xs">
+            <InputField
+              label="Faible rotation : jours sans sortie"
+              type="number"
+              min={15}
+              max={365}
+              required
+              disabled={!manage}
+              value={slowDays}
+              hint="Un article en stock sans aucune sortie depuis ce nombre de jours apparaît dans les alertes (15 à 365)."
+              onChange={(e) => setSlowDays(e.target.value)}
+            />
+          </div>
           <div className="border-t border-line pt-4">
             <p className="text-sm font-semibold">Caisse et tickets</p>
             <div className="mt-3 grid gap-4 sm:grid-cols-2">
