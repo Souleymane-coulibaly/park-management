@@ -16,4 +16,9 @@ export const AI_PROMPT_MANIFEST: Readonly<Record<string, string>> = {
   'facture.quote@1': 'bceebf42c544354b',
   'facture.planning@1': '67acee5fe0d89828',
   'facture.maintenance@1': '9a3e8ab0d5ae9a77',
+  'stock.restock@1': 'ff81db4c408beca6',
+  'stock.stockout@1': '01f1026929787cc0',
+  'stock.analysis@1': 'c9238ecfc9436535',
+  'stock.product_photo@1': '319c8e56243799f4',
+  'stock.illustration@1': '05e8bd2730d64c92',
 };

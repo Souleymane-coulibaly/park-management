@@ -251,7 +251,10 @@ export class OcallStockCatalogService {
             },
           },
         },
-        images: { orderBy: { position: 'asc' }, select: { id: true, position: true } },
+        images: {
+          orderBy: { position: 'asc' },
+          select: { id: true, position: true, aiGenerated: true, showcaseApproved: true },
+        },
       },
     });
     if (!product) throw new NotFoundException(PRODUCT_NOT_FOUND);

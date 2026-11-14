@@ -74,7 +74,12 @@ const PUBLIC_PRODUCT = {
   category: { select: { id: true, name: true } },
   brand: { select: { name: true } },
   variants: { where: { isArchived: false }, select: { id: true, salePrice: true } },
-  images: { orderBy: { position: 'asc' }, select: { id: true } },
+  // Illustrations IA : seulement celles que le commerçant a autorisées sur la vitrine (S8).
+  images: {
+    where: { OR: [{ aiGenerated: false }, { showcaseApproved: true }] },
+    orderBy: { position: 'asc' },
+    select: { id: true, aiGenerated: true },
+  },
 } satisfies Prisma.StockProductSelect;
 
 type PublicProductRow = Prisma.StockProductGetPayload<{ select: typeof PUBLIC_PRODUCT }>;
@@ -660,10 +665,14 @@ export class OcallStockShowcaseService {
       select: {
         organizationId: true,
         storageKey: true,
+        aiGenerated: true,
+        showcaseApproved: true,
         product: { select: { showcasePublished: true, isArchived: true } },
       },
     });
     if (!image?.product.showcasePublished || image.product.isArchived) return null;
+    // Illustration IA : visible seulement sur décision du commerçant (S8).
+    if (image.aiGenerated && !image.showcaseApproved) return null;
     const site = await this.onlineOrg(image.organizationId);
     if (!site?.showCatalog) return null;
     return this.storage.get(image.storageKey);
@@ -891,6 +900,7 @@ export class OcallStockShowcaseService {
         priceFrom: site.showPrices && new Set(prices).size > 1,
         availability: !r.isStockable || inStock.has(r.id) ? 'AVAILABLE' : 'ON_ORDER',
         images: r.images.map((i) => i.id),
+        illustrations: r.images.filter((i) => i.aiGenerated).map((i) => i.id),
       };
     });
   }

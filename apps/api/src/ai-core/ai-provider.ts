@@ -81,6 +81,16 @@ export interface AiProvider {
     maxRounds: number;
   }): Promise<AiResult<{ answer: string }>>;
 
+  /**
+   * Génération d'une image (illustration) à partir d'une description composée par le serveur. Le résultat
+   * n'est jamais présenté comme une photo réelle : l'application l'étiquette et le soumet à une personne.
+   */
+  generateImage(request: {
+    model: string;
+    prompt: string;
+    size: '1024x1024';
+  }): Promise<AiResult<{ image: Buffer; mimeType: 'image/png' }>>;
+
   /** Transcription d'un enregistrement vocal. */
   transcribe(request: {
     model: string;

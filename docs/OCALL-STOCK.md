@@ -7,8 +7,8 @@ Elle est vendue indépendamment d'Ocall Facture. Les deux applications fonctionn
 organisation a les deux abonnements (sprint S5).
 
 **État : sprints S1 (socle et catalogue), S2 (sites, stocks, transferts, inventaires), S3 (achats), S4
-(caisse), S5 (interconnexion Facture), S6 (tableaux de bord, alertes, recherche globale) et S7 (site
-vitrine) livrés.** L'IA et la stabilisation suivent (§16). Plan complet :
+(caisse), S5 (interconnexion Facture), S6 (tableaux de bord, alertes, recherche globale), S7 (site
+vitrine) et S8 (IA) livrés.** La stabilisation suit (§17). Plan complet :
 `ocall-audits/plan-ocall-stock-v1.md` (hors dépôt).
 
 ## 1. Activation
@@ -480,7 +480,39 @@ commande en ligne.
 - **Droits** : « Gérer le site vitrine » (administrateur, responsable de magasin) ; « Traiter les demandes
   du site » (responsable de magasin, commercial).
 
-## 14. Base et déploiement
+## 14. Intelligence artificielle (S8)
+
+Sur **Ocall AI Core** (application `stock`), comme Facture : fournisseur configuré par la plateforme
+(`AI_PROVIDER`), contexte de chaque appel construit depuis la session Stock, prompts versionnés
+(`stock.restock`, `stock.stockout`, `stock.analysis`, `stock.product_photo`, `stock.illustration`,
+empreintes au manifeste), consommation tracée sans contenu (`StockAiUsage`), propositions tracées
+(`StockAiProposal`).
+
+**Règles absolues.** L'IA propose, une personne décide. Elle ne modifie jamais une quantité, ne passe jamais
+une commande, ne change jamais un prix, ne voit jamais une autre organisation et n'invente aucun chiffre :
+
+- tous les chiffres sont calculés par le serveur (`packages/shared/src/stock-ai.ts`) ;
+- les textes du modèle sont contrôlés : références connues seulement, aucun nombre absent des données
+  fournies, aucune rupture annoncée comme certaine ; sinon la réponse est refusée (`AI_INVALID_OUTPUT`) et
+  la consommation est tracée en échec.
+
+**Réglages et quotas** (`/stock/ia`, administrateur) : IA **désactivée par défaut** ; activation et plafond
+mensuel par fonctionnalité, sous les plafonds Ocall `STOCK_AI_MAX_MONTHLY_CALLS` (150 par défaut) et
+`STOCK_AI_MAX_MONTHLY_IMAGES` (20, une image coûtant plus qu'un texte). Réservation atomique avant l'appel,
+alerte au journal à 80 %. Droits : « Utiliser les assistants IA » et « Utiliser l'IA du catalogue »
+(responsables de magasin et d'entrepôt).
+
+| Fonctionnalité         | Calculé par le serveur                                                                                                                                                     | Rôle de l'IA                                                                        | Décision humaine                                                                                                                                  |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Réapprovisionnement    | Sorties nettes sur 90 jours, disponible du site, déjà commandé, délai fournisseur (7 j supposé s'il manque, signalé), couverture visée, seuil d'alerte → quantité suggérée | Classe (urgent, bientôt, peut attendre) et explique                                 | « Créer le brouillon de commande » : lignes retenues, quantités corrigées ; commande **brouillon** seulement                                      |
+| Ruptures               | Fourchette de jours avant épuisement (rythmes 30 et 90 jours), risque selon le délai                                                                                       | Explique les facteurs, prudemment                                                   | Consultation seule ; aucune date, aucune garantie                                                                                                 |
+| Analyse commerciale    | Indicateurs du tableau de bord, période et période précédente (marges seulement pour qui voit les prix d'achat)                                                            | Synthèse, tendances, points forts et faibles, suggestions                           | Consultation seule                                                                                                                                |
+| Fiche depuis une photo | Catégories de l'organisation ; code-barres gardé seulement si sa clé GTIN est juste (« lu sur la photo, à vérifier »)                                                      | Lit nom, marque, contenance, catégorie                                              | Le commerçant vérifie et crée l'article                                                                                                           |
+| Illustration           | Description de l'article (articles **sans photo** seulement)                                                                                                               | Génère une image (`generateImage`, extension d'Ocall AI Core, `OPENAI_IMAGE_MODEL`) | « Ajouter à l'article » ou « Refuser » ; mention **« Illustration générée par IA »** ; visible sur la vitrine seulement si le commerçant le coche |
+
+Aucun article à commander ou à risque, aucune vente à analyser : aucun appel, aucune consommation.
+
+## 15. Base et déploiement
 
 - **Migration** `20261201000000_stock_v1_catalogue` (additive) :
   - 13 tables ;
@@ -512,6 +544,9 @@ commande en ligne.
 - **Migration** `20261207000000_stock_v1_vitrine` (S7, additive) : `StockProduct.showcasePublished` (faux
   par défaut), vitrine, images, domaines, demandes ; contrôles (adresse, site en ligne publié, domaine,
   contact et longueur des demandes, 20 articles au plus) ; index partiel du catalogue public.
+- **Migration** `20261208000000_stock_v1_ia` (S8, additive) : réglages, consommation et propositions IA ;
+  `StockProductImage.aiGenerated` et `showcaseApproved` (une photo réelle est toujours visible sur la
+  vitrine, contrôlé par la base).
 - **Base Facture** : migration `20261129000000_facture_v1_stock` (S5, additive) :
   - colonnes facultatives : `FactureItem.stock*`, `FactureDocument.stockSale*`, `stockCovered`,
     `stockReturnGoods` ;
@@ -527,15 +562,18 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
 
 **Variables.**
 
-| Variable                         | Rôle                                                        |
-| -------------------------------- | ----------------------------------------------------------- |
-| `STOCK_ENABLED`                  | `true` pour activer l'application                           |
-| `STOCK_DATABASE_URL`             | URL de la base Stock                                        |
-| `STOCK_DIRECT_URL`               | URL directe, pour les migrations ; même base                |
-| `STOCK_SITES_BASE_DOMAIN`        | Domaine des vitrines Stock (`<slug>.<domaine>`), API et web |
-| `STOCK_SITES_SUBDOMAINS_ENABLED` | `true` pour servir les vitrines sur leur sous-domaine       |
+| Variable                         | Rôle                                                          |
+| -------------------------------- | ------------------------------------------------------------- |
+| `STOCK_ENABLED`                  | `true` pour activer l'application                             |
+| `STOCK_DATABASE_URL`             | URL de la base Stock                                          |
+| `STOCK_DIRECT_URL`               | URL directe, pour les migrations ; même base                  |
+| `STOCK_SITES_BASE_DOMAIN`        | Domaine des vitrines Stock (`<slug>.<domaine>`), API et web   |
+| `STOCK_SITES_SUBDOMAINS_ENABLED` | `true` pour servir les vitrines sur leur sous-domaine         |
+| `STOCK_AI_MAX_MONTHLY_CALLS`     | Plafond Ocall par fonctionnalité IA et par mois (150)         |
+| `STOCK_AI_MAX_MONTHLY_IMAGES`    | Plafond Ocall des illustrations par mois (20)                 |
+| `OPENAI_IMAGE_MODEL`             | Modèle de génération d'images d'Ocall AI Core (`gpt-image-1`) |
 
-## 15. Tests
+## 16. Tests
 
 | Type                | Fichier                                                                                         | Contenu                                                                                                |
 | ------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
@@ -544,11 +582,12 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
 | Unitaires, base     | `packages/database/src/migration-safety.spec.ts`                                                | Garde de la cible des migrations Stock                                                                 |
 | Unitaires, S2       | `packages/shared/src/stock-warehouse.spec.ts`                                                   | QR codes d'emplacement, ordre des niveaux, permissions S2                                              |
 | Unitaires, S4       | `packages/shared/src/stock-sales.spec.ts`                                                       | Montants, remises plafonnées, paiements et monnaie, remboursements, ticket 58 / 80 mm, droits          |
+| Unitaires, S8       | `packages/shared/src/stock-ai.spec.ts`, `apps/api/src/ai-core/ai-core.spec.ts`                  | Quantité à commander, rupture prudente, code-barres lu sur photo ; génération d'image simulée          |
 | Unitaires, S7       | `packages/shared/src/stock-showcase.spec.ts`                                                    | Adresse canonique, pages servies, données structurées (prix seulement s'il est affiché)                |
 | Unitaires, S6       | `packages/shared/src/stock-reports.spec.ts`                                                     | CMUP, coût retenu, marges et exclusions, valeur, faible rotation, période                              |
 | Unitaires, S5       | `packages/shared/src/stock-facture.spec.ts`                                                     | TTC → HT, quantités par article, sortie nette de la source, plafond des retours, délais de relance     |
-| Intégration         | `apps/api/test/stock-s1…s7.integration.spec.ts` (`TEST_STOCK_DATABASE_URL`)                     | Voir le détail ci-dessous                                                                              |
-| E2E                 | `e2e/stock-s1.spec.ts` à `stock-s7.spec.ts`                                                     | Voir le détail ci-dessous                                                                              |
+| Intégration         | `apps/api/test/stock-s1…s8.integration.spec.ts` (`TEST_STOCK_DATABASE_URL`)                     | Voir le détail ci-dessous                                                                              |
+| E2E                 | `e2e/stock-s1.spec.ts` à `stock-s8.spec.ts`                                                     | Voir le détail ci-dessous                                                                              |
 
 **Intégration**, sur bases locales jetables :
 
@@ -592,7 +631,12 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
   seuls articles cochés (prix au choix, badge, aucune donnée interne), fiche, photos des seuls articles
   publiés, catalogue désactivé, article archivé ; demandes (articles, contact, anti-spam, formulaire
   fermé, droits, isolation) ; domaine (TXT, activation, adresse canonique, plan du site, unicité entre
-  applications) ; garanties en base.
+  applications) ; garanties en base ;
+- S8 (fournisseur IA simulé) : désactivée par défaut, réglages, droits, fonctionnalité désactivée ;
+  réapprovisionnement (quantités du serveur, déjà commandé déduit, brouillon seulement, rien d'autre ne
+  bouge, aucun appel sans article) ; chiffre inventé refusé ; ruptures (fourchette, risque, jamais
+  « certaine ») ; analyse ; photo (catégorie, code-barres contrôlé) ; illustration (sans photo, mention,
+  vitrine sur décision, quota propre, contrôle en base) ; isolation.
 
 **E2E**, parcours navigateur :
 
@@ -616,11 +660,12 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
   bord sur téléphone ;
 - S7 : site créé, contenu et prix, article publié, mise en ligne ; accueil, catalogue (article interne
   absent), fiche (prix, « Disponible », données structurées), fiche sur téléphone ; demande de devis avec
-  l'article, reçue dans « Demandes du site ».
+  l'article, reçue dans « Demandes du site » ;
+- S8 : IA activée, suggestion de réapprovisionnement puis brouillon de commande, ruptures, illustration
+  (mention IA, hors vitrine), fiche préremplie depuis une photo, page IA sur téléphone.
 
-## 16. Suite de la feuille de route
+## 17. Suite de la feuille de route
 
-| Sprint | Contenu                                                        |
-| ------ | -------------------------------------------------------------- |
-| S8     | IA : réapprovisionnement, ruptures, analyse, images d'articles |
-| S9     | Stabilisation                                                  |
+| Sprint | Contenu       |
+| ------ | ------------- |
+| S9     | Stabilisation |

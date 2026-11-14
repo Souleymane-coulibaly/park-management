@@ -10,6 +10,7 @@ describe('loadStockConfig', () => {
       enabled: false,
       databaseUrl: null,
       sites: { baseDomain: null, subdomainsEnabled: false },
+      ai: { monthlyCeiling: 150, imageMonthlyCeiling: 20 },
     });
     expect(
       loadStockConfig({
@@ -45,6 +46,13 @@ describe('loadStockConfig', () => {
       enabled: true,
       databaseUrl: stock,
       sites: { baseDomain: null, subdomainsEnabled: false },
+      ai: { monthlyCeiling: 150, imageMonthlyCeiling: 20 },
     });
+  });
+  it('plafonds IA Ocall (S8) : 150 appels et 20 illustrations par mois par défaut, réglables', () => {
+    expect(
+      loadStockConfig({ STOCK_AI_MAX_MONTHLY_CALLS: '40', STOCK_AI_MAX_MONTHLY_IMAGES: '5' }).ai,
+    ).toEqual({ monthlyCeiling: 40, imageMonthlyCeiling: 5 });
+    expect(() => loadStockConfig({ STOCK_AI_MAX_MONTHLY_CALLS: '-1' })).toThrow('invalide');
   });
 });

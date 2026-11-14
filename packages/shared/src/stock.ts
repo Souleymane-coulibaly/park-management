@@ -102,6 +102,10 @@ export const STOCK_PERMISSIONS = [
   'stock.showcase.manage',
   /** S7 : demandes reçues par le site vitrine. */
   'stock.showcase.requests',
+  /** S8 : assistants IA (réapprovisionnement, ruptures, analyse commerciale). */
+  'stock.ai.use',
+  /** S8 : IA du catalogue (fiche depuis une photo, illustration générée). */
+  'stock.ai.images',
 ] as const;
 export type StockPermission = (typeof STOCK_PERMISSIONS)[number];
 
@@ -142,6 +146,8 @@ export const STOCK_PERMISSION_LABELS: Record<StockPermission, string> = {
   'stock.customers.manage': 'Gérer les clients',
   'stock.showcase.manage': 'Gérer le site vitrine',
   'stock.showcase.requests': 'Traiter les demandes du site vitrine',
+  'stock.ai.use': 'Utiliser les assistants IA (réapprovisionnement, ruptures, analyse)',
+  'stock.ai.images': 'Utiliser l’IA du catalogue (photo, illustration)',
 };
 
 const ALL: readonly StockPermission[] = STOCK_PERMISSIONS;
@@ -182,6 +188,8 @@ const ROLE_PERMISSIONS: Record<StockRole, readonly StockPermission[]> = {
     'stock.customers.manage',
     'stock.showcase.manage',
     'stock.showcase.requests',
+    'stock.ai.use',
+    'stock.ai.images',
   ],
   WAREHOUSE_MANAGER: [
     'stock.access',
@@ -207,6 +215,8 @@ const ROLE_PERMISSIONS: Record<StockRole, readonly StockPermission[]> = {
     'stock.returns.manage',
     'stock.sales.read',
     'stock.customers.read',
+    'stock.ai.use',
+    'stock.ai.images',
   ],
   STOREKEEPER: [
     'stock.access',

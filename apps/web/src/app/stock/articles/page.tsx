@@ -4,10 +4,12 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useState } from 'react';
 import { STOCK_BARCODE_TYPE_LABELS, formatStockMoney } from '@ocall/shared';
+import { AiPhotoPrefill, type PhotoPrefill } from '@/components/stock/ai-photo-prefill';
 import { ProductForm } from '@/components/stock/product-form';
 import { ScanField, type ScanFeedback } from '@/components/scan/scan-field';
 import { StockPage } from '@/components/stock/stock-page';
 import {
+  type StockBrandView,
   type StockCategoryView,
   type StockLookup,
   type StockProductPage,
@@ -35,6 +37,7 @@ export default function StockProductsPage() {
             currency={context.currency}
             canCreate={canWrite('stock.catalog.manage')}
             canSeePurchase={can('stock.prices.purchase.read')}
+            canAiImages={canWrite('stock.ai.images')}
           />
         </Suspense>
       )}
@@ -46,10 +49,13 @@ function Products({
   currency,
   canCreate,
   canSeePurchase,
+  canAiImages,
 }: {
   currency: string;
   canCreate: boolean;
   canSeePurchase: boolean;
+  /** S8 : préremplir la fiche depuis une photo (IA). */
+  canAiImages: boolean;
 }) {
   const router = useRouter();
   const params = useSearchParams();
@@ -59,6 +65,8 @@ function Products({
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(params.get('nouveau') === '1');
   const [unknownCode, setUnknownCode] = useState<string | null>(null);
+  const [prefill, setPrefill] = useState<PhotoPrefill | null>(null);
+  const brands = useApi<StockBrandView[]>(canAiImages && creating ? '/ocall-stock/brands' : null);
   const [feedback, setFeedback] = useState<ScanFeedback>(null);
   const categories = useApi<StockCategoryView[]>('/ocall-stock/categories');
   const query = new URLSearchParams({
@@ -157,23 +165,39 @@ function Products({
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => (setCreating(false), setUnknownCode(null))}
+                onClick={() => (setCreating(false), setUnknownCode(null), setPrefill(null))}
               >
                 Fermer
               </Button>
             }
           />
-          <CardBody>
+          <CardBody className="space-y-4">
+            {canAiImages && (
+              <AiPhotoPrefill
+                brands={brands.state === 'success' ? brands.data : []}
+                onPrefill={setPrefill}
+              />
+            )}
             <ProductForm
-              key={unknownCode ?? 'new'}
+              key={prefill?.proposalId ?? unknownCode ?? 'new'}
               canEditPrices
               canSeePurchase={canSeePurchase}
+              initial={prefill?.initial}
               testId="stock-product-form"
-              onDone={(p) => {
-                const target = unknownCode
-                  ? `/stock/articles/${p.id}?code=${encodeURIComponent(unknownCode)}`
-                  : `/stock/articles/${p.id}`;
-                router.push(target);
+              onDone={async (p) => {
+                // Proposition IA appliquée : la fiche créée est rattachée à la photo lue (traçabilité).
+                if (prefill) {
+                  await api(`/ocall-stock/ai/proposals/${prefill.proposalId}/apply`, {
+                    method: 'POST',
+                    body: { productId: p.id },
+                  }).catch(() => undefined);
+                }
+                const code = prefill?.barcode ?? unknownCode;
+                router.push(
+                  code
+                    ? `/stock/articles/${p.id}?code=${encodeURIComponent(code)}`
+                    : `/stock/articles/${p.id}`,
+                );
               }}
             />
           </CardBody>

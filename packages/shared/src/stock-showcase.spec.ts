@@ -40,6 +40,7 @@ const product: StockShowcaseProduct = {
   priceFrom: false,
   availability: 'AVAILABLE',
   images: ['i1'],
+  illustrations: [],
 };
 
 describe('Ocall Stock — vitrine', () => {

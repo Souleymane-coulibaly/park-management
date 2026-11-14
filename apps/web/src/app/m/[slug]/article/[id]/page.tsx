@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { stockShowcaseProductJsonLd } from '@ocall/shared';
+import { STOCK_AI_ILLUSTRATION_LABEL, stockShowcaseProductJsonLd } from '@ocall/shared';
 import { AddToRequest } from '@/components/stock-site/request';
 import { AvailabilityBadge, PublicPrice, StockSiteShell } from '@/components/stock-site/site-shell';
 import { fetchStockProduct, stockImageUrl, stockSiteBase } from '@/lib/public-stock-site';
@@ -64,13 +64,25 @@ export default async function StockSiteProductPage({ params }: Params) {
         <div className="space-y-3">
           {p.images.length > 0 ? (
             p.images.map((imageId, i) => (
-              // eslint-disable-next-line @next/next/no-img-element -- photo publiée servie par l'API
-              <img
-                key={imageId}
-                src={stockImageUrl(imageId)}
-                alt={i === 0 ? p.name : `${p.name} — photo ${i + 1}`}
-                className="w-full rounded-2xl bg-surface object-cover"
-              />
+              <figure key={imageId} className="space-y-1">
+                {/* eslint-disable-next-line @next/next/no-img-element -- photo publiée servie par l'API */}
+                <img
+                  src={stockImageUrl(imageId)}
+                  alt={
+                    p.illustrations.includes(imageId)
+                      ? `${STOCK_AI_ILLUSTRATION_LABEL} : ${p.name}`
+                      : i === 0
+                        ? p.name
+                        : `${p.name} — photo ${i + 1}`
+                  }
+                  className="w-full rounded-2xl bg-surface object-cover"
+                />
+                {p.illustrations.includes(imageId) && (
+                  <figcaption className="text-xs text-muted">
+                    {STOCK_AI_ILLUSTRATION_LABEL}
+                  </figcaption>
+                )}
+              </figure>
             ))
           ) : (
             <div className="flex aspect-square items-center justify-center rounded-2xl bg-surface text-muted">

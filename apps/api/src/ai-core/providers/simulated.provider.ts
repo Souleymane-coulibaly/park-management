@@ -42,6 +42,8 @@ export const SIMULATED_USAGE: AiUsageReport = {
 /** Scénario de simulation d'une application : undefined = « ce n'est pas pour moi ». */
 export interface AiSimulation {
   structureText?(request: { instructions: string; text: string; schemaName: string }): unknown;
+  /** Lecture d'un document (photo, PDF) sans consigne `OCALL-SIM:` (ex. image réencodée). */
+  extractFromDocument?(request: { prompt: string; schemaName: string }): unknown;
   runWithTools?(request: {
     instructions: string;
     question: string;
@@ -74,12 +76,45 @@ function marker(content: string): unknown {
 export class SimulatedAiProvider implements AiProvider {
   readonly name = 'simulated';
 
+  /**
+   * Illustration simulée : image unie (couleur tirée de la description), aucune qualité prétendue.
+   * `OCALL-SIM-DOWN` dans la description simule une panne.
+   */
+  async generateImage(request: {
+    prompt: string;
+  }): Promise<AiResult<{ image: Buffer; mimeType: 'image/png' }>> {
+    if (request.prompt.includes(SIM_DOWN)) {
+      throw new AiProviderError('AI_UNAVAILABLE', 'Le service IA est momentanément indisponible.');
+    }
+    let hash = 0;
+    for (const c of request.prompt) hash = (hash * 31 + c.charCodeAt(0)) >>> 0;
+    const { default: sharp } = await import('sharp');
+    const image = await sharp({
+      create: {
+        width: 256,
+        height: 256,
+        channels: 3,
+        background: { r: hash & 0xff, g: (hash >> 8) & 0xff, b: (hash >> 16) & 0xff },
+      },
+    })
+      .png()
+      .toBuffer();
+    return { value: { image, mimeType: 'image/png' }, usage: SIMULATED_USAGE };
+  }
+
   async extractFromDocument<T>(request: {
+    prompt: string;
     document: { data: Buffer };
+    schemaName: string;
     schema: JsonSchema;
   }): Promise<AiResult<T>> {
-    const value = marker(request.document.data.toString('latin1'));
-    return { value: (value ?? { readable: false, items: [] }) as T, usage: SIMULATED_USAGE };
+    const value = marker(request.document.data.toString('latin1')) ?? marker(request.prompt);
+    if (value !== undefined) return { value: value as T, usage: SIMULATED_USAGE };
+    for (const s of simulations) {
+      const simulated = s.extractFromDocument?.(request);
+      if (simulated !== undefined) return { value: simulated as T, usage: SIMULATED_USAGE };
+    }
+    return { value: { readable: false, items: [] } as T, usage: SIMULATED_USAGE };
   }
 
   async structureText<T>(request: {

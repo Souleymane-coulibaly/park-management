@@ -77,7 +77,7 @@ export interface StockProductDetail {
   category: { id: string; name: string; parentId: string | null } | null;
   brand: { id: string; name: string } | null;
   variants: StockVariantView[];
-  images: { id: string; position: number }[];
+  images: { id: string; position: number; aiGenerated?: boolean; showcaseApproved?: boolean }[];
 }
 
 export interface StockSupplierView {

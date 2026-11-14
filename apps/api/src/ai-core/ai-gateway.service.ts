@@ -116,6 +116,10 @@ export class AiGatewayService implements OnModuleInit, OnModuleDestroy {
     return this.provider?.name === 'simulated' ? 'simulated' : this.config.ai.transcribeModel;
   }
 
+  imageModel(): string {
+    return this.provider?.name === 'simulated' ? 'simulated' : this.config.ai.imageModel;
+  }
+
   /**
    * Exécute un appel IA dans le contexte d'une application. `call` reçoit le fournisseur ; ses erreurs
    * sont traduites en messages compréhensibles ; la consommation est toujours enregistrée.

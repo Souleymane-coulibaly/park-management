@@ -88,6 +88,8 @@ export interface StockShowcaseProduct {
   availability: StockShowcaseAvailability;
   /** Photos (identifiants publics). */
   images: string[];
+  /** Parmi elles, les illustrations générées par IA (S8), affichées avec leur mention. */
+  illustrations: string[];
 }
 
 /**

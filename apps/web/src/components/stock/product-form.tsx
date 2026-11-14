@@ -32,22 +32,25 @@ export function ProductForm({
   defaultVatRate = STOCK_DEFAULT_VAT_RATE,
   onDone,
   testId,
+  initial,
 }: {
   product?: StockProductDetail;
+  /** Valeurs proposées à la création (fiche préremplie depuis une photo par l'IA, S8), modifiables. */
+  initial?: { name?: string; description?: string; categoryId?: string; brandId?: string };
   canEditPrices: boolean;
   canSeePurchase: boolean;
   defaultVatRate?: number;
-  onDone: (product: StockProductDetail) => void;
+  onDone: (product: StockProductDetail) => void | Promise<void>;
   testId?: string;
 }) {
   const categories = useApi<StockCategoryView[]>('/ocall-stock/categories');
   const brands = useApi<StockBrandView[]>('/ocall-stock/brands');
   const [values, setValues] = useState(() => ({
-    name: product?.name ?? '',
+    name: product?.name ?? initial?.name ?? '',
     sku: product?.sku ?? '',
-    description: product?.description ?? '',
-    categoryId: product?.categoryId ?? '',
-    brandId: product?.brandId ?? '',
+    description: product?.description ?? initial?.description ?? '',
+    categoryId: product?.categoryId ?? initial?.categoryId ?? '',
+    brandId: product?.brandId ?? initial?.brandId ?? '',
     unit: product?.unit ?? 'unité',
     salePrice: product ? String(product.salePrice) : '',
     purchasePrice: product?.purchasePrice != null ? String(product.purchasePrice) : '',

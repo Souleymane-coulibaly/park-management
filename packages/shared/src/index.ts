@@ -47,3 +47,4 @@ export * from './stock-sales';
 export * from './stock-facture';
 export * from './stock-reports';
 export * from './stock-showcase';
+export * from './stock-ai';

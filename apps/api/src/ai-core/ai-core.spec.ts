@@ -350,3 +350,24 @@ describe('Fournisseur simulé générique', () => {
     ).resolves.toMatchObject({ value: { simulated: true } });
   });
 });
+
+describe('Génération d’images (S8 Stock)', () => {
+  it('modèle d’image réglable, gpt-image-1 par défaut ; jamais pris pour une fonctionnalité', () => {
+    expect(loadAiConfig({}, 'test').imageModel).toBe('gpt-image-1');
+    const config = loadAiConfig({ OPENAI_IMAGE_MODEL: 'gpt-image-2' }, 'test');
+    expect(config.imageModel).toBe('gpt-image-2');
+    expect(config.models).not.toHaveProperty('IMAGE');
+  });
+
+  it('illustration simulée : image PNG déterministe, panne simulée', async () => {
+    const provider = new SimulatedAiProvider();
+    const a = await provider.generateImage({ prompt: 'Peinture blanche' });
+    const b = await provider.generateImage({ prompt: 'Peinture blanche' });
+    expect(a.value.mimeType).toBe('image/png');
+    expect(a.value.image.subarray(1, 4).toString('latin1')).toBe('PNG');
+    expect(a.value.image.equals(b.value.image)).toBe(true);
+    await expect(provider.generateImage({ prompt: 'OCALL-SIM-DOWN' })).rejects.toMatchObject({
+      code: 'AI_UNAVAILABLE',
+    });
+  });
+});

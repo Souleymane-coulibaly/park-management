@@ -22,6 +22,8 @@ export interface AiConfig {
   /** Modèles réglés explicitement, par fonctionnalité (hors transcription). */
   models: Record<string, string>;
   transcribeModel: string;
+  /** Modèle de génération d'images (illustrations), `OPENAI_IMAGE_MODEL`. */
+  imageModel: string;
   timeoutMs: number;
   /** Taux indicatif USD → FCFA pour l'affichage des coûts estimés. */
   usdXofRate: number;
@@ -68,7 +70,9 @@ export function loadAiConfig(env: NodeJS.ProcessEnv, nodeEnv: string): AiConfig 
   const models: Record<string, string> = {};
   for (const [key, value] of Object.entries(env)) {
     const match = /^OPENAI_MODEL_([A-Z][A-Z0-9_]*)$/.exec(key);
-    if (match && match[1] !== 'TRANSCRIBE' && value?.trim()) models[match[1]!] = value.trim();
+    if (match && match[1] !== 'TRANSCRIBE' && match[1] !== 'IMAGE' && value?.trim()) {
+      models[match[1]!] = value.trim();
+    }
   }
   const timeoutMs = positiveInt(env, 'AI_TIMEOUT_MS', 60_000);
   return {
@@ -77,6 +81,7 @@ export function loadAiConfig(env: NodeJS.ProcessEnv, nodeEnv: string): AiConfig 
     defaultModel,
     models,
     transcribeModel: env.OPENAI_TRANSCRIBE_MODEL?.trim() || 'gpt-transcribe',
+    imageModel: env.OPENAI_IMAGE_MODEL?.trim() || 'gpt-image-1',
     timeoutMs,
     usdXofRate: positiveInt(env, 'AI_USD_XOF_RATE', 600),
     rateLimit: {

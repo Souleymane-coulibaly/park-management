@@ -15,6 +15,10 @@ export async function purgeStockOrganizations(
     async (tx) => {
       await tx.$executeRaw`SELECT set_config('ocall.stock_purge', 'on', true)`;
       const where = { organizationId: { in: organizationIds } };
+      // S8 : propositions et consommation IA, réglages IA.
+      await tx.stockAiProposal.deleteMany({ where });
+      await tx.stockAiUsage.deleteMany({ where });
+      await tx.stockAiSettings.deleteMany({ where });
       // S7 : vitrine, images, domaines et demandes.
       await tx.stockShowcaseRequest.deleteMany({ where });
       await tx.stockShowcaseDomain.deleteMany({ where });

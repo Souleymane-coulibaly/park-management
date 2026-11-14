@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { type FormEvent, Suspense, useState } from 'react';
 import {
+  STOCK_AI_ILLUSTRATION_LABEL,
   STOCK_BARCODE_TYPE_LABELS,
   type StockBarcodeType,
   formatStockMoney,
@@ -219,7 +220,13 @@ function Product({ context, can, canWrite }: StockPageProps) {
 
       {can('stock.levels.read') && p.isStockable && <Levels product={p} />}
 
-      <Images product={p} manage={manage} onChange={reload} onError={setError} />
+      <Images
+        product={p}
+        manage={manage}
+        canIllustrate={canWrite('stock.ai.images')}
+        onChange={reload}
+        onError={setError}
+      />
 
       <Card>
         <CardHeader title="Historique" />
@@ -511,15 +518,52 @@ function NewVariant({
 function Images({
   product,
   manage,
+  canIllustrate,
   onChange,
   onError,
 }: {
   product: StockProductDetail;
   manage: boolean;
+  /** S8 : illustration générée par IA, pour un article sans photo. */
+  canIllustrate: boolean;
   onChange: () => void;
   onError: (e: ApiError | null) => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [draft, setDraft] = useState<string | null>(null);
+  const [showcase, setShowcase] = useState(false);
+
+  async function illustrate() {
+    onError(null);
+    setBusy(true);
+    try {
+      const r = await api<{ proposal: { id: string } }>(
+        `/ocall-stock/ai/products/${product.id}/illustration`,
+        { method: 'POST' },
+      );
+      setDraft(r.proposal.id);
+      setShowcase(false);
+    } catch (e) {
+      onError(asApiError(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function decide(action: 'apply' | 'reject') {
+    if (!draft) return;
+    onError(null);
+    try {
+      await api(`/ocall-stock/ai/proposals/${draft}/${action}`, {
+        method: 'POST',
+        body: action === 'apply' ? { showcase } : undefined,
+      });
+      setDraft(null);
+      onChange();
+    } catch (e) {
+      onError(asApiError(e));
+    }
+  }
 
   async function upload(file: File | undefined) {
     if (!file) return;
@@ -549,6 +593,12 @@ function Images({
               alt={`Photo ${img.position + 1} de ${product.name}`}
               className="h-32 w-32 rounded-xl object-cover"
             />
+            {img.aiGenerated && (
+              <figcaption className="text-xs text-muted" data-testid="stock-ai-illustration-label">
+                {STOCK_AI_ILLUSTRATION_LABEL}
+                {img.showcaseApproved ? ' · sur la vitrine' : ' · hors vitrine'}
+              </figcaption>
+            )}
             {manage && (
               <button
                 type="button"
@@ -570,7 +620,51 @@ function Images({
             )}
           </figure>
         ))}
-        {product.images.length === 0 && <p className="text-sm text-muted">Aucune photo.</p>}
+        {product.images.length === 0 && !draft && (
+          <div className="space-y-2">
+            <p className="text-sm text-muted">Aucune photo.</p>
+            {canIllustrate && (
+              <Button
+                size="sm"
+                variant="secondary"
+                loading={busy}
+                onClick={() => void illustrate()}
+                data-testid="stock-ai-illustrate"
+              >
+                Générer une illustration (IA)
+              </Button>
+            )}
+          </div>
+        )}
+        {draft && (
+          <figure className="w-full max-w-xs space-y-2" data-testid="stock-ai-illustration">
+            {/* eslint-disable-next-line @next/next/no-img-element -- aperçu privé servi par l'API */}
+            <img
+              src={`/api/v1/ocall-stock/ai/proposals/${draft}/image`}
+              alt={`${STOCK_AI_ILLUSTRATION_LABEL} : ${product.name}`}
+              className="h-48 w-48 rounded-xl border border-line object-cover"
+            />
+            <figcaption className="text-xs font-semibold text-terracotta-dark">
+              {STOCK_AI_ILLUSTRATION_LABEL} — ce n’est pas une photo du produit réel.
+            </figcaption>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={showcase}
+                onChange={(e) => setShowcase(e.target.checked)}
+              />
+              Montrer cette illustration sur le site vitrine
+            </label>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={() => void decide('apply')}>
+                Ajouter à l’article
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => void decide('reject')}>
+                Refuser
+              </Button>
+            </div>
+          </figure>
+        )}
         {manage && product.images.length < 4 && (
           <label className="flex h-32 w-32 cursor-pointer items-center justify-center rounded-xl border-2 border-dashed border-line text-center text-sm text-charcoal-soft hover:bg-ivory-dark/40">
             {busy ? 'Envoi…' : 'Ajouter une photo'}

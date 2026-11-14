@@ -10,7 +10,20 @@ export interface StockConfig {
   databaseUrl: string | null;
   /** Vitrines (S7) : sous-domaines `<slug>.<domaine>` si activés, sinon adresses `/m/<slug>`. */
   sites: { baseDomain: string | null; subdomainsEnabled: boolean };
+  /**
+   * Plafonds mensuels Ocall de l'IA (S8), par organisation et par fonctionnalité : le gérant règle les siens
+   * en dessous. Illustrations à part (une image coûte plus qu'un texte).
+   */
+  ai: { monthlyCeiling: number; imageMonthlyCeiling: number };
 }
+
+const ceiling = (env: NodeJS.ProcessEnv, key: string, fallback: number) => {
+  const value = Number(env[key] ?? fallback);
+  if (!Number.isInteger(value) || value < 0 || value > 100_000) {
+    throw new Error(`${key} invalide : entier de 0 à 100 000.`);
+  }
+  return value;
+};
 
 export function loadStockConfig(env: NodeJS.ProcessEnv): StockConfig {
   const enabled = env.STOCK_ENABLED === 'true';
@@ -19,7 +32,11 @@ export function loadStockConfig(env: NodeJS.ProcessEnv): StockConfig {
     baseDomain,
     subdomainsEnabled: env.STOCK_SITES_SUBDOMAINS_ENABLED === 'true' && baseDomain !== null,
   };
-  if (!enabled) return { enabled, databaseUrl: null, sites };
+  const ai = {
+    monthlyCeiling: ceiling(env, 'STOCK_AI_MAX_MONTHLY_CALLS', 150),
+    imageMonthlyCeiling: ceiling(env, 'STOCK_AI_MAX_MONTHLY_IMAGES', 20),
+  };
+  if (!enabled) return { enabled, databaseUrl: null, sites, ai };
   const databaseUrl = env.STOCK_DATABASE_URL?.trim() || null;
   if (!databaseUrl) throw new Error('STOCK_ENABLED=true exige STOCK_DATABASE_URL.');
   const stock = databaseIdentity(databaseUrl);
@@ -36,5 +53,5 @@ export function loadStockConfig(env: NodeJS.ProcessEnv): StockConfig {
       'STOCK_DATABASE_URL doit désigner une base distincte des bases Ocall Suite, School et Facture.',
     );
   }
-  return { enabled, databaseUrl, sites };
+  return { enabled, databaseUrl, sites, ai };
 }

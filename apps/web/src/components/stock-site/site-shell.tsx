@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import {
+  STOCK_AI_ILLUSTRATION_LABEL,
   STOCK_SHOWCASE_AVAILABILITY_LABELS,
   type StockShowcaseProduct,
   type StockShowcasePublished,
@@ -38,13 +39,20 @@ export function ProductCard({ product, base }: { product: StockShowcaseProduct; 
     <li className="min-w-0 overflow-hidden rounded-2xl border border-line bg-surface">
       <Link href={`${base}/article/${product.id}`} className="block">
         {product.images[0] ? (
-          // eslint-disable-next-line @next/next/no-img-element -- photo publiée servie par l'API
-          <img
-            src={stockImageUrl(product.images[0])}
-            alt={product.name}
-            loading="lazy"
-            className="aspect-square w-full bg-ivory object-cover"
-          />
+          <div className="relative">
+            {/* eslint-disable-next-line @next/next/no-img-element -- photo publiée servie par l'API */}
+            <img
+              src={stockImageUrl(product.images[0])}
+              alt={product.name}
+              loading="lazy"
+              className="aspect-square w-full bg-ivory object-cover"
+            />
+            {product.illustrations.includes(product.images[0]) && (
+              <span className="absolute bottom-1 left-1 rounded bg-white/90 px-1.5 py-0.5 text-[10px] text-charcoal">
+                {STOCK_AI_ILLUSTRATION_LABEL}
+              </span>
+            )}
+          </div>
         ) : (
           <div className="flex aspect-square w-full items-center justify-center bg-ivory text-sm text-muted">
             Photo à venir

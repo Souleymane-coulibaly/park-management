@@ -23,6 +23,7 @@ const NAV: NavItem[] = [
   { key: 'stock-transfers', label: 'Transferts', href: '/stock/transferts' },
   { key: 'stock-counts', label: 'Inventaires', href: '/stock/inventaires' },
   { key: 'stock-purchases', label: 'Achats', href: '/stock/achats' },
+  { key: 'stock-ai', label: 'Assistant IA', href: '/stock/ia' },
   { key: 'stock-sites', label: 'Sites et emplacements', href: '/stock/sites' },
   { key: 'stock-registers', label: 'Caisses et sessions', href: '/stock/caisses' },
   { key: 'stock-suppliers', label: 'Fournisseurs', href: '/stock/fournisseurs' },

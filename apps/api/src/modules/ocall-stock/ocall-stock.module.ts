@@ -21,6 +21,9 @@ import { OcallStockSitesService } from './ocall-stock-sites.service';
 import { OcallStockTransfersService } from './ocall-stock-transfers.service';
 import { OcallStockWarehouseController } from './ocall-stock-warehouse.controller';
 import { OcallStockDocumentsService } from './ocall-stock-documents.service';
+import { OcallStockAiUsageStore } from './ocall-stock-ai-usage.store';
+import { OcallStockAiController } from './ocall-stock-ai.controller';
+import { OcallStockAiService } from './ocall-stock-ai.service';
 import { OcallStockReportsController } from './ocall-stock-reports.controller';
 import {
   OcallStockShowcaseDomainsService,
@@ -65,6 +68,7 @@ import { OcallStockService } from './ocall-stock.service';
     PublicStockShowcaseController,
     PublicStockShowcaseRequestsController,
     PlatformStockShowcaseDomainsController,
+    OcallStockAiController,
   ],
   providers: [
     OcallStockPrismaService,
@@ -92,6 +96,8 @@ import { OcallStockService } from './ocall-stock.service';
     OcallStockReportsService,
     OcallStockShowcaseService,
     OcallStockShowcaseDomainsService,
+    OcallStockAiUsageStore,
+    OcallStockAiService,
     // Vérification des domaines personnalisés : même vérificateur que les sites Park (simulé en test).
     {
       provide: STOCK_DOMAIN_VERIFIER,

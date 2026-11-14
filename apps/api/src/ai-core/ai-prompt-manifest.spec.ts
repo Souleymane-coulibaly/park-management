@@ -14,6 +14,13 @@ import {
   FACTURE_QUOTE_PROMPT,
   FACTURE_REPORT_PROMPT,
 } from '../modules/facture/facture-ai.prompts';
+import {
+  STOCK_ANALYSIS_PROMPT,
+  STOCK_ILLUSTRATION_PROMPT,
+  STOCK_PRODUCT_PHOTO_PROMPT,
+  STOCK_RESTOCK_PROMPT,
+  STOCK_STOCKOUT_PROMPT,
+} from '../modules/ocall-stock/ocall-stock-ai.prompts';
 import { AI_PROMPT_MANIFEST } from './ai-prompt-manifest';
 
 /**
@@ -33,6 +40,11 @@ describe('Manifeste des prompts d’Ocall AI Core', () => {
     FACTURE_QUOTE_PROMPT,
     FACTURE_PLANNING_PROMPT,
     FACTURE_MAINTENANCE_PROMPT,
+    STOCK_RESTOCK_PROMPT,
+    STOCK_STOCKOUT_PROMPT,
+    STOCK_ANALYSIS_PROMPT,
+    STOCK_PRODUCT_PHOTO_PROMPT,
+    STOCK_ILLUSTRATION_PROMPT,
   ];
 
   it.each(prompts.map((p) => [`${p.id}@${p.version}`, p] as const))(

@@ -203,6 +203,31 @@ export class OpenAiProvider implements AiProvider {
     return { value: { text: result.text }, usage };
   }
 
+  async generateImage(request: {
+    model: string;
+    prompt: string;
+    size: '1024x1024';
+  }): Promise<AiResult<{ image: Buffer; mimeType: 'image/png' }>> {
+    const result = await this.call(() =>
+      this.client.images.generate({
+        model: request.model,
+        prompt: request.prompt,
+        size: request.size,
+        n: 1,
+      }),
+    );
+    const b64 = result.data?.[0]?.b64_json;
+    if (!b64) {
+      throw new AiProviderError('AI_INVALID_OUTPUT', 'Illustration non générée. Réessayez.');
+    }
+    const usage: AiUsageReport = {
+      inputTokens: result.usage?.input_tokens ?? 0,
+      cachedInputTokens: 0,
+      outputTokens: result.usage?.output_tokens ?? 0,
+    };
+    return { value: { image: Buffer.from(b64, 'base64'), mimeType: 'image/png' }, usage };
+  }
+
   /** Traduit les erreurs du SDK : aucun détail technique (ni clé) n'est renvoyé au client. */
   private async call<R>(fn: () => Promise<R>): Promise<R> {
     try {
