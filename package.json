@@ -34,8 +34,6 @@
     "db:facture:migrate:status": "pnpm --filter @ocall/facture-database run migrate:status",
     "db:stock:migrate:deploy": "pnpm --filter @ocall/stock-database run migrate:deploy",
     "db:stock:migrate:status": "pnpm --filter @ocall/stock-database run migrate:status",
-    "db:stock:migrate:deploy": "pnpm --filter @ocall/stock-database run migrate:deploy",
-    "db:stock:migrate:status": "pnpm --filter @ocall/stock-database run migrate:status",
     "db:school:mark-test": "pnpm --filter @ocall/school-database run mark-test",
     "db:mark-test": "pnpm --filter @ocall/database run mark-test",
     "db:migrate:deploy:staging": "pnpm --filter @ocall/database run migrate:deploy:staging",
