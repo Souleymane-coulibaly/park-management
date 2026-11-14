@@ -15,6 +15,7 @@ import { StockPage } from '@/components/stock/stock-page';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonClass } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
+import { BrandColorField } from '@/components/site/brand-color-field';
 import { CheckboxGroup, InputField } from '@/components/ui/field';
 import { Alert, ApiErrorAlert, ErrorState, LoadingState } from '@/components/ui/states';
 import { ApiError, api, apiUpload } from '@/lib/api';
@@ -289,6 +290,17 @@ function ContentCard({
             maxLength={300}
             {...text('seoDescription')}
           />
+          <div className="sm:col-span-2">
+            <BrandColorField
+              value={c.primaryColor}
+              disabled={!editable}
+              testId="showcase-brand-color"
+              onChange={(color) => {
+                setSaved(false);
+                setC({ ...c, primaryColor: color });
+              }}
+            />
+          </div>
           <div className="space-y-2 sm:col-span-2">
             <label className="flex items-start gap-2 text-sm">
               <input

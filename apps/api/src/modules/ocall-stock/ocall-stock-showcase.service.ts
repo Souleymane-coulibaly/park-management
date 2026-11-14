@@ -16,6 +16,7 @@ import {
   type StockShowcaseProduct,
   type StockShowcasePublished,
   demoSpamReason,
+  isAccessibleBrandColor,
   safeHttpsUrl,
   siteSlugError,
   slugify,
@@ -31,6 +32,10 @@ import { PrismaService } from '../../prisma/prisma.service';
 import type { StockContext } from './ocall-stock-access';
 import { FUZZY_THRESHOLD } from './ocall-stock-catalog.service';
 import { type StockUpload, normalizeProductImage } from './ocall-stock-media.service';
+import {
+  STOCK_DOMAIN_PENDING_DAYS,
+  stockDomainHttpsProof,
+} from './ocall-stock-showcase-domains.service';
 import { OcallStockPrismaService } from './ocall-stock-prisma.service';
 import type {
   StockShowcaseCatalogQueryDto,
@@ -58,6 +63,7 @@ const DEFAULT_CONTENT = (name: string): StockShowcaseContent => ({
   hours: null,
   mapUrl: null,
   seoDescription: null,
+  primaryColor: null,
   showCatalog: true,
   showPrices: false,
   forms: ['CONTACT', 'QUOTE'],
@@ -129,8 +135,14 @@ const requestView = (r: {
  * qui arrivent dans Stock sans jamais créer de vente ni de commande. Jamais publiés : prix d'achat,
  * marges, quantités, fournisseurs, clients.
  */
+type SitemapEntry = { url: string; lastModified: string | null };
+const SITEMAP_TTL_MS = 10 * 60_000;
+const SITEMAP_MAX_HOSTS = 500;
+
 @Injectable()
 export class OcallStockShowcaseService {
+  private readonly sitemaps = new Map<string, { at: number; value: Promise<SitemapEntry[]> }>();
+
   constructor(
     private readonly db: OcallStockPrismaService,
     private readonly core: PrismaService,
@@ -240,6 +252,12 @@ export class OcallStockShowcaseService {
       throw new BadRequestException({
         code: 'STOCK_SHOWCASE_WHATSAPP',
         message: 'Numéro WhatsApp international invalide (+223 …).',
+      });
+    }
+    if (dto.primaryColor && !isAccessibleBrandColor(dto.primaryColor)) {
+      throw new BadRequestException({
+        code: 'STOCK_SHOWCASE_COLOR',
+        message: 'Couleur trop claire : le texte blanc des boutons doit rester lisible.',
       });
     }
     const content: StockShowcaseContent = {
@@ -600,7 +618,32 @@ export class OcallStockShowcaseService {
    * Plan du site selon l'hôte : accueil, catalogue et fiches des articles publiés. Sur l'application
    * (vitrines servies à `/m/<slug>`), les vitrines en ligne dont l'adresse canonique est sur cet hôte.
    */
-  async sitemap(host: string) {
+  /**
+   * Plan du site public, gardé en mémoire 10 minutes par adresse servie (une requête anonyme ne relance
+   * pas le calcul de toutes les vitrines) ; les adresses inconnues ne sont pas gardées (pas d'éviction
+   * forcée par des noms au hasard).
+   */
+  async sitemap(host: string): Promise<SitemapEntry[]> {
+    const h = host.trim().toLowerCase().split(':')[0]!;
+    const hit = this.sitemaps.get(h);
+    if (hit && Date.now() - hit.at < SITEMAP_TTL_MS) return hit.value;
+    const built = this.buildSitemap(h);
+    const value = built.then((b) => b.entries);
+    built
+      .then((b) => {
+        if (!b.cacheable) return;
+        if (this.sitemaps.size >= SITEMAP_MAX_HOSTS) {
+          this.sitemaps.delete(this.sitemaps.keys().next().value!);
+        }
+        this.sitemaps.set(h, { at: Date.now(), value });
+      })
+      .catch(() => undefined);
+    return value;
+  }
+
+  private async buildSitemap(
+    host: string,
+  ): Promise<{ entries: SitemapEntry[]; cacheable: boolean }> {
     const resolved = await this.resolveHost(host);
     const entries = async (slug: string) => {
       const found = await this.live(slug);
@@ -627,27 +670,40 @@ export class OcallStockShowcaseService {
       }
       return list;
     };
-    if (resolved) return entries(resolved.slug);
-    const h = host.trim().toLowerCase().split(':')[0]!;
-    if (h !== new URL(this.config.sites.publicOrigin).hostname) return [];
+    if (resolved) return { entries: await entries(resolved.slug), cacheable: true };
+    if (host !== new URL(this.config.sites.publicOrigin).hostname) {
+      return { entries: [], cacheable: false };
+    }
     const online = await this.db.stockShowcase.findMany({
       where: { isOnline: true },
       select: { slug: true },
       take: 1000,
     });
     const origin = this.config.sites.publicOrigin.replace(/\/$/, '');
-    return (await Promise.all(online.map((s) => entries(s.slug))))
-      .flat()
-      .filter((e) => e.url.startsWith(origin));
+    // Par lots de 10 : jamais 1 000 vitrines interrogées en même temps.
+    const all: SitemapEntry[] = [];
+    for (let i = 0; i < online.length; i += 10) {
+      const batch = await Promise.all(online.slice(i, i + 10).map((s) => entries(s.slug)));
+      all.push(...batch.flat().filter((e) => e.url.startsWith(origin)));
+    }
+    return { entries: all, cacheable: true };
   }
 
-  /** Identifiant attendu par la page de contrôle HTTPS d'un domaine (activation par Ocall). */
+  /**
+   * Preuve attendue par la page de contrôle HTTPS d'un domaine (activation par Ocall) : dérivée du jeton du
+   * domaine, jamais l'identifiant de l'organisation ; rien pour un domaine suspendu ou une déclaration en
+   * attente expirée.
+   */
   async siteIdForHost(host: string): Promise<string | null> {
     const domain = await this.db.stockShowcaseDomain.findUnique({
       where: { hostname: host.trim().toLowerCase().split(':')[0]! },
-      select: { organizationId: true, status: true },
+      select: { verificationToken: true, status: true, createdAt: true },
     });
-    return domain && domain.status !== 'SUSPENDED' ? domain.organizationId : null;
+    if (!domain || domain.status === 'SUSPENDED') return null;
+    const expired =
+      domain.status === 'PENDING' &&
+      domain.createdAt.getTime() < Date.now() - STOCK_DOMAIN_PENDING_DAYS * 86_400_000;
+    return expired ? null : stockDomainHttpsProof(domain.verificationToken);
   }
 
   /** Image publiée (logo, couverture, galerie) d'un site en ligne et autorisé. */

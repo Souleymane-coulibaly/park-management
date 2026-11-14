@@ -14,6 +14,7 @@ import { TextareaField } from '@/components/facture/textarea-field';
 import { Badge } from '@/components/ui/badge';
 import { Button, buttonClass } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
+import { BrandColorField } from '@/components/site/brand-color-field';
 import { CheckboxGroup, InputField } from '@/components/ui/field';
 import { Alert, ApiErrorAlert, ErrorState, LoadingState } from '@/components/ui/states';
 import { ApiError, api, apiUpload } from '@/lib/api';
@@ -272,6 +273,17 @@ function ContentCard({
             maxLength={300}
             {...text('seoDescription')}
           />
+          <div className="sm:col-span-2">
+            <BrandColorField
+              value={c.primaryColor}
+              disabled={!editable}
+              testId="showcase-brand-color"
+              onChange={(color) => {
+                setSaved(false);
+                setC({ ...c, primaryColor: color });
+              }}
+            />
+          </div>
           <div className="sm:col-span-2 space-y-2">
             <p className="text-sm font-medium text-charcoal">Prestations mises en avant</p>
             {services.length === 0 ? (

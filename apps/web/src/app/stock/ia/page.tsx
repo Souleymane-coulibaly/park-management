@@ -46,7 +46,8 @@ interface RestockLine {
   sku: string;
   label: string;
   unit: string;
-  unitCost: number;
+  /** Absent pour qui ne voit pas les prix d’achat. */
+  unitCost?: number;
   costKnown: boolean;
   out90: number;
   available: number;

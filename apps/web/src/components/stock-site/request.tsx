@@ -79,7 +79,7 @@ export function AddToRequest({
             step="any"
             value={quantity}
             onChange={(e) => setQuantity(e.target.value)}
-            className="mt-1 block w-24 rounded-xl border border-line bg-surface px-3 py-2"
+            className="mt-1 block w-24 rounded-xl border border-black/15 bg-white px-3 py-2"
           />
         </label>
       )}
@@ -92,7 +92,8 @@ export function AddToRequest({
             { productId: product.id, name: product.name, quantity: Number(quantity) || 1 },
           ])
         }
-        className="rounded-xl bg-forest px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+        className="min-h-11 rounded-full px-5 py-2 text-sm font-semibold text-white disabled:opacity-60"
+        style={{ background: 'var(--brand, #176B53)' }}
         data-testid="stock-site-add"
       >
         {inList ? 'Dans votre demande' : 'Ajouter à ma demande'}
@@ -126,7 +127,7 @@ export function StockRequestForm({
     onChange: (e: { target: { value: string } }) => setForm({ ...form, [key]: e.target.value }),
   });
   const field =
-    'mt-1 block w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-[15px]';
+    'mt-1 block w-full rounded-xl border border-black/15 bg-white px-3 py-2.5 text-[15px]';
   const withItems = kind === 'QUOTE' && items.length > 0;
 
   async function submit(e: FormEvent) {
@@ -278,7 +279,8 @@ export function StockRequestForm({
       <button
         type="submit"
         disabled={state === 'sending'}
-        className="rounded-xl bg-forest px-5 py-3 font-semibold text-white disabled:opacity-60"
+        className="min-h-12 rounded-full px-6 py-3 font-semibold text-white disabled:opacity-60"
+        style={{ background: 'var(--brand, #176B53)' }}
       >
         {state === 'sending' ? 'Envoi…' : 'Envoyer ma demande'}
       </button>

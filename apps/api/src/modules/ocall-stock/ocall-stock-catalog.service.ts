@@ -278,6 +278,15 @@ export class OcallStockCatalogService {
   }
 
   async createProduct(ctx: StockContext, dto: StockProductDto) {
+    // Fixer un prix exige le droit de gérer les prix (comme pour une variante) : sans lui, l'article est créé
+    // au prix de vente 0, sans prix d'achat, et un responsable fixe ensuite les prix.
+    if (dto.salePrice > 0 || (dto.purchasePrice !== undefined && dto.purchasePrice !== null)) {
+      this.assertCan(
+        ctx,
+        'stock.prices.manage',
+        'Vous ne pouvez pas fixer de prix : laissez le prix de vente à 0, un responsable le fixera.',
+      );
+    }
     if (dto.purchasePrice !== undefined && dto.purchasePrice !== null) {
       this.assertCan(
         ctx,
@@ -371,6 +380,15 @@ export class OcallStockCatalogService {
   async updateProduct(ctx: StockContext, id: string, dto: UpdateStockProductDto) {
     const changed = await this.db
       .$transaction(async (tx) => {
+        // Droit vérifié dès que le champ est envoyé, avant toute comparaison : sinon la réponse (200 si la
+        // valeur est la valeur actuelle, 403 sinon) révélerait le prix d'achat.
+        if (dto.purchasePrice !== undefined) {
+          this.assertCan(
+            ctx,
+            'stock.prices.purchase.read',
+            'Vous ne pouvez pas voir ni modifier les prix d’achat.',
+          );
+        }
         const current = await this.lockProduct(tx, ctx, id);
         const next: Record<string, unknown> = {};
         for (const key of TRACKED) {
@@ -595,6 +613,13 @@ export class OcallStockCatalogService {
             code: 'STOCK_DEFAULT_VARIANT',
             message: 'La variante par défaut suit l’article : modifiez ou archivez l’article.',
           });
+        }
+        if (dto.purchasePrice !== undefined) {
+          this.assertCan(
+            ctx,
+            'stock.prices.purchase.read',
+            'Vous ne pouvez pas voir ni modifier les prix d’achat.',
+          );
         }
         const next: Record<string, unknown> = {};
         for (const key of ['name', 'sku', 'salePrice', 'purchasePrice', 'isArchived'] as const) {

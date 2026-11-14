@@ -530,6 +530,16 @@ export class OcallStockPurchasesService {
 
   /** Historique des coûts reçus d'une variante, par fournisseur (plus récent d'abord). */
   async purchasePrices(ctx: StockContext, variantId: string) {
+    const variant = await this.db.stockVariant.findUnique({
+      where: { organizationId_id: { organizationId: ctx.organizationId, id: variantId } },
+      select: { id: true },
+    });
+    if (!variant) {
+      throw new NotFoundException({
+        code: 'STOCK_VARIANT_NOT_FOUND',
+        message: 'Variante introuvable.',
+      });
+    }
     const rows = await this.db.stockSupplierPrice.findMany({
       where: { organizationId: ctx.organizationId, variantId },
       orderBy: { createdAt: 'desc' },

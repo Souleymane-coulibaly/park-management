@@ -10,6 +10,7 @@ import { OcallStockPrismaService } from '../src/modules/ocall-stock/ocall-stock-
 import {
   OcallStockShowcaseDomainsService,
   STOCK_DOMAIN_VERIFIER,
+  stockDomainHttpsProof,
 } from '../src/modules/ocall-stock/ocall-stock-showcase-domains.service';
 import type { PrismaService } from '../src/prisma/prisma.service';
 import {
@@ -281,6 +282,24 @@ const opened = () => Date.now() - 10_000;
       (await a.put(api('/ocall-stock/showcase/slug')).send({ slug: 'autre-adresse' }).expect(409))
         .body.code,
     ).toBe('STOCK_SHOWCASE_ONLINE');
+
+    // Couleur principale (S9, même règle que les sites Park : texte blanc lisible) ; publiée.
+    expect(home.site.primaryColor).toBeNull();
+    const color = (over: Record<string, unknown>) =>
+      a.put(api('/ocall-stock/showcase/draft')).send(content(over));
+    expect((await color({ primaryColor: '#FFE066' }).expect(400)).body.code).toBe(
+      'STOCK_SHOWCASE_COLOR',
+    );
+    await color({ primaryColor: 'bleu' }).expect(400);
+    await color({ primaryColor: '#1E3A8A' }).expect(200);
+    await a.post(api('/ocall-stock/showcase/publish')).expect(200);
+    expect(
+      (
+        await pub()
+          .get(api(`/public/stock-sites/${slug}`))
+          .expect(200)
+      ).body.site.primaryColor,
+    ).toBe('#1E3A8A');
   });
 
   it('catalogue public : articles cochés seulement, prix au choix, badge, jamais de données internes', async () => {
@@ -510,8 +529,11 @@ const opened = () => Date.now() - 10_000;
           .get(api(`/public/stock-sites/well-known?host=${hostname}`))
           .expect(200)
       ).body,
-    ).toEqual({ siteId: orgA.organizationId });
+    ).toEqual({ siteId: stockDomainHttpsProof(domain.verificationToken) });
+    // La page publique ne révèle jamais l'identifiant de l'organisation (S9).
     verifier.setHttps(hostname, orgA.organizationId);
+    expect((await svc.activate(orgA.organizationId, domain.id)).status).toBe('ERROR');
+    verifier.setHttps(hostname, stockDomainHttpsProof(domain.verificationToken));
     expect((await svc.activate(orgA.organizationId, domain.id)).status).toBe('ACTIVE');
     expect(
       (
@@ -560,6 +582,30 @@ const opened = () => Date.now() - 10_000;
       });
     }
     await orgB.agent.post(api('/ocall-stock/showcase/domains')).send({ hostname }).expect(409);
+
+    // Déclaration jamais vérifiée : retient le nom 7 jours, puis il est libéré (S9).
+    const squat = `www.squat-${RUN}.ml`.toLowerCase();
+    const pending = (
+      await orgB.agent
+        .post(api('/ocall-stock/showcase/domains'))
+        .send({ hostname: squat })
+        .expect(201)
+    ).body;
+    expect(await registry.takenElsewhere('FACTURE', squat)).toBe(true);
+    await db.stockShowcaseDomain.update({
+      where: { id: pending.id },
+      data: { createdAt: new Date(Date.now() - 8 * DAY) },
+    });
+    expect(await registry.takenElsewhere('FACTURE', squat)).toBe(false);
+    await pub()
+      .get(api(`/public/stock-sites/well-known?host=${squat}`))
+      .expect(404);
+    await a.delete(api(`/ocall-stock/showcase/domains/${domain.id}`)).expect(204);
+    expect(
+      (await a.post(api('/ocall-stock/showcase/domains')).send({ hostname: squat }).expect(201))
+        .body,
+    ).toMatchObject({ hostname: squat, status: 'PENDING' });
+    expect(await db.stockShowcaseDomain.count({ where: { id: pending.id } })).toBe(0);
   });
 
   it('garanties en base : adresse, contact et articles d’une demande', async () => {

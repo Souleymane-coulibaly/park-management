@@ -9,7 +9,9 @@ import {
 } from '../src/common/integration/stock-movements';
 import { FacturePrismaService } from '../src/modules/facture/facture-prisma.service';
 import { FactureStockService } from '../src/modules/facture/facture-stock.service';
+import type { StockContext } from '../src/modules/ocall-stock/ocall-stock-access';
 import { OcallStockPrismaService } from '../src/modules/ocall-stock/ocall-stock-prisma.service';
+import { OcallStockService } from '../src/modules/ocall-stock/ocall-stock.service';
 import type { PrismaService } from '../src/prisma/prisma.service';
 import {
   type Agent,
@@ -53,6 +55,7 @@ const TOMORROW = new Date(Date.now() + DAY).toISOString().slice(0, 10);
     let sales: Agent;
     const plans = new Map<string, string>();
     let location: string;
+    let siteId: string;
     let paint: { productId: string; variantId: string; sku: string };
     let glass: { productId: string; variantId: string; sku: string };
     let cutting: { productId: string; variantId: string; sku: string };
@@ -223,6 +226,7 @@ const TOMORROW = new Date(Date.now() + DAY).toISOString().slice(0, 10);
           .expect(201)
       ).body;
       location = site.locations[0].id;
+      siteId = site.id;
       paint = await product('Peinture blanche 5 L');
       glass = await product('Vitre claire 4 mm', { salePrice: 5900 });
       cutting = await product('Découpe sur mesure', { salePrice: 2360, isStockable: false });
@@ -458,6 +462,20 @@ const TOMORROW = new Date(Date.now() + DAY).toISOString().slice(0, 10);
       expect(event.lines).toEqual([
         expect.objectContaining({ variantId: paint.variantId, quantity: -3 }),
       ]);
+      // Membre rattaché à un autre site : ces mouvements ne le concernent pas (S9).
+      const otherSite = (
+        await a
+          .post(api('/ocall-stock/sites'))
+          .send({ code: 'DEP9', name: 'Dépôt Kati', kind: 'WAREHOUSE' })
+          .expect(201)
+      ).body.id as string;
+      const restricted = { organizationId: orgA.organizationId, siteIds: [otherSite] };
+      const stockService = app.get(OcallStockService);
+      expect(await stockService.factureEvents(restricted as unknown as StockContext)).toEqual([]);
+      const own = { organizationId: orgA.organizationId, siteIds: [siteId] };
+      expect(
+        (await stockService.factureEvents(own as unknown as StockContext)).map((e) => e.reference),
+      ).toContain(issued.number);
     });
 
     it('emplacement non réglé, puis stock insuffisant : échec visible, relance par le gérant', async () => {

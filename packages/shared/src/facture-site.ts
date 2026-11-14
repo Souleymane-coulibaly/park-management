@@ -49,6 +49,11 @@ export interface FactureSiteContent {
   /** Lien https vers une carte (Google Maps, OpenStreetMap…). */
   mapUrl: string | null;
   seoDescription: string | null;
+  /**
+   * Couleur principale de la vitrine (#RRGGBB, boutons et bandeaux à texte blanc lisible) ; null = couleur
+   * Ocall par défaut. Même règle que les sites Park.
+   */
+  primaryColor?: string | null;
   /** Formulaires proposés aux visiteurs. */
   forms: FactureRequestKind[];
 }

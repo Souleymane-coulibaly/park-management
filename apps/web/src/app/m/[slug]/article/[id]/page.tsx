@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { STOCK_AI_ILLUSTRATION_LABEL, stockShowcaseProductJsonLd } from '@ocall/shared';
+import { PremiumPageTitle } from '@/components/site/showcase-premium';
 import { AddToRequest } from '@/components/stock-site/request';
 import { AvailabilityBadge, PublicPrice, StockSiteShell } from '@/components/stock-site/site-shell';
 import { fetchStockProduct, stockImageUrl, stockSiteBase } from '@/lib/public-stock-site';
@@ -57,8 +58,19 @@ export default async function StockSiteProductPage({ params }: Params) {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, '\\u003c') }}
       />
+      <PremiumPageTitle
+        eyebrow={
+          <>
+            <Link href={`${base}/catalogue`} className="underline">
+              Catalogue
+            </Link>
+            {p.category && <> · {p.category.name}</>}
+          </>
+        }
+        title={p.name}
+      />
       <article
-        className="mx-auto grid max-w-5xl gap-8 px-4 py-10 md:grid-cols-2 [&>*]:min-w-0"
+        className="mx-auto grid max-w-6xl gap-8 px-4 py-10 sm:px-6 md:grid-cols-2 [&>*]:min-w-0"
         data-testid="stock-site-product"
       >
         <div className="space-y-3">
@@ -75,45 +87,47 @@ export default async function StockSiteProductPage({ params }: Params) {
                         ? p.name
                         : `${p.name} — photo ${i + 1}`
                   }
-                  className="w-full rounded-2xl bg-surface object-cover"
+                  className="w-full rounded-3xl bg-[#F4F9FC] object-cover shadow-sm ring-1 ring-black/5"
                 />
                 {p.illustrations.includes(imageId) && (
-                  <figcaption className="text-xs text-muted">
+                  <figcaption className="text-xs opacity-70">
                     {STOCK_AI_ILLUSTRATION_LABEL}
                   </figcaption>
                 )}
               </figure>
             ))
           ) : (
-            <div className="flex aspect-square items-center justify-center rounded-2xl bg-surface text-muted">
+            <div
+              className="flex aspect-square items-center justify-center rounded-3xl font-medium text-white/90"
+              style={{
+                background:
+                  'linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 55%, white))',
+              }}
+            >
               Photo à venir
             </div>
           )}
         </div>
         <div className="space-y-4">
-          <nav className="text-sm text-muted">
-            <Link href={`${base}/catalogue`} className="underline">
-              Catalogue
-            </Link>
-            {p.category && <> · {p.category.name}</>}
-          </nav>
-          <h1 className="font-display text-3xl font-bold">{p.name}</h1>
-          {p.brand && <p className="text-sm text-muted">Marque : {p.brand}</p>}
-          <p className="text-xl">
+          {p.brand && <p className="text-sm opacity-70">Marque : {p.brand}</p>}
+          <p className="text-2xl">
             <PublicPrice product={p} />
-            {p.priceTtc !== null && <span className="text-sm text-muted"> / {p.unit}</span>}
+            {p.priceTtc !== null && <span className="text-sm opacity-70"> / {p.unit}</span>}
           </p>
           <AvailabilityBadge product={p} />
           {p.description && (
-            <p className="whitespace-pre-line text-charcoal-soft">{p.description}</p>
+            <p className="whitespace-pre-line text-lg leading-relaxed opacity-85">
+              {p.description}
+            </p>
           )}
           {data.site.forms.includes('QUOTE') && (
-            <div className="space-y-2 rounded-2xl border border-line bg-surface p-4">
+            <div className="space-y-3 rounded-3xl bg-[#F4F9FC] p-6 ring-1 ring-black/5">
               <p className="text-sm font-semibold">Demander un devis</p>
               <AddToRequest slug={data.slug} product={{ id: p.id, name: p.name }} withQuantity />
               <Link
                 href={`${base || '/'}#demande`}
-                className="text-sm font-semibold text-forest underline"
+                className="text-sm font-semibold underline"
+                style={{ color: 'var(--brand)' }}
               >
                 Voir ma demande et l’envoyer
               </Link>

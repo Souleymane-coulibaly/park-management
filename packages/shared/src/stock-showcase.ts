@@ -48,6 +48,11 @@ export interface StockShowcaseContent {
   /** Lien https vers une carte. */
   mapUrl: string | null;
   seoDescription: string | null;
+  /**
+   * Couleur principale de la vitrine (#RRGGBB, boutons et bandeaux à texte blanc lisible) ; null = couleur
+   * Ocall par défaut. Même règle que les sites Park.
+   */
+  primaryColor?: string | null;
   /** Catalogue public (articles cochés « Publier sur la vitrine »). */
   showCatalog: boolean;
   /** Prix de vente TTC affichés ; sinon « Prix sur demande ». */

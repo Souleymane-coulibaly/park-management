@@ -379,12 +379,13 @@ export class OcallStockAiService implements OnModuleInit {
         leadTimeDays: lead,
         coverDays: cover,
         scope,
+        sites: [dto.siteId],
       },
       output: { summary: out.summary, lines, leadAssumed, supplierName: supplier.name },
     });
     return {
       proposal,
-      lines,
+      lines: this.costs(ctx, lines),
       summary: out.summary,
       supplier,
       leadTimeDays: lead,
@@ -529,7 +530,7 @@ export class OcallStockAiService implements OnModuleInit {
     const proposal = await this.propose(ctx, 'STOCK_STOCKOUT', STOCK_STOCKOUT_PROMPT, {
       targetType: dto.siteId ? 'SITE' : 'ORGANIZATION',
       targetId: dto.siteId ?? null,
-      input: { siteId: dto.siteId ?? null },
+      input: { siteId: dto.siteId ?? null, sites: this.sites(ctx, dto.siteId) },
       output: { summary: out.summary, items: explained },
     });
     return { proposal, items: explained, summary: out.summary };
@@ -633,7 +634,12 @@ export class OcallStockAiService implements OnModuleInit {
     const proposal = await this.propose(ctx, 'STOCK_ANALYSIS', STOCK_ANALYSIS_PROMPT, {
       targetType: 'ORGANIZATION',
       targetId: dto.siteId ?? null,
-      input: { period: current.period, siteId: dto.siteId ?? null },
+      input: {
+        period: current.period,
+        siteId: dto.siteId ?? null,
+        sites: this.sites(ctx, dto.siteId),
+        withCosts: Boolean(s.margins),
+      },
       output: { ...out, period: current.period },
     });
     return { proposal, ...out, period: current.period, facts: lines };
@@ -818,9 +824,12 @@ export class OcallStockAiService implements OnModuleInit {
             : { feature: { in: ['STOCK_PRODUCT_PHOTO', 'STOCK_ILLUSTRATION'] } }),
       },
       orderBy: { createdAt: 'desc' },
-      take: 50,
+      take: 200,
     });
-    return rows.map((r) => this.view(r));
+    return rows
+      .filter((r) => this.visible(ctx, r))
+      .slice(0, 50)
+      .map((r) => this.view(r, ctx));
   }
 
   /**
@@ -832,7 +841,8 @@ export class OcallStockAiService implements OnModuleInit {
     const proposal = await this.find(ctx, proposalId);
     this.assertFeatureRight(ctx, proposal.feature as StockAiFeature);
     if (proposal.status !== 'PROPOSED') throw this.decided();
-    let resultId: string;
+    // Vérifications d'abord ; l'action (commande, photo) ne s'exécute qu'après la réservation.
+    let act: () => Promise<string>;
     let edited = false;
     if (proposal.feature === 'STOCK_RESTOCK') {
       if (!stockCan(ctx, 'stock.purchases.manage')) {
@@ -865,18 +875,20 @@ export class OcallStockAiService implements OnModuleInit {
       edited =
         chosen.length !== proposed.length ||
         chosen.some((l) => q3(l.quantity) !== q3(byVariant.get(l.variantId)!.quantity));
-      const order = await this.purchases.create(ctx, {
-        supplierId: input.supplierId,
-        siteId: input.siteId,
-        note: 'Brouillon préparé avec l’assistant de réapprovisionnement (IA), à vérifier.',
-        lines: chosen.map((l) => ({
-          variantId: l.variantId,
-          quantity: q3(l.quantity),
-          unitCost: byVariant.get(l.variantId)!.unitCost,
-          vatRate: byVariant.get(l.variantId)!.vatRate,
-        })),
-      });
-      resultId = order.id;
+      act = async () => {
+        const order = await this.purchases.create(ctx, {
+          supplierId: input.supplierId,
+          siteId: input.siteId,
+          note: 'Brouillon préparé avec l’assistant de réapprovisionnement (IA), à vérifier.',
+          lines: chosen.map((l) => ({
+            variantId: l.variantId,
+            quantity: q3(l.quantity),
+            unitCost: byVariant.get(l.variantId)!.unitCost,
+            vatRate: byVariant.get(l.variantId)!.vatRate,
+          })),
+        });
+        return order.id;
+      };
     } else if (proposal.feature === 'STOCK_PRODUCT_PHOTO') {
       if (!dto.productId) {
         throw new BadRequestException({
@@ -895,31 +907,40 @@ export class OcallStockAiService implements OnModuleInit {
         });
       }
       edited = product.name !== (proposal.output as { name?: string }).name;
-      resultId = product.id;
+      act = async () => product.id;
     } else if (proposal.feature === 'STOCK_ILLUSTRATION') {
-      resultId = await this.applyIllustration(ctx, proposal, dto.showcase === true);
+      act = () => this.applyIllustration(ctx, proposal, dto.showcase === true);
     } else {
       throw new ConflictException({
         code: 'STOCK_AI_NOT_APPLICABLE',
         message: 'Cette proposition se consulte seulement : rien à appliquer.',
       });
     }
+    // Réservation atomique (PROPOSED → APPLIED) : deux validations simultanées, ou une validation et un
+    // refus, ne produisent jamais deux commandes ni une photo dont le fichier a été supprimé.
+    const where = { organizationId: ctx.organizationId, id: proposalId };
     const { count } = await this.db.stockAiProposal.updateMany({
-      where: { organizationId: ctx.organizationId, id: proposalId, status: 'PROPOSED' },
-      data: {
-        status: 'APPLIED',
-        decidedByUserId: ctx.userId,
-        decidedAt: new Date(),
-        edited,
-        resultId,
-      },
+      where: { ...where, status: 'PROPOSED' },
+      data: { status: 'APPLIED', decidedByUserId: ctx.userId, decidedAt: new Date(), edited },
     });
     if (count === 0) throw this.decided();
+    let resultId: string;
+    try {
+      resultId = await act();
+    } catch (error) {
+      // Échec de l'action : la proposition redevient décidable.
+      await this.db.stockAiProposal.updateMany({
+        where: { ...where, status: 'APPLIED', resultId: null },
+        data: { status: 'PROPOSED', decidedByUserId: null, decidedAt: null, edited: false },
+      });
+      throw error;
+    }
+    await this.db.stockAiProposal.updateMany({ where, data: { resultId } });
     await this.record(ctx, 'stock.ai_proposal_applied', proposalId, 'StockAiProposal', {
       feature: proposal.feature,
       resultId,
     });
-    return this.view(await this.find(ctx, proposalId));
+    return this.view(await this.find(ctx, proposalId), ctx);
   }
 
   async reject(ctx: StockContext, proposalId: string) {
@@ -937,7 +958,7 @@ export class OcallStockAiService implements OnModuleInit {
     await this.record(ctx, 'stock.ai_proposal_rejected', proposalId, 'StockAiProposal', {
       feature: proposal.feature,
     });
-    return this.view(await this.find(ctx, proposalId));
+    return this.view(await this.find(ctx, proposalId), ctx);
   }
 
   // ─── Outils ───
@@ -1088,7 +1109,7 @@ export class OcallStockAiService implements OnModuleInit {
     const proposal = await this.db.stockAiProposal.findUnique({
       where: { organizationId_id: { organizationId: ctx.organizationId, id } },
     });
-    if (!proposal) {
+    if (!proposal || !this.visible(ctx, proposal)) {
       throw new NotFoundException({
         code: 'STOCK_AI_PROPOSAL_NOT_FOUND',
         message: 'Proposition introuvable.',
@@ -1097,22 +1118,28 @@ export class OcallStockAiService implements OnModuleInit {
     return proposal;
   }
 
-  private view(p: {
-    id: string;
-    feature: string;
-    status: string;
-    targetType: string;
-    targetId: string | null;
-    output: Prisma.JsonValue;
-    model: string;
-    promptId: string | null;
-    promptVersion: number | null;
-    createdAt: Date;
-    decidedAt: Date | null;
-    edited: boolean;
-    resultId: string | null;
-  }) {
-    const { storageKey: _k, ...output } = (p.output ?? {}) as Record<string, unknown>;
+  private view(
+    p: {
+      id: string;
+      feature: string;
+      status: string;
+      targetType: string;
+      targetId: string | null;
+      output: Prisma.JsonValue;
+      model: string;
+      promptId: string | null;
+      promptVersion: number | null;
+      createdAt: Date;
+      decidedAt: Date | null;
+      edited: boolean;
+      resultId: string | null;
+    },
+    ctx: StockContext,
+  ) {
+    const { storageKey: _k, ...raw } = (p.output ?? {}) as Record<string, unknown>;
+    const output = Array.isArray(raw.lines)
+      ? { ...raw, lines: this.costs(ctx, raw.lines as Record<string, unknown>[]) }
+      : raw;
     return {
       id: p.id,
       feature: p.feature as StockAiFeature,
@@ -1127,6 +1154,39 @@ export class OcallStockAiService implements OnModuleInit {
       edited: p.edited,
       resultId: p.resultId,
     };
+  }
+
+  /** Périmètre réel d'une proposition : le site demandé, sinon les sites du membre (null = toute l'organisation). */
+  private sites(ctx: StockContext, siteId?: string | null): string[] | null {
+    return siteId ? [siteId] : ctx.siteIds;
+  }
+
+  /**
+   * Une proposition n'est vue (liste, aperçu, décision) que par qui pourrait la produire : droit IA de la
+   * fonctionnalité, tous ses sites autorisés (une proposition sur toute l'organisation reste aux membres
+   * sans restriction de site), droit de consulter les ventes pour une analyse, et droit de voir les prix
+   * d'achat si elle cite des marges. Les images du catalogue (sans site) suivent le seul droit IA.
+   */
+  private visible(ctx: StockContext, p: { feature: string; input: Prisma.JsonValue }): boolean {
+    const images = p.feature === 'STOCK_PRODUCT_PHOTO' || p.feature === 'STOCK_ILLUSTRATION';
+    if (!stockCan(ctx, images ? 'stock.ai.images' : 'stock.ai.use')) return false;
+    if (images) return true;
+    const input = (p.input ?? {}) as {
+      sites?: string[] | null;
+      siteId?: string | null;
+      withCosts?: boolean;
+    };
+    if (p.feature === 'STOCK_ANALYSIS' && !stockCan(ctx, 'stock.sales.read')) return false;
+    if (input.withCosts && !stockCan(ctx, 'stock.prices.purchase.read')) return false;
+    const sites = input.sites !== undefined ? input.sites : input.siteId ? [input.siteId] : null;
+    if (sites === null) return ctx.siteIds === null;
+    return sites.every((siteId) => stockSiteAllowed(ctx, siteId));
+  }
+
+  /** Coûts d'achat retirés pour qui ne peut pas les voir (ils restent côté serveur pour le brouillon). */
+  private costs<T extends Record<string, unknown>>(ctx: StockContext, lines: T[]): T[] {
+    if (stockCan(ctx, 'stock.prices.purchase.read')) return lines;
+    return lines.map(({ unitCost: _c, ...rest }) => rest as T);
   }
 
   private decided() {
@@ -1163,7 +1223,7 @@ export class OcallStockAiService implements OnModuleInit {
       },
     });
     await this.record(ctx, 'stock.ai_proposal_created', created.id, 'StockAiProposal', { feature });
-    return this.view(created);
+    return this.view(created, ctx);
   }
 
   private context(ctx: StockContext, feature: StockAiFeature) {

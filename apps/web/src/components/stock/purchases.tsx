@@ -29,11 +29,14 @@ export function Documents({
   ownerId,
   canAdd,
   canRemove,
+  canOpen,
 }: {
   ownerType: 'PURCHASE_ORDER' | 'RECEIPT' | 'SUPPLIER_RETURN';
   ownerId: string;
   canAdd: boolean;
   canRemove: boolean;
+  /** Ouvrir un document exige de voir les prix d'achat (factures et bons fournisseurs). */
+  canOpen: boolean;
 }) {
   const docs = useApi<DocumentView[]>(`/ocall-stock/documents/${ownerType}/${ownerId}`);
   const [error, setError] = useState<ApiError | null>(null);
@@ -66,13 +69,17 @@ export function Documents({
           <ul className="space-y-1 text-sm">
             {docs.data.map((d) => (
               <li key={d.id} className="flex flex-wrap items-center gap-3">
-                <button
-                  type="button"
-                  className="text-forest hover:underline"
-                  onClick={() => void downloadFile(`/ocall-stock/documents/${d.id}`, d.fileName)}
-                >
-                  {d.fileName}
-                </button>
+                {canOpen ? (
+                  <button
+                    type="button"
+                    className="text-forest hover:underline"
+                    onClick={() => void downloadFile(`/ocall-stock/documents/${d.id}`, d.fileName)}
+                  >
+                    {d.fileName}
+                  </button>
+                ) : (
+                  <span>{d.fileName}</span>
+                )}
                 <span className="text-xs text-muted">{Math.ceil(d.bytes / 1024)} Ko</span>
                 {canRemove && (
                   <button

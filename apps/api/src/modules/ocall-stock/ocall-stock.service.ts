@@ -107,8 +107,21 @@ export class OcallStockService {
 
   /** Demandes appliquées pour Ocall Facture (200 dernières), avec le libellé des articles. */
   async factureEvents(ctx: StockContext) {
+    // Membre rattaché à certains sites : seulement les mouvements arrivés à leurs emplacements.
+    const locations =
+      ctx.siteIds === null
+        ? null
+        : (
+            await this.db.stockLocation.findMany({
+              where: { organizationId: ctx.organizationId, siteId: { in: ctx.siteIds } },
+              select: { id: true },
+            })
+          ).map((l) => l.id);
     const events = await this.db.stockInboundEvent.findMany({
-      where: { organizationId: ctx.organizationId },
+      where: {
+        organizationId: ctx.organizationId,
+        ...(locations ? { locationId: { in: locations } } : {}),
+      },
       orderBy: { createdAt: 'desc' },
       take: 200,
     });

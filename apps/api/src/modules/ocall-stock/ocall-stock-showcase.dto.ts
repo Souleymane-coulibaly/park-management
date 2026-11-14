@@ -117,6 +117,14 @@ export class StockShowcaseContentDto {
   @MaxLength(300)
   seoDescription: string | null = null;
 
+  @ApiPropertyOptional({
+    description: 'Couleur principale #RRGGBB (texte blanc lisible) ; null = couleur Ocall',
+  })
+  @IsOptional()
+  @ValidateIf(notNull)
+  @Matches(/^#[0-9a-fA-F]{6}$/, { message: 'Couleur au format #RRGGBB.' })
+  primaryColor: string | null = null;
+
   @ApiProperty({ description: 'Catalogue public (articles cochés « Publier sur la vitrine »)' })
   @IsBoolean()
   showCatalog: boolean = true;

@@ -250,11 +250,18 @@ export function layoutStockReceipt(data: StockReceiptData, paperWidth: PaperWidt
     out.push({ text: columns('Sous-total', money(data.grossTotal), w) });
     out.push({ text: columns('Remises', `-${money(data.discountTotal)}`, w) });
   }
-  out.push({
-    text: columns('TOTAL TTC', money(data.total), Math.floor(w / 2)),
-    bold: true,
-    large: true,
-  });
+  // Total en double largeur (moitié des caractères) : libellé et montant sur une ligne s'ils tiennent,
+  // sinon le libellé puis le montant ; jamais tronqués (un « TOTA » sur 58 mm dès 10 000 FCFA).
+  const total = money(data.total);
+  const half = Math.floor(w / 2);
+  if ('TOTAL TTC'.length + 1 + total.length <= half) {
+    out.push({ text: columns('TOTAL TTC', total, half), bold: true, large: true });
+  } else if (total.length <= half) {
+    out.push({ text: 'TOTAL TTC', bold: true });
+    out.push({ text: total, align: 'right', bold: true, large: true });
+  } else {
+    out.push({ text: columns('TOTAL TTC', total, w), bold: true });
+  }
   const vatByRate = new Map<number, number>();
   for (const l of data.lines)
     vatByRate.set(l.vatRate, (vatByRate.get(l.vatRate) ?? 0) + l.vatAmount);

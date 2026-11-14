@@ -15,6 +15,7 @@ import {
   type FactureSitePublished,
   computeFactureTotals,
   demoSpamReason,
+  isAccessibleBrandColor,
   factureSiteCanonicalUrl,
   safeHttpsUrl,
   siteSlugError,
@@ -57,6 +58,7 @@ const DEFAULT_CONTENT = (name: string): FactureSiteContent => ({
   hours: null,
   mapUrl: null,
   seoDescription: null,
+  primaryColor: null,
   forms: ['CONTACT', 'QUOTE'],
 });
 
@@ -184,6 +186,12 @@ export class FactureSiteService {
       throw new BadRequestException({
         code: 'FACTURE_SITE_WHATSAPP',
         message: 'Numéro WhatsApp international invalide (+223 …).',
+      });
+    }
+    if (dto.primaryColor && !isAccessibleBrandColor(dto.primaryColor)) {
+      throw new BadRequestException({
+        code: 'FACTURE_SITE_COLOR',
+        message: 'Couleur trop claire : le texte blanc des boutons doit rester lisible.',
       });
     }
     const ids = dto.services.map((s) => s.itemId);

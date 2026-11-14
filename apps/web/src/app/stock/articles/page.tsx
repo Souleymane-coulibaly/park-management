@@ -37,6 +37,7 @@ export default function StockProductsPage() {
             currency={context.currency}
             canCreate={canWrite('stock.catalog.manage')}
             canSeePurchase={can('stock.prices.purchase.read')}
+            canEditPrices={canWrite('stock.prices.manage')}
             canAiImages={canWrite('stock.ai.images')}
           />
         </Suspense>
@@ -49,11 +50,14 @@ function Products({
   currency,
   canCreate,
   canSeePurchase,
+  canEditPrices,
   canAiImages,
 }: {
   currency: string;
   canCreate: boolean;
   canSeePurchase: boolean;
+  /** Sans ce droit, l'article est créé au prix de vente 0 (un responsable le fixera). */
+  canEditPrices: boolean;
   /** S8 : préremplir la fiche depuis une photo (IA). */
   canAiImages: boolean;
 }) {
@@ -180,7 +184,7 @@ function Products({
             )}
             <ProductForm
               key={prefill?.proposalId ?? unknownCode ?? 'new'}
-              canEditPrices
+              canEditPrices={canEditPrices}
               canSeePurchase={canSeePurchase}
               initial={prefill?.initial}
               testId="stock-product-form"

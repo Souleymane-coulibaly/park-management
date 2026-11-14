@@ -51,6 +51,8 @@ test('Ocall Stock : site vitrine, catalogue public et demande de devis', async (
   await content.getByLabel('WhatsApp (+223 …)').fill('+223 70 11 22 33');
   await content.getByLabel('Ville').fill('Bamako');
   await content.getByRole('checkbox', { name: /Afficher les prix/ }).check();
+  // Couleur principale du site (même règle que les sites Park).
+  await content.getByLabel('Couleur principale du site').fill('#1e3a8a');
   await content.getByRole('button', { name: 'Enregistrer le brouillon' }).click();
   await expect(content.getByText('Brouillon enregistré.')).toBeVisible();
   const products = page.getByTestId('stock-showcase-products');
@@ -67,6 +69,21 @@ test('Ocall Stock : site vitrine, catalogue public et demande de devis', async (
   await expect(page.getByRole('heading', { name: 'Tout pour bâtir à Bamako' })).toBeVisible();
   await expect(page.getByTestId('stock-site-whatsapp')).toBeVisible();
   await expect(page.getByTestId('stock-site-featured')).toContainText('Peinture blanche 5 L');
+  // Mise en page des sites Park, à la couleur choisie.
+  await expect(page.getByTestId('stock-site')).toHaveAttribute('style', /--brand:\s*#1e3a8a/i);
+  if (process.env.E2E_SHOTS) {
+    await page.screenshot({
+      path: `${process.env.E2E_SHOTS}/stock-vitrine-bureau.png`,
+      fullPage: true,
+    });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.screenshot({
+      path: `${process.env.E2E_SHOTS}/stock-vitrine-telephone.png`,
+      fullPage: true,
+    });
+    await page.setViewportSize({ width: 1280, height: 900 });
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280);
   await page.getByRole('link', { name: 'Tout le catalogue' }).click();
   const catalog = page.getByTestId('stock-site-catalog');
   await expect(catalog).toContainText('Peinture blanche 5 L');

@@ -414,6 +414,7 @@ function Purchase({ context, can, canWrite }: StockPageProps) {
         ownerId={p.id}
         canAdd={canWrite('stock.purchases.manage') || canWrite('stock.purchases.receive')}
         canRemove={manage}
+        canOpen={seeCost}
       />
       {p.status === 'DRAFT' && (
         <Alert tone="info" title="Brouillon">

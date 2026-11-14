@@ -1,11 +1,13 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import sharp from 'sharp';
 import { STOCK_DOCUMENT_MAX_BYTES, STOCK_DOCUMENT_MAX_COUNT } from '@ocall/shared';
 import { AuditService } from '../../common/audit/audit.service';
 import {
@@ -13,7 +15,7 @@ import {
   type StorageProvider,
   privateKey,
 } from '../../common/storage/storage-provider';
-import { type StockContext, stockSiteAllowed } from './ocall-stock-access';
+import { type StockContext, stockCan, stockSiteAllowed } from './ocall-stock-access';
 import { OcallStockPrismaService } from './ocall-stock-prisma.service';
 
 export type StockDocumentOwner = 'PURCHASE_ORDER' | 'RECEIPT' | 'SUPPLIER_RETURN';
@@ -37,9 +39,19 @@ function detectType(buffer: Buffer): { mime: string; ext: 'pdf' | 'jpg' | 'png' 
   return null;
 }
 
+/**
+ * Le nom reçu d'un envoi multipart est lu octet par octet (latin-1) alors que les navigateurs l'envoient
+ * en UTF-8 : « bon’livraison » arrivait en « bonâ€™livraison ». Relu en UTF-8 s'il est valide.
+ */
+export function uploadedName(name: string): string {
+  if ([...name].some((c) => c.charCodeAt(0) > 0xff)) return name;
+  const utf8 = Buffer.from(name, 'latin1').toString('utf8');
+  return utf8.includes('\uFFFD') ? name : utf8;
+}
+
 /** Nom affiché : sans chemin ni caractères de contrôle, 160 caractères au plus. */
 const safeName = (name: string) =>
-  (name.split(/[\\/]/).pop() ?? 'document')
+  (uploadedName(name).split(/[\\/]/).pop() ?? 'document')
     .replace(/[\p{Cc}"]/gu, '')
     .trim()
     .slice(0, 160) || 'document';
@@ -89,8 +101,21 @@ export class OcallStockDocumentsService {
         message: `${STOCK_DOCUMENT_MAX_COUNT} documents au plus par pièce.`,
       });
     }
+    // Photo réencodée : métadonnées retirées (position GPS, appareil), orientation appliquée.
+    let body = file.buffer;
+    if (type.ext !== 'pdf') {
+      try {
+        const image = sharp(file.buffer, { limitInputPixels: 40_000_000 }).rotate();
+        body = await (type.ext === 'png' ? image.png() : image.jpeg({ quality: 88 })).toBuffer();
+      } catch {
+        throw new BadRequestException({
+          code: 'STOCK_DOCUMENT_REFUSED',
+          message: 'Image illisible : PDF, JPEG ou PNG de 10 Mo au plus.',
+        });
+      }
+    }
     const key = privateKey(ctx.organizationId, null, randomUUID(), type.ext);
-    await this.storage.put(key, file.buffer, type.mime);
+    await this.storage.put(key, body, type.mime);
     try {
       const doc = await this.db.stockDocument.create({
         data: {
@@ -99,7 +124,7 @@ export class OcallStockDocumentsService {
           ownerId,
           fileName: safeName(file.originalname),
           mimeType: type.mime,
-          bytes: file.size,
+          bytes: body.length,
           storageKey: key,
           createdByUserId: ctx.userId,
         },
@@ -111,7 +136,7 @@ export class OcallStockDocumentsService {
         action: 'stock.document_added',
         targetType: ownerType,
         targetId: ownerId,
-        metadata: { documentId: doc.id, bytes: file.size },
+        metadata: { documentId: doc.id, bytes: body.length },
       });
       return doc;
     } catch (e) {
@@ -120,7 +145,15 @@ export class OcallStockDocumentsService {
     }
   }
 
+  /** Factures et bons fournisseurs portent les prix d'achat : leur contenu suit ce droit. */
   async body(ctx: StockContext, id: string) {
+    if (!stockCan(ctx, 'stock.prices.purchase.read')) {
+      throw new ForbiddenException({
+        code: 'STOCK_PRICE_FORBIDDEN',
+        message:
+          'Les documents fournisseurs (avec les prix d’achat) sont réservés aux personnes autorisées.',
+      });
+    }
     const doc = await this.db.stockDocument.findUnique({
       where: { organizationId_id: { organizationId: ctx.organizationId, id } },
     });

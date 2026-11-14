@@ -8,7 +8,8 @@ organisation a les deux abonnements (sprint S5).
 
 **État : sprints S1 (socle et catalogue), S2 (sites, stocks, transferts, inventaires), S3 (achats), S4
 (caisse), S5 (interconnexion Facture), S6 (tableaux de bord, alertes, recherche globale), S7 (site
-vitrine) et S8 (IA) livrés.** La stabilisation suit (§17). Plan complet :
+vitrine), S8 (IA) et S9 (stabilisation, revue de sécurité) livrés.** Prochaine étape : l'audit Codex
+indépendant (§18). Plan complet :
 `ocall-audits/plan-ocall-stock-v1.md` (hors dépôt).
 
 ## 1. Activation
@@ -479,6 +480,12 @@ commande en ligne.
   déclaré pour une vitrine Facture n'est jamais repris par Stock, et réciproquement (ni un site Park).
 - **Droits** : « Gérer le site vitrine » (administrateur, responsable de magasin) ; « Traiter les demandes
   du site » (responsable de magasin, commercial).
+- **Mise en page** (S9) : celle des sites Park (thème Aqua Premium) — en-tête fixe avec menu mobile,
+  accueil plein écran sur la photo de couverture, sections alternées, articles en cartes, galerie en
+  mosaïque, cartes de contact, pied de page, bouton WhatsApp permanent sur mobile — à la **couleur
+  principale** choisie par le commerçant (même règle que Park : texte blanc lisible, contraste ≥ 4,5:1 ;
+  sinon refusée ; sans choix, couleur Ocall). Composants communs aux vitrines Stock et Facture :
+  `apps/web/src/components/site/showcase-premium.tsx`.
 
 ## 14. Intelligence artificielle (S8)
 
@@ -586,7 +593,8 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
 | Unitaires, S7       | `packages/shared/src/stock-showcase.spec.ts`                                                    | Adresse canonique, pages servies, données structurées (prix seulement s'il est affiché)                |
 | Unitaires, S6       | `packages/shared/src/stock-reports.spec.ts`                                                     | CMUP, coût retenu, marges et exclusions, valeur, faible rotation, période                              |
 | Unitaires, S5       | `packages/shared/src/stock-facture.spec.ts`                                                     | TTC → HT, quantités par article, sortie nette de la source, plafond des retours, délais de relance     |
-| Intégration         | `apps/api/test/stock-s1…s8.integration.spec.ts` (`TEST_STOCK_DATABASE_URL`)                     | Voir le détail ci-dessous                                                                              |
+| Unitaires, S9       | `apps/api/src/common/download.spec.ts`, `packages/shared/src/stock-sales.spec.ts`               | Nom de fichier quelconque téléchargeable ; total du ticket jamais tronqué                              |
+| Intégration         | `apps/api/test/stock-s1…s8.integration.spec.ts`, `stock-s9-*.integration.spec.ts`               | Voir le détail ci-dessous                                                                              |
 | E2E                 | `e2e/stock-s1.spec.ts` à `stock-s8.spec.ts`                                                     | Voir le détail ci-dessous                                                                              |
 
 **Intégration**, sur bases locales jetables :
@@ -636,7 +644,21 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
   réapprovisionnement (quantités du serveur, déjà commandé déduit, brouillon seulement, rien d'autre ne
   bouge, aucun appel sans article) ; chiffre inventé refusé ; ruptures (fourchette, risque, jamais
   « certaine ») ; analyse ; photo (catégorie, code-barres contrôlé) ; illustration (sans photo, mention,
-  vitrine sur décision, quota propre, contrôle en base) ; isolation.
+  vitrine sur décision, quota propre, contrôle en base) ; propositions limitées aux sites du membre, aux
+  ventes et aux coûts d'achat qu'il peut voir ; isolation ;
+- S9, isolation (`stock-s9-tenancy`) : une organisation tente **chaque route** avec les identifiants d'une
+  autre (76 routes à identifiant, 19 identifiants dans le corps, 26 listes) : 404 partout, aucune donnée
+  dans les listes, rien de modifié (empreinte des tables). Une garde relit les contrôleurs : une nouvelle
+  route à identifiant non couverte fait échouer le test ;
+- S9, concurrence (`stock-s9-concurrency`) : réception rejouée, annulation de réception, expédition et
+  réception de transfert, validation d'inventaire, vente rejouée, retours de la totalité, panier repris,
+  clôture de caisse, proposition IA validée deux fois ou validée et refusée — chaque fois lancées deux fois
+  en même temps : une seule compte ;
+- S9, impression (`stock-s9-printing`) : étiquettes d'articles et d'emplacements à la taille exacte de
+  chaque format, une par page ; tickets 58 et 80 mm (aucune ligne plus large que le papier, accents en
+  PC858, coupe, jamais d'ouverture de tiroir), ticket PDF à la largeur du rouleau, duplicata ; bon de
+  commande A4 paginé ; rapport d'inventaire ; CSV protégé contre les formules ;
+- S9, sécurité (`stock-s9-security`) : corrections de la revue (§17).
 
 **E2E**, parcours navigateur :
 
@@ -664,8 +686,41 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
 - S8 : IA activée, suggestion de réapprovisionnement puis brouillon de commande, ruptures, illustration
   (mention IA, hors vitrine), fiche préremplie depuis une photo, page IA sur téléphone.
 
-## 17. Suite de la feuille de route
+## 17. Stabilisation et revue de sécurité (S9)
 
-| Sprint | Contenu       |
-| ------ | ------------- |
-| S9     | Stabilisation |
+**Revue de sécurité** du module (isolation, sites, droits, routes publiques, envois de fichiers, SQL,
+concurrence, IA, journaux) : aucune faille critique. Corrigé :
+
+| Gravité    | Constat                                                                                                                                                       | Correction                                                                                                                                                                                                                                                                         |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Importante | Les propositions IA (réapprovisionnement, ruptures, analyse) étaient visibles de tout utilisateur de l'IA, quels que soient ses sites et ses droits           | Périmètre réel gardé avec chaque proposition ; liste, aperçu et décision limités aux sites du membre (une proposition sur toute l'organisation reste aux membres sans restriction), analyse réservée au droit des ventes, marges et coûts d'achat retirés pour qui ne les voit pas |
+| Mineure    | Un responsable d'entrepôt (catalogue « hors prix ») fixait le prix de vente en créant un article                                                              | Fixer un prix exige le droit de gérer les prix : sans lui, l'article est créé au prix de vente 0, sans prix d'achat, et un responsable fixe ensuite le prix (indiqué dans le formulaire)                                                                                           |
+| Mineure    | Une modification répondait 200 ou 403 selon que la valeur envoyée était le prix d'achat actuel                                                                | Droit vérifié dès que le champ est envoyé                                                                                                                                                                                                                                          |
+| Mineure    | Le magasinier ouvrait les factures et bons fournisseurs joints (qui portent les prix d'achat) ; les photos jointes gardaient leurs métadonnées (position GPS) | Ouverture réservée au droit « Voir les prix d'achat » (la liste reste visible) ; photos réencodées sans métadonnées                                                                                                                                                                |
+| Mineure    | Erreur 500 au téléchargement d'un fichier dont le nom contient « ’ » ; nom reçu mal décodé (« bonâ€™livraison »)                                              | En-tête `Content-Disposition` avec repli ASCII et nom exact encodé (outil commun : un nom ASCII est inchangé pour Facture et School) ; nom relu en UTF-8                                                                                                                           |
+| Mineure    | Deux validations simultanées d'une proposition IA : deux brouillons de commande, ou photo dont le fichier venait d'être supprimé par un refus                 | Réservation atomique de la proposition avant l'action, rendue décidable si l'action échoue                                                                                                                                                                                         |
+| Mineure    | Les mouvements venus de Facture étaient listés hors des sites du membre                                                                                       | Filtrés sur les emplacements de ses sites                                                                                                                                                                                                                                          |
+| Mineure    | Un domaine déclaré mais jamais vérifié restait réservé sans fin ; la page de contrôle HTTPS publique révélait l'identifiant de l'organisation                 | Déclaration en attente libérée au bout de 7 jours ; la page sert une preuve dérivée du jeton du domaine                                                                                                                                                                            |
+| Mineure    | Une requête anonyme du plan du site recalculait toutes les vitrines                                                                                           | Plan gardé 10 minutes par adresse servie (adresses inconnues jamais gardées), vitrines interrogées par lots de 10                                                                                                                                                                  |
+
+Trouvés par les nouveaux tests et corrigés : le total du ticket 58 mm était tronqué (« TOTA 64 900 FCFA »
+dès 10 000 FCFA) — libellé puis montant quand ils ne tiennent pas sur une ligne en double largeur ;
+l'historique des prix d'achat d'une variante d'une autre organisation répondait une liste vide au lieu de 404.
+
+**Validation sur le matériel cible** (à faire sur place, aucun matériel réel n'a été testé) :
+
+1. Imprimante thermique 58 mm puis 80 mm (connecteur Ocall) : ticket d'une vente avec un article au nom
+   long accentué et un total d'au moins 100 000 FCFA ; vérifier accents, largeur, coupe, QR code, puis
+   duplicata ; le tiroir ne s'ouvre jamais par l'impression.
+2. Étiquettes 40 × 30, 50 × 30 et 60 × 40 mm (imprimante d'étiquettes, échelle 100 %) : une étiquette par
+   page, code-barres EAN-13 relu par la douchette et par le téléphone, QR code relu.
+3. Étiquettes d'emplacements : QR code relu par la caméra (Android et iPhone) dans l'inventaire.
+4. Douchette USB (mode clavier) en caisse et à l'inventaire ; caméra du téléphone (iPhone : lecture de
+   secours `zxing-wasm`).
+
+## 18. Audit Codex indépendant
+
+Dossier préparé hors dépôt : `ocall-audits/brief-codex-ocall-stock-v1.md` (périmètre, branches, commandes
+de test, règles absolues, points d'attention). Reste ensuite : migrations et déploiement en préproduction,
+chacun sur accord explicite (le pré-déploiement Railway doit d'abord inclure les étapes Facture et Stock,
+§15).

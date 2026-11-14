@@ -139,6 +139,20 @@ describe('Ocall Stock — caisse : ticket', () => {
     expect(encodeReceiptLines(lines).length).toBeGreaterThan(100);
   });
 
+  it.each([
+    [58, 9_000, 'TOTAL TTC 9 000 FCFA'],
+    [58, 64_900, '64 900 FCFA'],
+    [58, 1_234_567, '1 234 567 FCFA'],
+    [80, 64_900, '64 900 FCFA'],
+    [58, 12_345_678_900, '12 345 678 900 FCFA'],
+  ] as const)('ticket %i mm, total %i : libellé et montant jamais tronqués', (w, total, shown) => {
+    const preview = previewLines(layoutStockReceipt({ ...data, total }, w), w);
+    const text = preview.join('\n');
+    expect(text).toMatch(/TOTAL TTC/);
+    expect(text.replace(/\s+/g, ' ')).toContain(shown);
+    expect(text).not.toMatch(/TOTA(?!L)/);
+  });
+
   it('réimpression : mention DUPLICATA', () => {
     expect(previewLines(layoutStockReceipt({ ...data, duplicate: true }, 80), 80)[0]).toContain(
       'DUPLICATA',

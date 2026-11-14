@@ -132,6 +132,14 @@ export class FactureSiteContentDto {
   @MaxLength(300)
   seoDescription: string | null = null;
 
+  @ApiPropertyOptional({
+    description: 'Couleur principale #RRGGBB (texte blanc lisible) ; null = couleur Ocall',
+  })
+  @IsOptional()
+  @ValidateIf(notNull)
+  @Matches(/^#[0-9a-fA-F]{6}$/, { message: 'Couleur au format #RRGGBB.' })
+  primaryColor: string | null = null;
+
   @ApiProperty({ enum: FACTURE_REQUEST_KINDS, isArray: true })
   @IsArray()
   @ArrayUnique()

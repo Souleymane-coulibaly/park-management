@@ -43,6 +43,7 @@ test('Ocall Facture : site vitrine publié, demande d’un visiteur reçue', asy
   await content.getByLabel('Accroche').fill('Installation, entretien, dépannage');
   await content.getByLabel('WhatsApp (+223 …)').fill('+223 70 11 22 33');
   await content.getByLabel('Ville').fill('Bamako');
+  await content.getByLabel('Couleur principale du site').fill('#7c2d12');
   await content.getByLabel('Entretien climatiseur', { exact: true }).check();
   await content.getByLabel('Afficher le prix — Entretien climatiseur').check();
   await content.getByRole('button', { name: 'Enregistrer le brouillon' }).click();
@@ -64,6 +65,23 @@ test('Ocall Facture : site vitrine publié, demande d’un visiteur reçue', asy
     'Climatisation et froid à Bamako',
   );
   await expect(pub.getByTestId('facture-site-services')).toContainText(/29\s500\sFCFA TTC/);
+  // Mise en page des sites Park, à la couleur choisie ; lisible sur téléphone.
+  await expect(site).toHaveAttribute('style', /--brand:\s*#7c2d12/i);
+  if (process.env.E2E_SHOTS) {
+    await pub.screenshot({
+      path: `${process.env.E2E_SHOTS}/facture-vitrine-bureau.png`,
+      fullPage: true,
+    });
+  }
+  await pub.setViewportSize({ width: 390, height: 844 });
+  expect(await pub.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  if (process.env.E2E_SHOTS) {
+    await pub.screenshot({
+      path: `${process.env.E2E_SHOTS}/facture-vitrine-telephone.png`,
+      fullPage: true,
+    });
+  }
+  await pub.setViewportSize({ width: 1280, height: 900 });
   await expect(pub.getByTestId('facture-site-whatsapp')).toHaveAttribute(
     'href',
     'https://wa.me/22370112233',

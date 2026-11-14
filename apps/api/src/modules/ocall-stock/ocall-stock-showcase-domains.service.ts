@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
@@ -22,6 +22,23 @@ import type { StockContext } from './ocall-stock-access';
 import { OcallStockPrismaService } from './ocall-stock-prisma.service';
 
 const NOT_FOUND = { code: 'DOMAIN_NOT_FOUND', message: 'Domaine introuvable.' };
+
+/** Un domaine déclaré mais jamais vérifié est libéré au bout de 7 jours (pas de réservation sans fin). */
+export const STOCK_DOMAIN_PENDING_DAYS = 7;
+const pendingCutoff = () => new Date(Date.now() - STOCK_DOMAIN_PENDING_DAYS * 86_400_000);
+/** Domaine qui retient encore son nom : tout sauf une déclaration en attente expirée. */
+const holding = () => ({ NOT: { status: 'PENDING' as const, createdAt: { lt: pendingCutoff() } } });
+
+/**
+ * Preuve servie par la page de contrôle HTTPS : dérivée du jeton du domaine, jamais l'identifiant de
+ * l'organisation (la page est publique).
+ */
+export function stockDomainHttpsProof(verificationToken: string): string {
+  return createHash('sha256')
+    .update(`ocall-stock-site:${verificationToken}`)
+    .digest('base64url')
+    .slice(0, 32);
+}
 
 /**
  * Vérificateur des domaines des vitrines Stock : même implémentation que les sites Park et Facture, jeton
@@ -49,7 +66,7 @@ export class OcallStockShowcaseDomainsService {
     // Domaines déclarés pour une vitrine Stock : consultés par les autres applications (Facture).
     registry.register('STOCK', async (hostname) =>
       this.config.stock.enabled
-        ? (await this.db.stockShowcaseDomain.count({ where: { hostname } })) > 0
+        ? (await this.db.stockShowcaseDomain.count({ where: { hostname, ...holding() } })) > 0
         : false,
     );
   }
@@ -95,6 +112,25 @@ export class OcallStockShowcaseDomainsService {
         code: 'DOMAIN_ALREADY_SET',
         message: 'Votre site a déjà un domaine : supprimez-le avant d’en ajouter un autre.',
       });
+    }
+    // Déclaration en attente expirée (jamais vérifiée en 7 jours, quelle que soit l'organisation) : libérée.
+    const expired = await this.db.stockShowcaseDomain.findMany({
+      where: {
+        hostname: normalized.hostname,
+        status: 'PENDING',
+        createdAt: { lt: pendingCutoff() },
+      },
+      select: { id: true, organizationId: true },
+    });
+    for (const old of expired) {
+      const { count } = await this.db.stockShowcaseDomain.deleteMany({
+        where: { id: old.id, status: 'PENDING', createdAt: { lt: pendingCutoff() } },
+      });
+      if (count > 0) {
+        await this.record(old.organizationId, ctx.userId, 'stock.showcase_domain_expired', old.id, {
+          hostname: normalized.hostname,
+        });
+      }
     }
     // Unicité entre applications : un domaine déclaré pour un site Park n'est jamais repris.
     if (
@@ -185,7 +221,10 @@ export class OcallStockShowcaseDomainsService {
     ) {
       error = 'Enregistrement TXT de propriété absent : le domaine n’est plus prouvé.';
     } else {
-      const https = await this.verifier.checkHttps(domain.hostname, domain.organizationId);
+      const https = await this.verifier.checkHttps(
+        domain.hostname,
+        stockDomainHttpsProof(domain.verificationToken),
+      );
       if (!https.ok) error = https.error;
     }
     const updated = await this.db.stockShowcaseDomain.update({

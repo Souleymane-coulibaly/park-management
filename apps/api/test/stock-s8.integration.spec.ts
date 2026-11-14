@@ -96,7 +96,12 @@ const key = () => randomUUID().replace(/-/g, '');
     return rows.reduce((n, r) => n + r.onHand.toNumber(), 0);
   }
 
-  async function member(role: string, overrides: { permission: string; granted: boolean }[] = []) {
+  let lastMemberId = '';
+  async function member(
+    role: string,
+    overrides: { permission: string; granted: boolean }[] = [],
+    siteIds: string[] = [],
+  ) {
     const created = (
       await a
         .post(api('/ocall-stock/members'))
@@ -109,6 +114,13 @@ const key = () => randomUUID().replace(/-/g, '');
         .send({ overrides })
         .expect(200);
     }
+    if (siteIds.length > 0) {
+      await a
+        .put(api(`/ocall-stock/members/${created.member.id}/sites`))
+        .send({ siteIds })
+        .expect(200);
+    }
+    lastMemberId = created.member.id;
     const session = await login(app, created.member.loginId, created.temporaryPassword);
     await session.agent
       .post(api('/auth/change-password'))
@@ -642,6 +654,69 @@ const key = () => randomUUID().replace(/-/g, '');
       (await a.post(api(`/ocall-stock/ai/products/${other.productId}/illustration`)).expect(429))
         .body.code,
     ).toBe('AI_QUOTA_EXCEEDED');
+  });
+
+  it('propositions : sites du membre, droit des ventes et coûts d’achat respectés', async () => {
+    const mine = (await a.get(api('/ocall-stock/ai/proposals')).expect(200)).body as {
+      id: string;
+      feature: string;
+      output: { lines?: { unitCost?: number }[] };
+    }[];
+    const restock = mine.find((p) => p.id === restockProposal)!;
+    expect(restock.output.lines![0]).toHaveProperty('unitCost', 5000);
+    const analysis = mine.find((p) => p.feature === 'STOCK_ANALYSIS')!;
+    // Responsable du seul dépôt : rien du magasin ni de toute l'organisation ; les images du catalogue, si.
+    const depOnly = await member('STORE_MANAGER', [], [dep.id]);
+    const seen = (await depOnly.get(api('/ocall-stock/ai/proposals')).expect(200)).body as {
+      id: string;
+      feature: string;
+    }[];
+    expect(seen.map((p) => p.id)).not.toContain(restockProposal);
+    expect(seen.map((p) => p.id)).not.toContain(analysis.id);
+    expect(seen.filter((p) => p.feature === 'STOCK_STOCKOUT')).toEqual([]);
+    expect(seen.some((p) => p.feature === 'STOCK_ILLUSTRATION')).toBe(true);
+    await depOnly.post(api(`/ocall-stock/ai/proposals/${restockProposal}/reject`)).expect(404);
+    await depOnly.post(api(`/ocall-stock/ai/proposals/${analysis.id}/reject`)).expect(404);
+    // Sans droit de voir les prix d'achat : suggestion visible, coûts retirés ; analyse avec marges cachée.
+    const noCosts = await member('STORE_MANAGER', [
+      { permission: 'stock.prices.purchase.read', granted: false },
+    ]);
+    const blind = (await noCosts.get(api('/ocall-stock/ai/proposals')).expect(200)).body as {
+      id: string;
+      output: { lines?: Record<string, unknown>[] };
+    }[];
+    const blindRestock = blind.find((p) => p.id === restockProposal)!;
+    expect(blindRestock.output.lines![0]).toMatchObject({
+      variantId: paint.variantId,
+      quantity: 6,
+    });
+    expect(blindRestock.output.lines![0]).not.toHaveProperty('unitCost');
+    expect(blind.map((p) => p.id)).not.toContain(analysis.id);
+    // Sans droit de consulter les ventes (prix d'achat visibles) : analyse cachée, suggestion visible.
+    const blindId = lastMemberId;
+    await a
+      .put(api(`/ocall-stock/members/${blindId}/permissions`))
+      .send({ overrides: [{ permission: 'stock.sales.read', granted: false }] })
+      .expect(200);
+    const noSales = (await noCosts.get(api('/ocall-stock/ai/proposals')).expect(200)).body as {
+      id: string;
+    }[];
+    expect(noSales.map((p) => p.id)).toContain(restockProposal);
+    expect(noSales.map((p) => p.id)).not.toContain(analysis.id);
+    await noCosts.post(api(`/ocall-stock/ai/proposals/${analysis.id}/reject`)).expect(404);
+    await a
+      .put(api(`/ocall-stock/members/${blindId}/permissions`))
+      .send({ overrides: [{ permission: 'stock.prices.purchase.read', granted: false }] })
+      .expect(200);
+    const fresh = (
+      await noCosts
+        .post(api('/ocall-stock/ai/restock'))
+        .send({ siteId: mag.id, supplierId, coverDays: 30 })
+        .expect(200)
+    ).body;
+    expect(fresh.lines.length).toBeGreaterThan(0);
+    expect(fresh.lines[0]).not.toHaveProperty('unitCost');
+    expect(fresh.proposal.output.lines[0]).not.toHaveProperty('unitCost');
   });
 
   it('isolation : propositions, aperçus et décisions limités à l’organisation', async () => {

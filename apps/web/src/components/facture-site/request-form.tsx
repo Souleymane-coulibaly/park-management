@@ -35,7 +35,7 @@ export function FactureRequestForm({
     onChange: (e: { target: { value: string } }) => setForm({ ...form, [key]: e.target.value }),
   });
   const field =
-    'mt-1 block w-full rounded-xl border border-line bg-surface px-3 py-2.5 text-[15px]';
+    'mt-1 block w-full rounded-xl border border-black/15 bg-white px-3 py-2.5 text-[15px]';
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -166,7 +166,8 @@ export function FactureRequestForm({
       <button
         type="submit"
         disabled={state === 'sending'}
-        className="rounded-xl bg-forest px-5 py-3 font-semibold text-white disabled:opacity-60"
+        className="min-h-12 rounded-full px-6 py-3 font-semibold text-white disabled:opacity-60"
+        style={{ background: 'var(--brand, #176B53)' }}
       >
         {state === 'sending' ? 'Envoi…' : 'Envoyer ma demande'}
       </button>

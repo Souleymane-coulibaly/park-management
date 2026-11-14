@@ -63,7 +63,8 @@ export function ProductForm({
   const set = (key: keyof typeof values) => (v: string | boolean) =>
     setValues((s) => ({ ...s, [key]: v }));
   const creating = !product;
-  const pricesEditable = creating || canEditPrices;
+  // Sans le droit de gérer les prix, un article se crée au prix de vente 0 (un responsable le fixera).
+  const pricesEditable = canEditPrices;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -85,6 +86,7 @@ export function ProductForm({
     } else if (values.sku.trim() !== product.sku) {
       body.sku = values.sku.trim();
     }
+    if (creating && !pricesEditable) body.salePrice = 0;
     if (pricesEditable) {
       const sale = num(values.salePrice);
       if (creating || sale !== product.salePrice) body.salePrice = sale;
@@ -164,8 +166,14 @@ export function ProductForm({
           min={0}
           required
           disabled={!pricesEditable}
-          hint={pricesEditable ? undefined : 'Modification réservée aux personnes autorisées.'}
-          value={values.salePrice}
+          hint={
+            pricesEditable
+              ? undefined
+              : creating
+                ? 'Prix fixé par un responsable : l’article est créé à 0 en attendant.'
+                : 'Modification réservée aux personnes autorisées.'
+          }
+          value={creating && !pricesEditable ? '0' : values.salePrice}
           onChange={(e) => set('salePrice')(e.target.value)}
         />
         {canSeePurchase && (

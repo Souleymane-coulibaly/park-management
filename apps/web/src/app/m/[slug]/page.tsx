@@ -1,7 +1,14 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { stockShowcaseStoreJsonLd } from '@ocall/shared';
+import { stockShowcaseStoreJsonLd, whatsappDigits, whatsappUrl } from '@ocall/shared';
+import {
+  ContactCards,
+  GalleryMosaic,
+  PREMIUM_CARD,
+  PremiumHero,
+  PremiumSection,
+} from '@/components/site/showcase-premium';
 import { StockRequestForm } from '@/components/stock-site/request';
 import { ProductCard, StockSiteShell } from '@/components/stock-site/site-shell';
 import { fetchStockSite, stockMediaUrl, stockSiteBase } from '@/lib/public-stock-site';
@@ -53,148 +60,121 @@ export default async function StockSiteHomePage({ params }: Params) {
     new URL(stockMediaUrl(key), data.url).toString(),
   );
 
+  const wa = s.whatsapp ? whatsappDigits(s.whatsapp) : null;
+  const waHref = wa ? whatsappUrl(wa) : null;
+  // Sections affichées, dans l'ordre : fonds alternés comme sur les sites Park.
+  const sections = [
+    s.about ? 'about' : null,
+    s.showCatalog && data.featured.length > 0 ? 'featured' : null,
+    s.gallery.length > 0 ? 'gallery' : null,
+    'contact',
+  ].filter((x): x is string => x !== null);
+  const tinted = (key: string) => sections.indexOf(key) % 2 === 0;
+
   return (
     <StockSiteShell site={s} base={base}>
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, '\\u003c') }}
       />
-      <header className="relative overflow-hidden bg-forest text-white">
-        {s.cover && (
-          // eslint-disable-next-line @next/next/no-img-element -- image publiée servie par l'API
-          <img
-            src={stockMediaUrl(s.cover)}
-            alt=""
-            className="absolute inset-0 h-full w-full object-cover opacity-30"
-          />
-        )}
-        <div className="relative mx-auto max-w-5xl px-4 py-14 sm:py-20">
-          <p className="text-sm font-semibold uppercase tracking-wide text-white/80">
-            {s.businessName}
+      <PremiumHero
+        coverUrl={s.cover ? stockMediaUrl(s.cover) : null}
+        eyebrow={[s.businessName, s.city].filter(Boolean).join(' · ')}
+        title={s.headline}
+        tagline={s.tagline}
+        cta={
+          s.showCatalog
+            ? { href: `${base}/catalogue`, label: 'Voir le catalogue', kind: 'link' }
+            : waHref
+              ? { href: waHref, label: 'Écrire sur WhatsApp', kind: 'whatsapp' }
+              : null
+        }
+        discoverHref={`#${sections[0]}`}
+      />
+
+      {s.about && (
+        <PremiumSection
+          id="about"
+          eyebrow="Bienvenue"
+          title="Qui sommes-nous"
+          tinted={tinted('about')}
+        >
+          <p className="max-w-3xl whitespace-pre-line text-lg leading-relaxed opacity-85">
+            {s.about}
           </p>
-          <h1 className="mt-2 font-display text-3xl font-bold sm:text-4xl">{s.headline}</h1>
-          {s.tagline && <p className="mt-3 max-w-2xl text-lg text-white/90">{s.tagline}</p>}
-          <div className="mt-6 flex flex-wrap gap-3">
-            {s.showCatalog && (
-              <Link
-                href={`${base}/catalogue`}
-                className="rounded-xl bg-white px-5 py-3 font-semibold text-forest"
-              >
-                Voir le catalogue
-              </Link>
-            )}
-            {s.phone && (
-              <a
-                href={`tel:${s.phone.replace(/[^+\d]/g, '')}`}
-                className="rounded-xl border border-white/60 px-5 py-3 font-semibold"
-              >
-                Appeler {s.phone}
-              </a>
-            )}
-          </div>
-        </div>
-      </header>
+        </PremiumSection>
+      )}
 
-      <div className="mx-auto max-w-5xl space-y-12 px-4 py-12">
-        {s.about && (
-          <section>
-            <h2 className="font-display text-2xl font-bold">Qui sommes-nous</h2>
-            <p className="mt-3 whitespace-pre-line text-charcoal-soft">{s.about}</p>
-          </section>
-        )}
+      {s.showCatalog && data.featured.length > 0 && (
+        <PremiumSection
+          id="featured"
+          eyebrow="Catalogue"
+          title="Nos articles"
+          tinted={tinted('featured')}
+          testId="stock-site-featured"
+          action={
+            <Link
+              href={`${base}/catalogue`}
+              className="inline-flex min-h-11 items-center rounded-full px-5 font-semibold text-white"
+              style={{ background: 'var(--brand)' }}
+            >
+              Tout le catalogue
+            </Link>
+          }
+        >
+          <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            {data.featured.map((p) => (
+              <ProductCard key={p.id} product={p} base={base} />
+            ))}
+          </ul>
+        </PremiumSection>
+      )}
 
-        {s.showCatalog && data.featured.length > 0 && (
-          <section data-testid="stock-site-featured">
-            <div className="flex flex-wrap items-baseline justify-between gap-2">
-              <h2 className="font-display text-2xl font-bold">Nos articles</h2>
-              <Link href={`${base}/catalogue`} className="font-semibold text-forest underline">
-                Tout le catalogue
-              </Link>
-            </div>
-            <ul className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-              {data.featured.map((p) => (
-                <ProductCard key={p.id} product={p} base={base} />
-              ))}
-            </ul>
-          </section>
-        )}
+      {s.gallery.length > 0 && (
+        <PremiumSection
+          id="gallery"
+          eyebrow="En images"
+          title="Le magasin"
+          tinted={tinted('gallery')}
+        >
+          <GalleryMosaic
+            items={s.gallery.map((g) => ({
+              src: stockMediaUrl(g.key),
+              alt: g.caption ?? 'Le magasin',
+              caption: g.caption,
+            }))}
+          />
+        </PremiumSection>
+      )}
 
-        {s.gallery.length > 0 && (
-          <section>
-            <h2 className="font-display text-2xl font-bold">Le magasin</h2>
-            <ul className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {s.gallery.map((g) => (
-                <li key={g.key}>
-                  {/* eslint-disable-next-line @next/next/no-img-element -- image publiée servie par l'API */}
-                  <img
-                    src={stockMediaUrl(g.key)}
-                    alt={g.caption ?? 'Le magasin'}
-                    loading="lazy"
-                    className="aspect-[4/3] w-full rounded-xl object-cover"
-                  />
-                  {g.caption && <p className="mt-1 text-xs text-muted">{g.caption}</p>}
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-
-        <section className="grid gap-8 lg:grid-cols-2 [&>*]:min-w-0">
-          <div>
-            <h2 className="font-display text-2xl font-bold">Nous trouver</h2>
-            <dl className="mt-4 space-y-2 text-sm">
-              {(s.address || s.city) && (
-                <div>
-                  <dt className="font-semibold">Adresse</dt>
-                  <dd>{[s.address, s.city].filter(Boolean).join(', ')}</dd>
-                </div>
-              )}
-              {s.hours && (
-                <div>
-                  <dt className="font-semibold">Horaires</dt>
-                  <dd>{s.hours}</dd>
-                </div>
-              )}
-              {s.phone && (
-                <div>
-                  <dt className="font-semibold">Téléphone</dt>
-                  <dd>{s.phone}</dd>
-                </div>
-              )}
-              {s.email && (
-                <div>
-                  <dt className="font-semibold">E-mail</dt>
-                  <dd>
-                    <a className="text-forest underline" href={`mailto:${s.email}`}>
-                      {s.email}
-                    </a>
-                  </dd>
-                </div>
-              )}
-            </dl>
-            {s.mapUrl && (
-              <a
-                href={s.mapUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-4 inline-block font-semibold text-forest underline"
-              >
-                Voir sur la carte
-              </a>
-            )}
-          </div>
+      <PremiumSection
+        id="contact"
+        eyebrow="Nous trouver"
+        title="Localisation et contact"
+        tinted={tinted('contact')}
+      >
+        <div className="grid gap-8 lg:grid-cols-2 [&>*]:min-w-0">
+          <ContactCards
+            address={[s.address, s.city].filter(Boolean).join(', ') || null}
+            mapUrl={s.mapUrl}
+            hours={s.hours}
+            phone={s.phone}
+            whatsapp={s.whatsapp}
+            whatsappHref={waHref}
+            email={s.email}
+          />
           {s.forms.length > 0 && (
-            <div id="demande">
-              <h2 className="font-display text-2xl font-bold">Votre demande</h2>
-              <p className="mt-1 text-sm text-muted">
+            <div id="demande" className={`scroll-mt-20 ${PREMIUM_CARD}`}>
+              <h3 className="font-display text-2xl font-bold">Votre demande</h3>
+              <p className="mt-1 text-sm opacity-70">
                 Ajoutez des articles depuis le catalogue pour demander un devis ; le magasin vous
                 recontacte rapidement.
               </p>
               <StockRequestForm slug={data.slug} forms={s.forms} />
             </div>
           )}
-        </section>
-      </div>
+        </div>
+      </PremiumSection>
     </StockSiteShell>
   );
 }

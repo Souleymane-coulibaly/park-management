@@ -3,6 +3,15 @@ import { headers } from 'next/headers';
 import { notFound, permanentRedirect } from 'next/navigation';
 import { factureSiteJsonLd, formatXof, whatsappDigits, whatsappUrl } from '@ocall/shared';
 import { FactureRequestForm } from '@/components/facture-site/request-form';
+import {
+  ContactCards,
+  GalleryMosaic,
+  PREMIUM_CARD,
+  type PremiumCta,
+  PremiumHero,
+  PremiumSection,
+  PremiumSite,
+} from '@/components/site/showcase-premium';
 import { factureMediaUrl, fetchFactureSite } from '@/lib/public-facture-site';
 
 export const dynamic = 'force-dynamic';
@@ -60,164 +69,145 @@ export default async function FactureSitePage({ params }: Params) {
     new URL(factureMediaUrl(key), data.url).toString(),
   );
 
+  const waHref = wa ? whatsappUrl(wa) : null;
+  const headerCta: PremiumCta | null = waHref
+    ? { href: waHref, label: 'Écrire sur WhatsApp', kind: 'whatsapp' }
+    : s.phone
+      ? { href: `tel:${s.phone.replace(/[^+\d]/g, '')}`, label: 'Appeler', kind: 'phone' }
+      : null;
+  // Sections affichées, dans l'ordre : fonds alternés comme sur les sites Park.
+  const sections = [
+    s.about ? 'about' : null,
+    s.services.length > 0 ? 'services' : null,
+    s.gallery.length > 0 ? 'gallery' : null,
+    'contact',
+  ].filter((x): x is string => x !== null);
+  const tinted = (key: string) => sections.indexOf(key) % 2 === 0;
+
   return (
-    <main className="min-h-screen bg-ivory text-charcoal" data-testid="facture-site">
+    <PremiumSite
+      brandColor={s.primaryColor}
+      name={s.businessName}
+      homeHref="#top"
+      logoUrl={s.logo ? factureMediaUrl(s.logo) : null}
+      nav={[
+        ...(s.services.length > 0 ? [{ href: '#services', label: 'Prestations' }] : []),
+        ...(s.gallery.length > 0 ? [{ href: '#gallery', label: 'Réalisations' }] : []),
+        { href: '#contact', label: 'Contact' },
+        ...(s.forms.length > 0 ? [{ href: '#demande', label: 'Demande' }] : []),
+      ]}
+      cta={headerCta}
+      ctaTestId={waHref ? 'facture-site-whatsapp' : undefined}
+      whatsappHref={waHref}
+      footer={{
+        tagline: s.tagline,
+        hours: s.hours,
+        address: [s.address, s.city].filter(Boolean).join(', ') || null,
+        phone: s.phone,
+        email: s.email,
+        poweredBy: 'Site réalisé avec Ocall Facture',
+      }}
+      testId="facture-site"
+    >
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, '\\u003c') }}
       />
-      <header className="relative overflow-hidden bg-forest text-white">
-        {s.cover && (
-          // eslint-disable-next-line @next/next/no-img-element -- image publiée servie par l'API
-          <img
-            src={factureMediaUrl(s.cover)}
-            alt=""
-            className="absolute inset-0 h-full w-full object-cover opacity-30"
-          />
-        )}
-        <div className="relative mx-auto max-w-5xl px-4 py-14 sm:py-20">
-          {s.logo && (
-            // eslint-disable-next-line @next/next/no-img-element -- image publiée servie par l'API
-            <img
-              src={factureMediaUrl(s.logo)}
-              alt={`Logo ${s.businessName}`}
-              className="mb-6 h-16 w-auto rounded-lg bg-white p-2"
-            />
-          )}
-          <p className="text-sm font-semibold uppercase tracking-wide text-white/80">
-            {s.businessName}
+      <PremiumHero
+        coverUrl={s.cover ? factureMediaUrl(s.cover) : null}
+        eyebrow={[s.businessName, s.city].filter(Boolean).join(' · ')}
+        title={s.headline}
+        tagline={s.tagline}
+        cta={
+          s.forms.length > 0
+            ? { href: '#demande', label: 'Faire une demande', kind: 'link' }
+            : headerCta
+        }
+        discoverHref={`#${sections[0]}`}
+      />
+
+      {s.about && (
+        <PremiumSection
+          id="about"
+          eyebrow="Bienvenue"
+          title="Qui sommes-nous"
+          tinted={tinted('about')}
+        >
+          <p className="max-w-3xl whitespace-pre-line text-lg leading-relaxed opacity-85">
+            {s.about}
           </p>
-          <h1 className="mt-2 font-display text-3xl font-bold sm:text-4xl">{s.headline}</h1>
-          {s.tagline && <p className="mt-3 max-w-2xl text-lg text-white/90">{s.tagline}</p>}
-          <div className="mt-6 flex flex-wrap gap-3">
-            {s.forms.length > 0 && (
-              <a
-                href="#demande"
-                className="rounded-xl bg-white px-5 py-3 font-semibold text-forest"
-              >
-                Faire une demande
-              </a>
-            )}
-            {wa && (
-              <a
-                href={whatsappUrl(wa)}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="rounded-xl bg-[#25D366] px-5 py-3 font-semibold text-white"
-                data-testid="facture-site-whatsapp"
-              >
-                Écrire sur WhatsApp
-              </a>
-            )}
-            {s.phone && (
-              <a
-                href={`tel:${s.phone.replace(/[^+\d]/g, '')}`}
-                className="rounded-xl border border-white/60 px-5 py-3 font-semibold"
-              >
-                Appeler {s.phone}
-              </a>
-            )}
-          </div>
-        </div>
-      </header>
+        </PremiumSection>
+      )}
 
-      <div className="mx-auto max-w-5xl space-y-12 px-4 py-12">
-        {s.about && (
-          <section>
-            <h2 className="font-display text-2xl font-bold">Qui sommes-nous</h2>
-            <p className="mt-3 whitespace-pre-line text-charcoal-soft">{s.about}</p>
-          </section>
-        )}
+      {s.services.length > 0 && (
+        <PremiumSection
+          id="services"
+          eyebrow="Savoir-faire"
+          title="Nos prestations"
+          tinted={tinted('services')}
+          testId="facture-site-services"
+        >
+          <ul className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {s.services.map((svc) => (
+              <li key={svc.itemId} className={`flex min-w-0 flex-col ${PREMIUM_CARD}`}>
+                <p className="text-lg font-bold">{svc.name}</p>
+                {svc.description && (
+                  <p className="mt-2 whitespace-pre-line text-[15px] opacity-80">
+                    {svc.description}
+                  </p>
+                )}
+                {svc.priceTtc !== null && (
+                  <p
+                    className="mt-4 font-display text-2xl font-bold"
+                    style={{ color: 'var(--brand)' }}
+                  >
+                    {formatXof(svc.priceTtc)} TTC
+                    <span className="text-sm font-normal opacity-70"> / {svc.unit}</span>
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </PremiumSection>
+      )}
 
-        {s.services.length > 0 && (
-          <section data-testid="facture-site-services">
-            <h2 className="font-display text-2xl font-bold">Nos prestations</h2>
-            <ul className="mt-4 grid gap-4 sm:grid-cols-2">
-              {s.services.map((svc) => (
-                <li key={svc.itemId} className="rounded-2xl border border-line bg-surface p-5">
-                  <p className="font-semibold">{svc.name}</p>
-                  {svc.description && (
-                    <p className="mt-1 text-sm text-charcoal-soft">{svc.description}</p>
-                  )}
-                  {svc.priceTtc !== null && (
-                    <p className="mt-2 text-sm font-semibold text-forest">
-                      {formatXof(svc.priceTtc)} TTC / {svc.unit}
-                    </p>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
+      {s.gallery.length > 0 && (
+        <PremiumSection
+          id="gallery"
+          eyebrow="En images"
+          title="Nos réalisations"
+          tinted={tinted('gallery')}
+        >
+          <GalleryMosaic
+            items={s.gallery.map((g) => ({
+              src: factureMediaUrl(g.key),
+              alt: g.caption ?? 'Réalisation',
+              caption: g.caption,
+            }))}
+          />
+        </PremiumSection>
+      )}
 
-        {s.gallery.length > 0 && (
-          <section>
-            <h2 className="font-display text-2xl font-bold">Nos réalisations</h2>
-            <ul className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-              {s.gallery.map((g) => (
-                <li key={g.key}>
-                  {/* eslint-disable-next-line @next/next/no-img-element -- image publiée servie par l'API */}
-                  <img
-                    src={factureMediaUrl(g.key)}
-                    alt={g.caption ?? 'Réalisation'}
-                    loading="lazy"
-                    className="aspect-[4/3] w-full rounded-xl object-cover"
-                  />
-                  {g.caption && <p className="mt-1 text-xs text-muted">{g.caption}</p>}
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-
-        <section className="grid gap-8 lg:grid-cols-2">
-          <div>
-            <h2 className="font-display text-2xl font-bold">Nous trouver</h2>
-            <dl className="mt-4 space-y-2 text-sm">
-              {(s.address || s.city) && (
-                <div>
-                  <dt className="font-semibold">Adresse</dt>
-                  <dd>{[s.address, s.city].filter(Boolean).join(', ')}</dd>
-                </div>
-              )}
-              {s.hours && (
-                <div>
-                  <dt className="font-semibold">Horaires</dt>
-                  <dd>{s.hours}</dd>
-                </div>
-              )}
-              {s.phone && (
-                <div>
-                  <dt className="font-semibold">Téléphone</dt>
-                  <dd>{s.phone}</dd>
-                </div>
-              )}
-              {s.email && (
-                <div>
-                  <dt className="font-semibold">E-mail</dt>
-                  <dd>
-                    <a className="text-forest underline" href={`mailto:${s.email}`}>
-                      {s.email}
-                    </a>
-                  </dd>
-                </div>
-              )}
-            </dl>
-            {s.mapUrl && (
-              <a
-                href={s.mapUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-4 inline-block font-semibold text-forest underline"
-              >
-                Voir sur la carte
-              </a>
-            )}
-          </div>
+      <PremiumSection
+        id="contact"
+        eyebrow="Nous trouver"
+        title="Localisation et contact"
+        tinted={tinted('contact')}
+      >
+        <div className="grid gap-8 lg:grid-cols-2 [&>*]:min-w-0">
+          <ContactCards
+            address={[s.address, s.city].filter(Boolean).join(', ') || null}
+            mapUrl={s.mapUrl}
+            hours={s.hours}
+            phone={s.phone}
+            whatsapp={s.whatsapp}
+            whatsappHref={waHref}
+            email={s.email}
+          />
           {s.forms.length > 0 && (
-            <div id="demande">
-              <h2 className="font-display text-2xl font-bold">Votre demande</h2>
-              <p className="mt-1 text-sm text-muted">
+            <div id="demande" className={`scroll-mt-20 ${PREMIUM_CARD}`}>
+              <h3 className="font-display text-2xl font-bold">Votre demande</h3>
+              <p className="mt-1 text-sm opacity-70">
                 Nous vous recontactons rapidement. Un rendez-vous demandé est confirmé par
                 l’entreprise.
               </p>
@@ -228,11 +218,8 @@ export default async function FactureSitePage({ params }: Params) {
               />
             </div>
           )}
-        </section>
-      </div>
-      <footer className="border-t border-line py-6 text-center text-xs text-muted">
-        {s.businessName} · Site réalisé avec Ocall Facture
-      </footer>
-    </main>
+        </div>
+      </PremiumSection>
+    </PremiumSite>
   );
 }

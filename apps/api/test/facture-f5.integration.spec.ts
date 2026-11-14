@@ -225,6 +225,22 @@ const opened = () => Date.now() - 10_000;
       (await showcase.agent.put(api('/facture/site/slug')).send({ slug: `autre-${RUN}` })).body
         .code,
     ).toBe('FACTURE_SITE_ONLINE');
+
+    // Couleur principale (même règle que les sites Park : texte blanc lisible) ; publiée.
+    expect(live.site.primaryColor).toBeNull();
+    expect((await draft(showcase.agent, { primaryColor: '#FFE066' }).expect(400)).body.code).toBe(
+      'FACTURE_SITE_COLOR',
+    );
+    await draft(showcase.agent, { primaryColor: 'bleu' }).expect(400);
+    await draft(showcase.agent, { primaryColor: '#1E3A8A' }).expect(200);
+    await showcase.agent.post(api('/facture/site/publish')).expect(200);
+    expect(
+      (
+        await pub()
+          .get(api(`/public/facture-sites/${slug}`))
+          .expect(200)
+      ).body.site.primaryColor,
+    ).toBe('#1E3A8A');
   });
 
   it('offre « avec vitrine » exigée ; droit historique Park sans effet sur Facture', async () => {

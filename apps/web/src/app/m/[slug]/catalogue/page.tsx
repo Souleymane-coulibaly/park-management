@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { PremiumPageTitle } from '@/components/site/showcase-premium';
 import { ProductCard, StockSiteShell } from '@/components/stock-site/site-shell';
 import { fetchStockCatalog, stockSiteBase } from '@/lib/public-stock-site';
 
@@ -53,8 +54,11 @@ export default async function StockSiteCatalogPage({ params, searchParams }: Pro
 
   return (
     <StockSiteShell site={data.site} base={base}>
-      <div className="mx-auto max-w-5xl space-y-6 px-4 py-10" data-testid="stock-site-catalog">
-        <h1 className="font-display text-3xl font-bold">Catalogue</h1>
+      <PremiumPageTitle eyebrow={data.site.businessName} title="Catalogue" />
+      <div
+        className="mx-auto max-w-6xl space-y-6 px-4 py-10 sm:px-6"
+        data-testid="stock-site-catalog"
+      >
         <form action={`${base}/catalogue`} method="get" className="flex flex-wrap gap-2">
           {category && <input type="hidden" name="categorie" value={category} />}
           <label className="sr-only" htmlFor="catalog-q">
@@ -66,11 +70,12 @@ export default async function StockSiteCatalogPage({ params, searchParams }: Pro
             defaultValue={q}
             maxLength={80}
             placeholder="Rechercher un article"
-            className="min-w-0 flex-1 rounded-xl border border-line bg-surface px-3 py-2.5"
+            className="min-h-11 min-w-0 flex-1 rounded-full border border-black/10 bg-white px-4 py-2.5"
           />
           <button
             type="submit"
-            className="rounded-xl bg-forest px-4 py-2.5 font-semibold text-white"
+            className="min-h-11 rounded-full px-5 py-2.5 font-semibold text-white"
+            style={{ background: 'var(--brand)' }}
           >
             Rechercher
           </button>
@@ -80,7 +85,8 @@ export default async function StockSiteCatalogPage({ params, searchParams }: Pro
             <Link
               href={link({ categorie: null })}
               aria-current={!category ? 'page' : undefined}
-              className={`rounded-full border px-3 py-1 text-sm ${!category ? 'border-forest bg-forest text-white' : 'border-line bg-surface'}`}
+              className={`rounded-full border px-3.5 py-1.5 text-sm ${!category ? 'border-transparent text-white' : 'border-black/10 bg-white'}`}
+              style={!category ? { background: 'var(--brand)' } : undefined}
             >
               Tout
             </Link>
@@ -89,7 +95,8 @@ export default async function StockSiteCatalogPage({ params, searchParams }: Pro
                 key={c.id}
                 href={link({ categorie: c.id })}
                 aria-current={category === c.id ? 'page' : undefined}
-                className={`rounded-full border px-3 py-1 text-sm ${category === c.id ? 'border-forest bg-forest text-white' : 'border-line bg-surface'}`}
+                className={`rounded-full border px-3.5 py-1.5 text-sm ${category === c.id ? 'border-transparent text-white' : 'border-black/10 bg-white'}`}
+                style={category === c.id ? { background: 'var(--brand)' } : undefined}
               >
                 {c.name}
               </Link>
@@ -97,7 +104,7 @@ export default async function StockSiteCatalogPage({ params, searchParams }: Pro
           </nav>
         )}
         {data.items.length === 0 ? (
-          <p className="text-muted">Aucun article ne correspond.</p>
+          <p className="opacity-70">Aucun article ne correspond.</p>
         ) : (
           <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
             {data.items.map((p) => (
@@ -108,15 +115,23 @@ export default async function StockSiteCatalogPage({ params, searchParams }: Pro
         {pages > 1 && (
           <nav aria-label="Pages" className="flex flex-wrap items-center gap-3 text-sm">
             {page > 0 && (
-              <Link href={link({ page: page - 1 })} className="font-semibold text-forest underline">
+              <Link
+                href={link({ page: page - 1 })}
+                className="font-semibold underline"
+                style={{ color: 'var(--brand)' }}
+              >
                 Page précédente
               </Link>
             )}
-            <span className="text-muted">
+            <span className="opacity-70">
               Page {page + 1} sur {pages}
             </span>
             {page + 1 < pages && (
-              <Link href={link({ page: page + 1 })} className="font-semibold text-forest underline">
+              <Link
+                href={link({ page: page + 1 })}
+                className="font-semibold underline"
+                style={{ color: 'var(--brand)' }}
+              >
                 Page suivante
               </Link>
             )}

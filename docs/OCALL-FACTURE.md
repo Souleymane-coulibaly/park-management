@@ -331,6 +331,11 @@ WhatsApp (`whatsappDigits`). Park et School inchangés (tests d'intégration et 
   formulaires proposés ; logo, couverture et 12 réalisations (images réencodées, sans métadonnées).
   **Brouillon jamais public** ; « Publier » fige une copie (libellés et prix du jour, images publiées).
   Une image en ligne se **retire à tout moment** : elle quitte aussitôt la version publiée.
+- **Mise en page** (alignée sur les sites Park lors du sprint S9 d'Ocall Stock) : en-tête fixe avec menu
+  mobile, accueil plein écran, prestations en cartes, réalisations en mosaïque, cartes de contact, pied de
+  page, bouton WhatsApp permanent sur mobile, à la **couleur principale** choisie par l'entreprise (texte
+  blanc lisible, contraste ≥ 4,5:1, sinon refusée `FACTURE_SITE_COLOR` ; sans choix, couleur Ocall).
+  Composants communs avec les vitrines Stock : `apps/web/src/components/site/showcase-premium.tsx`.
 - **Adresses** : domaine personnalisé actif > `<slug>.<FACTURE_SITES_BASE_DOMAIN>` (si
   `FACTURE_SITES_SUBDOMAINS_ENABLED=true`, après la configuration DNS/TLS réelle) > `<origine>/v/<slug>`
   ; les autres adresses redirigent (301). Préfixe `/v/` distinct des sites Park (`/e/`) et School (`/s/`).

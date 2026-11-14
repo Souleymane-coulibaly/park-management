@@ -308,6 +308,14 @@ export function isAccessibleAccentColor(hex: string): boolean {
   return isHexColor(hex) && contrastRatio(hex, SITE_ACCENT_TEXT) >= 4.5;
 }
 
+/**
+ * Couleur principale d'une vitrine Stock ou Facture : celle choisie si elle est lisible avec un texte
+ * blanc, sinon la couleur Ocall par défaut (contenus antérieurs sans couleur).
+ */
+export function showcaseBrandColor(color: string | null | undefined): string {
+  return color && isAccessibleBrandColor(color) ? color : SITE_DEFAULT_COLOR;
+}
+
 export const SITE_SECTIONS = [
   'about',
   'gallery',

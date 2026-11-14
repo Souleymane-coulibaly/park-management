@@ -21,11 +21,20 @@ export async function downloadFile(
     throw new ApiError(res.status, err.code ?? 'ERROR', err.message ?? 'Une erreur est survenue.');
   }
   const blob = await res.blob();
-  const match = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '');
+  const disposition = res.headers.get('content-disposition') ?? '';
+  // Nom exact (RFC 5987) s'il est donné, sinon le nom simple.
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+  let exact: string | undefined;
+  try {
+    exact = encoded ? decodeURIComponent(encoded) : undefined;
+  } catch {
+    exact = undefined;
+  }
+  const match = /filename="([^"]+)"/.exec(disposition);
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = match?.[1] ?? fallbackName;
+  link.download = exact ?? match?.[1] ?? fallbackName;
   document.body.appendChild(link);
   link.click();
   link.remove();
