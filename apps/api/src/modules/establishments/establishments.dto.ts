@@ -6,10 +6,17 @@ import {
   IsOptional,
   IsString,
   IsTimeZone,
+  IsUUID,
   Length,
   MaxLength,
+  ValidateIf,
 } from 'class-validator';
-import { BUSINESS_TYPES, type BusinessType } from '@ocall/shared';
+import {
+  BUSINESS_TYPES,
+  type BusinessType,
+  ESTABLISHMENT_KINDS,
+  type EstablishmentKind,
+} from '@ocall/shared';
 
 const trim = ({ value }: { value: unknown }) => (typeof value === 'string' ? value.trim() : value);
 
@@ -21,10 +28,11 @@ export class CreateEstablishmentDto {
   name: string;
 
   @ApiProperty({
-    enum: BUSINESS_TYPES,
-    description: "Doit être compatible avec le métier de l'organisation.",
+    enum: [...BUSINESS_TYPES, 'NONE'],
+    description:
+      "Doit être compatible avec le métier de l'organisation. Sprint Suite 2B : NONE = lieu sans activité Park (boutique, école, agence…), utilisé par d'autres applications.",
   })
-  @IsIn(BUSINESS_TYPES)
+  @IsIn([...BUSINESS_TYPES, 'NONE'])
   businessType: BusinessType;
 
   @ApiPropertyOptional({ example: 'Bamako' })
@@ -55,9 +63,52 @@ export class CreateEstablishmentDto {
   @IsOptional()
   @IsTimeZone()
   timezone?: string;
+
+  @ApiPropertyOptional({
+    enum: ESTABLISHMENT_KINDS,
+    nullable: true,
+    description: 'Sprint Suite 2B : nature du lieu (boutique, dépôt, école…).',
+  })
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsIn(ESTABLISHMENT_KINDS)
+  kind?: EstablishmentKind | null;
+
+  @ApiPropertyOptional({
+    nullable: true,
+    description:
+      'Sprint Suite 2B : enseigne active de la même organisation ; null pour la retirer.',
+  })
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsUUID()
+  brandId?: string | null;
 }
 
 export class UpdateEstablishmentDto extends PartialType(CreateEstablishmentDto) {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  isActive?: boolean;
+}
+
+/** Sprint Suite 2B : enseigne (marque ou activité commerciale) de l'organisation. */
+export class CreateBrandDto {
+  @ApiProperty({ example: 'Quincaillerie du Sahel' })
+  @Transform(trim)
+  @IsString()
+  @Length(2, 80)
+  name: string;
+}
+
+export class UpdateBrandDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @Length(2, 80)
+  name?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsBoolean()

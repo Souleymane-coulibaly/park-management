@@ -19,6 +19,18 @@ enum BusinessType {
   NONE
 }
 
+/// Sprint Suite 2B : nature du lieu physique (descriptive ; l'activité Park reste dans `businessType`).
+enum EstablishmentKind {
+  PARK
+  RESTAURANT
+  SHOP
+  WAREHOUSE
+  SCHOOL
+  AGENCY
+  OFFICE
+  OTHER
+}
+
 enum MemberRole {
   OWNER
   ADMIN
@@ -102,6 +114,7 @@ model Organization {
   updatedAt              DateTime           @updatedAt
 
   establishments       Establishment[]
+  brands               Brand[]
   memberships          OrganizationMembership[]
   assignments          EstablishmentAssignment[]
   subscriptions        Subscription[]
@@ -163,24 +176,29 @@ model Organization {
 }
 
 model Establishment {
-  id              String       @id @default(uuid()) @db.Uuid
-  organizationId  String       @db.Uuid
+  id              String             @id @default(uuid()) @db.Uuid
+  organizationId  String             @db.Uuid
   name            String
   /// Activité(s) exercée(s), toujours compatible(s) avec le métier de l'organisation.
   businessType    BusinessType
   city            String?
   address         String?
   phone           String?
-  timezone        String       @default("Africa/Bamako")
-  isActive        Boolean      @default(true)
+  timezone        String             @default("Africa/Bamako")
+  isActive        Boolean            @default(true)
+  /// Sprint Suite 2B : nature du lieu (boutique, dépôt, école…) ; facultative, sans effet sur Park.
+  kind            EstablishmentKind?
+  /// Sprint Suite 2B : enseigne (marque) du lieu, de la même organisation ; facultative.
+  brandId         String?            @db.Uuid
   /// Compteur des numéros de vente de l'établissement, incrémenté de façon atomique.
-  saleSeq         Int          @default(0)
+  saleSeq         Int                @default(0)
   /// Compteur des numéros affichés des commandes de borne, incrémenté de façon atomique.
-  orderRequestSeq Int          @default(0)
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  orderRequestSeq Int                @default(0)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 
   organization     Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  brand            Brand?                    @relation(fields: [organizationId, brandId], references: [organizationId, id], onDelete: Restrict)
   assignments      EstablishmentAssignment[]
   variantPrices    VariantPrice[]
   cashSessions     CashSession[]
@@ -211,6 +229,24 @@ model Establishment {
 
   @@unique([organizationId, name])
   @@index([organizationId, isActive])
+  @@index([organizationId, brandId])
+}
+
+/// Sprint Suite 2B : enseigne (marque ou activité commerciale) d'une organisation. Un établissement
+/// (lieu physique) peut lui être rattaché. Jamais supprimée : désactivée.
+model Brand {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  name           String
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishments Establishment[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, name])
 }
 
 model User {

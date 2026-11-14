@@ -2,7 +2,12 @@ import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post } from '@nestj
 import { ApiTags } from '@nestjs/swagger';
 import { type AuthContext, requireTenant } from '../../common/auth-context';
 import { CurrentAuth, RequirePermission } from '../../common/decorators';
-import { CreateEstablishmentDto, UpdateEstablishmentDto } from './establishments.dto';
+import {
+  CreateBrandDto,
+  CreateEstablishmentDto,
+  UpdateBrandDto,
+  UpdateEstablishmentDto,
+} from './establishments.dto';
 import { EstablishmentsService } from './establishments.service';
 
 @ApiTags('Établissements')
@@ -14,6 +19,35 @@ export class EstablishmentsController {
   @Get()
   list(@CurrentAuth() auth: AuthContext) {
     return this.establishments.list(requireTenant(auth));
+  }
+
+  /** Sprint Suite 2B : sites de l'organisation et applications qui utilisent chacun. */
+  @RequirePermission('establishment.read')
+  @Get('registry')
+  registry(@CurrentAuth() auth: AuthContext) {
+    return this.establishments.registry(requireTenant(auth));
+  }
+
+  @RequirePermission('establishment.read')
+  @Get('brands')
+  brands(@CurrentAuth() auth: AuthContext) {
+    return this.establishments.brands(requireTenant(auth));
+  }
+
+  @RequirePermission('establishment.manage')
+  @Post('brands')
+  createBrand(@CurrentAuth() auth: AuthContext, @Body() dto: CreateBrandDto) {
+    return this.establishments.createBrand(requireTenant(auth), dto);
+  }
+
+  @RequirePermission('establishment.manage')
+  @Patch('brands/:id')
+  updateBrand(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateBrandDto,
+  ) {
+    return this.establishments.updateBrand(requireTenant(auth), id, dto);
   }
 
   @RequirePermission('establishment.read')

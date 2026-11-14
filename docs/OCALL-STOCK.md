@@ -319,6 +319,11 @@ retournée ».
 - **Sites** : magasins, dépôts, entrepôts. Code court unique (2 à 8 caractères) qui ne change plus : il est
   imprimé dans les QR codes. Chaque site naît avec un emplacement « Général » : un site non découpé
   fonctionne sans configuration.
+- **Référentiel Ocall Suite (Sprint Suite 2B)** : un site Stock peut être rattaché à un lieu du référentiel
+  commun des sites (établissement Suite), existant ou créé avec lui (case « Enregistrer aussi ce lieu dans
+  le référentiel », cochée par défaut). Un lieu ne sert qu'à un seul site Stock, mais aussi à Park, School…
+  Les correspondances proposées (même nom, même ville) ne sont que des suggestions : rien n'est rattaché
+  sans choix explicite d'un administrateur Stock. Les sites existants restent non rattachés.
 - **Emplacements** : zone → allée → rayonnage → emplacement (A-01-03), dans cet ordre, dans le même site
   (contrôlé par la base). Code unique dans le site, inchangeable. **QR code** : `L:<site>/<emplacement>`,
   imprimé sur étiquette (formats des étiquettes d'articles) et lu par le champ de scan. Un site ou un

@@ -86,6 +86,8 @@ export class SchoolService {
         isActive: true,
         // Fuseau : la date du jour d'un écran (appel des élèves) est celle de l'établissement.
         timezone: true,
+        // Ocall Suite Sprint 2B : lieu du référentiel Suite rattaché (null si pas encore rattaché).
+        establishmentId: true,
       },
     });
     return {

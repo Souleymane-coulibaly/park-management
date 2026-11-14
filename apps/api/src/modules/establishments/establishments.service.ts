@@ -1,10 +1,24 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { Prisma } from '@ocall/database';
 import { type BusinessType, isCompatibleBusinessType } from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
 import type { TenantContext } from '../../common/auth-context';
 import { establishmentScope } from '../../common/tenant-scope';
-import type { CreateEstablishmentDto, UpdateEstablishmentDto } from './establishments.dto';
+import { EstablishmentRegistryService } from './establishment-registry.service';
+import type {
+  CreateBrandDto,
+  CreateEstablishmentDto,
+  UpdateBrandDto,
+  UpdateEstablishmentDto,
+} from './establishments.dto';
+
+const BRAND_NOT_FOUND = { code: 'BRAND_NOT_FOUND', message: 'Enseigne introuvable.' };
 
 const SELECT = {
   id: true,
@@ -15,6 +29,9 @@ const SELECT = {
   phone: true,
   timezone: true,
   isActive: true,
+  kind: true,
+  brandId: true,
+  brand: { select: { name: true } },
   createdAt: true,
   _count: { select: { assignments: true } },
 } as const;
@@ -24,7 +41,83 @@ export class EstablishmentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly registryService: EstablishmentRegistryService,
   ) {}
+
+  /**
+   * Sprint Suite 2B : sites visibles du membre (même périmètre que la liste) et, pour chacun, les
+   * applications qui l'utilisent ; un site partagé n'apparaît qu'une fois.
+   */
+  async registry(auth: TenantContext) {
+    const [sites, usages] = await Promise.all([
+      this.list(auth),
+      this.registryService.usages(auth.membership.organizationId),
+    ]);
+    return sites.map((s) => ({ ...s, applications: usages.get(s.id) ?? [] }));
+  }
+
+  brands(auth: TenantContext) {
+    return this.prisma.brand.findMany({
+      where: { organizationId: auth.membership.organizationId },
+      select: {
+        id: true,
+        name: true,
+        isActive: true,
+        _count: { select: { establishments: true } },
+      },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async createBrand(auth: TenantContext, dto: CreateBrandDto) {
+    const organizationId = auth.membership.organizationId;
+    return this.brandConflict(() =>
+      this.prisma.$transaction(async (tx) => {
+        const brand = await tx.brand.create({
+          data: { organizationId, name: dto.name },
+          select: { id: true, name: true, isActive: true },
+        });
+        await this.audit.record(
+          {
+            organizationId,
+            actorUserId: auth.user.id,
+            action: 'brand.created',
+            targetType: 'Brand',
+            targetId: brand.id,
+            metadata: { name: brand.name },
+          },
+          tx,
+        );
+        return brand;
+      }),
+    );
+  }
+
+  /** Une enseigne n'est jamais supprimée : elle est renommée ou désactivée. */
+  async updateBrand(auth: TenantContext, id: string, dto: UpdateBrandDto) {
+    const organizationId = auth.membership.organizationId;
+    return this.brandConflict(() =>
+      this.prisma.$transaction(async (tx) => {
+        const result = await tx.brand.updateMany({ where: { id, organizationId }, data: dto });
+        if (result.count !== 1) throw new NotFoundException(BRAND_NOT_FOUND);
+        await this.audit.record(
+          {
+            organizationId,
+            actorUserId: auth.user.id,
+            action: 'brand.updated',
+            targetType: 'Brand',
+            targetId: id,
+            metadata: { ...dto },
+          },
+          tx,
+        );
+        return tx.brand.findUniqueOrThrow({
+          where: { id },
+          select: { id: true, name: true, isActive: true },
+        });
+      }),
+    );
+  }
 
   list(auth: TenantContext) {
     return this.prisma.establishment.findMany({
@@ -51,6 +144,7 @@ export class EstablishmentsService {
   async create(auth: TenantContext, dto: CreateEstablishmentDto) {
     const organizationId = auth.membership.organizationId;
     this.assertCompatible(auth.membership.businessType, dto.businessType);
+    if (dto.brandId) await this.assertBrand(organizationId, dto.brandId);
     return this.prisma.$transaction(async (tx) => {
       const created = await tx.establishment.create({
         data: { ...dto, organizationId, timezone: dto.timezone ?? auth.membership.timezone },
@@ -75,6 +169,7 @@ export class EstablishmentsService {
     const organizationId = auth.membership.organizationId;
     await this.get(auth, id);
     if (dto.businessType) this.assertCompatible(auth.membership.businessType, dto.businessType);
+    if (dto.brandId) await this.assertBrand(organizationId, dto.brandId);
     return this.prisma.$transaction(async (tx) => {
       // Le filtre organizationId est répété dans l'écriture : défense en profondeur.
       const result = await tx.establishment.updateMany({
@@ -105,6 +200,29 @@ export class EstablishmentsService {
       );
       return tx.establishment.findUniqueOrThrow({ where: { id }, select: SELECT });
     });
+  }
+
+  /** Enseigne active de l'organisation ; une enseigne d'un autre client est introuvable. */
+  private async assertBrand(organizationId: string, brandId: string) {
+    const brand = await this.prisma.brand.findFirst({
+      where: { id: brandId, organizationId, isActive: true },
+      select: { id: true },
+    });
+    if (!brand) throw new NotFoundException(BRAND_NOT_FOUND);
+  }
+
+  private async brandConflict<T>(work: () => Promise<T>): Promise<T> {
+    try {
+      return await work();
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException({
+          code: 'BRAND_NAME_TAKEN',
+          message: 'Une enseigne de ce nom existe déjà.',
+        });
+      }
+      throw error;
+    }
   }
 
   private assertCompatible(organizationType: BusinessType, establishmentType: BusinessType): void {

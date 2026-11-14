@@ -400,17 +400,20 @@ enum StockCountScope {
 
 /// Magasin, dépôt ou entrepôt.
 model StockSite {
-  id             String        @id @default(uuid()) @db.Uuid
-  organizationId String        @db.Uuid
+  id              String        @id @default(uuid()) @db.Uuid
+  organizationId  String        @db.Uuid
   /// Code court, unique par organisation (imprimé dans les QR codes des emplacements).
-  code           String
-  name           String
-  kind           StockSiteKind
-  address        String?
-  city           String?
-  isArchived     Boolean       @default(false)
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  code            String
+  name            String
+  kind            StockSiteKind
+  address         String?
+  city            String?
+  isArchived      Boolean       @default(false)
+  /// Sprint Suite 2B : établissement du référentiel Suite (même organisation, par UUID, sans clé
+  /// étrangère entre bases) ; un seul site Stock par établissement. Null = pas encore rattaché.
+  establishmentId String?       @db.Uuid
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
   locations        StockLocation[]
   members          StockMemberSite[]
@@ -424,6 +427,7 @@ model StockSite {
   prices           StockSitePrice[]
   showcaseRequests StockShowcaseRequest[]
 
+  @@unique([organizationId, establishmentId])
   @@unique([organizationId, id])
   @@unique([organizationId, code])
 }
@@ -450,13 +454,13 @@ model StockSitePrice {
 
 /// Rattachement d'un membre à un site. Sans aucun rattachement, le membre agit sur tous les sites.
 model StockMemberSite {
-  organizationId String   @db.Uuid
-  memberId       String   @db.Uuid
-  siteId         String   @db.Uuid
+  organizationId String     @db.Uuid
+  memberId       String     @db.Uuid
+  siteId         String     @db.Uuid
   /// Sprint Suite 2A : rôle propre à ce site (null = rôle principal du membre). Restreint, n'élargit jamais ;
   /// jamais administrateur (contrôle en base).
   role           StockRole?
-  createdAt      DateTime @default(now())
+  createdAt      DateTime   @default(now())
 
   member StockMember @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Cascade)
   site   StockSite   @relation(fields: [organizationId, siteId], references: [organizationId, id], onDelete: Restrict)

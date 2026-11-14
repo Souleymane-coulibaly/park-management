@@ -273,6 +273,12 @@ const PATH_CASES: Case[] = [
     (b, i) => b.patch(api(`/ocall-stock/sites/${i.site}`)).send({ name: 'Piraté' }),
   ],
   [
+    // Ocall Suite Sprint 2B : rattachement au référentiel des sites.
+    'PUT ocall-stock/sites/:id/establishment',
+    (b, i) =>
+      b.put(api(`/ocall-stock/sites/${i.site}/establishment`)).send({ establishmentId: null }),
+  ],
+  [
     'POST ocall-stock/sites/:id/locations',
     (b, i) =>
       b

@@ -172,3 +172,33 @@ Décisions et architecture : `ocall-audits/audit-architecture-multisite-ocall-su
 - **Migration** : `20261210000000_suite_s2a_roles_par_site` (base Stock, additive) : colonne facultative
   `StockMemberSite.role`, contrôle « jamais administrateur ».
 - **Tests** : `apps/api/test/suite-s2a-roles.integration.spec.ts`, `e2e/suite-s2a-roles.spec.ts`.
+
+## Sprint 2B (multi-établissements) — référentiel commun des sites
+
+- **Établissements réutilisés.** Les établissements de la base Suite (déjà ceux de Park et Restaurant)
+  deviennent le référentiel des lieux physiques de l'organisation : un lieu est enregistré **une seule
+  fois** et plusieurs applications l'utilisent. Aucune table de sites en double.
+- **Ajouts facultatifs** : nature du lieu (`kind` : parc, restaurant, boutique, dépôt, école, agence,
+  bureau, autre) et **enseigne** (`Brand`, propre à l'organisation, jamais supprimée : désactivée).
+  Un lieu sans activité Park (`businessType = NONE`) est désormais accepté : il n'apparaît dans aucune
+  vente Park ni Restaurant (filtres d'activité existants).
+- **Rattachements** : `StockSite.establishmentId` et `School.establishmentId` (UUID, sans clé étrangère
+  entre bases ; un seul site Stock et une seule école par lieu). Rattacher un lieu existant, le créer à
+  partir de la fiche, ou retirer le rattachement : toujours un choix explicite, journalisé. Lieu d'une
+  autre organisation : introuvable ; lieu désactivé ou déjà pris : refusé. Les données existantes restent
+  non rattachées : aucune reprise automatique.
+- **API** : `GET /establishments/registry` (sites et applications qui les utilisent),
+  `GET|POST|PATCH /establishments/brands` ; `GET /ocall-stock/sites/registry`,
+  `PUT /ocall-stock/sites/:id/establishment` ; `GET /school/schools/registry`,
+  `PUT /school/schools/:id/establishment`. Contrat commun : `common/integration/site-registry.ts`
+  (`SITE_REGISTRY`, module `establishments` global) ; chaque application déclare ses rattachements.
+- **Web** : portail Suite « Sites de l'organisation » (`/suite/sites`, propriétaire et administrateurs) ;
+  rattachement depuis Stock (Sites) et School (Établissements).
+- **Migrations** (`20261211000000_suite_s2b_etablissements`, additives) : base Suite (énumération
+  `EstablishmentKind`, table `Brand`, colonnes facultatives `Establishment.kind` et `brandId`), base
+  Stock (`StockSite.establishmentId`), base School (`School.establishmentId`).
+- **Désactivation globale ou retrait d'un rôle** : désactiver un employé Park ferme son compte (toutes
+  applications, sessions révoquées) ; une réactivation dans une application ne le rouvre pas. Retirer un
+  rôle applicatif ne ferme que cette application. Un compte réservé aux applications n'a pas encore de
+  désactivation unique (à prévoir à l'étape D).
+- **Tests** : `apps/api/test/suite-s2b-etablissements.integration.spec.ts`, `e2e/suite-s2b-sites.spec.ts`.

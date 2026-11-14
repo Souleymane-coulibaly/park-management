@@ -1,17 +1,21 @@
 import {
   BadRequestException,
   ConflictException,
+  Inject,
   Injectable,
   NotFoundException,
+  type OnModuleInit,
 } from '@nestjs/common';
 import { Prisma } from '@ocall/stock-database';
 import {
   STOCK_DEFAULT_LOCATION_CODE,
+  STOCK_PRODUCT_CODE,
   STOCK_SITE_KIND_LABELS,
   type StockRole,
   type StockSiteKind,
   parseStockLocationQr,
   stockLocationNests,
+  siteMatchReason,
   stockLocationQr,
 } from '@ocall/shared';
 import { AuditService } from '../../common/audit/audit.service';
@@ -22,9 +26,15 @@ import type {
   StockLocationDto,
   StockLocationLabelsDto,
   StockSiteDto,
+  StockSiteEstablishmentDto,
   UpdateStockLocationDto,
   UpdateStockSiteDto,
 } from './ocall-stock.dto';
+import {
+  type RegistrySite,
+  SITE_REGISTRY,
+  type SiteRegistry,
+} from '../../common/integration/site-registry';
 
 const SITE_NOT_FOUND = { code: 'STOCK_SITE_NOT_FOUND', message: 'Site introuvable.' };
 const LOCATION_NOT_FOUND = {
@@ -46,11 +56,165 @@ const pgMessage = (e: unknown) =>
  * voit qu'eux ; un site d'une autre organisation ou hors périmètre est « introuvable ».
  */
 @Injectable()
-export class OcallStockSitesService {
+export class OcallStockSitesService implements OnModuleInit {
   constructor(
     private readonly db: OcallStockPrismaService,
     private readonly audit: AuditService,
+    @Inject(SITE_REGISTRY) private readonly registryService: SiteRegistry,
   ) {}
+
+  /** Sprint Suite 2B : le référentiel Suite affiche les sites Stock rattachés à ses établissements. */
+  onModuleInit() {
+    this.registryService.registerUsage({
+      product: STOCK_PRODUCT_CODE,
+      label: 'Ocall Stock',
+      usages: async (organizationId) =>
+        (
+          await this.db.stockSite.findMany({
+            where: { organizationId, isArchived: false, establishmentId: { not: null } },
+            select: { id: true, name: true, establishmentId: true },
+          })
+        ).map((s) => ({
+          establishmentId: s.establishmentId!,
+          appSiteId: s.id,
+          appSiteName: s.name,
+        })),
+    });
+  }
+
+  // ─── Référentiel Suite (Sprint Suite 2B) ───
+
+  /**
+   * Établissements de l'organisation (actifs) avec le site Stock déjà rattaché à chacun, et pour chaque
+   * site Stock non rattaché du périmètre, les établissements libres qui lui ressemblent (même nom, même
+   * ville). Simple suggestion : rien n'est rattaché sans choix explicite.
+   */
+  async registry(ctx: StockContext) {
+    const [establishments, sites] = await Promise.all([
+      this.registryService.list(ctx.organizationId),
+      this.db.stockSite.findMany({
+        where: { organizationId: ctx.organizationId },
+        select: { id: true, name: true, city: true, establishmentId: true, isArchived: true },
+      }),
+    ]);
+    const linkedTo = new Map(
+      sites.filter((s) => s.establishmentId).map((s) => [s.establishmentId!, s.id]),
+    );
+    const free = establishments.filter((e) => e.isActive && !linkedTo.has(e.id));
+    return {
+      establishments: establishments
+        .filter((e) => e.isActive)
+        .map((e) => ({ ...e, stockSiteId: linkedTo.get(e.id) ?? null })),
+      suggestions: sites
+        .filter((s) => !s.establishmentId && !s.isArchived && stockSiteAllowed(ctx, s.id))
+        .flatMap((s) =>
+          free.flatMap((e) => {
+            const reason = siteMatchReason(s, e);
+            return reason ? [{ siteId: s.id, establishmentId: e.id, reason }] : [];
+          }),
+        ),
+    };
+  }
+
+  /**
+   * Rattache un site Stock à un établissement du référentiel (existant, ou créé à partir du site), ou retire
+   * le rattachement. Un établissement d'une autre organisation est introuvable ; un établissement désactivé
+   * ou déjà rattaché à un autre site Stock est refusé. Chaque changement est journalisé.
+   */
+  async linkEstablishment(ctx: StockContext, id: string, dto: StockSiteEstablishmentDto) {
+    const site = await this.site(ctx, id);
+    if (dto.createEstablishment && dto.establishmentId) throw this.establishmentChoice();
+    let establishmentId: string | null;
+    if (dto.createEstablishment) {
+      establishmentId = (await this.newEstablishment(ctx, site)).id;
+    } else if (dto.establishmentId !== undefined) {
+      establishmentId = dto.establishmentId;
+      if (establishmentId) await this.usableEstablishment(ctx, establishmentId, id);
+    } else {
+      throw this.establishmentChoice();
+    }
+    await this.saveLink(ctx, id, establishmentId);
+    await this.record(
+      ctx,
+      establishmentId ? 'stock.site_establishment_linked' : 'stock.site_establishment_unlinked',
+      'StockSite',
+      id,
+      { from: site.establishmentId, to: establishmentId, created: !!dto.createEstablishment },
+    );
+    return this.site(ctx, id);
+  }
+
+  private async saveLink(ctx: StockContext, id: string, establishmentId: string | null) {
+    try {
+      await this.db.stockSite.update({
+        where: { organizationId_id: { organizationId: ctx.organizationId, id } },
+        data: { establishmentId },
+      });
+    } catch (e) {
+      if (isUnique(e)) throw this.establishmentTaken();
+      throw e;
+    }
+  }
+
+  /** Établissement actif de l'organisation, libre (ou déjà rattaché à ce site). */
+  private async usableEstablishment(
+    ctx: StockContext,
+    establishmentId: string,
+    siteId: string | null,
+  ): Promise<RegistrySite> {
+    const establishment = await this.registryService.get(ctx.organizationId, establishmentId);
+    if (!establishment) {
+      throw new NotFoundException({
+        code: 'ESTABLISHMENT_NOT_FOUND',
+        message: 'Établissement introuvable.',
+      });
+    }
+    if (!establishment.isActive) {
+      throw new ConflictException({
+        code: 'ESTABLISHMENT_INACTIVE',
+        message: 'Cet établissement est désactivé.',
+      });
+    }
+    const taken = await this.db.stockSite.findFirst({
+      where: {
+        organizationId: ctx.organizationId,
+        establishmentId,
+        ...(siteId ? { NOT: { id: siteId } } : {}),
+      },
+      select: { id: true },
+    });
+    if (taken) throw this.establishmentTaken();
+    return establishment;
+  }
+
+  private newEstablishment(
+    ctx: StockContext,
+    site: { name: string; kind: StockSiteKind; city: string | null; address: string | null },
+  ) {
+    return this.registryService.createSite({
+      organizationId: ctx.organizationId,
+      actorUserId: ctx.userId,
+      source: STOCK_PRODUCT_CODE,
+      name: site.name,
+      kind: site.kind === 'STORE' ? 'SHOP' : 'WAREHOUSE',
+      city: site.city,
+      address: site.address,
+    });
+  }
+
+  private establishmentTaken() {
+    return new ConflictException({
+      code: 'STOCK_SITE_ESTABLISHMENT_TAKEN',
+      message: 'Cet établissement est déjà rattaché à un autre site Stock.',
+    });
+  }
+
+  private establishmentChoice() {
+    return new BadRequestException({
+      code: 'STOCK_SITE_ESTABLISHMENT_CHOICE',
+      message: 'Choisissez un établissement existant ou la création d’un nouveau, pas les deux.',
+    });
+  }
 
   // ─── Sites ───
 
@@ -151,16 +315,44 @@ export class OcallStockSitesService {
   }
 
   async createSite(ctx: StockContext, dto: StockSiteDto) {
+    const { establishmentId: chosen, createEstablishment, ...fields } = dto;
+    if (chosen && createEstablishment) throw this.establishmentChoice();
+    // Sprint Suite 2B : établissement vérifié (ou créé) avant le site ; code déjà pris refusé d'abord,
+    // pour ne jamais créer un établissement pour rien.
+    if (chosen) await this.usableEstablishment(ctx, chosen, null);
+    if (createEstablishment) {
+      const taken = await this.db.stockSite.findFirst({
+        where: { organizationId: ctx.organizationId, code: dto.code },
+        select: { id: true },
+      });
+      if (taken) {
+        throw new ConflictException({
+          code: 'STOCK_SITE_CODE_TAKEN',
+          message: 'Un site porte déjà ce code.',
+        });
+      }
+    }
+    const establishmentId = createEstablishment
+      ? (
+          await this.newEstablishment(ctx, {
+            name: fields.name,
+            kind: fields.kind,
+            city: fields.city ?? null,
+            address: fields.address ?? null,
+          })
+        ).id
+      : (chosen ?? null);
     try {
       const site = await this.db.$transaction(async (tx) => {
         const created = await tx.stockSite.create({
           data: {
             organizationId: ctx.organizationId,
-            code: dto.code,
-            name: dto.name,
-            kind: dto.kind,
-            address: dto.address ?? null,
-            city: dto.city ?? null,
+            code: fields.code,
+            name: fields.name,
+            kind: fields.kind,
+            address: fields.address ?? null,
+            city: fields.city ?? null,
+            establishmentId,
           },
         });
         await tx.stockLocation.create({
@@ -174,10 +366,14 @@ export class OcallStockSitesService {
         });
         return created;
       });
-      await this.record(ctx, 'stock.site_created', 'StockSite', site.id, { code: site.code });
+      await this.record(ctx, 'stock.site_created', 'StockSite', site.id, {
+        code: site.code,
+        ...(establishmentId ? { establishmentId } : {}),
+      });
       return this.site(ctx, site.id);
     } catch (e) {
       if (isUnique(e)) {
+        if (pgMessage(e).includes('establishmentId')) throw this.establishmentTaken();
         throw new ConflictException({
           code: 'STOCK_SITE_CODE_TAKEN',
           message: 'Un site porte déjà ce code.',

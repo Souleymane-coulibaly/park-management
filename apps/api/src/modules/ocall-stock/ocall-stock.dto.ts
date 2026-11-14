@@ -689,6 +689,22 @@ export class StockSiteDto {
   @IsString()
   @MaxLength(80)
   city?: string | null;
+
+  @ApiPropertyOptional({
+    description:
+      'Sprint Suite 2B : établissement existant du référentiel Suite à rattacher (même organisation).',
+  })
+  @IsOptional()
+  @IsUUID()
+  establishmentId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Sprint Suite 2B : créer aussi ce lieu dans le référentiel Suite et l’y rattacher.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  createEstablishment?: boolean;
 }
 
 export class UpdateStockSiteDto {
@@ -806,6 +822,23 @@ export class StockMemberSitesDto {
   @ValidateNested({ each: true })
   @Type(() => StockMemberSiteRoleDto)
   siteRoles?: StockMemberSiteRoleDto[];
+}
+
+/**
+ * Sprint Suite 2B : rattachement d'un site au référentiel Suite. `establishmentId` : établissement existant
+ * (null : retirer le rattachement) ; `createEstablishment` : créer le lieu dans le référentiel.
+ */
+export class StockSiteEstablishmentDto {
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsUUID()
+  establishmentId?: string | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  createEstablishment?: boolean;
 }
 
 export class StockSiteQueryDto {

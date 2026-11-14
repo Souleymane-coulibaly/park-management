@@ -25,6 +25,8 @@ export interface SchoolSummary {
   defaultLocale: SchoolLocale;
   isActive: boolean;
   timezone: string;
+  /** Ocall Suite Sprint 2B : lieu du référentiel Suite rattaché (null si pas encore rattaché). */
+  establishmentId?: string | null;
   /** Accès selon les contrats qui couvrent cet établissement (contrats multiples). */
   contractAccess?: ProductAccess;
 }

@@ -155,6 +155,8 @@ export interface StockSiteView extends StockSiteRef {
   address: string | null;
   city: string | null;
   isArchived: boolean;
+  /** Ocall Suite Sprint 2B : lieu du référentiel Suite rattaché ; null si pas encore rattaché. */
+  establishmentId?: string | null;
   locations?: StockLocationView[];
 }
 

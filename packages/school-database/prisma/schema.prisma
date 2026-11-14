@@ -249,21 +249,24 @@ model SchoolGroup {
 }
 
 model School {
-  id             String       @id @default(uuid()) @db.Uuid
-  organizationId String       @db.Uuid
-  groupId        String       @db.Uuid
-  name           String
-  nameAr         String?
-  type           SchoolType
-  countryCode    String       @db.Char(2)
-  timezone       String
-  defaultLocale  SchoolLocale @default(FR)
-  address        String?
-  phone          String?
-  email          String?
-  isActive       Boolean      @default(true)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  id              String       @id @default(uuid()) @db.Uuid
+  organizationId  String       @db.Uuid
+  groupId         String       @db.Uuid
+  name            String
+  nameAr          String?
+  type            SchoolType
+  countryCode     String       @db.Char(2)
+  timezone        String
+  defaultLocale   SchoolLocale @default(FR)
+  address         String?
+  phone           String?
+  email           String?
+  isActive        Boolean      @default(true)
+  /// Sprint Suite 2B : établissement du référentiel Suite (même organisation, par UUID, sans clé
+  /// étrangère entre bases) ; une seule école par établissement. Null = pas encore rattachée.
+  establishmentId String?      @db.Uuid
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   group         SchoolGroup              @relation(fields: [organizationId, groupId], references: [organizationId, id], onDelete: Restrict)
   assignments   SchoolMemberAssignment[]
@@ -282,12 +285,13 @@ model School {
   announcements SchoolAnnouncement[]
   sms           SchoolSmsSettings?
   smsWallet     SchoolSmsWallet?
-  rooms        SchoolRoom[]
+  rooms         SchoolRoom[]
   events        SchoolCalendarEvent[]
   reportViews   SchoolReportView[]
   aiSettings    SchoolAiSettings?
   site          SchoolSite?
 
+  @@unique([organizationId, establishmentId])
   @@unique([organizationId, id])
   @@unique([organizationId, name])
 }
@@ -1559,22 +1563,22 @@ model SchoolSmsSettings {
 
 /// File d'envoi et historique des SMS : tentatives bornées, prochaine tentative, dernière erreur.
 model SchoolSmsMessage {
-  id                String          @id @default(uuid()) @db.Uuid
-  organizationId    String          @db.Uuid
-  schoolId          String          @db.Uuid
+  id                String               @id @default(uuid()) @db.Uuid
+  organizationId    String               @db.Uuid
+  schoolId          String               @db.Uuid
   /// Responsable et élève concernés : éligibilité revérifiée juste avant l'envoi.
-  guardianId        String?         @db.Uuid
-  studentId         String?         @db.Uuid
+  guardianId        String?              @db.Uuid
+  studentId         String?              @db.Uuid
   phone             String
   body              String
   kind              String
   dedupeKey         String
-  status            SchoolSmsStatus @default(PENDING)
-  attempts          Int             @default(0)
-  nextAttemptAt     DateTime        @default(now())
+  status            SchoolSmsStatus      @default(PENDING)
+  attempts          Int                  @default(0)
+  nextAttemptAt     DateTime             @default(now())
   lastError         String?
   providerMessageId String?
-  createdAt         DateTime        @default(now())
+  createdAt         DateTime             @default(now())
   sentAt            DateTime?
   /// Sprint S2 : unité de facturation calculée à la réservation (segments GSM-7/UCS-2, destination).
   segments          Int?

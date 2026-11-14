@@ -19,6 +19,7 @@ import { SchoolFinanceController } from './school-finance.controller';
 import { SchoolFinanceService } from './school-finance.service';
 import { SchoolGuardiansService } from './school-guardians.service';
 import { SchoolImportsService } from './school-imports.service';
+import { SchoolEstablishmentsService } from './school-establishments.service';
 import { SchoolMembersService } from './school-members.service';
 import { SchoolNotificationsService } from './school-notifications.service';
 import { SchoolPaymentsService } from './school-payments.service';
@@ -93,6 +94,8 @@ import { APP_CONFIG, type AppConfig } from '../../config/app-config';
     SchoolPrismaService,
     SchoolService,
     SchoolMembersService,
+    // Ocall Suite Sprint 2B : rattachement des écoles au référentiel commun des sites.
+    SchoolEstablishmentsService,
     SchoolAccessGuard,
     SchoolStudentsService,
     SchoolEnrollmentsService,

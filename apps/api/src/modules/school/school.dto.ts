@@ -18,6 +18,7 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateIf,
 } from 'class-validator';
 import {
   SCHOOL_LOCALES,
@@ -332,4 +333,21 @@ export class CreateGradingPolicyDto {
   @ApiProperty({ type: Object })
   @IsObject()
   rules: SchoolGradingRules;
+}
+
+/**
+ * Ocall Suite Sprint 2B : rattachement d'une école au référentiel commun des sites. `establishmentId` :
+ * établissement existant (null : retirer le rattachement) ; `createEstablishment` : créer le lieu.
+ */
+export class SchoolEstablishmentDto {
+  @ApiPropertyOptional({ nullable: true })
+  @IsOptional()
+  @ValidateIf((_, v) => v !== null)
+  @IsUUID()
+  establishmentId?: string | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  createEstablishment?: boolean;
 }

@@ -1,9 +1,21 @@
-import { Module } from '@nestjs/common';
+import { Global, Module } from '@nestjs/common';
+import { SITE_REGISTRY } from '../../common/integration/site-registry';
+import { EstablishmentRegistryService } from './establishment-registry.service';
 import { EstablishmentsController } from './establishments.controller';
 import { EstablishmentsService } from './establishments.service';
 
+/**
+ * Établissements de l'organisation. Sprint Suite 2B : référentiel commun des sites, exposé aux
+ * applications à base séparée sous le jeton `SITE_REGISTRY` (module global).
+ */
+@Global()
 @Module({
   controllers: [EstablishmentsController],
-  providers: [EstablishmentsService],
+  providers: [
+    EstablishmentsService,
+    EstablishmentRegistryService,
+    { provide: SITE_REGISTRY, useExisting: EstablishmentRegistryService },
+  ],
+  exports: [SITE_REGISTRY],
 })
 export class EstablishmentsModule {}

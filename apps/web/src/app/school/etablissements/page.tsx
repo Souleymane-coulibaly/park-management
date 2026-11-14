@@ -9,6 +9,7 @@ import {
 } from '@ocall/shared';
 import { toApiError, useSchoolText } from '@/components/school/school-language';
 import { BiName, SchoolPage, type SchoolSummary } from '@/components/school/school-page';
+import { SiteLinkPanel } from '@/components/suite/site-link-panel';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody } from '@/components/ui/card';
@@ -24,6 +25,7 @@ export default function EtablissementsPage() {
         <Schools
           schools={page.context.schools}
           canCreate={page.forSchool(null).canWrite('school.schools.manage')}
+          canLink={(id) => page.forSchool(id).canWrite('school.schools.manage')}
           canSetLocale={(id) => page.forSchool(id).canWrite('school.structure.manage')}
           reload={page.reloadContext}
         />
@@ -35,15 +37,18 @@ export default function EtablissementsPage() {
 function Schools({
   schools,
   canCreate,
+  canLink,
   canSetLocale,
   reload,
 }: {
   schools: SchoolSummary[];
   canCreate: boolean;
+  canLink: (schoolId: string) => boolean;
   canSetLocale: (schoolId: string) => boolean;
   reload: () => void;
 }) {
   const { t, labels } = useSchoolText();
+  const [linking, setLinking] = useState<string | null>(null);
   return (
     <>
       <Card>
@@ -63,6 +68,53 @@ function Schools({
                 </span>
               </div>
               {canSetLocale(s.id) && <LocaleSetting school={s} onDone={reload} />}
+              {canLink(s.id) && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setLinking(linking === s.id ? null : s.id)}
+                >
+                  {t('schools.registryOpen')}
+                </Button>
+              )}
+              {canLink(s.id) && linking === s.id && (
+                <SiteLinkPanel
+                  registryPath="/school/schools/registry"
+                  linkPath={`/school/schools/${s.id}/establishment`}
+                  appSiteId={s.id}
+                  establishmentId={s.establishmentId ?? null}
+                  labels={{
+                    title: t('schools.registryTitle'),
+                    linked: (n) => t('schools.registryLinked', { name: n }),
+                    none: t('schools.registryNone'),
+                    choose: t('schools.registryChoose'),
+                    suggestion: t('schools.registrySuggestion'),
+                    link: t('schools.registryLink'),
+                    create: t('schools.registryCreate'),
+                    unlink: t('schools.registryUnlink'),
+                  }}
+                  normalize={(raw) => {
+                    const r = raw as {
+                      establishments: {
+                        id: string;
+                        name: string;
+                        city: string | null;
+                        schoolId: string | null;
+                      }[];
+                      suggestions: {
+                        schoolId: string;
+                        establishmentId: string;
+                        reason: 'same-name' | 'same-city';
+                      }[];
+                    };
+                    return {
+                      establishments: r.establishments.map((e) => ({ ...e, linkedId: e.schoolId })),
+                      suggestions: r.suggestions.map((x) => ({ ...x, appSiteId: x.schoolId })),
+                    };
+                  }}
+                  onDone={reload}
+                />
+              )}
             </li>
           ))}
         </ul>

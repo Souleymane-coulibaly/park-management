@@ -7,6 +7,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -18,6 +19,7 @@ import {
   SchoolAccessGuard,
   type SchoolContext,
 } from './school-access';
+import { SchoolEstablishmentsService } from './school-establishments.service';
 import { SchoolMembersService } from './school-members.service';
 import { SchoolPrismaService } from './school-prisma.service';
 import {
@@ -27,6 +29,7 @@ import {
   CreateLevelDto,
   AttachMemberDto,
   CreateMemberDto,
+  SchoolEstablishmentDto,
   CreatePeriodDto,
   CreateSchoolDto,
   CreateSubjectDto,
@@ -50,6 +53,7 @@ export class SchoolController {
   constructor(
     private readonly school: SchoolService,
     private readonly members: SchoolMembersService,
+    private readonly establishments: SchoolEstablishmentsService,
   ) {}
 
   @RequireSchoolPermission(READ)
@@ -74,6 +78,23 @@ export class SchoolController {
   @Post('schools')
   createSchool(@CurrentSchool() ctx: SchoolContext, @Body() dto: CreateSchoolDto) {
     return this.school.createSchool(ctx, dto);
+  }
+
+  /** Ocall Suite Sprint 2B : établissements du référentiel et suggestions (jamais appliquées). */
+  @RequireSchoolPermission('school.schools.manage')
+  @Get('schools/registry')
+  schoolRegistry(@CurrentSchool() ctx: SchoolContext) {
+    return this.establishments.registry(ctx);
+  }
+
+  @RequireSchoolPermission('school.schools.manage')
+  @Put('schools/:id/establishment')
+  linkSchool(
+    @CurrentSchool() ctx: SchoolContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SchoolEstablishmentDto,
+  ) {
+    return this.establishments.link(ctx, id, dto);
   }
 
   @RequireSchoolPermission(MANAGE)

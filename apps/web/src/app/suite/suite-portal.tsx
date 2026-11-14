@@ -80,9 +80,12 @@ function nextDue(apps: SuitePortalApp[]): { app: SuitePortalApp; at: string; day
 export function SuitePortal({
   organizationName,
   firstName,
+  canSites = false,
 }: {
   organizationName: string;
   firstName: string;
+  /** Ocall Suite Sprint 2B : lien vers le référentiel des sites (propriétaire, administrateurs). */
+  canSites?: boolean;
 }) {
   const apps = useApi<SuitePortalApp[]>('/suite/overview');
   const unread = useApi<{ unread: number }>('/suite/notifications/unread-count');
@@ -105,6 +108,15 @@ export function SuitePortal({
             Bonjour {firstName}
           </h1>
           <p className="mt-1 text-suite-ink-soft">Choisissez votre application.</p>
+          {canSites && (
+            <Link
+              href="/suite/sites"
+              className="mt-2 inline-block text-sm font-semibold text-suite-green hover:underline"
+              data-testid="suite-sites-link"
+            >
+              Sites de l’organisation
+            </Link>
+          )}
         </div>
         {apps.state === 'loading' && <LoadingState />}
         {apps.state === 'error' && <ErrorState error={apps.error} onRetry={apps.reload} />}

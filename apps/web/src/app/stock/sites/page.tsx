@@ -5,7 +5,9 @@ import { useState } from 'react';
 import { STOCK_SITE_KIND_LABELS, STOCK_SITE_KINDS } from '@ocall/shared';
 import { StockPage } from '@/components/stock/stock-page';
 import type { StockSiteView } from '@/components/stock/stock-types';
+import { SiteLinkPanel } from '@/components/suite/site-link-panel';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { SimpleForm } from '@/components/ui/simple-form';
 import { ErrorState, LoadingState } from '@/components/ui/states';
@@ -24,6 +26,8 @@ export default function StockSitesPage() {
 function Sites({ manage }: { manage: boolean }) {
   const [archived, setArchived] = useState(false);
   const sites = useApi<StockSiteView[]>(`/ocall-stock/sites?archived=${archived}`);
+  const [linking, setLinking] = useState<string | null>(null);
+  const linked = sites.state === 'success' ? sites.data.find((s) => s.id === linking) : undefined;
   return (
     <>
       <label className="flex items-center gap-2 text-sm">
@@ -42,7 +46,7 @@ function Sites({ manage }: { manage: boolean }) {
             </CardBody>
           ) : (
             <div data-testid="stock-site-list">
-              <Table head={['Site', 'Type', 'Ville', '']}>
+              <Table head={['Site', 'Type', 'Ville', 'Référentiel Suite', '']}>
                 {sites.data.map((s) => (
                   <tr key={s.id}>
                     <Td>
@@ -53,12 +57,68 @@ function Sites({ manage }: { manage: boolean }) {
                     </Td>
                     <Td>{STOCK_SITE_KIND_LABELS[s.kind]}</Td>
                     <Td>{s.city ?? '—'}</Td>
+                    <Td>
+                      <span className="inline-flex flex-wrap items-center gap-2">
+                        {s.establishmentId ? (
+                          <Badge tone="forest">Rattaché</Badge>
+                        ) : (
+                          <Badge tone="neutral">Non rattaché</Badge>
+                        )}
+                        {manage && !s.isArchived && (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            aria-label={`Référentiel : ${s.name}`}
+                            onClick={() => setLinking(linking === s.id ? null : s.id)}
+                          >
+                            {s.establishmentId ? 'Modifier' : 'Rattacher'}
+                          </Button>
+                        )}
+                      </span>
+                    </Td>
                     <Td className="text-right">{s.isArchived && <Badge>Archivé</Badge>}</Td>
                   </tr>
                 ))}
               </Table>
             </div>
           )}
+        </Card>
+      )}
+      {manage && linked && (
+        <Card>
+          <CardHeader
+            title={`Référentiel Suite : ${linked.name}`}
+            description="Un lieu physique n’est enregistré qu’une fois pour toute l’organisation, et plusieurs applications peuvent l’utiliser."
+          />
+          <CardBody>
+            <SiteLinkPanel
+              key={linked.id}
+              registryPath="/ocall-stock/sites/registry"
+              linkPath={`/ocall-stock/sites/${linked.id}/establishment`}
+              appSiteId={linked.id}
+              establishmentId={linked.establishmentId ?? null}
+              normalize={(raw) => {
+                const r = raw as {
+                  establishments: {
+                    id: string;
+                    name: string;
+                    city: string | null;
+                    stockSiteId: string | null;
+                  }[];
+                  suggestions: {
+                    siteId: string;
+                    establishmentId: string;
+                    reason: 'same-name' | 'same-city';
+                  }[];
+                };
+                return {
+                  establishments: r.establishments.map((e) => ({ ...e, linkedId: e.stockSiteId })),
+                  suggestions: r.suggestions.map((s) => ({ ...s, appSiteId: s.siteId })),
+                };
+              }}
+              onDone={sites.reload}
+            />
+          </CardBody>
         </Card>
       )}
       {manage && (
@@ -86,6 +146,12 @@ function Sites({ manage }: { manage: boolean }) {
                 },
                 { name: 'city', label: 'Ville (facultatif)' },
                 { name: 'address', label: 'Adresse (facultatif)' },
+                {
+                  name: 'createEstablishment',
+                  label: 'Enregistrer aussi ce lieu dans le référentiel Ocall Suite',
+                  type: 'checkbox',
+                  defaultValue: 'true',
+                },
               ]}
               onDone={() => sites.reload()}
             />

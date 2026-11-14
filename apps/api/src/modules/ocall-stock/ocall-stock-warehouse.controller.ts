@@ -38,6 +38,7 @@ import {
   StockLocationLabelsDto,
   StockLookupQueryDto,
   StockMemberSitesDto,
+  StockSiteEstablishmentDto,
   StockMoveDto,
   StockMovementDto,
   StockMovementsQueryDto,
@@ -75,6 +76,23 @@ export class OcallStockWarehouseController {
   @Post('sites')
   createSite(@CurrentStock() ctx: StockContext, @Body() dto: StockSiteDto) {
     return this.sites.createSite(ctx, dto);
+  }
+
+  /** Sprint Suite 2B : établissements du référentiel Suite et suggestions de rattachement (jamais appliquées). */
+  @RequireStockPermission('stock.sites.manage')
+  @Get('sites/registry')
+  siteRegistry(@CurrentStock() ctx: StockContext) {
+    return this.sites.registry(ctx);
+  }
+
+  @RequireStockPermission('stock.sites.manage')
+  @Put('sites/:id/establishment')
+  linkSite(
+    @CurrentStock() ctx: StockContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: StockSiteEstablishmentDto,
+  ) {
+    return this.sites.linkEstablishment(ctx, id, dto);
   }
 
   @RequireStockPermission('stock.access')
