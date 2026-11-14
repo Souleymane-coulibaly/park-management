@@ -16,6 +16,7 @@ import {
   type StockPermission,
   type StockRole,
   stockEffectivePermissions,
+  stockSitePermissions,
 } from '@ocall/shared';
 import { loadAppAccess } from '../../common/app-access';
 import type { TenantContext } from '../../common/auth-context';
@@ -39,9 +40,15 @@ export interface StockContext {
   isOwner: boolean;
   /**
    * Sites accessibles : null = tous (administrateur, ou membre rattaché à aucun site) ; sinon les sites
-   * auxquels le membre est rattaché.
+   * auxquels le membre est rattaché **et où son rôle porte la permission exigée par la route** (rôle par
+   * site, Sprint Suite 2A).
    */
   siteIds: string[] | null;
+  /**
+   * Permissions sur chacun des sites rattachés (rôle de site limité au rôle principal) ; null quand
+   * `siteIds` vaut null à l'origine (tous les sites, avec les permissions du rôle principal).
+   */
+  sitePermissions: Record<string, StockPermission[]> | null;
 }
 
 type StockRequest = Request & { ocallStock?: StockContext };
@@ -65,6 +72,22 @@ export const stockSiteWhere = (ctx: StockContext, field = 'siteId') =>
 /** Vrai si le contexte porte la permission (contrôles fins dans les services). */
 export const stockCan = (ctx: StockContext, permission: StockPermission) =>
   ctx.permissions.includes(permission);
+
+/** Vrai si le membre porte la permission **sur ce site** (rôle propre au site compris). */
+export const stockCanAt = (ctx: StockContext, permission: StockPermission, siteId: string) =>
+  stockCan(ctx, permission) &&
+  stockSiteAllowed(ctx, siteId) &&
+  (ctx.sitePermissions === null || !!ctx.sitePermissions[siteId]?.includes(permission));
+
+/**
+ * Sites où le membre porte la permission, dans le périmètre de la requête : null = tous ; [] = aucun.
+ * Pour les sections d'un écran qui exigent chacune leur permission (tableau de bord, recherche…).
+ */
+export const stockSitesFor = (ctx: StockContext, permission: StockPermission): string[] | null => {
+  if (!stockCan(ctx, permission)) return [];
+  if (ctx.siteIds === null || ctx.sitePermissions === null) return ctx.siteIds;
+  return ctx.siteIds.filter((id) => ctx.sitePermissions![id]?.includes(permission));
+};
 
 /**
  * Garde de toutes les routes Ocall Stock, dans cet ordre : application activée, membre d'organisation,
@@ -104,20 +127,19 @@ export class OcallStockAccessGuard implements CanActivate {
       });
     }
 
+    const required = this.reflector.getAllAndOverride<StockPermission[] | undefined>(
+      STOCK_PERMISSION,
+      [context.getHandler(), context.getClass()],
+    );
     const member = await stockMemberRights(
       this.db,
       organizationId,
       auth.user.id,
       auth.membership.role,
+      required,
     );
     if (!member) throw this.denied();
-    const { permissions } = member;
-
-    const required = this.reflector.getAllAndOverride<StockPermission[] | undefined>(
-      STOCK_PERMISSION,
-      [context.getHandler(), context.getClass()],
-    );
-    if (required && !required.some((p) => permissions.includes(p))) throw this.denied();
+    if (required && !required.some((p) => member.permissions.includes(p))) throw this.denied();
 
     req.ocallStock = {
       organizationId,
@@ -138,7 +160,9 @@ export class OcallStockAccessGuard implements CanActivate {
 
 /**
  * Droits Stock d'un compte de l'organisation : le propriétaire est administrateur d'office ; sinon, membre
- * Stock actif (rôle et ajustements). Null si le compte n'a aucun droit Stock. Seule source de ce calcul
+ * Stock actif (rôle et ajustements), quel que soit son rôle Suite (Sprint Suite 2A : un employé Park peut
+ * aussi être membre Stock). Null si le compte n'a aucun droit Stock. `required` (permissions de la route,
+ * l'une suffit) limite les sites à ceux où le rôle du membre la porte. Seule source de ce calcul
  * (garde des routes, lectures demandées par une autre application).
  */
 export async function stockMemberRights(
@@ -146,27 +170,48 @@ export async function stockMemberRights(
   organizationId: string,
   userId: string,
   membershipRole: string,
-): Promise<Pick<StockContext, 'role' | 'permissions' | 'memberId' | 'isOwner' | 'siteIds'> | null> {
+  required?: readonly StockPermission[],
+): Promise<Pick<
+  StockContext,
+  'role' | 'permissions' | 'memberId' | 'isOwner' | 'siteIds' | 'sitePermissions'
+> | null> {
   const isOwner = membershipRole === 'OWNER';
-  const member =
-    !isOwner && membershipRole === 'PRODUCT_USER'
-      ? await db.stockMember.findFirst({
-          where: { organizationId, userId, isActive: true },
-          select: {
-            id: true,
-            role: true,
-            permissions: { select: { permission: true, granted: true } },
-            sites: { select: { siteId: true } },
-          },
-        })
-      : null;
+  const member = isOwner
+    ? null
+    : await db.stockMember.findFirst({
+        where: { organizationId, userId, isActive: true },
+        select: {
+          id: true,
+          role: true,
+          permissions: { select: { permission: true, granted: true } },
+          sites: { select: { siteId: true, role: true } },
+        },
+      });
   if (!isOwner && !member) return null;
   const role: StockRole = member?.role ?? 'ADMIN';
+  const overrides = member?.permissions ?? [];
+  if (role === 'ADMIN' || !member?.sites.length) {
+    return {
+      role,
+      permissions: stockEffectivePermissions(role, overrides),
+      memberId: member?.id ?? null,
+      isOwner,
+      siteIds: null,
+      sitePermissions: null,
+    };
+  }
+  const sitePermissions = Object.fromEntries(
+    member.sites.map((s) => [s.siteId, stockSitePermissions(role, s.role, overrides)]),
+  );
+  const siteIds = member.sites
+    .map((s) => s.siteId)
+    .filter((id) => !required?.length || required.some((p) => sitePermissions[id]!.includes(p)));
   return {
     role,
-    permissions: stockEffectivePermissions(role, member?.permissions ?? []),
-    memberId: member?.id ?? null,
+    permissions: stockEffectivePermissions(role, overrides),
+    memberId: member.id,
     isOwner,
-    siteIds: role === 'ADMIN' || !member?.sites.length ? null : member.sites.map((s) => s.siteId),
+    siteIds,
+    sitePermissions,
   };
 }

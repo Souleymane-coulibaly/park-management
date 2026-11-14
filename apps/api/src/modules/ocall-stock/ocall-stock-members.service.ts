@@ -1,10 +1,14 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
+  type OnModuleInit,
 } from '@nestjs/common';
+import { Prisma } from '@ocall/stock-database';
 import {
+  STOCK_PRODUCT_CODE,
   type StockRole,
   assignableStockRoles,
   stockEffectivePermissions,
@@ -15,6 +19,7 @@ import { ProductUserAccountsService } from '../organizations/product-user-accoun
 import type { StockContext } from './ocall-stock-access';
 import { OcallStockPrismaService } from './ocall-stock-prisma.service';
 import type {
+  AttachStockMemberDto,
   CreateStockMemberDto,
   StockMemberPermissionsDto,
   UpdateStockMemberDto,
@@ -32,7 +37,7 @@ const MEMBER_SELECT = {
   isActive: true,
   createdAt: true,
   permissions: { select: { permission: true, granted: true } },
-  sites: { select: { siteId: true } },
+  sites: { select: { siteId: true, role: true } },
 } as const;
 
 /**
@@ -40,12 +45,81 @@ const MEMBER_SELECT = {
  * base Stock. Seul un administrateur gère l'équipe ; personne ne modifie son propre accès.
  */
 @Injectable()
-export class OcallStockMembersService {
+export class OcallStockMembersService implements OnModuleInit {
   constructor(
     private readonly db: OcallStockPrismaService,
     private readonly accounts: ProductUserAccountsService,
     private readonly audit: AuditService,
   ) {}
+
+  /** Suite garde un compte PRODUCT_USER ouvert tant qu'une application lui donne un rôle actif. */
+  onModuleInit() {
+    this.accounts.registerProbe({
+      product: STOCK_PRODUCT_CODE,
+      isActiveMember: async (organizationId, userId) =>
+        (await this.db.stockMember.count({
+          where: { organizationId, userId, isActive: true },
+        })) > 0,
+    });
+  }
+
+  /** Membres de l'organisation (Park, autres applications) qui ne sont pas encore dans l'équipe Stock. */
+  async candidates(ctx: StockContext) {
+    const members = await this.db.stockMember.findMany({
+      where: { organizationId: ctx.organizationId },
+      select: { userId: true },
+    });
+    return this.accounts.candidates(
+      ctx.organizationId,
+      members.map((m) => m.userId),
+    );
+  }
+
+  /**
+   * Ajoute un membre existant de l'organisation avec un rôle Stock, sans nouveau compte (Sprint Suite 2A) :
+   * son rôle Park ou dans une autre application reste inchangé.
+   */
+  async attach(ctx: StockContext, dto: AttachStockMemberDto) {
+    this.assertCanAssign(ctx, dto.role);
+    const user = await this.accounts.existingMember(ctx.organizationId, dto.userId);
+    try {
+      const member = await this.db.stockMember.create({
+        data: {
+          organizationId: ctx.organizationId,
+          userId: user.userId,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          loginId: user.loginId,
+          role: dto.role,
+        },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          loginId: true,
+          role: true,
+          isActive: true,
+        },
+      });
+      await this.audit.record({
+        organizationId: ctx.organizationId,
+        actorUserId: ctx.userId,
+        action: 'stock.member_attached',
+        targetType: 'StockMember',
+        targetId: member.id,
+        metadata: { userId: user.userId, role: dto.role, suiteRole: user.suiteRole },
+      });
+      return { member };
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException({
+          code: 'STOCK_MEMBER_EXISTS',
+          message: 'Cette personne fait déjà partie de l’équipe Stock.',
+        });
+      }
+      throw error;
+    }
+  }
 
   async list(ctx: StockContext) {
     const members = await this.db.stockMember.findMany({
@@ -56,6 +130,7 @@ export class OcallStockMembersService {
     return members.map(({ userId: _u, sites, ...m }) => ({
       ...m,
       siteIds: sites.map((x) => x.siteId),
+      siteRoles: sites.flatMap((x) => (x.role ? [{ siteId: x.siteId, role: x.role }] : [])),
       effectivePermissions: stockEffectivePermissions(m.role, m.permissions),
     }));
   }
@@ -122,13 +197,7 @@ export class OcallStockMembersService {
     });
     // Après la validation Stock : Suite recopie l'état validé (fermeture effective aussitôt).
     if (dto.isActive !== undefined) {
-      await this.accounts.syncActive(ctx.organizationId, target.userId, async () => {
-        const row = await this.db.stockMember.findUniqueOrThrow({
-          where: { id: target.id },
-          select: { isActive: true },
-        });
-        return row.isActive;
-      });
+      await this.accounts.syncActive(ctx.organizationId, target.userId);
     }
     return { id: target.id, role: target.role, isActive: target.isActive };
   }

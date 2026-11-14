@@ -25,6 +25,7 @@ import {
   CreateCycleDto,
   CreateGradingPolicyDto,
   CreateLevelDto,
+  AttachMemberDto,
   CreateMemberDto,
   CreatePeriodDto,
   CreateSchoolDto,
@@ -197,6 +198,19 @@ export class SchoolController {
   @Post('members')
   createMember(@CurrentSchool() ctx: SchoolContext, @Body() dto: CreateMemberDto) {
     return this.members.create(ctx, dto);
+  }
+
+  /** Membres de l'organisation (Park, autres applications) à ajouter sans nouveau compte. */
+  @RequireSchoolPermission('school.members.manage')
+  @Get('members/candidates')
+  memberCandidates(@CurrentSchool() ctx: SchoolContext) {
+    return this.members.candidates(ctx);
+  }
+
+  @RequireSchoolPermission('school.members.manage')
+  @Post('members/existing')
+  attachMember(@CurrentSchool() ctx: SchoolContext, @Body() dto: AttachMemberDto) {
+    return this.members.attach(ctx, dto);
   }
 
   @RequireSchoolPermission('school.members.manage')

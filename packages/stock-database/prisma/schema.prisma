@@ -453,6 +453,9 @@ model StockMemberSite {
   organizationId String   @db.Uuid
   memberId       String   @db.Uuid
   siteId         String   @db.Uuid
+  /// Sprint Suite 2A : rôle propre à ce site (null = rôle principal du membre). Restreint, n'élargit jamais ;
+  /// jamais administrateur (contrôle en base).
+  role           StockRole?
   createdAt      DateTime @default(now())
 
   member StockMember @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Cascade)

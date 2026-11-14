@@ -27,7 +27,7 @@ import { stockEffectivePrice, stockSitePrices } from './ocall-stock-site-prices'
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   type StockContext,
-  stockCan,
+  stockCanAt,
   stockSiteAllowed,
   stockSiteWhere,
 } from './ocall-stock-access';
@@ -83,11 +83,7 @@ export class OcallStockSalesService {
       where: { organizationId: ctx.organizationId },
       select: { maxDiscountPercent: true },
     });
-    const rules = {
-      canDiscount: stockCan(ctx, 'stock.sales.discount'),
-      unlimited: stockCan(ctx, 'stock.sales.discount.unlimited'),
-      maxPercent: settings?.maxDiscountPercent ?? STOCK_DEFAULT_MAX_DISCOUNT_PERCENT,
-    };
+    const maxPercent = settings?.maxDiscountPercent ?? STOCK_DEFAULT_MAX_DISCOUNT_PERCENT;
     const cashier = await this.core.user.findUniqueOrThrow({
       where: { id: ctx.userId },
       select: { firstName: true, lastName: true },
@@ -107,6 +103,12 @@ export class OcallStockSalesService {
       if (existing) return { id: existing.id, replayed: true };
 
       const register = await this.registers.register(ctx, dto.registerId, tx);
+      // Remises selon le rôle du membre sur le site de la caisse (rôle par site, Sprint Suite 2A).
+      const rules = {
+        canDiscount: stockCanAt(ctx, 'stock.sales.discount', register.siteId),
+        unlimited: stockCanAt(ctx, 'stock.sales.discount.unlimited', register.siteId),
+        maxPercent,
+      };
       const session = await this.registers.openSession(tx, ctx, register.id, 'share');
       if (!session) {
         throw new ConflictException({

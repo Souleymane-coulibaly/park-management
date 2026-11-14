@@ -118,6 +118,22 @@ mouvements, inventaires, transferts dont il est le départ ou l'arrivée. Un sit
 l'administrateur agit toujours sur tous. Préparer, expédier ou annuler un transfert exige le site de départ ;
 le réceptionner, le site d'arrivée.
 
+**Rôle par boutique (Ocall Suite, Sprint 2A).** Sur un site rattaché, un administrateur peut donner au
+membre un **rôle propre à ce site** (par exemple responsable à Bamako, caissier à Ségou).
+
+- Le rôle de site **restreint** le rôle principal, il ne l'élargit jamais : permissions du rôle de site
+  (avec les mêmes ajustements) ∩ permissions du rôle principal. Jamais administrateur (contrôle en base).
+- Sans rôle de site, le rôle principal s'applique : rien ne change pour les équipes existantes.
+- Chaque route limite les sites à ceux où le rôle du membre porte sa permission ; les gestes précis sont
+  vérifiés sur le site concerné (remise selon la boutique de la caisse, entrée ou ajustement selon
+  l'emplacement, commande issue d'une proposition IA selon la boutique livrée) ; chaque section du
+  tableau de bord et de la recherche ne compte que les sites où sa permission est portée.
+- Les actions propres à l'organisation (catalogue, prix, fournisseurs, réglages) suivent le rôle principal.
+
+**Membre existant (Ocall Suite, Sprint 2A).** Un administrateur peut ajouter à l'équipe une personne qui a
+déjà un compte dans l'organisation (employé Park, membre de Facture ou School) : aucun nouveau compte,
+son rôle Park et ses autres rôles restent inchangés.
+
 ## 4. Catalogue
 
 - **Catégories.** Deux niveaux : catégorie, puis sous-catégorie. Un troisième niveau est refusé par la base

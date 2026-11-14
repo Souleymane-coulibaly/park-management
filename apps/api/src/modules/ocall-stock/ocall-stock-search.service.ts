@@ -1,12 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@ocall/stock-database';
 import {
+  type StockPermission,
   type StockSearchGroup,
   normalizeScannedCode,
   stockPurchaseNumber,
   stockSaleNumber,
 } from '@ocall/shared';
-import { type StockContext, stockCan } from './ocall-stock-access';
+import { type StockContext, stockCan, stockSitesFor } from './ocall-stock-access';
 import { FUZZY_THRESHOLD, OcallStockCatalogService } from './ocall-stock-catalog.service';
 import { OcallStockPrismaService } from './ocall-stock-prisma.service';
 
@@ -22,10 +23,19 @@ export interface StockSearchHit {
   targetId?: string;
 }
 
-/** Filtre SQL des sites du membre (colonne `alias."<column>"`), paramétré. */
-function siteSql(alias: string, ctx: StockContext, column = 'siteId') {
-  if (ctx.siteIds === null) return Prisma.empty;
-  return Prisma.sql`AND ${Prisma.raw(`${alias}."${column}"`)} = ANY(${ctx.siteIds}::uuid[])`;
+/**
+ * Filtre SQL des sites du membre (colonne `alias."<column>"`), paramétré ; avec `permission`, les seuls
+ * sites où son rôle la porte (rôle par site).
+ */
+function siteSql(
+  alias: string,
+  ctx: StockContext,
+  column = 'siteId',
+  permission?: StockPermission,
+) {
+  const sites = permission ? stockSitesFor(ctx, permission) : ctx.siteIds;
+  if (sites === null) return Prisma.empty;
+  return Prisma.sql`AND ${Prisma.raw(`${alias}."${column}"`)} = ANY(${sites}::uuid[])`;
 }
 
 /** Condition « nom proche » (contient, ou trigrammes), sans accents ni casse. */
@@ -185,7 +195,7 @@ export class OcallStockSearchService {
     >`
       SELECT s.id, s.number, s."createdAt", c.name AS customer
       FROM "StockSale" s LEFT JOIN "StockCustomer" c ON c.id = s."customerId"
-      WHERE s."organizationId" = ${ctx.organizationId}::uuid ${siteSql('s', ctx)}
+      WHERE s."organizationId" = ${ctx.organizationId}::uuid ${siteSql('s', ctx, 'siteId', 'stock.sales.read')}
         AND (s.number = ${number} OR (c.name IS NOT NULL AND ${near(Prisma.sql`c.name`, q)}))
       ORDER BY (s.number = ${number}) DESC, s."createdAt" DESC
       LIMIT ${lim} OFFSET ${skip}`;
@@ -210,7 +220,7 @@ export class OcallStockSearchService {
     >`
       SELECT o.id, o.number, o.status::text AS status, sp.name AS supplier
       FROM "StockPurchaseOrder" o JOIN "StockSupplier" sp ON sp.id = o."supplierId"
-      WHERE o."organizationId" = ${ctx.organizationId}::uuid ${siteSql('o', ctx)}
+      WHERE o."organizationId" = ${ctx.organizationId}::uuid ${siteSql('o', ctx, 'siteId', 'stock.purchases.read')}
         AND (o.number = ${number} OR ${near(Prisma.sql`sp.name`, q)})
       ORDER BY (o.number = ${number}) DESC, o."createdAt" DESC
       LIMIT ${lim} OFFSET ${skip}`;
@@ -276,7 +286,7 @@ export class OcallStockSearchService {
       JOIN "StockVariant" v ON v.id = l."variantId"
       JOIN "StockSite" s ON s.id = l."siteId"
       WHERE l."organizationId" = ${ctx.organizationId}::uuid
-        AND v."productId" = ANY(${productIds}::uuid[]) ${siteSql('l', ctx)}
+        AND v."productId" = ANY(${productIds}::uuid[]) ${siteSql('l', ctx, 'siteId', 'stock.levels.read')}
       GROUP BY v."productId", s.code
       ORDER BY s.code`;
     const out: Record<string, { site: string; available: number }[]> = {};

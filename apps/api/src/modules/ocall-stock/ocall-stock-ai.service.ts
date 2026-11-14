@@ -43,7 +43,7 @@ import {
   privateKey,
 } from '../../common/storage/storage-provider';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
-import { type StockContext, stockCan, stockSiteAllowed } from './ocall-stock-access';
+import { type StockContext, stockCan, stockCanAt, stockSiteAllowed } from './ocall-stock-access';
 import { STOCK_AI_SIMULATION } from './ocall-stock-ai-simulation';
 import {
   OcallStockAiUsageStore,
@@ -845,13 +845,14 @@ export class OcallStockAiService implements OnModuleInit {
     let act: () => Promise<string>;
     let edited = false;
     if (proposal.feature === 'STOCK_RESTOCK') {
-      if (!stockCan(ctx, 'stock.purchases.manage')) {
+      const input = proposal.input as { supplierId: string; siteId: string };
+      // Sur le site livré : le rôle du membre sur ce site doit gérer les achats (rôle par site).
+      if (!stockCanAt(ctx, 'stock.purchases.manage', input.siteId)) {
         throw new ForbiddenException({
           code: 'FORBIDDEN',
           message: 'Créer une commande fournisseur exige le droit de gérer les achats.',
         });
       }
-      const input = proposal.input as { supplierId: string; siteId: string };
       const proposed = (
         proposal.output as {
           lines: { variantId: string; quantity: number; unitCost: number; vatRate: number }[];
@@ -1180,7 +1181,11 @@ export class OcallStockAiService implements OnModuleInit {
     if (input.withCosts && !stockCan(ctx, 'stock.prices.purchase.read')) return false;
     const sites = input.sites !== undefined ? input.sites : input.siteId ? [input.siteId] : null;
     if (sites === null) return ctx.siteIds === null;
-    return sites.every((siteId) => stockSiteAllowed(ctx, siteId));
+    return sites.every(
+      (siteId) =>
+        stockSiteAllowed(ctx, siteId) &&
+        (p.feature !== 'STOCK_ANALYSIS' || stockCanAt(ctx, 'stock.sales.read', siteId)),
+    );
   }
 
   /** Coûts d'achat retirés pour qui ne peut pas les voir (ils restent côté serveur pour le brouillon). */

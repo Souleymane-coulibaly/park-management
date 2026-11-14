@@ -147,3 +147,28 @@ organisation, une offre par métier).
   `platform.demo.manage` ; côté client : `subscription.pay` (propriétaire, administrateur).
 - **Nouvelles sections** : Paiements en ligne, Caisse et remises, Demandes de démo ; tableau de bord :
   activations à approuver, démonstrations, encaissé par canal, remboursé.
+
+## Sprint 2A (multi-établissements) — rôles par application et par site
+
+Décisions et architecture : `ocall-audits/audit-architecture-multisite-ocall-suite.md` (audit validé le
+14/11/2026).
+
+- **Un compte, un rôle par application.** Les gardes d'Ocall School, Facture et Stock lisent leur table de
+  membres pour **tout** membre de l'organisation, quel que soit son rôle Suite ; le propriétaire reste
+  administrateur d'office de chaque application. Un employé Park (caissier, superviseur, administrateur…)
+  n'a aucun droit applicatif tant que l'application ne l'a pas ajouté.
+- **Ajout d'un membre existant** : `GET /<app>/members/candidates` (membres actifs, hors propriétaire et
+  hors membres de l'application) puis `POST /<app>/members/existing` (`userId`, `role`, et `schoolIds` pour
+  School), réservés au gestionnaire de l'équipe de l'application ; un compte d'une autre organisation, le
+  propriétaire ou un compte inconnu donnent 404 ; un second ajout 409. Journal : `<app>.member_attached`
+  avec le rôle Suite d'origine.
+- **Fermeture d'un accès** : désactiver un membre dans une application ne touche ni les autres
+  applications ni Park. Un compte réservé aux applications (`PRODUCT_USER`) reste ouvert tant qu'une
+  application au moins lui donne un rôle actif ; il est fermé (sessions révoquées) quand plus aucune ne lui
+  en donne, et rouvert dès qu'une le réactive. Chaque application déclare sa lecture de l'état de ses
+  membres auprès de `ProductUserAccountsService` (`registerProbe`) ; l'état est relu sous verrou.
+- **Rôle par site** : Ocall Stock (rôle propre à une boutique, voir `OCALL-STOCK.md` §3). Park et School
+  par établissement : après le référentiel commun des enseignes et établissements (étape B).
+- **Migration** : `20261210000000_suite_s2a_roles_par_site` (base Stock, additive) : colonne facultative
+  `StockMemberSite.role`, contrôle « jamais administrateur ».
+- **Tests** : `apps/api/test/suite-s2a-roles.integration.spec.ts`, `e2e/suite-s2a-roles.spec.ts`.

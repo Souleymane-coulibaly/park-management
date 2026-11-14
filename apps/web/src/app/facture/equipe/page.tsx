@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { FACTURE_ROLE_LABELS, FACTURE_ROLES, type FactureRole } from '@ocall/shared';
 import { FacturePage } from '@/components/facture/facture-page';
 import { TeamPlanning } from '@/components/facture/team-planning';
+import { ExistingMemberForm } from '@/components/suite/existing-member-form';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
@@ -109,6 +110,30 @@ function Team({ canManage }: { canManage: boolean }) {
           ))}
         </ul>
       </Card>
+      {canManage && (
+        <Card>
+          <CardHeader
+            title="Ajouter un membre de l’organisation"
+            description="Une personne qui a déjà un compte (employé Park, membre d’une autre application) : pas de nouveau compte, ses autres rôles ne changent pas."
+          />
+          <CardBody>
+            <ExistingMemberForm
+              testId="facture-member-existing"
+              candidatesPath="/facture/members/candidates"
+              attachPath="/facture/members/existing"
+              roleOptions={FACTURE_ROLES.map((r) => ({ value: r, label: FACTURE_ROLE_LABELS[r] }))}
+              defaultRole="TECHNICIAN"
+              labels={{
+                person: 'Personne',
+                role: 'Rôle Facture',
+                submit: 'Ajouter à l’équipe',
+                empty: 'Aucun autre membre de l’organisation à ajouter.',
+              }}
+              onDone={members.reload}
+            />
+          </CardBody>
+        </Card>
+      )}
       {canManage && (
         <Card>
           <CardHeader title="Nouveau membre" />

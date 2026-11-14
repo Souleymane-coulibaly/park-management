@@ -7,6 +7,7 @@ import {
   IsInt,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
   Matches,
   Max,
@@ -165,6 +166,17 @@ export class FactureExtraLogoDto {
   @IsString()
   @MaxLength(80)
   label?: string | null;
+}
+
+/** Sprint Suite 2A : membre existant de l'organisation ajouté à l'équipe Facture, sans nouveau compte. */
+export class AttachFactureMemberDto {
+  @ApiProperty({ description: 'Compte Suite d’un membre actif de l’organisation' })
+  @IsUUID()
+  userId: string;
+
+  @ApiProperty({ enum: FACTURE_ROLES })
+  @IsIn(FACTURE_ROLES)
+  role: FactureRole;
 }
 
 export class CreateFactureMemberDto {

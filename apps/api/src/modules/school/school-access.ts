@@ -123,10 +123,10 @@ export class SchoolAccessGuard implements CanActivate {
       });
     }
 
+    // Sprint Suite 2A : rôle School pour tout membre de l'organisation (employé Park compris) ; le
+    // propriétaire reste directeur de groupe d'office.
     const member =
-      auth.membership.role === 'PRODUCT_USER'
-        ? await this.member(organizationId, auth.user.id)
-        : null;
+      auth.membership.role === 'OWNER' ? null : await this.member(organizationId, auth.user.id);
     if (auth.membership.role !== 'OWNER' && !member) throw this.denied();
     const role: SchoolRole = member?.role ?? 'GROUP_DIRECTOR';
 

@@ -28,6 +28,7 @@ import {
 import { FactureMembersService } from './facture-members.service';
 import { FACTURE_LOGO_MAX_BYTES, FactureService, type FactureUpload } from './facture.service';
 import {
+  AttachFactureMemberDto,
   CreateFactureMemberDto,
   FactureExtraLogoDto,
   FactureSettingsDto,
@@ -152,6 +153,19 @@ export class FactureController {
   @Post('members')
   createMember(@CurrentFacture() ctx: FactureContext, @Body() dto: CreateFactureMemberDto) {
     return this.members.create(ctx, dto);
+  }
+
+  /** Membres de l'organisation (Park, autres applications) à ajouter sans nouveau compte. */
+  @RequireFacturePermission('facture.members.manage')
+  @Get('members/candidates')
+  memberCandidates(@CurrentFacture() ctx: FactureContext) {
+    return this.members.candidates(ctx);
+  }
+
+  @RequireFacturePermission('facture.members.manage')
+  @Post('members/existing')
+  attachMember(@CurrentFacture() ctx: FactureContext, @Body() dto: AttachFactureMemberDto) {
+    return this.members.attach(ctx, dto);
   }
 
   @RequireFacturePermission('facture.members.manage')

@@ -2,11 +2,14 @@ import {
   STOCK_ADJUSTABLE_PERMISSIONS,
   STOCK_PERMISSIONS,
   STOCK_ROLES,
+  STOCK_SITE_ROLES,
   assignableStockRoles,
   formatStockMoney,
+  isStockSiteRole,
   stockEffectivePermissions,
   stockGeneratedSku,
   stockRolePermissions,
+  stockSitePermissions,
 } from './stock';
 import {
   barcodeProblem,
@@ -47,6 +50,28 @@ describe('Ocall Stock — rôles et permissions', () => {
       stockEffectivePermissions('ADMIN', [{ permission: 'stock.access', granted: false }]),
     ).toContain('stock.access');
     expect(STOCK_ADJUSTABLE_PERMISSIONS).not.toContain('stock.members.manage');
+  });
+
+  it('rôle par site : restreint au rôle principal, jamais élargi ; administrateur exclu', () => {
+    const manager = stockEffectivePermissions('STORE_MANAGER');
+    // Sans rôle de site : rôle principal.
+    expect(stockSitePermissions('STORE_MANAGER', null)).toEqual(manager);
+    // Rôle de site inférieur : ses seules permissions.
+    const atSite = stockSitePermissions('STORE_MANAGER', 'CASHIER');
+    expect(atSite).toEqual(manager.filter((p) => stockRolePermissions('CASHIER').includes(p)));
+    expect(atSite).not.toContain('stock.purchases.manage');
+    // Rôle de site supérieur : jamais plus que le rôle principal.
+    const cashier = stockEffectivePermissions('CASHIER');
+    expect(stockSitePermissions('CASHIER', 'STORE_MANAGER')).toEqual(cashier);
+    expect(stockSitePermissions('CASHIER', 'ADMIN')).toEqual(cashier);
+    // Ajustements appliqués des deux côtés.
+    const adj = [{ permission: 'stock.sales.discount', granted: false }];
+    expect(stockSitePermissions('STORE_MANAGER', 'CASHIER', adj)).not.toContain(
+      'stock.sales.discount',
+    );
+    expect(STOCK_SITE_ROLES).not.toContain('ADMIN');
+    expect(isStockSiteRole('CASHIER')).toBe(true);
+    expect(isStockSiteRole('ADMIN')).toBe(false);
   });
 
   it('seul l’administrateur attribue des rôles', () => {

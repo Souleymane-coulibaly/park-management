@@ -8,6 +8,7 @@ import { Prisma } from '@ocall/stock-database';
 import {
   STOCK_DEFAULT_LOCATION_CODE,
   STOCK_SITE_KIND_LABELS,
+  type StockRole,
   type StockSiteKind,
   parseStockLocationQr,
   stockLocationNests,
@@ -322,19 +323,41 @@ export class OcallStockSitesService {
 
   // ─── Équipe ───
 
-  /** Sites d'un membre : la liste remplace la précédente (vide = tous les sites). */
-  async setMemberSites(ctx: StockContext, memberId: string, siteIds: string[]) {
+  /**
+   * Sites d'un membre : la liste remplace la précédente (vide = tous les sites). `siteRoles` (Sprint
+   * Suite 2A) donne un rôle propre à certains de ces sites ; il restreint le rôle principal, jamais plus.
+   */
+  async setMemberSites(
+    ctx: StockContext,
+    memberId: string,
+    siteIds: string[],
+    siteRoles: { siteId: string; role: StockRole }[] = [],
+  ) {
     const unique = [...new Set(siteIds)];
+    const roles = new Map(siteRoles.map((r) => [r.siteId, r.role]));
+    if (roles.size !== siteRoles.length || [...roles.keys()].some((id) => !unique.includes(id))) {
+      throw new BadRequestException({
+        code: 'STOCK_SITE_ROLES',
+        message: 'Un rôle de site porte sur un site rattaché, une seule fois.',
+      });
+    }
     await this.db.$transaction(async (tx) => {
       const member = await tx.stockMember.findUnique({
         where: { organizationId_id: { organizationId: ctx.organizationId, id: memberId } },
-        select: { id: true },
+        select: { id: true, role: true },
       });
       if (!member)
         throw new NotFoundException({
           code: 'STOCK_MEMBER_NOT_FOUND',
           message: 'Utilisateur introuvable.',
         });
+      // L'administrateur agit sur toute l'organisation : un rôle de site n'aurait aucun effet.
+      if (member.role === 'ADMIN' && roles.size > 0) {
+        throw new BadRequestException({
+          code: 'STOCK_SITE_ROLES_ADMIN',
+          message: 'Un administrateur a les mêmes droits sur tous les sites.',
+        });
+      }
       const sites = await tx.stockSite.count({
         where: { organizationId: ctx.organizationId, id: { in: unique } },
       });
@@ -344,14 +367,24 @@ export class OcallStockSitesService {
       });
       if (unique.length) {
         await tx.stockMemberSite.createMany({
-          data: unique.map((siteId) => ({ organizationId: ctx.organizationId, memberId, siteId })),
+          data: unique.map((siteId) => ({
+            organizationId: ctx.organizationId,
+            memberId,
+            siteId,
+            role: roles.get(siteId) ?? null,
+          })),
         });
       }
     });
     await this.record(ctx, 'stock.member_sites_updated', 'StockMember', memberId, {
       sites: unique.length,
+      siteRoles: Object.fromEntries(roles),
     });
-    return { memberId, siteIds: unique };
+    return {
+      memberId,
+      siteIds: unique,
+      siteRoles: [...roles].map(([siteId, role]) => ({ siteId, role })),
+    };
   }
 
   // ─── Outils ───

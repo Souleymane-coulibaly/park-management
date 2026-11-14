@@ -3,17 +3,24 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  type OnModuleInit,
 } from '@nestjs/common';
 import { Prisma } from '@ocall/database';
-import { type FactureRole, assignableFactureRoles } from '@ocall/shared';
+import { Prisma as FacturePrisma } from '@ocall/facture-database';
+import { FACTURE_PRODUCT_CODE, type FactureRole, assignableFactureRoles } from '@ocall/shared';
 import { AuditService } from '../../common/audit/audit.service';
 import { PasswordService } from '../../common/security/password.service';
 import { generateTemporaryPassword } from '../../common/security/tokens';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OrganizationProvisioningService } from '../organizations/organization-provisioning.service';
+import { ProductUserAccountsService } from '../organizations/product-user-accounts.service';
 import type { FactureContext } from './facture-access';
 import { FacturePrismaService } from './facture-prisma.service';
-import type { CreateFactureMemberDto, UpdateFactureMemberDto } from './facture.dto';
+import type {
+  AttachFactureMemberDto,
+  CreateFactureMemberDto,
+  UpdateFactureMemberDto,
+} from './facture.dto';
 
 const NOT_FOUND = { code: 'FACTURE_MEMBER_NOT_FOUND', message: 'Utilisateur introuvable.' };
 
@@ -23,14 +30,84 @@ const NOT_FOUND = { code: 'FACTURE_MEMBER_NOT_FOUND', message: 'Utilisateur intr
  * Deux bases, donc pas de transaction commune : Facture décide d'abord, Suite recopie l'état validé.
  */
 @Injectable()
-export class FactureMembersService {
+export class FactureMembersService implements OnModuleInit {
   constructor(
     private readonly db: FacturePrismaService,
     private readonly core: PrismaService,
     private readonly audit: AuditService,
     private readonly passwords: PasswordService,
     private readonly provisioning: OrganizationProvisioningService,
+    private readonly accounts: ProductUserAccountsService,
   ) {}
+
+  /** Suite garde un compte PRODUCT_USER ouvert tant qu'une application lui donne un rôle actif. */
+  onModuleInit() {
+    this.accounts.registerProbe({
+      product: FACTURE_PRODUCT_CODE,
+      isActiveMember: async (organizationId, userId) =>
+        (await this.db.factureMember.count({
+          where: { organizationId, userId, isActive: true },
+        })) > 0,
+    });
+  }
+
+  /** Membres de l'organisation (Park, autres applications) qui ne sont pas encore dans l'équipe Facture. */
+  async candidates(ctx: FactureContext) {
+    const members = await this.db.factureMember.findMany({
+      where: { organizationId: ctx.organizationId },
+      select: { userId: true },
+    });
+    return this.accounts.candidates(
+      ctx.organizationId,
+      members.map((m) => m.userId),
+    );
+  }
+
+  /**
+   * Ajoute un membre existant de l'organisation avec un rôle Facture, sans nouveau compte (Sprint Suite
+   * 2A) : son rôle Park ou dans une autre application reste inchangé.
+   */
+  async attach(ctx: FactureContext, dto: AttachFactureMemberDto) {
+    this.assertCanAssign(ctx, dto.role);
+    const user = await this.accounts.existingMember(ctx.organizationId, dto.userId);
+    try {
+      const member = await this.db.factureMember.create({
+        data: {
+          organizationId: ctx.organizationId,
+          userId: user.userId,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          loginId: user.loginId,
+          role: dto.role,
+        },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          loginId: true,
+          role: true,
+          isActive: true,
+        },
+      });
+      await this.audit.record({
+        organizationId: ctx.organizationId,
+        actorUserId: ctx.userId,
+        action: 'facture.member_attached',
+        targetType: 'FactureMember',
+        targetId: member.id,
+        metadata: { userId: user.userId, role: dto.role, suiteRole: user.suiteRole },
+      });
+      return { member };
+    } catch (error) {
+      if (error instanceof FacturePrisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException({
+          code: 'FACTURE_MEMBER_EXISTS',
+          message: 'Cette personne fait déjà partie de l’équipe Facture.',
+        });
+      }
+      throw error;
+    }
+  }
 
   list(ctx: FactureContext) {
     return this.db.factureMember.findMany({
@@ -145,38 +222,10 @@ export class FactureMembersService {
       },
     });
     // Après la validation Facture : Suite recopie l'état validé (fermeture effective aussitôt).
-    if (dto.isActive !== undefined) await this.syncAccount(ctx, target.id, target.userId);
+    if (dto.isActive !== undefined) {
+      await this.accounts.syncActive(ctx.organizationId, target.userId);
+    }
     return { id: target.id, role: target.role, isActive: target.isActive };
-  }
-
-  /**
-   * Compte réservé à Facture : Suite recopie l'état validé dans Facture, jamais la décision de la requête.
-   * Une désactivation ferme aussi les sessions ouvertes.
-   */
-  private async syncAccount(ctx: FactureContext, memberId: string, userId: string) {
-    await this.core.$transaction(async (tx) => {
-      const memberships = await tx.organizationMembership.findMany({
-        where: { organizationId: ctx.organizationId, userId, role: 'PRODUCT_USER' },
-        select: { id: true },
-      });
-      const ids = memberships.map((m) => m.id);
-      await tx.$queryRaw`
-        SELECT id FROM "OrganizationMembership" WHERE id = ANY(${ids}::uuid[]) FOR UPDATE`;
-      const { isActive } = await this.db.factureMember.findUniqueOrThrow({
-        where: { id: memberId },
-        select: { isActive: true },
-      });
-      await tx.organizationMembership.updateMany({
-        where: { id: { in: ids } },
-        data: { isActive },
-      });
-      if (!isActive) {
-        await tx.session.updateMany({
-          where: { membershipId: { in: ids }, revokedAt: null },
-          data: { revokedAt: new Date() },
-        });
-      }
-    });
   }
 
   private assertCanAssign(ctx: FactureContext, role: FactureRole) {

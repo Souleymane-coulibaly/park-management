@@ -190,6 +190,12 @@ export const SCHOOL_TEXT_FR = {
   'team.reactivate': 'Réactiver',
   'team.new': 'Nouveau membre · {school}',
   'team.create': 'Créer le compte',
+  'team.existing': 'Ajouter un membre de l’organisation · {school}',
+  'team.existingHint':
+    'Une personne qui a déjà un compte (employé Park, membre d’une autre application) : pas de nouveau compte, ses autres rôles ne changent pas.',
+  'team.person': 'Personne',
+  'team.attach': 'Ajouter à l’équipe',
+  'team.noCandidate': 'Aucun autre membre de l’organisation à ajouter.',
 
   'grading.title': 'Règles de notation',
   'grading.desc': 'Chaque modification crée une nouvelle version : les anciennes restent intactes.',
@@ -1720,6 +1726,12 @@ export const SCHOOL_TEXT_AR: Record<SchoolTextKey, Entry> = {
   'team.reactivate': 'إعادة التفعيل',
   'team.new': 'عضو جديد · {school}',
   'team.create': 'إنشاء الحساب',
+  'team.existing': 'إضافة عضو من المؤسسة · {school}',
+  'team.existingHint':
+    'شخص لديه حساب بالفعل (موظف في Park أو عضو في تطبيق آخر): لا حساب جديد، وتبقى أدواره الأخرى كما هي.',
+  'team.person': 'الشخص',
+  'team.attach': 'إضافة إلى الفريق',
+  'team.noCandidate': 'لا يوجد عضو آخر في المؤسسة لإضافته.',
 
   'grading.title': 'قواعد التنقيط',
   'grading.desc': 'كل تعديل يُنشئ نسخة جديدة: تبقى النسخ السابقة كما هي.',

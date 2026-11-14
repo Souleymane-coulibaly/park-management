@@ -143,7 +143,7 @@ export class OcallStockWarehouseController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: StockMemberSitesDto,
   ) {
-    return this.sites.setMemberSites(ctx, id, dto.siteIds);
+    return this.sites.setMemberSites(ctx, id, dto.siteIds, dto.siteRoles);
   }
 
   // ─── Stocks et mouvements ───

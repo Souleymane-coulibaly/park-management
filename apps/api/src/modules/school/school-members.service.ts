@@ -3,19 +3,26 @@ import {
   ForbiddenException,
   Injectable,
   NotFoundException,
+  type OnModuleInit,
 } from '@nestjs/common';
 import { Prisma } from '@ocall/database';
-import type { Prisma as SchoolPrisma } from '@ocall/school-database';
-import { assignableSchoolRoles, hasAllSchoolsScope, type SchoolRole } from '@ocall/shared';
+import { Prisma as SchoolPrisma } from '@ocall/school-database';
+import {
+  SCHOOL_PRODUCT_CODE,
+  assignableSchoolRoles,
+  hasAllSchoolsScope,
+  type SchoolRole,
+} from '@ocall/shared';
 import { AuditService } from '../../common/audit/audit.service';
 import { PasswordService } from '../../common/security/password.service';
 import { generateTemporaryPassword } from '../../common/security/tokens';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OrganizationProvisioningService } from '../organizations/organization-provisioning.service';
+import { ProductUserAccountsService } from '../organizations/product-user-accounts.service';
 import type { SchoolContext } from './school-access';
 import { SchoolPrismaService } from './school-prisma.service';
 import { SchoolService } from './school.service';
-import type { CreateMemberDto, UpdateMemberDto } from './school.dto';
+import type { AttachMemberDto, CreateMemberDto, UpdateMemberDto } from './school.dto';
 
 const NOT_FOUND = { code: 'SCHOOL_MEMBER_NOT_FOUND', message: 'Utilisateur introuvable.' };
 
@@ -24,7 +31,7 @@ const NOT_FOUND = { code: 'SCHOOL_MEMBER_NOT_FOUND', message: 'Utilisateur intro
  * avec le rôle PRODUCT_USER, sans aucun droit Ocall Park ; le rôle scolaire est dans la base School.
  */
 @Injectable()
-export class SchoolMembersService {
+export class SchoolMembersService implements OnModuleInit {
   constructor(
     private readonly db: SchoolPrismaService,
     private readonly core: PrismaService,
@@ -32,7 +39,91 @@ export class SchoolMembersService {
     private readonly passwords: PasswordService,
     private readonly provisioning: OrganizationProvisioningService,
     private readonly school: SchoolService,
+    private readonly accounts: ProductUserAccountsService,
   ) {}
+
+  /** Suite garde un compte PRODUCT_USER ouvert tant qu'une application lui donne un rôle actif. */
+  onModuleInit() {
+    this.accounts.registerProbe({
+      product: SCHOOL_PRODUCT_CODE,
+      isActiveMember: async (organizationId, userId) =>
+        (await this.db.schoolMember.count({
+          where: { organizationId, userId, isActive: true },
+        })) > 0,
+    });
+  }
+
+  /** Membres de l'organisation (Park, autres applications) qui ne sont pas encore dans l'équipe School. */
+  async candidates(ctx: SchoolContext) {
+    const members = await this.db.schoolMember.findMany({
+      where: { organizationId: ctx.organizationId },
+      select: { userId: true },
+    });
+    return this.accounts.candidates(
+      ctx.organizationId,
+      members.map((m) => m.userId),
+    );
+  }
+
+  /**
+   * Ajoute un membre existant de l'organisation avec un rôle School et ses établissements, sans nouveau
+   * compte (Sprint Suite 2A) : son rôle Park ou dans une autre application reste inchangé.
+   */
+  async attach(ctx: SchoolContext, dto: AttachMemberDto) {
+    this.assertCanAssign(ctx, dto.role);
+    await this.assertSchools(this.db, ctx, dto.role, dto.schoolIds);
+    const user = await this.accounts.existingMember(ctx.organizationId, dto.userId);
+    const schoolIds = [...new Set(dto.schoolIds)];
+    try {
+      const member = await this.db.$transaction(async (tx) => {
+        const created = await tx.schoolMember.create({
+          data: {
+            organizationId: ctx.organizationId,
+            userId: user.userId,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            loginId: user.loginId,
+            role: dto.role,
+          },
+        });
+        await tx.schoolMemberAssignment.createMany({
+          data: schoolIds.map((schoolId) => ({
+            memberId: created.id,
+            schoolId,
+            organizationId: ctx.organizationId,
+          })),
+        });
+        return created;
+      });
+      await this.audit.record({
+        organizationId: ctx.organizationId,
+        actorUserId: ctx.userId,
+        action: 'school.member_attached',
+        targetType: 'SchoolMember',
+        targetId: member.id,
+        metadata: { userId: user.userId, role: dto.role, suiteRole: user.suiteRole, schoolIds },
+      });
+      return {
+        member: {
+          id: member.id,
+          firstName: member.firstName,
+          lastName: member.lastName,
+          loginId: member.loginId,
+          role: member.role,
+          isActive: member.isActive,
+          schoolIds,
+        },
+      };
+    } catch (error) {
+      if (error instanceof SchoolPrisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException({
+          code: 'SCHOOL_MEMBER_EXISTS',
+          message: 'Cette personne fait déjà partie de l’équipe School.',
+        });
+      }
+      throw error;
+    }
+  }
 
   async list(ctx: SchoolContext) {
     await this.school.publishDecisions(ctx.organizationId);
@@ -249,34 +340,14 @@ export class SchoolMembersService {
   }
 
   /**
-   * Compte réservé à School : l'accès exige School et Suite ouverts. Suite recopie l'état validé dans School,
-   * jamais la décision de la requête : une panne laisse le compte fermé, l'administrateur rejoue la décision,
-   * et une synchronisation tardive ne peut pas écraser une décision plus récente.
+   * Compte Suite : l'accès exige School (ou une autre application) et Suite ouverts. Suite recopie l'état
+   * validé, relu sous verrou dans chaque application (Sprint Suite 2A : un compte réservé aux applications
+   * reste ouvert tant qu'une application lui donne un rôle actif), jamais la décision de la requête : une
+   * panne laisse le compte fermé, l'administrateur rejoue la décision, et une synchronisation tardive ne
+   * peut pas écraser une décision plus récente. `memberId` : point d'interception des tests de reprise.
    */
-  private async syncAccount(ctx: SchoolContext, memberId: string, userId: string) {
-    await this.core.$transaction(async (tx) => {
-      const memberships = await tx.organizationMembership.findMany({
-        where: { organizationId: ctx.organizationId, userId, role: 'PRODUCT_USER' },
-        select: { id: true },
-      });
-      const ids = memberships.map((m) => m.id);
-      await tx.$queryRaw`
-        SELECT id FROM "OrganizationMembership" WHERE id = ANY(${ids}::uuid[]) FOR UPDATE`;
-      const { isActive } = await this.db.schoolMember.findUniqueOrThrow({
-        where: { id: memberId },
-        select: { isActive: true },
-      });
-      await tx.organizationMembership.updateMany({
-        where: { id: { in: ids } },
-        data: { isActive },
-      });
-      if (!isActive) {
-        await tx.session.updateMany({
-          where: { membershipId: { in: ids }, revokedAt: null },
-          data: { revokedAt: new Date() },
-        });
-      }
-    });
+  private async syncAccount(ctx: SchoolContext, _memberId: string, userId: string) {
+    await this.accounts.syncActive(ctx.organizationId, userId);
   }
 
   private async findManageable(tx: SchoolPrisma.TransactionClient, ctx: SchoolContext, id: string) {

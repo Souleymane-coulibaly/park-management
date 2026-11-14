@@ -155,7 +155,10 @@ export class OcallStockCatalogReader implements StockCatalogReader {
       select: { role: true },
     });
     if (!membership) return null;
-    const rights = await stockMemberRights(this.db, organizationId, userId, membership.role);
+    // Sites limités à ceux où le rôle du membre porte la permission (rôle par site).
+    const rights = await stockMemberRights(this.db, organizationId, userId, membership.role, [
+      permission,
+    ]);
     return rights?.permissions.includes(permission) ? rights : null;
   }
 

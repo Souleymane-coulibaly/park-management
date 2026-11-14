@@ -10,9 +10,10 @@ import {
   stockReportPeriod,
   stockUnitCost,
   stockValue,
+  type StockPermission,
   stockWeightedCost,
 } from '@ocall/shared';
-import { type StockContext, stockCan, stockSiteAllowed } from './ocall-stock-access';
+import { type StockContext, stockCan, stockSiteAllowed, stockSitesFor } from './ocall-stock-access';
 import { OcallStockPrismaService } from './ocall-stock-prisma.service';
 
 const DAY = 86_400_000;
@@ -75,16 +76,19 @@ export class OcallStockReportsService {
     });
     const costs = seeCost ? await this.unitCosts(ctx.organizationId, end) : null;
 
-    const sales = stockCan(ctx, 'stock.sales.read')
-      ? await this.sales(scope, start, end, costs)
+    // Chaque section sur les seuls sites où le rôle du membre porte sa permission (rôle par site).
+    const salesScope = this.sectionScope(ctx, scope, 'stock.sales.read');
+    const levelsScope = this.sectionScope(ctx, scope, 'stock.levels.read');
+    const purchasesScope = this.sectionScope(ctx, scope, 'stock.purchases.read');
+    const movementsScope = this.sectionScope(ctx, scope, 'stock.movements.read');
+    const sales = salesScope ? await this.sales(salesScope, start, end, costs) : null;
+    const stock = levelsScope ? await this.stockValue(levelsScope, costs) : null;
+    const alerts = levelsScope ? await this.alertCounts(ctx, levelsScope) : null;
+    const purchases = purchasesScope
+      ? await this.purchases(purchasesScope, start, end, seeCost)
       : null;
-    const stock = stockCan(ctx, 'stock.levels.read') ? await this.stockValue(scope, costs) : null;
-    const alerts = stockCan(ctx, 'stock.levels.read') ? await this.alertCounts(ctx, scope) : null;
-    const purchases = stockCan(ctx, 'stock.purchases.read')
-      ? await this.purchases(scope, start, end, seeCost)
-      : null;
-    const variances = stockCan(ctx, 'stock.movements.read')
-      ? await this.variances(scope, start, end, costs)
+    const variances = movementsScope
+      ? await this.variances(movementsScope, start, end, costs)
       : null;
 
     return {
@@ -110,7 +114,10 @@ export class OcallStockReportsService {
 
   /** Ruptures, stocks sous le seuil et articles à faible rotation, par article et par site. */
   async alerts(ctx: StockContext, siteId?: string) {
-    const scope = await this.scope(ctx, siteId);
+    return this.alertsIn(ctx, await this.scope(ctx, siteId));
+  }
+
+  private async alertsIn(ctx: StockContext, scope: Scope) {
     const days = await this.slowMovingDays(ctx.organizationId);
     const rows = await this.levelRows(scope);
     const now = new Date();
@@ -349,11 +356,24 @@ export class OcallStockReportsService {
   }
 
   private async alertCounts(ctx: StockContext, scope: Scope) {
-    const a = await this.alerts(ctx, scope.sites?.length === 1 ? scope.sites[0] : undefined);
-    return a.counts;
+    return (await this.alertsIn(ctx, scope)).counts;
   }
 
   // ─── Outils ───
+
+  /**
+   * Périmètre d'une section : celui de la requête, limité aux sites où le membre porte la permission
+   * (null si elle n'est portée nulle part : section masquée).
+   */
+  private sectionScope(ctx: StockContext, scope: Scope, permission: StockPermission): Scope | null {
+    if (!stockCan(ctx, permission)) return null;
+    const allowed = stockSitesFor(ctx, permission);
+    if (allowed === null) return scope;
+    return {
+      ...scope,
+      sites: scope.sites === null ? allowed : scope.sites.filter((id) => allowed.includes(id)),
+    };
+  }
 
   /** Périmètre : un site précis (dans ceux du membre), sinon ceux du membre (null = tous). */
   private async scope(ctx: StockContext, siteId?: string): Promise<Scope> {

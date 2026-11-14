@@ -9,6 +9,7 @@ import { AuditService } from '../../common/audit/audit.service';
 import {
   type StockContext,
   stockCan,
+  stockCanAt,
   stockSiteAllowed,
   stockSiteWhere,
 } from './ocall-stock-access';
@@ -198,6 +199,13 @@ export class OcallStockMovementsService {
     const quantity = dto.kind === 'OUT' ? D(dto.quantity).negated() : D(dto.quantity);
     const result = await this.db.$transaction(async (tx) => {
       const location = await this.sites.location(ctx, dto.locationId, { active: true }, tx);
+      // Le rôle du membre sur ce site doit porter le geste (rôle par site, Sprint Suite 2A).
+      if (!stockCanAt(ctx, permission, location.siteId)) {
+        throw new ForbiddenException({
+          code: 'FORBIDDEN',
+          message: "Vous n'avez pas les droits nécessaires.",
+        });
+      }
       const r = await this.ledger.apply(tx, ctx, `manual:${dto.idempotencyKey}`, [
         {
           variantId: dto.variantId,

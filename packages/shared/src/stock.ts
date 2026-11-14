@@ -317,6 +317,31 @@ export function stockEffectivePermissions(
   return STOCK_PERMISSIONS.filter((p) => set.has(p));
 }
 
+/**
+ * Rôles possibles sur un site (rôle par boutique, Sprint Suite 2A) : tous sauf administrateur, qui vaut
+ * pour toute l'organisation.
+ */
+export const STOCK_SITE_ROLES: readonly StockRole[] = STOCK_ROLES.filter((r) => r !== 'ADMIN');
+
+export const isStockSiteRole = (value: unknown): value is StockRole =>
+  typeof value === 'string' && (STOCK_SITE_ROLES as readonly string[]).includes(value);
+
+/**
+ * Permissions d'un membre sur un site. Sans rôle propre au site : celles du rôle principal. Avec un rôle
+ * propre : celles de ce rôle (avec les mêmes ajustements), **limitées à celles du rôle principal** : un rôle
+ * de site restreint, il n'élargit jamais.
+ */
+export function stockSitePermissions(
+  role: StockRole,
+  siteRole: StockRole | null | undefined,
+  overrides: readonly StockPermissionOverride[] = [],
+): StockPermission[] {
+  const base = stockEffectivePermissions(role, overrides);
+  if (!siteRole || siteRole === 'ADMIN') return base;
+  const site = new Set(stockEffectivePermissions(siteRole, overrides));
+  return base.filter((p) => site.has(p));
+}
+
 /** Rôles qu'un membre peut attribuer : seul l'administrateur (ou le propriétaire) gère l'équipe. */
 export function assignableStockRoles(role: StockRole): StockRole[] {
   return role === 'ADMIN' ? [...STOCK_ROLES] : [];

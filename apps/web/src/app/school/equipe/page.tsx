@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { assignableSchoolRoles, schoolDisplayName, type SchoolRole } from '@ocall/shared';
 import { toApiError, useSchoolText } from '@/components/school/school-language';
 import { SchoolPage, type SchoolSummary } from '@/components/school/school-page';
+import { ExistingMemberForm } from '@/components/suite/existing-member-form';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody } from '@/components/ui/card';
@@ -113,6 +114,31 @@ function Team({
           ))}
         </ul>
       </Card>
+      {canManage && (
+        <Card>
+          <CardBody>
+            <h2 className="font-semibold">{t('team.existing', { school: name(school) })}</h2>
+            <p className="mb-3 text-sm text-muted">{t('team.existingHint')}</p>
+            <ExistingMemberForm
+              testId="member-existing"
+              candidatesPath="/school/members/candidates"
+              attachPath="/school/members/existing"
+              extra={{ schoolIds: [school.id] }}
+              roleOptions={assignableSchoolRoles(role).map((r) => ({
+                value: r,
+                label: labels.role[r],
+              }))}
+              labels={{
+                person: t('team.person'),
+                role: t('field.role'),
+                submit: t('team.attach'),
+                empty: t('team.noCandidate'),
+              }}
+              onDone={members.reload}
+            />
+          </CardBody>
+        </Card>
+      )}
       {canManage && (
         <Card>
           <CardBody>

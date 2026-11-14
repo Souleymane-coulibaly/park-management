@@ -269,6 +269,23 @@ export class CreateMemberDto {
   schoolIds: string[];
 }
 
+/** Sprint Suite 2A : membre existant de l'organisation ajouté à l'équipe School, sans nouveau compte. */
+export class AttachMemberDto {
+  @ApiProperty({ description: 'Compte Suite d’un membre actif de l’organisation' })
+  @IsUUID('4')
+  userId: string;
+
+  @ApiProperty({ enum: SCHOOL_ROLES })
+  @IsIn(SCHOOL_ROLES)
+  role: SchoolRole;
+
+  @ApiProperty({ type: [String] })
+  @IsArray()
+  @ArrayMaxSize(1000)
+  @IsUUID('4', { each: true })
+  schoolIds: string[];
+}
+
 export class UpdateMemberDto {
   @ApiPropertyOptional({ enum: SCHOOL_ROLES })
   @IsOptional()

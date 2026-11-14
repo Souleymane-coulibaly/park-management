@@ -6,11 +6,13 @@ import {
   STOCK_PERMISSION_LABELS,
   STOCK_ROLES,
   STOCK_ROLE_LABELS,
+  STOCK_SITE_ROLES,
   type StockPermission,
   type StockRole,
   stockRolePermissions,
 } from '@ocall/shared';
 import { StockPage } from '@/components/stock/stock-page';
+import { ExistingMemberForm } from '@/components/suite/existing-member-form';
 import {
   type StockMemberView,
   type StockSiteView,
@@ -182,6 +184,30 @@ function Team({ manage }: { manage: boolean }) {
       )}
       {manage && (
         <Card>
+          <CardHeader
+            title="Ajouter un membre de l’organisation"
+            description="Une personne qui a déjà un compte (employé Park, membre d’une autre application) : pas de nouveau compte, ses autres rôles ne changent pas."
+          />
+          <CardBody>
+            <ExistingMemberForm
+              testId="stock-member-existing"
+              candidatesPath="/ocall-stock/members/candidates"
+              attachPath="/ocall-stock/members/existing"
+              roleOptions={ROLE_OPTIONS}
+              defaultRole="CASHIER"
+              labels={{
+                person: 'Personne',
+                role: 'Rôle Stock',
+                submit: 'Ajouter à l’équipe',
+                empty: 'Aucun autre membre de l’organisation à ajouter.',
+              }}
+              onDone={members.reload}
+            />
+          </CardBody>
+        </Card>
+      )}
+      {manage && (
+        <Card>
           <CardHeader title="Nouveau membre" />
           <CardBody>
             <SimpleForm<{ member: { loginId: string }; temporaryPassword: string }>
@@ -290,7 +316,12 @@ function Adjustments({
   );
 }
 
-/** Sites d'un membre : sans aucun site coché, il agit sur tous les sites. */
+const SITE_ROLE_OPTIONS = STOCK_SITE_ROLES.map((r) => ({ value: r, label: STOCK_ROLE_LABELS[r] }));
+
+/**
+ * Sites d'un membre : sans aucun site coché, il agit sur tous les sites. Sur un site coché, un rôle propre
+ * peut restreindre son rôle principal (jamais l'élargir).
+ */
 function MemberSites({
   member,
   onClose,
@@ -302,14 +333,23 @@ function MemberSites({
 }) {
   const sites = useApi<StockSiteView[]>('/ocall-stock/sites');
   const [chosen, setChosen] = useState<string[]>(member.siteIds);
+  const [roles, setRoles] = useState<Record<string, StockRole>>(() =>
+    Object.fromEntries((member.siteRoles ?? []).map((r) => [r.siteId, r.role])),
+  );
   const [error, setError] = useState<ApiError | null>(null);
+  const admin = member.role === 'ADMIN';
 
   async function save() {
     setError(null);
     try {
       await api(`/ocall-stock/members/${member.id}/sites`, {
         method: 'PUT',
-        body: { siteIds: chosen },
+        body: {
+          siteIds: chosen,
+          siteRoles: admin
+            ? []
+            : chosen.flatMap((siteId) => (roles[siteId] ? [{ siteId, role: roles[siteId] }] : [])),
+        },
       });
       onSaved();
     } catch (e) {
@@ -321,25 +361,56 @@ function MemberSites({
     <Card>
       <CardHeader
         title={`Sites de ${member.firstName} ${member.lastName}`}
-        description="Aucun site coché : le membre agit sur tous les sites. Sinon, seulement sur ceux cochés."
+        description={`Aucun site coché : le membre agit sur tous les sites. Sinon, seulement sur ceux cochés${admin ? '.' : ', avec son rôle principal (' + STOCK_ROLE_LABELS[member.role] + ') ou un rôle propre au site, qui ne peut que le restreindre.'}`}
       />
       <CardBody className="space-y-4">
         <ApiErrorAlert error={error} />
         {sites.state === 'success' && (
           <div className="grid gap-2 text-sm sm:grid-cols-2" data-testid="stock-member-sites">
             {sites.data.map((s) => (
-              <label key={s.id} className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={chosen.includes(s.id)}
-                  onChange={(e) =>
-                    setChosen((cur) =>
-                      e.target.checked ? [...cur, s.id] : cur.filter((x) => x !== s.id),
-                    )
-                  }
-                />
-                {s.code} · {s.name}
-              </label>
+              <div
+                key={s.id}
+                className="flex flex-wrap items-center gap-2"
+                data-site={s.code}
+                data-testid="stock-member-site"
+              >
+                <label className="flex min-w-0 flex-1 items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={chosen.includes(s.id)}
+                    onChange={(e) =>
+                      setChosen((cur) =>
+                        e.target.checked ? [...cur, s.id] : cur.filter((x) => x !== s.id),
+                      )
+                    }
+                  />
+                  <span className="truncate">
+                    {s.code} · {s.name}
+                  </span>
+                </label>
+                {!admin && chosen.includes(s.id) && (
+                  <select
+                    aria-label={`Rôle à ${s.name}`}
+                    value={roles[s.id] ?? ''}
+                    onChange={(e) =>
+                      setRoles((cur) => {
+                        const next = { ...cur };
+                        if (e.target.value) next[s.id] = e.target.value as StockRole;
+                        else delete next[s.id];
+                        return next;
+                      })
+                    }
+                    className="max-w-full rounded-lg border border-line px-2 py-1 text-sm"
+                  >
+                    <option value="">Rôle principal</option>
+                    {SITE_ROLE_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
             ))}
           </div>
         )}

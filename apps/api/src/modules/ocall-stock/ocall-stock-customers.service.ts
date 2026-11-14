@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { stockSaleNumber } from '@ocall/shared';
 import { AuditService } from '../../common/audit/audit.service';
-import { type StockContext, stockCan, stockSiteWhere } from './ocall-stock-access';
+import { type StockContext, stockCan, stockSitesFor } from './ocall-stock-access';
 import { OcallStockPrismaService } from './ocall-stock-prisma.service';
 import type {
   StockCustomerDto,
@@ -49,9 +49,14 @@ export class OcallStockCustomersService {
   /** Fiche et dernières ventes (des sites accessibles, si le membre voit les ventes). */
   async get(ctx: StockContext, id: string) {
     const customer = await this.find(ctx, id);
+    const salesSites = stockSitesFor(ctx, 'stock.sales.read');
     const sales = stockCan(ctx, 'stock.sales.read')
       ? await this.db.stockSale.findMany({
-          where: { organizationId: ctx.organizationId, customerId: id, ...stockSiteWhere(ctx) },
+          where: {
+            organizationId: ctx.organizationId,
+            customerId: id,
+            ...(salesSites === null ? {} : { siteId: { in: salesSites } }),
+          },
           orderBy: { number: 'desc' },
           take: 20,
           select: { id: true, number: true, total: true, createdAt: true },

@@ -86,14 +86,14 @@ export class FactureAccessGuard implements CanActivate {
     }
 
     const isOwner = auth.membership.role === 'OWNER';
+    // Sprint Suite 2A : rôle Facture pour tout membre de l'organisation (employé Park compris) ; le
+    // propriétaire reste responsable d'office.
     const member = isOwner
       ? null
-      : auth.membership.role === 'PRODUCT_USER'
-        ? await this.db.factureMember.findFirst({
-            where: { organizationId, userId: auth.user.id, isActive: true },
-            select: { id: true, role: true },
-          })
-        : null;
+      : await this.db.factureMember.findFirst({
+          where: { organizationId, userId: auth.user.id, isActive: true },
+          select: { id: true, role: true },
+        });
     if (!isOwner && !member) throw this.denied();
     const role: FactureRole = member?.role ?? 'MANAGER';
 

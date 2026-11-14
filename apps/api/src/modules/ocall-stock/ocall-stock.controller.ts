@@ -19,6 +19,7 @@ import {
 import { OcallStockMembersService } from './ocall-stock-members.service';
 import { OcallStockService } from './ocall-stock.service';
 import {
+  AttachStockMemberDto,
   CreateStockMemberDto,
   StockMemberPermissionsDto,
   StockSettingsDto,
@@ -73,6 +74,19 @@ export class OcallStockController {
   @Post('members')
   createMember(@CurrentStock() ctx: StockContext, @Body() dto: CreateStockMemberDto) {
     return this.members.create(ctx, dto);
+  }
+
+  /** Membres de l'organisation (Park, autres applications) à ajouter sans nouveau compte. */
+  @RequireStockPermission('stock.members.manage')
+  @Get('members/candidates')
+  memberCandidates(@CurrentStock() ctx: StockContext) {
+    return this.members.candidates(ctx);
+  }
+
+  @RequireStockPermission('stock.members.manage')
+  @Post('members/existing')
+  attachMember(@CurrentStock() ctx: StockContext, @Body() dto: AttachStockMemberDto) {
+    return this.members.attach(ctx, dto);
   }
 
   @RequireStockPermission('stock.members.manage')

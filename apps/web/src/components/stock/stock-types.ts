@@ -108,6 +108,8 @@ export interface StockMemberView {
   effectivePermissions: string[];
   /** Sites rattachés ; vide = tous les sites. */
   siteIds: string[];
+  /** Sprint Suite 2A : rôle propre à certains sites (restreint le rôle principal). */
+  siteRoles?: { siteId: string; role: StockRole }[];
 }
 
 export type StockLookup =

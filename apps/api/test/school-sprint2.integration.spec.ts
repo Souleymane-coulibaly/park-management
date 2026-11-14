@@ -1915,7 +1915,9 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
       expect((await login(app, m.loginId, PASSWORD)).status).not.toBe(200);
     });
 
-    it('une ligne School ne donne aucun accès à un compte qui n’est pas dédié à School', async () => {
+    // Ocall Suite Sprint 2A (décision validée le 14/11/2026) : un rôle School vaut pour tout membre de
+    // l'organisation, employé Park compris ; seule la ligne School active donne l'accès, avec son seul rôle.
+    it('un compte Park n’a dans School que le rôle de sa ligne School active', async () => {
       const m = await member(ownerA, 'SECRETARY', [a1.schoolId]);
       await m.agent.get('/api/v1/school/context').expect(200);
       const row = await db.schoolMember.findUniqueOrThrow({ where: { id: m.id } });
@@ -1923,6 +1925,13 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
         where: { userId: row.userId, role: 'PRODUCT_USER' },
         data: { role: 'CASHIER' },
       });
+      const context = (await m.agent.get('/api/v1/school/context').expect(200)).body;
+      expect(context.role).toBe('SECRETARY');
+      expect(context.schools.map((x: { id: string }) => x.id)).toEqual([a1.schoolId]);
+      // Ligne School fermée : plus aucun accès School, quel que soit le rôle Park.
+      await db.schoolMember.update({ where: { id: m.id }, data: { isActive: false } });
+      await m.agent.get('/api/v1/school/context').expect(403);
+      await db.schoolMember.delete({ where: { id: m.id } });
       await m.agent.get('/api/v1/school/context').expect(403);
     });
   });

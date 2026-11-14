@@ -35,6 +35,7 @@ import {
   STOCK_PAYMENT_METHODS,
   STOCK_PREFIX_PATTERN,
   STOCK_ROLES,
+  STOCK_SITE_ROLES,
   STOCK_SITE_CODE_PATTERN,
   STOCK_SITE_KINDS,
   STOCK_SKU_PATTERN,
@@ -155,6 +156,17 @@ export class CreateStockMemberDto {
   @ValidateIf(notNull)
   @IsEmail()
   email?: string | null;
+
+  @ApiProperty({ enum: STOCK_ROLES })
+  @IsIn(STOCK_ROLES)
+  role: StockRole;
+}
+
+/** Sprint Suite 2A : membre existant de l'organisation ajouté à l'équipe Stock, sans nouveau compte. */
+export class AttachStockMemberDto {
+  @ApiProperty({ description: 'Compte Suite d’un membre actif de l’organisation' })
+  @IsUUID()
+  userId: string;
 
   @ApiProperty({ enum: STOCK_ROLES })
   @IsIn(STOCK_ROLES)
@@ -766,12 +778,34 @@ export class StockLocationLabelsDto {
   locationIds: string[];
 }
 
+export class StockMemberSiteRoleDto {
+  @ApiProperty()
+  @IsUUID()
+  siteId: string;
+
+  @ApiProperty({ enum: STOCK_SITE_ROLES, description: 'Rôle sur ce site ; jamais administrateur' })
+  @IsIn(STOCK_SITE_ROLES)
+  role: StockRole;
+}
+
 export class StockMemberSitesDto {
   @ApiProperty({ type: [String], description: 'Sites du membre ; vide = tous les sites' })
   @IsArray()
   @ArrayMaxSize(200)
   @IsUUID('all', { each: true })
   siteIds: string[];
+
+  @ApiPropertyOptional({
+    type: [StockMemberSiteRoleDto],
+    description:
+      'Sprint Suite 2A : rôle propre à certains de ces sites (absent = rôle principal). Limité au rôle principal.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(200)
+  @ValidateNested({ each: true })
+  @Type(() => StockMemberSiteRoleDto)
+  siteRoles?: StockMemberSiteRoleDto[];
 }
 
 export class StockSiteQueryDto {
