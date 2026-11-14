@@ -110,9 +110,12 @@ export function AddToRequest({
 export function StockRequestForm({
   slug,
   forms,
+  shop = null,
 }: {
   slug: string;
   forms: StockShowcaseRequestKind[];
+  /** Boutique choisie (S10) : la demande lui est adressée. */
+  shop?: { siteId: string; name: string } | null;
 }) {
   const [items, save] = useWanted(slug);
   const [startedAt] = useState(() => Date.now());
@@ -149,6 +152,7 @@ export function StockRequestForm({
             : undefined,
           website: form.website,
           startedAt,
+          ...(shop ? { siteId: shop.siteId } : {}),
         }),
       });
       if (!res.ok) {
@@ -184,6 +188,11 @@ export function StockRequestForm({
 
   return (
     <form className="mt-4 space-y-3" onSubmit={submit} data-testid="stock-site-request-form">
+      {shop && (
+        <p className="text-sm" data-testid="stock-site-request-shop">
+          Demande adressée à <strong>{shop.name}</strong>.
+        </p>
+      )}
       {forms.length > 1 && (
         <label className="block text-sm font-medium">
           Objet

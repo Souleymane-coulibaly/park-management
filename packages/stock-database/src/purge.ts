@@ -54,6 +54,7 @@ export async function purgeStockOrganizations(
       await tx.stockMovement.deleteMany({ where });
       await tx.stockLevel.deleteMany({ where });
       await tx.stockMemberSite.deleteMany({ where });
+      await tx.stockSitePrice.deleteMany({ where });
       // Emplacements : du plus fin au plus large (chaque parent n'a plus d'enfant quand il part).
       for (const kind of ['BIN', 'SHELF', 'AISLE', 'ZONE', 'DEFAULT'] as const) {
         await tx.stockLocation.deleteMany({ where: { ...where, kind } });

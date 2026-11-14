@@ -8,6 +8,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   Res,
   StreamableFile,
@@ -43,6 +44,7 @@ import {
   StockLookupQueryDto,
   StockProductDto,
   StockProductQueryDto,
+  StockSitePriceDto,
   StockGlobalSearchQueryDto,
   StockSupplierDto,
   StockVariantDto,
@@ -174,6 +176,27 @@ export class OcallStockCatalogController {
     @Body() dto: UpdateStockVariantDto,
   ) {
     return this.catalog.updateVariantChecked(ctx, id, dto);
+  }
+
+  @RequireStockPermission('stock.prices.manage')
+  @Put('variants/:id/site-prices/:siteId')
+  setSitePrice(
+    @CurrentStock() ctx: StockContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+    @Body() dto: StockSitePriceDto,
+  ) {
+    return this.catalog.setSitePrice(ctx, id, siteId, dto.salePrice);
+  }
+
+  @RequireStockPermission('stock.prices.manage')
+  @Delete('variants/:id/site-prices/:siteId')
+  removeSitePrice(
+    @CurrentStock() ctx: StockContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('siteId', ParseUUIDPipe) siteId: string,
+  ) {
+    return this.catalog.removeSitePrice(ctx, id, siteId);
   }
 
   @RequireStockPermission('stock.catalog.manage')

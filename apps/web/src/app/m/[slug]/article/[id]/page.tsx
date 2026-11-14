@@ -4,12 +4,25 @@ import { notFound } from 'next/navigation';
 import { STOCK_AI_ILLUSTRATION_LABEL, stockShowcaseProductJsonLd } from '@ocall/shared';
 import { PremiumPageTitle } from '@/components/site/showcase-premium';
 import { AddToRequest } from '@/components/stock-site/request';
-import { AvailabilityBadge, PublicPrice, StockSiteShell } from '@/components/stock-site/site-shell';
-import { fetchStockProduct, stockImageUrl, stockSiteBase } from '@/lib/public-stock-site';
+import {
+  AvailabilityBadge,
+  PublicPrice,
+  StockSiteShell,
+  shopHref,
+} from '@/components/stock-site/site-shell';
+import {
+  fetchStockProduct,
+  shopParam,
+  stockImageUrl,
+  stockSiteBase,
+} from '@/lib/public-stock-site';
 
 export const dynamic = 'force-dynamic';
 
 type Params = { params: Promise<{ slug: string; id: string }> };
+type Props = Params & { searchParams: Promise<{ boutique?: string | string[] }> };
+
+const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { slug, id } = await params;
@@ -41,19 +54,24 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
  * Fiche publique d'un article publié : photos, prix (s'il est affiché), disponibilité (badge sans
  * chiffre), ajout à la demande de devis ; données structurées `Product` et `Offer`.
  */
-export default async function StockSiteProductPage({ params }: Params) {
+export default async function StockSiteProductPage({ params, searchParams }: Props) {
   const { slug, id } = await params;
-  const data = await fetchStockProduct(slug, id);
+  const boutique = shopParam(one((await searchParams).boutique));
+  const data = await fetchStockProduct(slug, id, boutique);
   if (!data) notFound();
   const p = data.product;
-  const base = await stockSiteBase(data, `/article/${p.id}`);
+  const shop = data.shop ?? null;
+  const base = await stockSiteBase(
+    data,
+    `/article/${p.id}${boutique ? `?boutique=${boutique}` : ''}`,
+  );
   const url = `${data.url}/article/${p.id}`;
   const jsonLd = stockShowcaseProductJsonLd(data.site, p, url, (imageId) =>
     new URL(stockImageUrl(imageId), data.url).toString(),
   );
 
   return (
-    <StockSiteShell site={data.site} base={base}>
+    <StockSiteShell site={data.site} base={base} shop={shop}>
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, '\\u003c') }}
@@ -61,7 +79,7 @@ export default async function StockSiteProductPage({ params }: Params) {
       <PremiumPageTitle
         eyebrow={
           <>
-            <Link href={`${base}/catalogue`} className="underline">
+            <Link href={shopHref(`${base}/catalogue`, shop)} className="underline">
               Catalogue
             </Link>
             {p.category && <> · {p.category.name}</>}
@@ -125,7 +143,7 @@ export default async function StockSiteProductPage({ params }: Params) {
               <p className="text-sm font-semibold">Demander un devis</p>
               <AddToRequest slug={data.slug} product={{ id: p.id, name: p.name }} withQuantity />
               <Link
-                href={`${base || '/'}#demande`}
+                href={shopHref(`${base}/#demande`, shop)}
                 className="text-sm font-semibold underline"
                 style={{ color: 'var(--brand)' }}
               >

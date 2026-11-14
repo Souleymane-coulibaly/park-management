@@ -16,7 +16,7 @@ import {
   stockInternalCode,
 } from '@ocall/shared';
 import { AuditService } from '../../common/audit/audit.service';
-import { type StockContext, stockCan } from './ocall-stock-access';
+import { type StockContext, stockCan, stockSiteAllowed } from './ocall-stock-access';
 import { OcallStockPrismaService } from './ocall-stock-prisma.service';
 import type {
   StockBarcodeDto,
@@ -38,6 +38,7 @@ const PRODUCT_NOT_FOUND = { code: 'STOCK_PRODUCT_NOT_FOUND', message: 'Article i
 const VARIANT_NOT_FOUND = { code: 'STOCK_VARIANT_NOT_FOUND', message: 'Variante introuvable.' };
 const CATEGORY_NOT_FOUND = { code: 'STOCK_CATEGORY_NOT_FOUND', message: 'Catégorie introuvable.' };
 const BRAND_NOT_FOUND = { code: 'STOCK_BRAND_NOT_FOUND', message: 'Marque introuvable.' };
+const SITE_NOT_FOUND = { code: 'STOCK_SITE_NOT_FOUND', message: 'Site introuvable.' };
 const LIST_LIMIT = 500;
 /**
  * Tolérance aux fautes : proximité de trigrammes d'un mot cherché avec une partie du nom (0 à 1). Le seuil
@@ -249,6 +250,7 @@ export class OcallStockCatalogService {
               orderBy: { createdAt: 'asc' },
               select: { id: true, type: true, code: true, createdAt: true },
             },
+            sitePrices: { select: { siteId: true, salePrice: true } },
           },
         },
         images: {
@@ -273,6 +275,8 @@ export class OcallStockCatalogService {
         purchasePrice: seePurchase ? v.purchasePrice : undefined,
         isArchived: v.isArchived,
         barcodes: v.barcodes,
+        // Exceptions de prix des boutiques du membre seulement (S10).
+        sitePrices: v.sitePrices.filter((p) => stockSiteAllowed(ctx, p.siteId)),
       })),
     };
   }
@@ -514,6 +518,7 @@ export class OcallStockCatalogService {
           newPrice: true,
           changedByUserId: true,
           createdAt: true,
+          siteId: true,
           variant: { select: { id: true, name: true, isDefault: true } },
         },
       }),
@@ -523,7 +528,11 @@ export class OcallStockCatalogService {
       const { purchasePrice: _p, ...rest } = c as Record<string, unknown>;
       return rest;
     };
-    return { changes: changes.map((c) => ({ ...c, changes: hide(c.changes) })), prices };
+    return {
+      changes: changes.map((c) => ({ ...c, changes: hide(c.changes) })),
+      // Prix d'une boutique : visibles des membres de cette boutique seulement (S10).
+      prices: prices.filter((p) => p.siteId === null || stockSiteAllowed(ctx, p.siteId)),
+    };
   }
 
   // ─── Variantes ───
@@ -677,6 +686,120 @@ export class OcallStockCatalogService {
       .catch((e) => this.skuErrors(e));
     await this.record(ctx, 'stock.variant_updated', 'StockVariant', id, Object.keys(dto));
     return this.product(ctx, productId);
+  }
+
+  // ─── Prix par boutique (S10) ───
+
+  /**
+   * Fixe le prix de vente TTC d'une variante dans une boutique (exception au prix commun), tracé dans
+   * l'historique des prix avec la boutique. Boutique de l'organisation, accessible au membre et active.
+   */
+  async setSitePrice(ctx: StockContext, variantId: string, siteId: string, salePrice: number) {
+    this.assertCan(ctx, 'stock.prices.manage', 'Vous ne pouvez pas modifier les prix.');
+    const productId = await this.db.$transaction(async (tx) => {
+      const productId = await this.lockVariant(tx, ctx, variantId);
+      const site = await this.allowedSite(tx, ctx, siteId);
+      if (site.isArchived) {
+        throw new ConflictException({ code: 'STOCK_SITE_ARCHIVED', message: 'Site archivé.' });
+      }
+      const key = { organizationId: ctx.organizationId, variantId, siteId };
+      const current = await tx.stockSitePrice.findUnique({
+        where: { organizationId_variantId_siteId: key },
+      });
+      if (current?.salePrice === salePrice) return productId;
+      await tx.stockSitePrice.upsert({
+        where: { organizationId_variantId_siteId: key },
+        create: { ...key, salePrice, updatedByUserId: ctx.userId },
+        update: { salePrice, updatedByUserId: ctx.userId },
+      });
+      await this.sitePriceHistory(
+        tx,
+        ctx,
+        productId,
+        variantId,
+        site,
+        current?.salePrice ?? null,
+        salePrice,
+      );
+      return productId;
+    });
+    await this.record(ctx, 'stock.site_price_set', 'StockVariant', variantId, [siteId]);
+    return this.product(ctx, productId);
+  }
+
+  /** Retire l'exception : la boutique revient au prix commun. */
+  async removeSitePrice(ctx: StockContext, variantId: string, siteId: string) {
+    this.assertCan(ctx, 'stock.prices.manage', 'Vous ne pouvez pas modifier les prix.');
+    const productId = await this.db.$transaction(async (tx) => {
+      const productId = await this.lockVariant(tx, ctx, variantId);
+      const site = await this.allowedSite(tx, ctx, siteId);
+      const key = { organizationId: ctx.organizationId, variantId, siteId };
+      const current = await tx.stockSitePrice.findUnique({
+        where: { organizationId_variantId_siteId: key },
+      });
+      if (!current) return productId;
+      await tx.stockSitePrice.delete({ where: { id: current.id } });
+      await this.sitePriceHistory(tx, ctx, productId, variantId, site, current.salePrice, null);
+      return productId;
+    });
+    await this.record(ctx, 'stock.site_price_removed', 'StockVariant', variantId, [siteId]);
+    return this.product(ctx, productId);
+  }
+
+  private async lockVariant(tx: Tx, ctx: StockContext, variantId: string) {
+    const [locked] = await tx.$queryRaw<{ productId: string }[]>`
+      SELECT "productId" FROM "StockVariant"
+      WHERE id = ${variantId}::uuid AND "organizationId" = ${ctx.organizationId}::uuid FOR UPDATE`;
+    if (!locked) throw new NotFoundException(VARIANT_NOT_FOUND);
+    return locked.productId;
+  }
+
+  private async allowedSite(tx: Tx, ctx: StockContext, siteId: string) {
+    const site = await tx.stockSite.findUnique({
+      where: { organizationId_id: { organizationId: ctx.organizationId, id: siteId } },
+      select: { id: true, name: true, isArchived: true },
+    });
+    if (!site || !stockSiteAllowed(ctx, site.id)) throw new NotFoundException(SITE_NOT_FOUND);
+    return site;
+  }
+
+  private async sitePriceHistory(
+    tx: Tx,
+    ctx: StockContext,
+    productId: string,
+    variantId: string,
+    site: { id: string; name: string },
+    oldPrice: number | null,
+    newPrice: number | null,
+  ) {
+    const variant = await tx.stockVariant.findUniqueOrThrow({
+      where: { id: variantId },
+      select: { name: true },
+    });
+    await tx.stockPriceHistory.create({
+      data: {
+        organizationId: ctx.organizationId,
+        variantId,
+        kind: 'SALE',
+        siteId: site.id,
+        oldPrice,
+        newPrice,
+        changedByUserId: ctx.userId,
+      },
+    });
+    await tx.stockProductHistory.create({
+      data: {
+        organizationId: ctx.organizationId,
+        productId,
+        actorUserId: ctx.userId,
+        action: newPrice === null ? 'site_price_removed' : 'site_price_set',
+        changes: {
+          ...(variant.name ? { variant: [variant.name, variant.name] } : {}),
+          site: [site.name, site.name],
+          salePrice: [oldPrice, newPrice],
+        },
+      },
+    });
   }
 
   // ─── Codes-barres ───

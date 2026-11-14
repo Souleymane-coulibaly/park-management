@@ -171,30 +171,30 @@ model StockBrand {
 /// Article du catalogue. Ses déclinaisons vendables sont ses variantes : un article sans déclinaison a une
 /// seule variante, dite « par défaut », qui porte ses codes-barres (et plus tard ses stocks).
 model StockProduct {
-  id             String   @id @default(uuid()) @db.Uuid
-  organizationId String   @db.Uuid
+  id                String   @id @default(uuid()) @db.Uuid
+  organizationId    String   @db.Uuid
   /// Référence interne (SKU), unique par organisation ; générée si elle n'est pas saisie.
-  sku            String
-  name           String
-  description    String?
-  categoryId     String?  @db.Uuid
-  brandId        String?  @db.Uuid
+  sku               String
+  name              String
+  description       String?
+  categoryId        String?  @db.Uuid
+  brandId           String?  @db.Uuid
   /// Unité de vente (unité, kg, litre, carton…).
-  unit           String   @default("unité")
+  unit              String   @default("unité")
   /// Prix de vente TTC.
-  salePrice      Int
+  salePrice         Int
   /// Prix d'achat HT ; null s'il est inconnu (jamais estimé).
-  purchasePrice  Int?
-  vatRate        Int
+  purchasePrice     Int?
+  vatRate           Int
   /// Seuil d'alerte (même unité) ; null = pas d'alerte.
-  minStock       Decimal? @db.Decimal(14, 3)
+  minStock          Decimal? @db.Decimal(14, 3)
   /// Faux pour un service ou un article qui ne se compte pas (aucun stock tenu).
-  isStockable    Boolean  @default(true)
-  isArchived     Boolean  @default(false)
+  isStockable       Boolean  @default(true)
+  isArchived        Boolean  @default(false)
   /// S7 : article publié dans le catalogue du site vitrine (choix explicite, faux par défaut).
-  showcasePublished Boolean @default(false)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  showcasePublished Boolean  @default(false)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   category StockCategory?        @relation(fields: [organizationId, categoryId], references: [organizationId, id], onDelete: Restrict)
   brand    StockBrand?           @relation(fields: [organizationId, brandId], references: [organizationId, id], onDelete: Restrict)
@@ -226,11 +226,12 @@ model StockVariant {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  product   StockProduct        @relation(fields: [organizationId, productId], references: [organizationId, id], onDelete: Restrict)
-  barcodes  StockBarcode[]
-  levels    StockLevel[]
-  movements StockMovement[]
-  prices    StockPriceHistory[]
+  product    StockProduct        @relation(fields: [organizationId, productId], references: [organizationId, id], onDelete: Restrict)
+  barcodes   StockBarcode[]
+  levels     StockLevel[]
+  movements  StockMovement[]
+  prices     StockPriceHistory[]
+  sitePrices StockSitePrice[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, sku])
@@ -255,19 +256,19 @@ model StockBarcode {
 
 /// Photo d'un article : image réencodée en JPEG, sans métadonnées, clé de stockage privée.
 model StockProductImage {
-  id              String   @id @default(uuid()) @db.Uuid
-  organizationId  String   @db.Uuid
-  productId       String   @db.Uuid
-  storageKey      String
-  position        Int
-  bytes           Int
+  id               String   @id @default(uuid()) @db.Uuid
+  organizationId   String   @db.Uuid
+  productId        String   @db.Uuid
+  storageKey       String
+  position         Int
+  bytes            Int
   /// S8 : illustration générée par IA (jamais présentée comme une photo réelle).
-  aiGenerated     Boolean  @default(false)
+  aiGenerated      Boolean  @default(false)
   /// S8 : visible sur la vitrine. Toujours vrai pour une photo ; une illustration IA ne l'est que sur
   /// décision du commerçant.
-  showcaseApproved Boolean @default(true)
-  createdByUserId String   @db.Uuid
-  createdAt       DateTime @default(now())
+  showcaseApproved Boolean  @default(true)
+  createdByUserId  String   @db.Uuid
+  createdAt        DateTime @default(now())
 
   product StockProduct @relation(fields: [organizationId, productId], references: [organizationId, id], onDelete: Restrict)
 
@@ -284,6 +285,8 @@ model StockPriceHistory {
   kind            StockPriceKind
   oldPrice        Int?
   newPrice        Int?
+  /// S10 : prix propre à une boutique (exception) ; null = prix commun.
+  siteId          String?        @db.Uuid
   changedByUserId String         @db.Uuid
   createdAt       DateTime       @default(now())
 
@@ -409,18 +412,40 @@ model StockSite {
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
-  locations     StockLocation[]
-  members       StockMemberSite[]
-  levels        StockLevel[]
-  movements     StockMovement[]
-  transfersFrom StockTransfer[]      @relation("StockTransferFrom")
-  transfersTo   StockTransfer[]      @relation("StockTransferTo")
-  counts        StockCount[]
-  purchases     StockPurchaseOrder[]
-  registers     StockRegister[]
+  locations        StockLocation[]
+  members          StockMemberSite[]
+  levels           StockLevel[]
+  movements        StockMovement[]
+  transfersFrom    StockTransfer[]        @relation("StockTransferFrom")
+  transfersTo      StockTransfer[]        @relation("StockTransferTo")
+  counts           StockCount[]
+  purchases        StockPurchaseOrder[]
+  registers        StockRegister[]
+  prices           StockSitePrice[]
+  showcaseRequests StockShowcaseRequest[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, code])
+}
+
+/// S10 : prix de vente TTC propre à une boutique (exception au prix commun de la variante ou de l'article).
+/// Sans ligne, la boutique applique le prix commun. Suivi par la caisse, les étiquettes et la vitrine ;
+/// Facture garde le prix commun.
+model StockSitePrice {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  variantId       String   @db.Uuid
+  siteId          String   @db.Uuid
+  salePrice       Int
+  updatedByUserId String   @db.Uuid
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  variant StockVariant @relation(fields: [organizationId, variantId], references: [organizationId, id], onDelete: Restrict)
+  site    StockSite    @relation(fields: [organizationId, siteId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, variantId, siteId])
+  @@index([organizationId, siteId])
 }
 
 /// Rattachement d'un membre à un site. Sans aucun rattachement, le membre agit sur tous les sites.
@@ -451,12 +476,12 @@ model StockLocation {
   createdAt      DateTime          @default(now())
   updatedAt      DateTime          @updatedAt
 
-  site      StockSite       @relation(fields: [organizationId, siteId], references: [organizationId, id], onDelete: Restrict)
-  parent    StockLocation?  @relation("StockLocationTree", fields: [organizationId, parentId], references: [organizationId, id], onDelete: Restrict)
-  children  StockLocation[] @relation("StockLocationTree")
-  levels    StockLevel[]
-  movements StockMovement[]
-  registers StockRegister[]
+  site            StockSite       @relation(fields: [organizationId, siteId], references: [organizationId, id], onDelete: Restrict)
+  parent          StockLocation?  @relation("StockLocationTree", fields: [organizationId, parentId], references: [organizationId, id], onDelete: Restrict)
+  children        StockLocation[] @relation("StockLocationTree")
+  levels          StockLevel[]
+  movements       StockMovement[]
+  registers       StockRegister[]
   /// Réglages qui en font l'emplacement des ventes Facture (S5).
   factureSettings StockSettings[] @relation("StockFactureLocation")
 
@@ -1179,11 +1204,16 @@ model StockShowcaseRequest {
   message         String
   /// Articles demandés : [{ productId, name, quantity }] (libellés copiés : le catalogue peut changer).
   items           Json                       @default("[]")
+  /// S10 : boutique choisie par le visiteur ; null = demande adressée à l'entreprise.
+  siteId          String?                    @db.Uuid
   handledByUserId String?                    @db.Uuid
   handledAt       DateTime?
   createdAt       DateTime                   @default(now())
 
+  site StockSite? @relation(fields: [organizationId, siteId], references: [organizationId, id], onDelete: Restrict)
+
   @@unique([organizationId, id])
+  @@index([organizationId, siteId, createdAt])
   @@index([organizationId, status, createdAt])
 }
 

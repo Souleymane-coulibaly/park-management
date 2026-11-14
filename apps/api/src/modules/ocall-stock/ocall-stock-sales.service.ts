@@ -23,6 +23,7 @@ import {
   toBase64,
 } from '@ocall/shared';
 import { AuditService } from '../../common/audit/audit.service';
+import { stockEffectivePrice, stockSitePrices } from './ocall-stock-site-prices';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
   type StockContext,
@@ -133,6 +134,13 @@ export class OcallStockSalesService {
           },
         },
       });
+      // Prix de la boutique de la caisse (S10) : exception de la boutique, sinon prix commun.
+      const sitePrices = await stockSitePrices(
+        tx,
+        ctx.organizationId,
+        register.siteId,
+        variants.map((v) => v.id),
+      );
       const lines = dto.lines.map((l) => {
         const v = variants.find((x) => x.id === l.variantId);
         if (!v) {
@@ -147,7 +155,7 @@ export class OcallStockSalesService {
             message: `${v.product.name} est archivé : il ne se vend plus.`,
           });
         }
-        const unitPrice = v.salePrice ?? v.product.salePrice;
+        const unitPrice = stockEffectivePrice(sitePrices, v);
         const discount = l.discount ?? 0;
         const amounts = stockLineAmounts(l.quantity, unitPrice, v.product.vatRate, discount);
         const refused = stockDiscountError(discount, amounts.gross, rules);
@@ -259,7 +267,7 @@ export class OcallStockSalesService {
     const ids = q.trim()
       ? await this.catalog.searchProductIds(ctx.organizationId, q.trim(), 24)
       : [];
-    const items = await this.posItems(ctx, register.locationId, { productId: { in: ids } });
+    const items = await this.posItems(ctx, register, { productId: { in: ids } });
     return items.sort((x, y) => ids.indexOf(x.productId) - ids.indexOf(y.productId));
   }
 
@@ -271,7 +279,7 @@ export class OcallStockSalesService {
     if (found.variant.isArchived || found.product.isArchived) {
       return { found: false as const, code: found.code, archived: true };
     }
-    const [item] = await this.posItems(ctx, register.locationId, { id: found.variant.id }, true);
+    const [item] = await this.posItems(ctx, register, { id: found.variant.id }, true);
     return item
       ? { found: true as const, code: found.code, item }
       : { found: false as const, code };
@@ -280,12 +288,12 @@ export class OcallStockSalesService {
   /** Articles d'un panier repris : prix et disponibilités relus au moment de la reprise. */
   async posItemsFor(ctx: StockContext, registerId: string, variantIds: string[]) {
     const register = await this.registers.register(ctx, registerId);
-    return this.posItems(ctx, register.locationId, { id: { in: variantIds } }, true);
+    return this.posItems(ctx, register, { id: { in: variantIds } }, true);
   }
 
   private async posItems(
     ctx: StockContext,
-    locationId: string,
+    register: { siteId: string; locationId: string },
     where: Prisma.StockVariantWhereInput,
     exact = false,
   ): Promise<StockPosItem[]> {
@@ -318,11 +326,17 @@ export class OcallStockSalesService {
     const levels = await this.db.stockLevel.findMany({
       where: {
         organizationId: ctx.organizationId,
-        locationId,
+        locationId: register.locationId,
         variantId: { in: sellable.map((v) => v.id) },
       },
       select: { variantId: true, onHand: true, reserved: true },
     });
+    const sitePrices = await stockSitePrices(
+      this.db,
+      ctx.organizationId,
+      register.siteId,
+      sellable.map((v) => v.id),
+    );
     return sellable.map((v) => {
       const level = levels.find((l) => l.variantId === v.id);
       return {
@@ -331,7 +345,7 @@ export class OcallStockSalesService {
         label: v.name ? `${v.product.name} — ${v.name}` : v.product.name,
         sku: v.sku,
         unit: v.product.unit,
-        unitPrice: v.salePrice ?? v.product.salePrice,
+        unitPrice: stockEffectivePrice(sitePrices, v),
         vatRate: v.product.vatRate,
         isStockable: v.product.isStockable,
         available: v.product.isStockable

@@ -58,6 +58,8 @@ export interface StockVariantView {
   purchasePrice?: number | null;
   isArchived: boolean;
   barcodes: StockBarcodeView[];
+  /** S10 : prix propres aux boutiques du membre (exceptions au prix commun). */
+  sitePrices?: { siteId: string; salePrice: number }[];
 }
 
 export interface StockProductDetail {

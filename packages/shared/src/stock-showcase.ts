@@ -31,6 +31,29 @@ export const STOCK_SHOWCASE_MAX_GALLERY = 12;
 /** Articles par page du catalogue public, articles joints à une demande. */
 export const STOCK_SHOWCASE_PAGE_SIZE = 24;
 export const STOCK_SHOWCASE_MAX_REQUEST_ITEMS = 20;
+/** Boutiques présentées sur une vitrine (S10). */
+export const STOCK_SHOWCASE_MAX_SHOPS = 20;
+
+/**
+ * Boutique présentée sur la vitrine (S10) : un site Stock de l'organisation, avec ses coordonnées propres.
+ * Nom et adresse viennent du site (figés à la publication).
+ */
+export interface StockShowcaseShop {
+  siteId: string;
+  phone: string | null;
+  /** Numéro WhatsApp international de la boutique ; à défaut, celui de l'entreprise. */
+  whatsapp: string | null;
+  hours: string | null;
+  /** Lien https vers une carte. */
+  mapUrl: string | null;
+}
+
+/** Boutique publiée : coordonnées et nom, adresse du site au moment de la publication. */
+export interface StockShowcasePublishedShop extends StockShowcaseShop {
+  name: string;
+  address: string | null;
+  city: string | null;
+}
 
 /** Contenu d'une vitrine (brouillon modifiable ; la version publiée en est une copie figée). */
 export interface StockShowcaseContent {
@@ -59,6 +82,11 @@ export interface StockShowcaseContent {
   showPrices: boolean;
   /** Formulaires proposés aux visiteurs. */
   forms: StockShowcaseRequestKind[];
+  /**
+   * Boutiques présentées (S10), dans l'ordre d'affichage ; vide ou absent = vitrine de l'entreprise sans
+   * choix de boutique.
+   */
+  shops?: StockShowcaseShop[];
 }
 
 /** Version publiée : contenu figé, nom de l'entreprise, images. Le catalogue est lu en direct. */
@@ -68,6 +96,7 @@ export interface StockShowcasePublished extends StockShowcaseContent {
   cover: string | null;
   gallery: { key: string; caption: string | null }[];
   publishedAt: string;
+  shops?: StockShowcasePublishedShop[];
 }
 
 /** Badge de disponibilité publié : jamais une quantité. */
@@ -86,7 +115,10 @@ export interface StockShowcaseProduct {
   category: { id: string; name: string } | null;
   brand: string | null;
   unit: string;
-  /** Prix de vente TTC (plus bas des variantes) ; null si les prix ne sont pas affichés. */
+  /**
+   * Prix de vente TTC (plus bas des variantes ; prix de la boutique choisie s'il y en a une, S10) ; null si
+   * les prix ne sont pas affichés.
+   */
   priceTtc: number | null;
   /** Plusieurs prix selon la variante : « à partir de ». */
   priceFrom: boolean;
@@ -116,13 +148,19 @@ export function stockShowcaseCanonicalUrl(input: {
   return `${input.publicOrigin.replace(/\/$/, '')}/m/${input.slug}`;
 }
 
-/** Pages d'une vitrine Stock servies sur son hôte : accueil, catalogue, fiche article. */
+/** Pages d'une vitrine Stock servies sur son hôte : accueil, catalogue, boutiques (S10), fiche article. */
 export function parseStockShowcasePath(
   path: string,
-): { page: 'home' } | { page: 'catalog' } | { page: 'product'; id: string } | null {
+):
+  | { page: 'home' }
+  | { page: 'catalog' }
+  | { page: 'shops' }
+  | { page: 'product'; id: string }
+  | null {
   const p = path.replace(/\/+$/, '') || '/';
   if (p === '/') return { page: 'home' };
   if (p === '/catalogue') return { page: 'catalog' };
+  if (p === '/boutiques') return { page: 'shops' };
   const m = /^\/article\/([0-9a-f-]{36})$/i.exec(p);
   return m ? { page: 'product', id: m[1]!.toLowerCase() } : null;
 }

@@ -10,12 +10,20 @@ import {
   PremiumSection,
 } from '@/components/site/showcase-premium';
 import { StockRequestForm } from '@/components/stock-site/request';
-import { ProductCard, StockSiteShell } from '@/components/stock-site/site-shell';
-import { fetchStockSite, stockMediaUrl, stockSiteBase } from '@/lib/public-stock-site';
+import {
+  ProductCard,
+  StockSiteShell,
+  shopContact,
+  shopHref,
+} from '@/components/stock-site/site-shell';
+import { fetchStockSite, shopParam, stockMediaUrl, stockSiteBase } from '@/lib/public-stock-site';
 
 export const dynamic = 'force-dynamic';
 
 type Params = { params: Promise<{ slug: string }> };
+type Props = Params & { searchParams: Promise<{ boutique?: string | string[] }> };
+
+const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
 
 /**
  * Vitrine publique d'un magasin Ocall Stock (S7) : version PUBLIÉE uniquement, lue sans cache, premiers
@@ -50,17 +58,20 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   };
 }
 
-export default async function StockSiteHomePage({ params }: Params) {
+export default async function StockSiteHomePage({ params, searchParams }: Props) {
   const { slug } = await params;
-  const data = await fetchStockSite(slug);
+  const boutique = shopParam(one((await searchParams).boutique));
+  const data = await fetchStockSite(slug, boutique);
   if (!data) notFound();
-  const base = await stockSiteBase(data, '');
+  const base = await stockSiteBase(data, boutique ? `?boutique=${boutique}` : '');
   const s = data.site;
+  const shop = data.shop ?? null;
+  const contact = shopContact(s, shop);
   const jsonLd = stockShowcaseStoreJsonLd(s, data.url, (key) =>
     new URL(stockMediaUrl(key), data.url).toString(),
   );
 
-  const wa = s.whatsapp ? whatsappDigits(s.whatsapp) : null;
+  const wa = contact.whatsapp ? whatsappDigits(contact.whatsapp) : null;
   const waHref = wa ? whatsappUrl(wa) : null;
   // Sections affichées, dans l'ordre : fonds alternés comme sur les sites Park.
   const sections = [
@@ -72,7 +83,7 @@ export default async function StockSiteHomePage({ params }: Params) {
   const tinted = (key: string) => sections.indexOf(key) % 2 === 0;
 
   return (
-    <StockSiteShell site={s} base={base}>
+    <StockSiteShell site={s} base={base} shop={shop}>
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, '\\u003c') }}
@@ -84,7 +95,11 @@ export default async function StockSiteHomePage({ params }: Params) {
         tagline={s.tagline}
         cta={
           s.showCatalog
-            ? { href: `${base}/catalogue`, label: 'Voir le catalogue', kind: 'link' }
+            ? {
+                href: shopHref(`${base}/catalogue`, shop),
+                label: 'Voir le catalogue',
+                kind: 'link',
+              }
             : waHref
               ? { href: waHref, label: 'Écrire sur WhatsApp', kind: 'whatsapp' }
               : null
@@ -114,7 +129,7 @@ export default async function StockSiteHomePage({ params }: Params) {
           testId="stock-site-featured"
           action={
             <Link
-              href={`${base}/catalogue`}
+              href={shopHref(`${base}/catalogue`, shop)}
               className="inline-flex min-h-11 items-center rounded-full px-5 font-semibold text-white"
               style={{ background: 'var(--brand)' }}
             >
@@ -124,7 +139,7 @@ export default async function StockSiteHomePage({ params }: Params) {
         >
           <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
             {data.featured.map((p) => (
-              <ProductCard key={p.id} product={p} base={base} />
+              <ProductCard key={p.id} product={p} base={base} shop={shop} />
             ))}
           </ul>
         </PremiumSection>
@@ -150,18 +165,18 @@ export default async function StockSiteHomePage({ params }: Params) {
       <PremiumSection
         id="contact"
         eyebrow="Nous trouver"
-        title="Localisation et contact"
+        title={shop ? shop.name : 'Localisation et contact'}
         tinted={tinted('contact')}
       >
         <div className="grid gap-8 lg:grid-cols-2 [&>*]:min-w-0">
           <ContactCards
-            address={[s.address, s.city].filter(Boolean).join(', ') || null}
-            mapUrl={s.mapUrl}
-            hours={s.hours}
-            phone={s.phone}
-            whatsapp={s.whatsapp}
+            address={contact.address}
+            mapUrl={contact.mapUrl}
+            hours={contact.hours}
+            phone={contact.phone}
+            whatsapp={contact.whatsapp}
             whatsappHref={waHref}
-            email={s.email}
+            email={contact.email}
           />
           {s.forms.length > 0 && (
             <div id="demande" className={`scroll-mt-20 ${PREMIUM_CARD}`}>
@@ -170,7 +185,11 @@ export default async function StockSiteHomePage({ params }: Params) {
                 Ajoutez des articles depuis le catalogue pour demander un devis ; le magasin vous
                 recontacte rapidement.
               </p>
-              <StockRequestForm slug={data.slug} forms={s.forms} />
+              <StockRequestForm
+                slug={data.slug}
+                forms={s.forms}
+                shop={shop ? { siteId: shop.siteId, name: shop.name } : null}
+              />
             </div>
           )}
         </div>

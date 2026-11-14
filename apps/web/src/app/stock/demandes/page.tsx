@@ -26,6 +26,8 @@ interface RequestRow {
   email: string | null;
   message: string;
   items: { productId: string; name: string; quantity: number }[];
+  /** Boutique choisie par le visiteur (S10). */
+  site?: { id: string; name: string } | null;
   createdAt: string;
 }
 
@@ -102,7 +104,12 @@ function Requests({ editable }: { editable: boolean }) {
                         {STOCK_SHOWCASE_REQUEST_STATUS_LABELS[r.status]}
                       </Badge>
                     </div>
-                    <p className="text-xs text-muted">Reçue le {dateTimeFr(r.createdAt)}</p>
+                    <p className="text-xs text-muted">
+                      Reçue le {dateTimeFr(r.createdAt)}
+                      {r.site && (
+                        <span data-testid="stock-request-site"> · Boutique : {r.site.name}</span>
+                      )}
+                    </p>
                     {r.items.length > 0 && (
                       <ul className="list-disc pl-5">
                         {r.items.map((i) => (

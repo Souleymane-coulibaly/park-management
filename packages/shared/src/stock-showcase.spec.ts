@@ -64,6 +64,7 @@ describe('Ocall Stock — vitrine', () => {
   it('pages servies sur l’hôte de la vitrine, rien d’autre', () => {
     expect(parseStockShowcasePath('/')).toEqual({ page: 'home' });
     expect(parseStockShowcasePath('/catalogue/')).toEqual({ page: 'catalog' });
+    expect(parseStockShowcasePath('/boutiques')).toEqual({ page: 'shops' });
     expect(parseStockShowcasePath(`/article/${product.id.toUpperCase()}`)).toEqual({
       page: 'product',
       id: product.id,

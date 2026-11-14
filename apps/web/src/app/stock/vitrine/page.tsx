@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button, buttonClass } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { BrandColorField } from '@/components/site/brand-color-field';
+import { ShopsEditor } from '@/components/stock-site/shops-editor';
 import { CheckboxGroup, InputField } from '@/components/ui/field';
 import { Alert, ApiErrorAlert, ErrorState, LoadingState } from '@/components/ui/states';
 import { ApiError, api, apiUpload } from '@/lib/api';
@@ -329,6 +330,16 @@ function ContentCard({
                 prix d’achat et les marges ne sont jamais publiés.
               </span>
             </label>
+          </div>
+          <div className="sm:col-span-2">
+            <ShopsEditor
+              value={c.shops ?? []}
+              disabled={!editable}
+              onChange={(shops) => {
+                setSaved(false);
+                setC({ ...c, shops });
+              }}
+            />
           </div>
           <div className="sm:col-span-2">
             <CheckboxGroup

@@ -80,12 +80,21 @@ async function stockSlugForHost(host: string): Promise<string | null> {
   return slug;
 }
 
-/** Page d'une vitrine Stock servie sur son hôte : `/m/<slug>[/catalogue|/article/<id>]`, requête comprise. */
+/**
+ * Page d'une vitrine Stock servie sur son hôte : `/m/<slug>[/catalogue|/boutiques|/article/<id>]`, requête
+ * comprise.
+ */
 function stockTarget(slug: string | null, path: string, search: string): string | null {
   const route = parseStockShowcasePath(path);
   if (!slug || !route) return null;
   const sub =
-    route.page === 'home' ? '' : route.page === 'catalog' ? '/catalogue' : `/article/${route.id}`;
+    route.page === 'home'
+      ? ''
+      : route.page === 'catalog'
+        ? '/catalogue'
+        : route.page === 'shops'
+          ? '/boutiques'
+          : `/article/${route.id}`;
   return `/m/${slug}${sub}${search}`;
 }
 

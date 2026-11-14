@@ -2,9 +2,10 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { STOCK_LABEL_MAX_TOTAL, formatStockMoney } from '@ocall/shared';
 import { AuditService } from '../../common/audit/audit.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import type { StockContext } from './ocall-stock-access';
+import { type StockContext, stockSiteAllowed } from './ocall-stock-access';
 import { type LabelContent, renderLabelsPdf, symbologyFor } from './ocall-stock-label-pdf';
 import { OcallStockPrismaService } from './ocall-stock-prisma.service';
+import { stockEffectivePrice, stockSitePrices } from './ocall-stock-site-prices';
 import type { StockLabelsDto } from './ocall-stock.dto';
 
 /** Préférence d'impression : code du fabricant d'abord, puis code interne. */
@@ -31,6 +32,17 @@ export class OcallStockLabelsService {
       });
     }
     const ids = [...new Set(dto.items.map((i) => i.variantId))];
+    // Prix imprimé : celui de la boutique demandée, ou de l'unique boutique du membre (S10).
+    const siteId = dto.siteId ?? (ctx.siteIds?.length === 1 ? ctx.siteIds[0]! : null);
+    if (siteId) {
+      const site = await this.db.stockSite.findUnique({
+        where: { organizationId_id: { organizationId: ctx.organizationId, id: siteId } },
+        select: { id: true },
+      });
+      if (!site || !stockSiteAllowed(ctx, site.id)) {
+        throw new NotFoundException({ code: 'STOCK_SITE_NOT_FOUND', message: 'Site introuvable.' });
+      }
+    }
     const [variants, settings, organization] = await Promise.all([
       this.db.stockVariant.findMany({
         where: { organizationId: ctx.organizationId, id: { in: ids } },
@@ -56,6 +68,9 @@ export class OcallStockLabelsService {
       });
     }
     const storeName = settings?.storeName ?? organization.name;
+    const sitePrices = siteId
+      ? await stockSitePrices(this.db, ctx.organizationId, siteId, ids)
+      : new Map<string, number>();
     const labels: LabelContent[] = dto.items.map((item) => {
       const v = variants.find((x) => x.id === item.variantId)!;
       const barcode = [...v.barcodes].sort((a, b) => ORDER[a.type] - ORDER[b.type])[0] ?? null;
@@ -66,7 +81,7 @@ export class OcallStockLabelsService {
         reference: v.sku,
         code: barcode?.code ?? v.sku,
         symbology: symbologyFor(barcode?.type ?? null),
-        price: formatStockMoney(v.salePrice ?? v.product.salePrice, organization.currency),
+        price: formatStockMoney(stockEffectivePrice(sitePrices, v), organization.currency),
         copies: item.copies,
       };
     });
@@ -76,7 +91,7 @@ export class OcallStockLabelsService {
       actorUserId: ctx.userId,
       action: 'stock.labels_printed',
       targetType: 'StockVariant',
-      metadata: { format: dto.format, labels: total, variants: ids.length },
+      metadata: { format: dto.format, labels: total, variants: ids.length, siteId },
     });
     return pdf;
   }

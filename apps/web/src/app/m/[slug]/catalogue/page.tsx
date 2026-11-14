@@ -3,13 +3,13 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { PremiumPageTitle } from '@/components/site/showcase-premium';
 import { ProductCard, StockSiteShell } from '@/components/stock-site/site-shell';
-import { fetchStockCatalog, stockSiteBase } from '@/lib/public-stock-site';
+import { fetchStockCatalog, shopParam, stockSiteBase } from '@/lib/public-stock-site';
 
 export const dynamic = 'force-dynamic';
 
 type Props = {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ categorie?: string; q?: string; page?: string }>;
+  searchParams: Promise<{ categorie?: string; q?: string; page?: string; boutique?: string }>;
 };
 
 const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
@@ -33,12 +33,20 @@ export default async function StockSiteCatalogPage({ params, searchParams }: Pro
   const category = one(sp.categorie);
   const q = one(sp.q)?.trim() || undefined;
   const page = Math.max(0, Number(one(sp.page)) || 0);
-  const data = await fetchStockCatalog(slug, { category, q, page });
+  const data = await fetchStockCatalog(slug, {
+    category,
+    q,
+    page,
+    boutique: shopParam(one(sp.boutique)),
+  });
   if (!data) notFound();
+  // Boutique retenue : seulement celle que l'API a reconnue (présentée sur la vitrine).
+  const shop = data.shop ?? null;
   const query = new URLSearchParams({
     ...(category ? { categorie: category } : {}),
     ...(q ? { q } : {}),
     ...(page ? { page: String(page) } : {}),
+    ...(shop ? { boutique: shop.siteId } : {}),
   }).toString();
   const base = await stockSiteBase(data, `/catalogue${query ? `?${query}` : ''}`);
   const link = (over: { categorie?: string | null; page?: number }) => {
@@ -47,20 +55,25 @@ export default async function StockSiteCatalogPage({ params, searchParams }: Pro
     if (c) next.set('categorie', c);
     if (q) next.set('q', q);
     if (over.page) next.set('page', String(over.page));
+    if (shop) next.set('boutique', shop.siteId);
     const s = next.toString();
     return `${base}/catalogue${s ? `?${s}` : ''}`;
   };
   const pages = Math.ceil(data.total / data.pageSize);
 
   return (
-    <StockSiteShell site={data.site} base={base}>
-      <PremiumPageTitle eyebrow={data.site.businessName} title="Catalogue" />
+    <StockSiteShell site={data.site} base={base} shop={shop}>
+      <PremiumPageTitle
+        eyebrow={shop ? `${data.site.businessName} · ${shop.name}` : data.site.businessName}
+        title="Catalogue"
+      />
       <div
         className="mx-auto max-w-6xl space-y-6 px-4 py-10 sm:px-6"
         data-testid="stock-site-catalog"
       >
         <form action={`${base}/catalogue`} method="get" className="flex flex-wrap gap-2">
           {category && <input type="hidden" name="categorie" value={category} />}
+          {shop && <input type="hidden" name="boutique" value={shop.siteId} />}
           <label className="sr-only" htmlFor="catalog-q">
             Rechercher un article
           </label>
@@ -108,7 +121,7 @@ export default async function StockSiteCatalogPage({ params, searchParams }: Pro
         ) : (
           <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
             {data.items.map((p) => (
-              <ProductCard key={p.id} product={p} base={base} />
+              <ProductCard key={p.id} product={p} base={base} shop={shop} />
             ))}
           </ul>
         )}

@@ -11,9 +11,11 @@ import {
   formatStockQuantity,
 } from '@ocall/shared';
 import { ProductForm } from '@/components/stock/product-form';
+import { SitePrices } from '@/components/stock/site-prices';
 import { StockPage, type StockPageProps } from '@/components/stock/stock-page';
 import {
   type StockProductDetail,
+  type StockSiteView,
   type StockVariantView,
   asApiError,
 } from '@/components/stock/stock-types';
@@ -39,6 +41,7 @@ interface HistoryView {
     oldPrice: number | null;
     newPrice: number | null;
     createdAt: string;
+    siteId?: string | null;
     variant: { id: string; name: string | null; isDefault: boolean };
   }[];
 }
@@ -52,6 +55,8 @@ const ACTIONS: Record<string, string> = {
   variant_updated: 'Variante modifiée',
   barcode_added: 'Code ajouté',
   barcode_removed: 'Code retiré',
+  site_price_set: 'Prix de boutique fixé',
+  site_price_removed: 'Retour au prix commun',
 };
 
 const FIELDS: Record<string, string> = {
@@ -69,6 +74,7 @@ const FIELDS: Record<string, string> = {
   isArchived: 'archivé',
   barcode: 'code',
   variant: 'variante',
+  site: 'boutique',
 };
 
 /** Type proposé d'après la longueur ; l'API vérifie la clé de contrôle et refuse un code faux. */
@@ -92,6 +98,10 @@ function Product({ context, can, canWrite }: StockPageProps) {
   const params = useSearchParams();
   const product = useApi<StockProductDetail>(`/ocall-stock/products/${id}`);
   const history = useApi<HistoryView>(`/ocall-stock/products/${id}/history`);
+  const sites = useApi<StockSiteView[]>('/ocall-stock/sites');
+  const siteName = (siteId: string) =>
+    (sites.state === 'success' ? sites.data.find((s) => s.id === siteId)?.name : null) ??
+    'une boutique';
   const [error, setError] = useState<ApiError | null>(null);
   const [editing, setEditing] = useState(false);
   const manage = canWrite('stock.catalog.manage');
@@ -218,6 +228,17 @@ function Product({ context, can, canWrite }: StockPageProps) {
         )}
       </Card>
 
+      {sites.state === 'success' && (
+        <SitePrices
+          sites={sites.data}
+          product={p}
+          currency={context.currency}
+          editPrices={editPrices}
+          onChange={reload}
+          onError={setError}
+        />
+      )}
+
       {can('stock.levels.read') && p.isStockable && <Levels product={p} />}
 
       <Images
@@ -242,7 +263,7 @@ function Product({ context, can, canWrite }: StockPageProps) {
                 ...history.data.prices.map((h) => ({
                   id: h.id,
                   at: h.createdAt,
-                  text: `${h.kind === 'SALE' ? 'Prix de vente' : 'Prix d’achat'}${h.variant.isDefault ? '' : ` (${h.variant.name})`} : ${
+                  text: `${h.kind === 'SALE' ? 'Prix de vente' : 'Prix d’achat'}${h.variant.isDefault ? '' : ` (${h.variant.name})`}${h.siteId ? ` à ${siteName(h.siteId)}` : ''} : ${
                     h.oldPrice === null ? '—' : money(h.oldPrice)
                   } → ${h.newPrice === null ? '—' : money(h.newPrice)}`,
                 })),
@@ -278,7 +299,7 @@ function describe(changes: Record<string, [unknown, unknown]>): string {
   return ` : ${keys
     .map((k) => {
       const [, after] = changes[k]!;
-      return k === 'barcode' || k === 'variant'
+      return k === 'barcode' || k === 'variant' || k === 'site'
         ? `${FIELDS[k]} ${String(after ?? changes[k]![0])}`
         : (FIELDS[k] ?? k);
     })

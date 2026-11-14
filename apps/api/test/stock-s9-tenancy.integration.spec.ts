@@ -71,6 +71,15 @@ const PATH_CASES: Case[] = [
     (b, i) => b.patch(api(`/ocall-stock/variants/${i.variant}`)).send({ salePrice: 1 }),
   ],
   [
+    'PUT ocall-stock/variants/:id/site-prices/:siteId',
+    (b, i) =>
+      b.put(api(`/ocall-stock/variants/${i.variant}/site-prices/${i.site}`)).send({ salePrice: 1 }),
+  ],
+  [
+    'DELETE ocall-stock/variants/:id/site-prices/:siteId',
+    (b, i) => b.delete(api(`/ocall-stock/variants/${i.variant}/site-prices/${i.site}`)),
+  ],
+  [
     'POST ocall-stock/variants/:id/barcodes',
     (b, i) =>
       b
@@ -360,6 +369,31 @@ const PATH_CASES: Case[] = [
 
 /** Identifiants de A passés dans le corps d'une requête de B : refusés (jamais un succès ni une erreur serveur). */
 const BODY_CASES: Case[] = [
+  // S10 : variante de B, boutique de A (et l'inverse) : jamais de prix croisé.
+  [
+    'site-price bVariant + site A',
+    (b, i) =>
+      b
+        .put(api(`/ocall-stock/variants/${i.bVariant}/site-prices/${i.site}`))
+        .send({ salePrice: 1 }),
+  ],
+  [
+    'site-price variant A + bSite',
+    (b, i) =>
+      b
+        .put(api(`/ocall-stock/variants/${i.variant}/site-prices/${i.bSite}`))
+        .send({ salePrice: 1 }),
+  ],
+  [
+    'labels siteId A',
+    (b, i) =>
+      b.post(api('/ocall-stock/labels.pdf')).send({
+        format: '50x30',
+        fields: ['productName'],
+        items: [{ variantId: i.bVariant, copies: 1 }],
+        siteId: i.site,
+      }),
+  ],
   [
     'movements',
     (b, i) =>
@@ -615,6 +649,7 @@ function declaredRoutes(): string[] {
         db.stockShowcaseDomain.findMany({ where: org, orderBy: { id: 'asc' } }),
         db.stockShowcaseRequest.findMany({ where: org, orderBy: { id: 'asc' } }),
         db.stockAiProposal.findMany({ where: org, orderBy: { id: 'asc' } }),
+        db.stockSitePrice.findMany({ where: org, orderBy: { id: 'asc' } }),
       ];
       return JSON.stringify(await Promise.all(tables));
     }

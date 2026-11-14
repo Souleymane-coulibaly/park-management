@@ -16,6 +16,7 @@ import { StockPage } from '@/components/stock/stock-page';
 import {
   type StockProductDetail,
   type StockProductPage,
+  type StockSiteView,
   asApiError,
 } from '@/components/stock/stock-types';
 import { Button } from '@/components/ui/button';
@@ -30,7 +31,9 @@ import { useApi } from '@/lib/use-api';
 interface Selected {
   variantId: string;
   label: string;
-  price: string;
+  /** Prix commun et prix propres aux boutiques (S10). */
+  price: number;
+  sitePrices: { siteId: string; salePrice: number }[];
   copies: number;
 }
 
@@ -68,6 +71,15 @@ function Labels({ currency }: { currency: string }) {
   const [fields, setFields] = useState<StockLabelField[]>([...STOCK_LABEL_DEFAULT_FIELDS]);
   const [error, setError] = useState<ApiError | null>(null);
   const [printing, setPrinting] = useState(false);
+  // Boutique dont le prix est imprimé (S10) ; '' = prix commun.
+  const [siteId, setSiteId] = useState('');
+  const sites = useApi<StockSiteView[]>('/ocall-stock/sites');
+  const shops = sites.state === 'success' ? sites.data.filter((s) => !s.isArchived) : [];
+  const priceOf = (s: Selected) =>
+    formatStockMoney(
+      (siteId ? s.sitePrices.find((p) => p.siteId === siteId)?.salePrice : undefined) ?? s.price,
+      currency,
+    );
   const results = useApi<StockProductPage>(
     q.trim()
       ? `/ocall-stock/products?${new URLSearchParams({ q: q.trim(), pageSize: '10' })}`
@@ -86,7 +98,8 @@ function Labels({ currency }: { currency: string }) {
           .map((v) => ({
             variantId: v.id,
             label: v.name ? `${p.name} — ${v.name}` : p.name,
-            price: formatStockMoney(v.effectiveSalePrice, currency),
+            price: v.effectiveSalePrice,
+            sitePrices: v.sitePrices ?? [],
             copies: 1,
           })),
       ]);
@@ -98,7 +111,6 @@ function Labels({ currency }: { currency: string }) {
   useEffect(() => {
     if (preselected) void addProduct(preselected);
     // Préselection lue une seule fois, à l'ouverture de la page.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preselected]);
 
   async function print() {
@@ -109,6 +121,7 @@ function Labels({ currency }: { currency: string }) {
         format,
         fields,
         items: selected.map((s) => ({ variantId: s.variantId, copies: s.copies })),
+        ...(siteId ? { siteId } : {}),
       });
     } catch (e) {
       setError(asApiError(e));
@@ -163,6 +176,18 @@ function Labels({ currency }: { currency: string }) {
                 label: f.replace('x', ' × ') + ' mm',
               }))}
             />
+            {shops.length > 1 && (
+              <SelectField
+                label="Prix imprimé"
+                value={siteId}
+                onChange={(e) => setSiteId(e.target.value)}
+                data-testid="stock-label-site"
+                options={[
+                  { value: '', label: 'Prix commun' },
+                  ...shops.map((s) => ({ value: s.id, label: `Prix de ${s.name}` })),
+                ]}
+              />
+            )}
             <fieldset className="grid grid-cols-2 gap-2 text-sm">
               <legend className="mb-1 font-medium">Éléments imprimés</legend>
               {STOCK_LABEL_FIELDS.map((f) => (
@@ -209,7 +234,7 @@ function Labels({ currency }: { currency: string }) {
               {selected.map((s) => (
                 <tr key={s.variantId}>
                   <Td>{s.label}</Td>
-                  <Td>{s.price}</Td>
+                  <Td>{priceOf(s)}</Td>
                   <Td>
                     <input
                       type="number"

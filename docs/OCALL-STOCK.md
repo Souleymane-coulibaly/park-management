@@ -8,8 +8,8 @@ organisation a les deux abonnements (sprint S5).
 
 **État : sprints S1 (socle et catalogue), S2 (sites, stocks, transferts, inventaires), S3 (achats), S4
 (caisse), S5 (interconnexion Facture), S6 (tableaux de bord, alertes, recherche globale), S7 (site
-vitrine), S8 (IA) et S9 (stabilisation, revue de sécurité) livrés.** Prochaine étape : l'audit Codex
-indépendant (§18). Plan complet :
+vitrine), S8 (IA), S9 (stabilisation, revue de sécurité) et S10 (prix et vitrine par boutique)
+livrés.** Prochaine étape : l'audit Codex indépendant (§18). Plan complet :
 `ocall-audits/plan-ocall-stock-v1.md` (hors dépôt).
 
 ## 1. Activation
@@ -136,6 +136,12 @@ le réceptionner, le site d'arrivée.
 - **Variantes.** Chaque article a une **variante par défaut** : elle porte sa référence et ses codes. Les
   déclinaisons (taille, couleur, contenance) sont des variantes nommées, avec une référence propre et un
   prix facultatif ; à défaut, elles prennent celui de l'article.
+- **Prix par boutique** (S10). Le prix de vente de l'article (ou de la variante) est le **prix commun** :
+  il s'applique dans toutes les boutiques. Un responsable des prix peut fixer un **prix propre à une
+  boutique** (exception, par variante), puis revenir au prix commun. La caisse de cette boutique, ses
+  étiquettes et la vitrine quand le visiteur l'a choisie appliquent ce prix ; **Facture garde le prix
+  commun**. Exceptions tracées dans l'historique des prix (avec la boutique) ; un membre limité à des
+  boutiques ne voit et ne fixe que les prix des siennes ; une boutique archivée ne reçoit plus de prix.
 - **Montants.** Entiers, dans la devise de l'organisation (XOF par défaut). Le franc CFA n'a pas de
   décimales.
 - **Historiques en ajout seul, garantis par la base :**
@@ -486,6 +492,15 @@ commande en ligne.
   principale** choisie par le commerçant (même règle que Park : texte blanc lisible, contraste ≥ 4,5:1 ;
   sinon refusée ; sans choix, couleur Ocall). Composants communs aux vitrines Stock et Facture :
   `apps/web/src/components/site/showcase-premium.tsx`.
+- **Plusieurs boutiques** (S10) : une seule vitrine (une adresse, un domaine), avec les **boutiques
+  présentées** choisies par le commerçant (sites actifs de l'organisation ; téléphone, WhatsApp, horaires
+  et carte propres ; nom et adresse repris du site, figés à la publication ; une boutique archivée n'est
+  pas publiée). Page **« Nos boutiques »** (`/boutiques`) ; le visiteur choisit sa boutique (`?boutique=`,
+  gardée de page en page) : catalogue et fiches affichent **son prix** et **sa disponibilité** (stock de
+  cette boutique seulement), contacts et pied de page sont les siens, et la demande lui est **adressée**.
+  Une boutique non présentée, archivée ou inconnue est ignorée (vitrine de l'entreprise). Dans « Demandes
+  du site », la boutique est indiquée ; un membre limité à des boutiques voit les demandes des siennes et
+  celles adressées à l'entreprise.
 
 ## 14. Intelligence artificielle (S8)
 
@@ -594,8 +609,8 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
 | Unitaires, S6       | `packages/shared/src/stock-reports.spec.ts`                                                     | CMUP, coût retenu, marges et exclusions, valeur, faible rotation, période                              |
 | Unitaires, S5       | `packages/shared/src/stock-facture.spec.ts`                                                     | TTC → HT, quantités par article, sortie nette de la source, plafond des retours, délais de relance     |
 | Unitaires, S9       | `apps/api/src/common/download.spec.ts`, `packages/shared/src/stock-sales.spec.ts`               | Nom de fichier quelconque téléchargeable ; total du ticket jamais tronqué                              |
-| Intégration         | `apps/api/test/stock-s1…s8.integration.spec.ts`, `stock-s9-*.integration.spec.ts`               | Voir le détail ci-dessous                                                                              |
-| E2E                 | `e2e/stock-s1.spec.ts` à `stock-s8.spec.ts`                                                     | Voir le détail ci-dessous                                                                              |
+| Intégration         | `apps/api/test/stock-s1…s8.integration.spec.ts`, `stock-s9-*`, `stock-s10.integration.spec.ts`  | Voir le détail ci-dessous                                                                              |
+| E2E                 | `e2e/stock-s1.spec.ts` à `stock-s8.spec.ts`, `stock-s10.spec.ts`                                | Voir le détail ci-dessous                                                                              |
 
 **Intégration**, sur bases locales jetables :
 
@@ -658,7 +673,17 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
   chaque format, une par page ; tickets 58 et 80 mm (aucune ligne plus large que le papier, accents en
   PC858, coupe, jamais d'ouverture de tiroir), ticket PDF à la largeur du rouleau, duplicata ; bon de
   commande A4 paginé ; rapport d'inventaire ; CSV protégé contre les formules ;
-- S9, sécurité (`stock-s9-security`) : corrections de la revue (§17).
+- S9, sécurité (`stock-s9-security`) : corrections de la revue (§17) ;
+- S10 (`stock-s10`) : prix de boutique fixé, inchangé s'il est identique, modifié puis retiré, tracé avec la
+  boutique ; prix invalide, caissier sans droit, boutique d'une autre organisation ou hors des sites du
+  membre, boutique archivée refusés ; un membre limité ne voit que les prix et l'historique de ses
+  boutiques ; caisse de chaque boutique à son prix (paiement au prix commun refusé) ; étiquettes au prix de
+  la boutique demandée ou de l'unique boutique du membre ; vitrine (boutiques en double, d'une autre
+  organisation, lien de carte non https refusés ; boutique archivée jamais publiée, puis retirée du choix
+  si archivée après publication ; prix et disponibilité de la boutique choisie ; boutique inconnue
+  ignorée ; prix masqués partout ; plan du site) ; demandes adressées à une boutique présentée, visibles
+  et modifiables par les seuls membres de cette boutique ; Facture garde le prix commun. Isolation : les
+  deux routes de prix de boutique et les croisements variante / boutique entre organisations.
 
 **E2E**, parcours navigateur :
 
@@ -684,7 +709,10 @@ Elle ne contient ni l'étape Facture ni l'étape Stock : il faut la mettre à jo
   absent), fiche (prix, « Disponible », données structurées), fiche sur téléphone ; demande de devis avec
   l'article, reçue dans « Demandes du site » ;
 - S8 : IA activée, suggestion de réapprovisionnement puis brouillon de commande, ruptures, illustration
-  (mention IA, hors vitrine), fiche préremplie depuis une photo, page IA sur téléphone.
+  (mention IA, hors vitrine), fiche préremplie depuis une photo, page IA sur téléphone ;
+- S10 : prix propre à une boutique fixé sur la fiche article, retour au prix commun, historique ; vitrine à
+  deux boutiques, choix de la boutique sur « Nos boutiques », son prix au catalogue et sur la fiche,
+  demande adressée à la boutique et reçue avec elle, page des boutiques sur téléphone.
 
 ## 17. Stabilisation et revue de sécurité (S9)
 

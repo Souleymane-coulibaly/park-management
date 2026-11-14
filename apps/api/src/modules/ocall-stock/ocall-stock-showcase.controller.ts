@@ -48,6 +48,7 @@ import {
   StockShowcaseProductQueryDto,
   StockShowcaseRequestDto,
   StockShowcaseRequestQueryDto,
+  StockShowcaseShopQueryDto,
   StockShowcaseSlugDto,
   SuspendStockShowcaseDomainDto,
   UpdateStockShowcaseRequestDto,
@@ -243,9 +244,15 @@ export class PublicStockShowcaseController {
   }
 
   @Get('stock-sites/:slug')
-  async bySlug(@Param('slug') slug: string, @Res({ passthrough: true }) res: Response) {
+  async bySlug(
+    @Param('slug') slug: string,
+    @Query() query: StockShowcaseShopQueryDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     const found =
-      this.config.stock.enabled && SLUG.test(slug) ? await this.sites.publicBySlug(slug) : null;
+      this.config.stock.enabled && SLUG.test(slug)
+        ? await this.sites.publicBySlug(slug, query.boutique)
+        : null;
     if (!found) throw notFound();
     res.setHeader('Cache-Control', 'no-store');
     return found;
@@ -270,11 +277,12 @@ export class PublicStockShowcaseController {
   async product(
     @Param('slug') slug: string,
     @Param('id') id: string,
+    @Query() query: StockShowcaseShopQueryDto,
     @Res({ passthrough: true }) res: Response,
   ) {
     const found =
       this.config.stock.enabled && SLUG.test(slug) && UUID.test(id)
-        ? await this.sites.publicProduct(slug, id)
+        ? await this.sites.publicProduct(slug, id, query.boutique)
         : null;
     if (!found) {
       throw new NotFoundException({ code: 'PRODUCT_NOT_FOUND', message: 'Article introuvable.' });

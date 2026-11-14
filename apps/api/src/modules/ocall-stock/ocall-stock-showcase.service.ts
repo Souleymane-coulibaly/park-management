@@ -15,6 +15,7 @@ import {
   type StockShowcaseMediaKind,
   type StockShowcaseProduct,
   type StockShowcasePublished,
+  type StockShowcasePublishedShop,
   demoSpamReason,
   isAccessibleBrandColor,
   safeHttpsUrl,
@@ -37,6 +38,7 @@ import {
   stockDomainHttpsProof,
 } from './ocall-stock-showcase-domains.service';
 import { OcallStockPrismaService } from './ocall-stock-prisma.service';
+import { stockSitePrices } from './ocall-stock-site-prices';
 import type {
   StockShowcaseCatalogQueryDto,
   StockShowcaseContentDto,
@@ -67,6 +69,7 @@ const DEFAULT_CONTENT = (name: string): StockShowcaseContent => ({
   showCatalog: true,
   showPrices: false,
   forms: ['CONTACT', 'QUOTE'],
+  shops: [],
 });
 
 /** Article lu pour la vitrine : seulement des champs de vente (jamais coût, quantité, fournisseur). */
@@ -100,9 +103,25 @@ export interface StockShowcaseRequestView {
   email: string | null;
   message: string;
   items: { productId: string; name: string; quantity: number }[];
+  /** Boutique choisie par le visiteur (S10) ; null = entreprise. */
+  site: { id: string; name: string } | null;
   handledAt: Date | null;
   createdAt: Date;
 }
+
+const REQUEST_SELECT = {
+  id: true,
+  kind: true,
+  status: true,
+  name: true,
+  phone: true,
+  email: true,
+  message: true,
+  items: true,
+  handledAt: true,
+  createdAt: true,
+  site: { select: { id: true, name: true } },
+} satisfies Prisma.StockShowcaseRequestSelect;
 
 const requestView = (r: {
   id: string;
@@ -113,6 +132,7 @@ const requestView = (r: {
   email: string | null;
   message: string;
   items: Prisma.JsonValue;
+  site: { id: string; name: string } | null;
   handledAt: Date | null;
   createdAt: Date;
 }): StockShowcaseRequestView => ({
@@ -124,6 +144,7 @@ const requestView = (r: {
   email: r.email,
   message: r.message,
   items: r.items as unknown as StockShowcaseRequestView['items'],
+  site: r.site,
   handledAt: r.handledAt,
   createdAt: r.createdAt,
 });
@@ -260,9 +281,49 @@ export class OcallStockShowcaseService {
         message: 'Couleur trop claire : le texte blanc des boutons doit rester lisible.',
       });
     }
+    const shops = dto.shops ?? [];
+    const siteIds = shops.map((sh) => sh.siteId);
+    if (new Set(siteIds).size !== siteIds.length) {
+      throw new BadRequestException({
+        code: 'STOCK_SHOWCASE_SHOPS',
+        message: 'Une boutique ne figure qu’une fois sur la vitrine.',
+      });
+    }
+    if (siteIds.length) {
+      const found = await this.db.stockSite.count({
+        where: { organizationId: ctx.organizationId, id: { in: siteIds }, isArchived: false },
+      });
+      if (found !== siteIds.length) {
+        throw new BadRequestException({
+          code: 'STOCK_SHOWCASE_SHOPS',
+          message: 'Boutique introuvable ou archivée.',
+        });
+      }
+    }
+    for (const shop of shops) {
+      if (shop.mapUrl && !safeHttpsUrl(shop.mapUrl)) {
+        throw new BadRequestException({
+          code: 'STOCK_SHOWCASE_MAP_URL',
+          message: 'Lien de carte invalide : adresse https complète.',
+        });
+      }
+      if (shop.whatsapp && !whatsappDigits(shop.whatsapp)) {
+        throw new BadRequestException({
+          code: 'STOCK_SHOWCASE_WHATSAPP',
+          message: 'Numéro WhatsApp international invalide (+223 …).',
+        });
+      }
+    }
     const content: StockShowcaseContent = {
       ...dto,
       mapUrl: dto.mapUrl ? safeHttpsUrl(dto.mapUrl) : null,
+      shops: shops.map((sh) => ({
+        siteId: sh.siteId,
+        phone: sh.phone ?? null,
+        whatsapp: sh.whatsapp ?? null,
+        hours: sh.hours ?? null,
+        mapUrl: sh.mapUrl ? safeHttpsUrl(sh.mapUrl) : null,
+      })),
     };
     await this.db.stockShowcase.update({
       where: { organizationId: ctx.organizationId },
@@ -395,8 +456,24 @@ export class OcallStockShowcaseService {
       const latest = (kind: StockShowcaseMediaKind) =>
         media.filter((m) => m.kind === kind).at(-1)?.storageKey ?? null;
       const gallery = media.filter((m) => m.kind === 'GALLERY');
+      const wanted = draft.shops ?? [];
+      const sites = wanted.length
+        ? await tx.stockSite.findMany({
+            where: {
+              organizationId: ctx.organizationId,
+              id: { in: wanted.map((sh) => sh.siteId) },
+              isArchived: false,
+            },
+            select: { id: true, name: true, address: true, city: true },
+          })
+        : [];
+      const shops: StockShowcasePublishedShop[] = wanted.flatMap((sh) => {
+        const site = sites.find((x) => x.id === sh.siteId);
+        return site ? [{ ...sh, name: site.name, address: site.address, city: site.city }] : [];
+      });
       const published: StockShowcasePublished = {
         ...draft,
+        shops,
         businessName,
         logo: latest('LOGO'),
         cover: latest('COVER'),
@@ -509,11 +586,18 @@ export class OcallStockShowcaseService {
       where: {
         organizationId: ctx.organizationId,
         ...(query.status ? { status: query.status } : {}),
+        ...this.requestSites(ctx),
       },
       orderBy: { createdAt: 'desc' },
       take: 200,
+      select: REQUEST_SELECT,
     });
     return rows.map(requestView);
+  }
+
+  /** Demandes visibles d'un membre limité à des boutiques : les siennes et celles sans boutique (S10). */
+  private requestSites(ctx: StockContext): Prisma.StockShowcaseRequestWhereInput {
+    return ctx.siteIds === null ? {} : { OR: [{ siteId: null }, { siteId: { in: ctx.siteIds } }] };
   }
 
   async updateRequest(
@@ -522,7 +606,7 @@ export class OcallStockShowcaseService {
     status: 'NEW' | 'IN_PROGRESS' | 'DONE' | 'SPAM',
   ) {
     const { count } = await this.db.stockShowcaseRequest.updateMany({
-      where: { organizationId: ctx.organizationId, id },
+      where: { organizationId: ctx.organizationId, id, ...this.requestSites(ctx) },
       data: { status, handledByUserId: ctx.userId, handledAt: new Date() },
     });
     if (count === 0) {
@@ -532,7 +616,12 @@ export class OcallStockShowcaseService {
       });
     }
     await this.record(ctx, 'stock.showcase_request_updated', { status });
-    return requestView(await this.db.stockShowcaseRequest.findUniqueOrThrow({ where: { id } }));
+    return requestView(
+      await this.db.stockShowcaseRequest.findUniqueOrThrow({
+        where: { id },
+        select: REQUEST_SELECT,
+      }),
+    );
   }
 
   // ─── Public ───
@@ -541,17 +630,19 @@ export class OcallStockShowcaseService {
    * Accueil d'un site en ligne et autorisé : version PUBLIÉE (jamais le brouillon), catégories du
    * catalogue public et premiers articles. Null si introuvable, hors ligne ou non autorisé.
    */
-  async publicBySlug(slug: string) {
+  async publicBySlug(slug: string, boutique?: string) {
     const found = await this.live(slug);
     if (!found) return null;
     const { site, organizationId } = found;
+    const shop = await this.shopOf(organizationId, site, boutique);
     const catalog = site.showCatalog
-      ? await this.catalogPage(organizationId, site, { page: 0 }, FEATURED)
+      ? await this.catalogPage(organizationId, site, { page: 0 }, FEATURED, shop)
       : null;
     return {
       slug,
       url: found.url,
       site,
+      shop,
       categories: catalog?.categories ?? [],
       featured: catalog?.items ?? [],
     };
@@ -561,19 +652,22 @@ export class OcallStockShowcaseService {
   async publicCatalog(slug: string, query: StockShowcaseCatalogQueryDto) {
     const found = await this.live(slug);
     if (!found?.site.showCatalog) return null;
+    const shop = await this.shopOf(found.organizationId, found.site, query.boutique);
     const page = await this.catalogPage(
       found.organizationId,
       found.site,
       query,
       STOCK_SHOWCASE_PAGE_SIZE,
+      shop,
     );
-    return { slug, url: found.url, site: found.site, ...page };
+    return { slug, url: found.url, site: found.site, shop, ...page };
   }
 
   /** Fiche d'un article publié. */
-  async publicProduct(slug: string, productId: string) {
+  async publicProduct(slug: string, productId: string, boutique?: string) {
     const found = await this.live(slug);
     if (!found?.site.showCatalog) return null;
+    const shop = await this.shopOf(found.organizationId, found.site, boutique);
     const row = await this.db.stockProduct.findFirst({
       where: {
         organizationId: found.organizationId,
@@ -584,8 +678,8 @@ export class OcallStockShowcaseService {
       select: PUBLIC_PRODUCT,
     });
     if (!row) return null;
-    const [product] = await this.toPublic(found.organizationId, found.site, [row]);
-    return { slug, url: found.url, site: found.site, product: product! };
+    const [product] = await this.toPublic(found.organizationId, found.site, [row], shop);
+    return { slug, url: found.url, site: found.site, shop, product: product! };
   }
 
   /** Domaine personnalisé ACTIF ou sous-domaine des vitrines Stock → adresse du site. */
@@ -650,6 +744,7 @@ export class OcallStockShowcaseService {
       if (!found) return [];
       const at = found.site.publishedAt;
       const list = [{ url: found.url, lastModified: at }];
+      if (found.site.shops?.length) list.push({ url: `${found.url}/boutiques`, lastModified: at });
       if (found.site.showCatalog) {
         list.push({ url: `${found.url}/catalogue`, lastModified: at });
         const products = await this.db.stockProduct.findMany({
@@ -782,10 +877,20 @@ export class OcallStockShowcaseService {
         message: 'Article introuvable sur ce site.',
       });
     }
+    const shop = dto.siteId
+      ? await this.shopOf(found.organizationId, found.site, dto.siteId)
+      : null;
+    if (dto.siteId && !shop) {
+      throw new BadRequestException({
+        code: 'STOCK_SHOWCASE_REQUEST_SHOP',
+        message: 'Boutique introuvable sur ce site.',
+      });
+    }
     const names = new Map(products.map((p) => [p.id, p.name]));
     await this.db.stockShowcaseRequest.create({
       data: {
         organizationId: found.organizationId,
+        siteId: shop?.siteId ?? null,
         kind: dto.kind,
         name: dto.name,
         phone: dto.phone ?? null,
@@ -869,6 +974,7 @@ export class OcallStockShowcaseService {
     site: StockShowcasePublished,
     query: StockShowcaseCatalogQueryDto,
     size: number,
+    shop: StockShowcasePublishedShop | null = null,
   ) {
     const q = query.q?.trim() || null;
     const ids = q
@@ -913,21 +1019,41 @@ export class OcallStockShowcaseService {
       page,
       pageSize: size,
       categories,
-      items: await this.toPublic(organizationId, site, rows),
+      items: await this.toPublic(organizationId, site, rows, shop),
     };
+  }
+
+  /**
+   * Boutique choisie par le visiteur : présentée sur la version publiée et toujours active ; null sinon
+   * (la vitrine reste celle de l'entreprise).
+   */
+  private async shopOf(
+    organizationId: string,
+    site: StockShowcasePublished,
+    siteId: string | undefined,
+  ): Promise<StockShowcasePublishedShop | null> {
+    const shop = siteId ? site.shops?.find((sh) => sh.siteId === siteId) : undefined;
+    if (!shop) return null;
+    const active = await this.db.stockSite.count({
+      where: { organizationId, id: shop.siteId, isArchived: false },
+    });
+    return active ? shop : null;
   }
 
   /**
    * Article public : prix de vente TTC (le plus bas des variantes actives, « à partir de » s'ils
    * diffèrent) seulement si l'entreprise affiche ses prix ; disponibilité réduite à un badge (somme du
-   * disponible des sites actifs > 0), jamais une quantité.
+   * disponible des sites actifs > 0), jamais une quantité. Boutique choisie (S10) : son prix et son seul
+   * stock.
    */
   private async toPublic(
     organizationId: string,
     site: StockShowcasePublished,
     rows: PublicProductRow[],
+    shop: StockShowcasePublishedShop | null = null,
   ): Promise<StockShowcaseProduct[]> {
     const variantIds = rows.flatMap((r) => r.variants.map((v) => v.id));
+    const shopId = shop?.siteId ?? null;
     const available = variantIds.length
       ? await this.db.$queryRaw<{ productId: string }[]>`
           SELECT v."productId"
@@ -936,13 +1062,18 @@ export class OcallStockShowcaseService {
           JOIN "StockSite" s ON s.id = l."siteId"
           WHERE l."organizationId" = ${organizationId}::uuid AND l."variantId" = ANY(${variantIds}::uuid[])
             AND NOT s."isArchived"
+            AND (${shopId}::uuid IS NULL OR l."siteId" = ${shopId}::uuid)
           GROUP BY v."productId"
           HAVING sum(l."onHand" - l."reserved") > 0`
       : [];
     const inStock = new Set(available.map((a) => a.productId));
+    const sitePrices =
+      shopId && site.showPrices
+        ? await stockSitePrices(this.db, organizationId, shopId, variantIds)
+        : new Map<string, number>();
     return rows.map((r) => {
-      const prices = (r.variants.length ? r.variants : [{ salePrice: null }]).map(
-        (v) => v.salePrice ?? r.salePrice,
+      const prices = (r.variants.length ? r.variants : [{ id: '', salePrice: null }]).map(
+        (v) => sitePrices.get(v.id) ?? v.salePrice ?? r.salePrice,
       );
       const min = Math.min(...prices);
       return {

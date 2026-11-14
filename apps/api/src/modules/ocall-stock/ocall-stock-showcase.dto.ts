@@ -22,6 +22,7 @@ import {
 } from 'class-validator';
 import {
   STOCK_SHOWCASE_MAX_REQUEST_ITEMS,
+  STOCK_SHOWCASE_MAX_SHOPS,
   STOCK_SHOWCASE_MEDIA_KINDS,
   STOCK_SHOWCASE_REQUEST_KINDS,
   STOCK_SHOWCASE_REQUEST_STATUSES,
@@ -36,6 +37,42 @@ const trimOrNull = ({ value }: { value: unknown }) =>
 const lowerOrNull = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim().toLowerCase() || null : value;
 const notNull = (_: unknown, v: unknown) => v !== null;
+
+/** Boutique présentée sur la vitrine (S10) : un site Stock et ses coordonnées propres. */
+export class StockShowcaseShopDto {
+  @ApiProperty()
+  @IsUUID()
+  siteId: string;
+
+  @ApiPropertyOptional({ description: 'Téléphone de la boutique (+223 …)' })
+  @IsOptional()
+  @Transform(trimOrNull)
+  @ValidateIf(notNull)
+  @Matches(/^\+[0-9][0-9 ().-]{6,22}$/, { message: 'Téléphone au format international (+223 …).' })
+  phone: string | null = null;
+
+  @ApiPropertyOptional({ description: 'WhatsApp de la boutique (+223 …)' })
+  @IsOptional()
+  @Transform(trimOrNull)
+  @ValidateIf(notNull)
+  @Matches(/^(\+|00)[0-9 ().-]{8,24}$/, { message: 'Numéro WhatsApp international (+223 …).' })
+  whatsapp: string | null = null;
+
+  @ApiPropertyOptional({ description: 'Horaires (texte libre)' })
+  @IsOptional()
+  @Transform(trimOrNull)
+  @IsString()
+  @MaxLength(200)
+  hours: string | null = null;
+
+  @ApiPropertyOptional({ description: 'Lien https vers une carte' })
+  @IsOptional()
+  @Transform(trimOrNull)
+  @ValidateIf(notNull)
+  @IsString()
+  @MaxLength(500)
+  mapUrl: string | null = null;
+}
 
 /** Contenu du brouillon de la vitrine Stock (remplacé en entier à chaque enregistrement). */
 export class StockShowcaseContentDto {
@@ -138,6 +175,17 @@ export class StockShowcaseContentDto {
   @ArrayUnique()
   @IsIn(STOCK_SHOWCASE_REQUEST_KINDS, { each: true })
   forms: StockShowcaseRequestKind[] = ['CONTACT', 'QUOTE'];
+
+  @ApiPropertyOptional({
+    type: [StockShowcaseShopDto],
+    description: 'Boutiques présentées (S10), dans l’ordre d’affichage',
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(STOCK_SHOWCASE_MAX_SHOPS)
+  @ValidateNested({ each: true })
+  @Type(() => StockShowcaseShopDto)
+  shops: StockShowcaseShopDto[] = [];
 }
 
 export class StockShowcaseSlugDto {
@@ -209,7 +257,15 @@ export class StockShowcaseHostQueryDto {
 }
 
 /** Catalogue public : catégorie, texte, page. */
-export class StockShowcaseCatalogQueryDto {
+/** Boutique choisie par le visiteur (S10) ; ignorée si elle n'est pas présentée sur la vitrine. */
+export class StockShowcaseShopQueryDto {
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsUUID()
+  boutique?: string;
+}
+
+export class StockShowcaseCatalogQueryDto extends StockShowcaseShopQueryDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsUUID()
@@ -275,6 +331,11 @@ export class StockShowcaseRequestDto {
   @IsString()
   @Length(5, 2000)
   message: string;
+
+  @ApiPropertyOptional({ description: 'Boutique choisie (S10), présentée sur la vitrine' })
+  @IsOptional()
+  @IsUUID()
+  siteId?: string;
 
   @ApiPropertyOptional({ type: [StockShowcaseRequestItemDto] })
   @IsOptional()

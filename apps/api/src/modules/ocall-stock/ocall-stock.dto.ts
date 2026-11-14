@@ -465,6 +465,17 @@ export class UpdateStockVariantDto extends PartialType(StockVariantDto) {
   isArchived?: boolean;
 }
 
+/** S10 : prix de vente TTC d'une variante dans une boutique (exception au prix commun). */
+export class StockSitePriceDto {
+  @ApiProperty({
+    description: 'Prix de vente TTC dans la boutique (entier, devise de l’organisation)',
+  })
+  @IsInt()
+  @Min(0)
+  @Max(STOCK_MAX_PRICE)
+  salePrice: number;
+}
+
 export class StockBarcodeDto {
   @ApiProperty({ enum: STOCK_BARCODE_TYPES.filter((t) => t !== 'INTERNAL') })
   @IsIn(STOCK_BARCODE_TYPES.filter((t) => t !== 'INTERNAL'))
@@ -601,6 +612,14 @@ export class StockLabelsDto {
   @ValidateNested({ each: true })
   @Type(() => StockLabelItemDto)
   items: StockLabelItemDto[];
+
+  @ApiPropertyOptional({
+    description:
+      'Boutique dont le prix est imprimé (S10) ; à défaut, la boutique du membre s’il n’en a qu’une, sinon le prix commun',
+  })
+  @IsOptional()
+  @IsUUID()
+  siteId?: string;
 }
 
 // ─── S2 : sites et emplacements ───

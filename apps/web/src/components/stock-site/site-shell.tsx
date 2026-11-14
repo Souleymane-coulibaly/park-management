@@ -5,6 +5,7 @@ import {
   STOCK_SHOWCASE_AVAILABILITY_LABELS,
   type StockShowcaseProduct,
   type StockShowcasePublished,
+  type StockShowcasePublishedShop,
   formatXof,
   whatsappDigits,
   whatsappUrl,
@@ -35,10 +36,18 @@ export function AvailabilityBadge({ product }: { product: StockShowcaseProduct }
   );
 }
 
-export function ProductCard({ product, base }: { product: StockShowcaseProduct; base: string }) {
+export function ProductCard({
+  product,
+  base,
+  shop = null,
+}: {
+  product: StockShowcaseProduct;
+  base: string;
+  shop?: StockShowcasePublishedShop | null;
+}) {
   return (
     <li className="group min-w-0 overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-black/5 transition motion-safe:hover:-translate-y-1 motion-safe:hover:shadow-lg">
-      <Link href={`${base}/article/${product.id}`} className="block">
+      <Link href={shopHref(`${base}/article/${product.id}`, shop)} className="block">
         {product.images[0] ? (
           <div className="relative overflow-hidden">
             {/* eslint-disable-next-line @next/next/no-img-element -- photo publiée servie par l'API */}
@@ -77,6 +86,76 @@ export function ProductCard({ product, base }: { product: StockShowcaseProduct; 
   );
 }
 
+/** Lien qui garde la boutique choisie par le visiteur (S10), ancre comprise. */
+export function shopHref(path: string, shop: StockShowcasePublishedShop | null | undefined) {
+  if (!shop) return path || '/';
+  const [p, hash] = path.split('#');
+  const q = `${p!.includes('?') ? '&' : '?'}boutique=${shop.siteId}`;
+  return `${p || '/'}${q}${hash ? `#${hash}` : ''}`;
+}
+
+/** Coordonnées affichées : celles de la boutique choisie, à défaut celles de l'entreprise (S10). */
+export function shopContact(
+  site: StockShowcasePublished,
+  shop: StockShowcasePublishedShop | null | undefined,
+) {
+  return {
+    address: shop
+      ? [shop.address, shop.city].filter(Boolean).join(', ') || null
+      : [site.address, site.city].filter(Boolean).join(', ') || null,
+    mapUrl: shop ? shop.mapUrl : site.mapUrl,
+    hours: shop?.hours ?? site.hours,
+    phone: shop?.phone ?? site.phone,
+    whatsapp: shop?.whatsapp ?? site.whatsapp,
+    email: site.email,
+  };
+}
+
+/** Bandeau du choix de boutique : la boutique choisie et un lien pour en changer, ou l'invitation à choisir. */
+function ShopBar({
+  site,
+  base,
+  shop,
+}: {
+  site: StockShowcasePublished;
+  base: string;
+  shop: StockShowcasePublishedShop | null;
+}) {
+  if (!site.shops?.length) return null;
+  return (
+    <div className="border-b border-black/5 bg-[#F4F9FC]" data-testid="stock-site-shop-bar">
+      <p className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-sm sm:px-6">
+        {shop ? (
+          <>
+            <span>
+              Votre boutique : <strong data-testid="stock-site-shop-name">{shop.name}</strong>
+            </span>
+            <Link
+              href={`${base}/boutiques`}
+              className="font-semibold underline"
+              style={{ color: 'var(--brand)' }}
+            >
+              Changer
+            </Link>
+          </>
+        ) : (
+          <>
+            <span>Prix et disponibilité selon votre boutique.</span>
+            <Link
+              href={`${base}/boutiques`}
+              className="font-semibold underline"
+              style={{ color: 'var(--brand)' }}
+              data-testid="stock-site-choose-shop"
+            >
+              Choisir ma boutique
+            </Link>
+          </>
+        )}
+      </p>
+    </div>
+  );
+}
+
 /**
  * Habillage public d'une vitrine Stock (mise en page des sites Park) : en-tête fixe, contenu, pied de page,
  * bouton WhatsApp mobile, couleur principale de l'entreprise. Les liens suivent l'adresse servie (`base` :
@@ -85,44 +164,51 @@ export function ProductCard({ product, base }: { product: StockShowcaseProduct; 
 export function StockSiteShell({
   site,
   base,
+  shop = null,
   children,
 }: {
   site: StockShowcasePublished;
   base: string;
+  /** Boutique choisie par le visiteur (S10) : ses coordonnées, liens qui la gardent. */
+  shop?: StockShowcasePublishedShop | null;
   children: ReactNode;
 }) {
-  const wa = site.whatsapp ? whatsappDigits(site.whatsapp) : null;
+  const contact = shopContact(site, shop);
+  const wa = contact.whatsapp ? whatsappDigits(contact.whatsapp) : null;
   const home = base || '/';
+  const link = (path: string) => shopHref(path, shop);
   const cta: PremiumCta | null = wa
     ? { href: whatsappUrl(wa), label: 'Écrire sur WhatsApp', kind: 'whatsapp' }
-    : site.phone
-      ? { href: `tel:${site.phone.replace(/[^+\d]/g, '')}`, label: 'Appeler', kind: 'phone' }
+    : contact.phone
+      ? { href: `tel:${contact.phone.replace(/[^+\d]/g, '')}`, label: 'Appeler', kind: 'phone' }
       : null;
   return (
     <PremiumSite
       brandColor={site.primaryColor}
       name={site.businessName}
-      homeHref={home}
+      homeHref={link(home)}
       logoUrl={site.logo ? stockMediaUrl(site.logo) : null}
       nav={[
-        { href: home, label: 'Accueil' },
-        ...(site.showCatalog ? [{ href: `${base}/catalogue`, label: 'Catalogue' }] : []),
-        { href: `${base}/#contact`, label: 'Contact' },
-        ...(site.forms.length > 0 ? [{ href: `${base}/#demande`, label: 'Ma demande' }] : []),
+        { href: link(home), label: 'Accueil' },
+        ...(site.showCatalog ? [{ href: link(`${base}/catalogue`), label: 'Catalogue' }] : []),
+        ...(site.shops?.length ? [{ href: `${base}/boutiques`, label: 'Nos boutiques' }] : []),
+        { href: link(`${base}/#contact`), label: 'Contact' },
+        ...(site.forms.length > 0 ? [{ href: link(`${base}/#demande`), label: 'Ma demande' }] : []),
       ]}
       cta={cta}
       ctaTestId={wa ? 'stock-site-whatsapp' : undefined}
       whatsappHref={wa ? whatsappUrl(wa) : null}
       footer={{
         tagline: site.tagline,
-        hours: site.hours,
-        address: [site.address, site.city].filter(Boolean).join(', ') || null,
-        phone: site.phone,
-        email: site.email,
+        hours: contact.hours,
+        address: contact.address,
+        phone: contact.phone,
+        email: contact.email,
         poweredBy: 'Site réalisé avec Ocall Stock',
       }}
       testId="stock-site"
     >
+      <ShopBar site={site} base={base} shop={shop} />
       {children}
     </PremiumSite>
   );

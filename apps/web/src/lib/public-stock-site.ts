@@ -1,7 +1,11 @@
 import 'server-only';
 import { headers } from 'next/headers';
 import { permanentRedirect } from 'next/navigation';
-import type { StockShowcaseProduct, StockShowcasePublished } from '@ocall/shared';
+import type {
+  StockShowcaseProduct,
+  StockShowcasePublished,
+  StockShowcasePublishedShop,
+} from '@ocall/shared';
 import { visitorHeaders } from './visitor-headers';
 
 const API_URL = process.env.API_URL ?? 'http://localhost:4000';
@@ -11,6 +15,8 @@ interface Base {
   /** Adresse canonique (domaine personnalisé actif, sous-domaine ou `/m/<slug>`). */
   url: string;
   site: StockShowcasePublished;
+  /** Boutique choisie par le visiteur (S10), présentée sur la vitrine ; null sinon. */
+  shop: StockShowcasePublishedShop | null;
 }
 
 export interface StockSiteHome extends Base {
@@ -44,18 +50,29 @@ async function get<T>(path: string): Promise<T | null> {
 }
 
 const validSlug = (slug: string) => /^[a-z0-9-]{1,40}$/.test(slug);
+const UUID = /^[0-9a-f-]{36}$/;
+
+/** Boutique choisie (`?boutique=`), transmise à l'API seulement si c'est un identifiant valide. */
+export const shopParam = (boutique: string | undefined) =>
+  boutique && UUID.test(boutique) ? boutique : undefined;
+const withShop = (path: string, boutique: string | undefined) => {
+  const shop = shopParam(boutique);
+  return shop ? `${path}${path.includes('?') ? '&' : '?'}boutique=${shop}` : path;
+};
 
 /**
  * Lecture publique d'une vitrine Ocall Stock (S7) : version publiée et catalogue des articles publiés,
  * jamais mis en cache. null : site introuvable, hors ligne ou non autorisé.
  */
-export function fetchStockSite(slug: string) {
-  return validSlug(slug) ? get<StockSiteHome>(`stock-sites/${slug}`) : Promise.resolve(null);
+export function fetchStockSite(slug: string, boutique?: string) {
+  return validSlug(slug)
+    ? get<StockSiteHome>(withShop(`stock-sites/${slug}`, boutique))
+    : Promise.resolve(null);
 }
 
 export function fetchStockCatalog(
   slug: string,
-  query: { category?: string; q?: string; page?: number },
+  query: { category?: string; q?: string; page?: number; boutique?: string },
 ) {
   if (!validSlug(slug)) return Promise.resolve(null);
   const params = new URLSearchParams();
@@ -64,12 +81,14 @@ export function fetchStockCatalog(
   }
   if (query.q) params.set('q', query.q.slice(0, 80));
   if (query.page && query.page > 0) params.set('page', String(Math.min(query.page, 200)));
+  const shop = shopParam(query.boutique);
+  if (shop) params.set('boutique', shop);
   return get<StockSiteCatalog>(`stock-sites/${slug}/catalogue?${params}`);
 }
 
-export function fetchStockProduct(slug: string, id: string) {
-  if (!validSlug(slug) || !/^[0-9a-f-]{36}$/.test(id)) return Promise.resolve(null);
-  return get<StockSiteProduct>(`stock-sites/${slug}/articles/${id}`);
+export function fetchStockProduct(slug: string, id: string, boutique?: string) {
+  if (!validSlug(slug) || !UUID.test(id)) return Promise.resolve(null);
+  return get<StockSiteProduct>(withShop(`stock-sites/${slug}/articles/${id}`, boutique));
 }
 
 /** Plan du site des vitrines Stock pour un hôte ; null si l'API est injoignable. */
