@@ -261,3 +261,19 @@ Décisions et architecture : `ocall-audits/audit-architecture-multisite-ocall-su
 - **Migration** `20261213000000_suite_s2d_suspension_adhesion` (base Suite, additive, sans modification des
   lignes existantes).
 - **Tests** : `apps/api/test/suite-s2d-acces.integration.spec.ts`, `e2e/suite-s2d-acces.spec.ts`.
+
+## Établissement émetteur Ocall Facture (après Sprint 2D)
+
+- Un document Facture peut porter un **établissement émetteur facultatif**, lu dans le référentiel commun des
+  sites (`SITE_REGISTRY`) : aucun référentiel Facture. Contrôle à l'organisation (établissements actifs de
+  l'organisation) ; rôles Facture inchangés. Détail : `docs/OCALL-FACTURE.md` (« Établissement émetteur »).
+- **Numérotation** : une seule suite par organisation, type et année, avec ou sans établissement.
+- **Documents émis** : établissement copié et figé à l'émission (base : `FactureDocument_establishment_frozen`) ;
+  les documents émis avant restent sans établissement.
+- **Stock** : la vente lue par Facture porte l'établissement de sa boutique (`StockSaleForInvoice.establishmentId`) ;
+  la facture de la vente le reprend.
+- Le référentiel ne compte pas Facture parmi les applications qui « utilisent » un lieu : un document émis ne
+  doit jamais empêcher de désactiver un lieu (sa copie reste imprimée).
+- **Migration** `20261214000000_facture_suite_etablissement_emetteur` (base Facture, additive).
+- **Tests** : `apps/api/test/facture-etablissement-emetteur.integration.spec.ts`,
+  `apps/api/src/modules/facture/facture-document-pdf.spec.ts`, `e2e/facture-etablissement.spec.ts`.

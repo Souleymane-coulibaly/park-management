@@ -40,6 +40,18 @@ export interface FactureSellerIdentity extends FactureLetterheadIdentity {
   accentColor: string;
 }
 
+/**
+ * Établissement émetteur (référentiel commun des sites), copié dans l'identité figée à l'émission. La
+ * raison sociale, le NIF et la numérotation restent ceux de l'organisation.
+ */
+export interface FactureEstablishmentIdentity {
+  id: string;
+  name: string;
+  address: string | null;
+  city: string | null;
+  phone: string | null;
+}
+
 export interface FacturePdfLine {
   reference: string | null;
   label: string;
@@ -68,6 +80,8 @@ export interface FacturePdfDocument {
   clientReference: string | null;
   /** Vendeur : membre qui a émis (ou créé) le document, nom et identifiant de connexion. */
   salesperson: { name: string; loginId: string } | null;
+  /** Établissement émetteur, facultatif. */
+  establishment: FactureEstablishmentIdentity | null;
   notes: string | null;
   terms: string | null;
   vatExemptionReason: string | null;
@@ -92,6 +106,11 @@ const dateFr = (d: Date) =>
 const timeFr = (d: Date) =>
   d.toLocaleTimeString('fr-FR', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit' });
 const amount = (n: number) => formatXof(n).replace(' FCFA', '');
+/** Coordonnées de l'établissement émetteur, imprimées en entier sous les informations du document. */
+const establishmentDetails = (e: FactureEstablishmentIdentity) => {
+  const place = [e.address, e.city].filter(Boolean).join(', ');
+  return [e.name, place, e.phone ? `Tél. ${e.phone}` : null].filter(Boolean).join(' — ');
+};
 const quantity = (n: number) => n.toLocaleString('fr-FR', { maximumFractionDigits: 3 });
 
 /** Colonnes du tableau des lignes. */
@@ -212,6 +231,9 @@ export function renderFactureDocumentPdf(
       ...(document.clientReference
         ? ([['Votre référence', document.clientReference]] as [string, string][])
         : []),
+      ...(document.establishment
+        ? ([['Établissement', document.establishment.name]] as [string, string][])
+        : []),
       ...(document.salesperson
         ? ([['Vendeur', `${document.salesperson.name} (${document.salesperson.loginId})`]] as [
             string,
@@ -270,6 +292,12 @@ export function renderFactureDocumentPdf(
       doc.text(value, cx, cy + 10, { width: cell - 6, lineBreak: false, ellipsis: true });
     });
     y = panelTop + panelHeight + 12;
+    if (document.establishment) {
+      doc.font('sans').fontSize(8).fillColor(FACTURE_MUTED);
+      const text = `Établissement émetteur : ${establishmentDetails(document.establishment)}`;
+      doc.text(text, left, y, { width: PDF_CONTENT_WIDTH });
+      y = doc.y + 8;
+    }
 
     // ── Lignes ──
     const header = () => {

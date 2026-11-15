@@ -118,6 +118,10 @@ export class OcallStockCatalogReader implements StockCatalogReader {
       },
     });
     if (!sale || (rights.siteIds !== null && !rights.siteIds.includes(sale.siteId))) return null;
+    const site = await this.db.stockSite.findFirst({
+      where: { organizationId, id: sale.siteId },
+      select: { establishmentId: true },
+    });
     const products = new Map(
       (
         await this.db.stockVariant.findMany({
@@ -130,6 +134,7 @@ export class OcallStockCatalogReader implements StockCatalogReader {
       id: sale.id,
       number: stockSaleNumber(sale.number),
       createdAt: sale.createdAt,
+      establishmentId: site?.establishmentId ?? null,
       customer: sale.customer,
       total: sale.total,
       lines: sale.lines

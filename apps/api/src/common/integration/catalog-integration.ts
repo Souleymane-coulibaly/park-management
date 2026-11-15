@@ -61,6 +61,11 @@ export interface StockSaleForInvoice {
   /** « VTE-000123 ». */
   number: string;
   createdAt: Date;
+  /**
+   * Établissement du référentiel commun (base Suite) auquel la boutique de la vente est rattachée ; null si
+   * la boutique n'est rattachée à aucun établissement. Repris comme établissement émetteur de la facture.
+   */
+  establishmentId: string | null;
   customer: { name: string; phone: string | null; email: string | null } | null;
   /** Total TTC encaissé. */
   total: number;

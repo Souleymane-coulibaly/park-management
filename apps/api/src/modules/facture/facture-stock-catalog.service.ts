@@ -270,6 +270,10 @@ export class FactureStockCatalogService {
         )
       ).map((e) => [e.variantId, e]),
     );
+    const establishmentId = await this.documents.activeEstablishmentId(
+      ctx.organizationId,
+      sale.establishmentId,
+    );
     const created = await this.db.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`${ctx.organizationId}:facture-sale:${sale.id}`}, 0))`;
       const again = await this.saleInvoice(tx, ctx.organizationId, sale.id);
@@ -305,6 +309,8 @@ export class FactureStockCatalogService {
       const id = await this.documents.createDraft(tx, ctx, {
         type: 'INVOICE',
         clientId: dto.clientId,
+        // Établissement émetteur : celui de la boutique de la vente, s'il est rattaché et actif.
+        establishmentId,
         subject: `Vente en caisse ${sale.number}`,
         notes: `Vente en caisse ${sale.number} du ${day}, réglée en caisse.`,
         lines,

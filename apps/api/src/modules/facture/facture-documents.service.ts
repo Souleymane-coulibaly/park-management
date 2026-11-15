@@ -31,6 +31,11 @@ import {
   type StockFactureLine,
 } from '@ocall/shared';
 import { AuditService } from '../../common/audit/audit.service';
+import {
+  SITE_REGISTRY,
+  type RegistrySite,
+  type SiteRegistry,
+} from '../../common/integration/site-registry';
 import { composeMail } from '../../common/mail/mail-compose';
 import { MailService } from '../../common/mail/mail.service';
 import { STORAGE_PROVIDER, type StorageProvider } from '../../common/storage/storage-provider';
@@ -38,6 +43,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import type { FactureContext } from './facture-access';
 import {
   type FactureClientIdentity,
+  type FactureEstablishmentIdentity,
   type FactureSellerIdentity,
   renderFactureDocumentPdf,
 } from './facture-document-pdf';
@@ -87,6 +93,7 @@ export class FactureDocumentsService {
     private readonly mail: MailService,
     @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
     private readonly stock: FactureStockService,
+    @Inject(SITE_REGISTRY) private readonly sites: SiteRegistry,
   ) {}
 
   // ─── Lecture ───
@@ -98,6 +105,7 @@ export class FactureDocumentsService {
         ...(query.type ? { type: query.type } : {}),
         ...(query.status ? { status: query.status } : {}),
         ...(query.clientId ? { clientId: query.clientId } : {}),
+        ...(query.establishmentId ? { establishmentId: query.establishmentId } : {}),
       },
       orderBy: [{ createdAt: 'desc' }],
       take: LIST_LIMIT,
@@ -113,15 +121,21 @@ export class FactureDocumentsService {
         amountPaid: true,
         amountCredited: true,
         createdAt: true,
+        establishmentId: true,
         client: { select: { id: true, name: true } },
       },
     });
+    const names = await this.establishmentNames(
+      ctx.organizationId,
+      rows.some((r) => r.establishmentId),
+    );
     const now = new Date();
     return rows.map((r) => {
       const amounts = invoiceAmounts(r);
       return {
         ...r,
         ...amounts,
+        establishmentName: r.establishmentId ? (names.get(r.establishmentId) ?? null) : null,
         balance: r.type === 'INVOICE' && r.status !== 'DRAFT' ? factureBalance(amounts) : null,
         overdue: isFactureOverdue({ ...r, ...amounts }, now),
       };
@@ -159,6 +173,7 @@ export class FactureDocumentsService {
       },
     });
     if (!doc) throw new NotFoundException(NOT_FOUND);
+    const establishment = await this.establishmentOf(doc);
     const {
       sellerSnapshot: _s,
       clientSnapshot,
@@ -172,6 +187,8 @@ export class FactureDocumentsService {
     return {
       ...rest,
       ...amounts,
+      /** Établissement émetteur : copie figée à l'émission, sinon fiche actuelle du référentiel. */
+      establishment,
       balance: billed ? factureBalance(amounts) : null,
       overdue: isFactureOverdue({ ...doc, ...amounts }, new Date()),
       creditNotes: doc.creditNotes.map((c) => ({ ...c, totalTtc: Number(c.totalTtc) })),
@@ -218,12 +235,15 @@ export class FactureDocumentsService {
     });
     const withValidity = dto.type === 'QUOTE' || dto.type === 'PRO_FORMA';
     await this.assertClient(tx, ctx.organizationId, dto.clientId);
+    if (dto.establishmentId)
+      await this.usableEstablishment(ctx.organizationId, dto.establishmentId);
     const doc = await tx.factureDocument.create({
       data: {
         organizationId: ctx.organizationId,
         type: dto.type,
         createdByUserId: ctx.userId,
         ...this.draftFields(dto),
+        establishmentId: dto.establishmentId ?? null,
         // Valeurs proposées par les réglages, modifiables sur le brouillon.
         validityDays: withValidity ? (dto.validityDays ?? settings?.quoteValidityDays ?? 30) : null,
         paymentTermsDays:
@@ -260,6 +280,14 @@ export class FactureDocumentsService {
       }
       // Client d'un avoir : celui de la facture, même archivé depuis.
       if (doc.type !== 'CREDIT_NOTE') await this.assertClient(tx, ctx.organizationId, dto.clientId);
+      const establishmentChanged =
+        dto.establishmentId !== undefined && dto.establishmentId !== doc.establishmentId;
+      if (establishmentChanged) {
+        this.assertEstablishmentEditable(doc);
+        if (dto.establishmentId) {
+          await this.usableEstablishment(ctx.organizationId, dto.establishmentId);
+        }
+      }
       const withValidity = doc.type === 'QUOTE' || doc.type === 'PRO_FORMA';
       await tx.factureDocumentLine.deleteMany({
         where: { organizationId: ctx.organizationId, documentId: id },
@@ -268,6 +296,7 @@ export class FactureDocumentsService {
         where: { organizationId_id: { organizationId: ctx.organizationId, id } },
         data: {
           ...this.draftFields(dto),
+          ...(establishmentChanged ? { establishmentId: dto.establishmentId ?? null } : {}),
           ...(dto.terms !== undefined ? { terms: dto.terms } : {}),
           ...(withValidity && dto.validityDays !== undefined
             ? { validityDays: dto.validityDays }
@@ -373,6 +402,8 @@ export class FactureDocumentsService {
       const client = await tx.factureClient.findUniqueOrThrow({
         where: { organizationId_id: { organizationId: ctx.organizationId, id: doc.clientId } },
       });
+      // Établissement émetteur, copié dans l'identité figée.
+      const establishment = await this.issuingEstablishment(tx, doc);
       const issueDate = todayUtc(now);
       if (doc.type === 'CREDIT_NOTE') await this.applyCreditNote(tx, doc);
       const allocated = await allocateFactureNumber(tx, ctx.organizationId, doc.type, now);
@@ -399,6 +430,7 @@ export class FactureDocumentsService {
           sellerSnapshot: {
             ...sellerOf(settings),
             salesperson: await this.personName(ctx.userId),
+            ...(establishment ? { establishment } : {}),
           } as unknown as Prisma.InputJsonValue,
           clientSnapshot: identityOf(client) as unknown as Prisma.InputJsonValue,
         },
@@ -683,6 +715,7 @@ export class FactureDocumentsService {
     ]);
     const lines = doc.lines.map(lineView);
     const totals = computeFactureTotals(lines);
+    const establishment = await this.establishmentOf(doc);
     const salesperson =
       (doc.sellerSnapshot as { salesperson?: { name: string; loginId: string } | null } | null)
         ?.salesperson ?? (await this.personName(doc.createdByUserId));
@@ -700,6 +733,7 @@ export class FactureDocumentsService {
         subject: doc.subject,
         clientReference: doc.clientReference,
         salesperson,
+        establishment,
         notes: doc.notes,
         terms: doc.terms,
         vatExemptionReason: doc.vatExemptionReason,
@@ -884,6 +918,8 @@ export class FactureDocumentsService {
       totalVat: source.totalVat,
       totalTtc: source.totalTtc,
       vatBreakdown: source.vatBreakdown as Prisma.InputJsonValue,
+      // Conversion, duplication, avoir : même établissement émetteur (vérifié à nouveau à l'émission).
+      establishmentId: source.establishmentId,
     };
   }
 
@@ -994,6 +1030,116 @@ export class FactureDocumentsService {
     return doc;
   }
 
+  // ─── Établissement émetteur (référentiel commun des sites, base Suite) ───
+
+  /**
+   * Établissement choisi sur un brouillon : de cette organisation (sinon introuvable, sans rien révéler
+   * d'une autre organisation) et actif.
+   */
+  private async usableEstablishment(organizationId: string, id: string): Promise<RegistrySite> {
+    const site = await this.sites.get(organizationId, id);
+    if (!site) {
+      throw new NotFoundException({
+        code: 'FACTURE_ESTABLISHMENT_NOT_FOUND',
+        message: 'Établissement introuvable.',
+      });
+    }
+    if (!site.isActive) {
+      throw conflict(
+        'FACTURE_ESTABLISHMENT_INACTIVE',
+        'Cet établissement est désactivé : choisissez-en un autre.',
+      );
+    }
+    return site;
+  }
+
+  /** Établissements de l'organisation (référentiel commun), actifs d'abord : choix sur un brouillon. */
+  async establishments(ctx: FactureContext) {
+    return (await this.sites.list(ctx.organizationId))
+      .map(({ id, name, city, isActive, brandName }) => ({ id, name, city, isActive, brandName }))
+      .sort((a, b) => Number(b.isActive) - Number(a.isActive));
+  }
+
+  /** Établissement actif de l'organisation, sinon null (sans erreur) : reprise depuis une vente Stock. */
+  async activeEstablishmentId(organizationId: string, id: string | null): Promise<string | null> {
+    if (!id) return null;
+    const site = await this.sites.get(organizationId, id);
+    return site?.isActive ? site.id : null;
+  }
+
+  /**
+   * Établissement imprimé et figé à l'émission :
+   * - avoir : celui figé sur la facture corrigée, quel que soit l'état actuel du lieu (une facture se
+   *   corrige toujours) ;
+   * - facture d'une vente en caisse : la boutique de la vente, même désactivée depuis ;
+   * - autre document : l'établissement doit encore être actif (sinon en choisir un autre ou le retirer).
+   */
+  private async issuingEstablishment(
+    tx: Tx,
+    doc: DocumentRow,
+  ): Promise<FactureEstablishmentIdentity | null> {
+    if (doc.type === 'CREDIT_NOTE' && doc.creditedInvoiceId) {
+      const invoice = await tx.factureDocument.findUniqueOrThrow({
+        where: {
+          organizationId_id: { organizationId: doc.organizationId, id: doc.creditedInvoiceId },
+        },
+        select: { sellerSnapshot: true },
+      });
+      return (
+        (invoice.sellerSnapshot as { establishment?: FactureEstablishmentIdentity } | null)
+          ?.establishment ?? null
+      );
+    }
+    if (!doc.establishmentId) return null;
+    const site = await this.sites.get(doc.organizationId, doc.establishmentId);
+    if (!site || (!site.isActive && !doc.stockSaleId)) {
+      throw conflict(
+        'FACTURE_ESTABLISHMENT_INACTIVE',
+        'L’établissement émetteur a été désactivé : choisissez-en un autre ou retirez-le avant d’émettre.',
+      );
+    }
+    return establishmentIdentity(site);
+  }
+
+  /**
+   * La facture d'une vente en caisse reste celle de la boutique de la vente ; un avoir reste celui de la
+   * facture corrigée.
+   */
+  private assertEstablishmentEditable(doc: DocumentRow) {
+    if (doc.stockSaleId) {
+      throw conflict(
+        'FACTURE_ESTABLISHMENT_LOCKED',
+        'La facture d’une vente en caisse est émise par l’établissement de la boutique de la vente.',
+      );
+    }
+    if (doc.type === 'CREDIT_NOTE') {
+      throw conflict(
+        'FACTURE_ESTABLISHMENT_LOCKED',
+        'Un avoir est émis par l’établissement de la facture corrigée.',
+      );
+    }
+  }
+
+  /** Établissement d'un document : copie figée (document émis), sinon fiche actuelle (brouillon). */
+  private async establishmentOf(doc: {
+    establishmentId: string | null;
+    sellerSnapshot: Prisma.JsonValue;
+    organizationId: string;
+  }): Promise<(FactureEstablishmentIdentity & { isActive: boolean | null }) | null> {
+    if (!doc.establishmentId) return null;
+    const frozen = (doc.sellerSnapshot as { establishment?: FactureEstablishmentIdentity } | null)
+      ?.establishment;
+    if (frozen) return { ...frozen, isActive: null };
+    const site = await this.sites.get(doc.organizationId, doc.establishmentId);
+    return site ? { ...establishmentIdentity(site), isActive: site.isActive } : null;
+  }
+
+  /** Noms actuels des établissements de l'organisation (une seule lecture, seulement si utile). */
+  private async establishmentNames(organizationId: string, needed: boolean) {
+    if (!needed) return new Map<string, string>();
+    return new Map((await this.sites.list(organizationId)).map((s) => [s.id, s.name]));
+  }
+
   private async liveSeller(organizationId: string): Promise<FactureSellerIdentity> {
     const settings = await this.db.factureSettings.findUnique({ where: { organizationId } });
     if (!settings) {
@@ -1086,6 +1232,16 @@ function identityOf(client: FactureClientIdentity): FactureClientIdentity {
     rccm: client.rccm,
     rib: client.rib ?? null,
     description: client.description ?? null,
+  };
+}
+
+function establishmentIdentity(site: RegistrySite): FactureEstablishmentIdentity {
+  return {
+    id: site.id,
+    name: site.name,
+    address: site.address,
+    city: site.city,
+    phone: site.phone,
   };
 }
 

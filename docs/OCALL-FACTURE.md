@@ -416,6 +416,21 @@ technicien), `/facture/interventions/:id` (travaux, photos, fin, signature à l'
 facturation), `/facture/equipements` et `/facture/stock` (S5 : facture d'une vente en caisse, mise à jour
 du stock et relance).
 
+**Établissement émetteur (Suite S2).** Un document peut porter, en option, un établissement émetteur pris dans
+le référentiel commun des sites (base Suite, `GET facture/establishments`, droit « voir les documents ») ;
+Facture n'a aucun référentiel de sites à lui. Choix sur le brouillon (`establishmentId` du brouillon ; absent à
+la modification : inchangé ; `null` : document de l'organisation), limité aux établissements actifs de
+l'organisation (autre organisation ou inconnu : 404 `FACTURE_ESTABLISHMENT_NOT_FOUND` ; désactivé : 409
+`FACTURE_ESTABLISHMENT_INACTIVE`). À l'émission, le nom, l'adresse, la ville et le téléphone sont copiés dans
+l'identité figée (`sellerSnapshot.establishment`) et imprimés sur le PDF ; la colonne est figée par la base
+(`FactureDocument_establishment_frozen`). Raison sociale, NIF et **numérotation restent ceux de
+l'organisation** (une seule suite par type et par année). Les documents émis avant restent sans établissement.
+Conversion et duplication reprennent l'établissement (vérifié de nouveau à l'émission) ; un avoir est émis par
+l'établissement figé sur la facture corrigée, même désactivé depuis ; la facture d'une vente en caisse Stock
+reprend l'établissement de la boutique s'il est rattaché et actif (409 `FACTURE_ESTABLISHMENT_LOCKED` pour le
+changer sur ces deux documents). Liste : nom actuel du lieu et filtre `?establishmentId=`. Rôles Facture
+inchangés (pas de droits Facture par établissement, décision du 15/11/2026).
+
 **Ocall Stock (S5).** Avec les deux abonnements, les documents et les pièces d'interventions cherchent les
 articles Ocall Stock (articles miroirs en lecture seule), l'émission d'une facture, la signature d'une
 intervention et l'émission d'un avoir « marchandise retournée » mettent le stock à jour par une file de
@@ -440,7 +455,10 @@ comme avant.
   `20261128000000_facture_v1_audit` (corrections de l'audit de fin de V1 : instantané du rapport signé,
   contrôle et déclencheur) et `20261129000000_facture_v1_stock` (S5 Stock, additive : articles miroirs,
   facture d'une vente en caisse, avoir avec retour de marchandise, file `FactureStockOutbox` ; contrôles et
-  déclencheurs `FactureDocument_stock_frozen`, `FactureStockOutbox_frozen`), appliquées par `pnpm db:facture:migrate:deploy` (refus des instructions
+  déclencheurs `FactureDocument_stock_frozen`, `FactureStockOutbox_frozen`) et
+  `20261214000000_facture_suite_etablissement_emetteur` (Suite S2, additive : `establishmentId` facultatif
+  et son index, déclencheur `FactureDocument_establishment_frozen` ; aucune ligne existante modifiée),
+  appliquées par `pnpm db:facture:migrate:deploy` (refus des instructions
   destructrices et d'une base Suite ou School).
 - Pré-déploiement Railway : `db:migrate:deploy && db:school:migrate:deploy && db:facture:migrate:deploy`
   — sans `FACTURE_ENABLED=true`, l'étape Facture ne fait rien.

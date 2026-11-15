@@ -106,6 +106,13 @@ export class FactureCommercialController {
 
   // ─── Documents ───
 
+  /** Établissements émetteurs possibles : ceux du référentiel commun des sites (Suite S2). */
+  @RequireFacturePermission('facture.documents.read')
+  @Get('establishments')
+  establishments(@CurrentFacture() ctx: FactureContext) {
+    return this.documents.establishments(ctx);
+  }
+
   @RequireFacturePermission('facture.documents.read')
   @Get('documents')
   listDocuments(@CurrentFacture() ctx: FactureContext, @Query() query: FactureDocumentQueryDto) {

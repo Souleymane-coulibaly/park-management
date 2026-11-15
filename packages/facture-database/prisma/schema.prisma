@@ -273,6 +273,11 @@ model FactureDocument {
   stockCovered       Json?
   /// S5 — avoir : la marchandise revient en stock (case cochée sur le brouillon, figée à l'émission).
   stockReturnGoods   Boolean               @default(false)
+  /// Suite S2 — établissement émetteur, facultatif : un établissement du référentiel commun des sites (base
+  /// Suite, sans clé étrangère entre bases). Choisi sur le brouillon, figé à l'émission (son nom et son
+  /// adresse sont alors copiés dans `sellerSnapshot.establishment`). La numérotation reste unique pour
+  /// toute l'organisation. Null : document de l'organisation, comme avant.
+  establishmentId    String?               @db.Uuid
   createdAt          DateTime              @default(now())
   updatedAt          DateTime              @updatedAt
 
@@ -296,6 +301,7 @@ model FactureDocument {
   @@index([organizationId, clientId])
   @@index([organizationId, creditedInvoiceId])
   @@index([organizationId, type, dueDate])
+  @@index([organizationId, establishmentId])
 }
 
 /// Encaissement d'une facture (paiements partiels possibles). Jamais modifié ni supprimé : une erreur

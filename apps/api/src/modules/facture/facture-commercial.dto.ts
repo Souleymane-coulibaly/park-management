@@ -286,6 +286,15 @@ export class FactureDraftDto {
   @IsUUID()
   clientId: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Établissement émetteur (référentiel commun des sites) ; null : document de l’organisation. Absent à la modification : inchangé.',
+    nullable: true,
+  })
+  @IsOptional()
+  @IsUUID()
+  establishmentId?: string | null;
+
   @ApiPropertyOptional({ description: 'Objet du document' })
   @IsOptional()
   @Transform(trimOrNull)
@@ -374,6 +383,11 @@ export class FactureDocumentQueryDto {
   @IsOptional()
   @IsUUID()
   clientId?: string;
+
+  @ApiPropertyOptional({ description: 'Documents de cet établissement émetteur' })
+  @IsOptional()
+  @IsUUID()
+  establishmentId?: string;
 }
 
 export class ConvertFactureDocumentDto {

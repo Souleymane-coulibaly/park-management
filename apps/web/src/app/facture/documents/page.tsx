@@ -37,6 +37,8 @@ interface DocumentRow {
   overdue: boolean;
   createdAt: string;
   client: { id: string; name: string };
+  /** Établissement émetteur (nom actuel dans le référentiel des sites) ; null : organisation. */
+  establishmentName: string | null;
 }
 
 /** Devis, pro forma, bons de commande, factures et avoirs : liste filtrée, création d'un brouillon. */
@@ -72,9 +74,13 @@ function Documents({ canManage, aiQuote }: { canManage: boolean; aiQuote: boolea
     ai.state === 'success' && ai.data.configured && ai.data.enabled && ai.data.quoteEnabled;
   const [type, setType] = useState('');
   const [status, setStatus] = useState('');
+  const [establishmentId, setEstablishmentId] = useState('');
+  const establishments =
+    useApi<{ id: string; name: string; isActive: boolean }[]>('/facture/establishments');
   const query = new URLSearchParams({
     ...(type ? { type } : {}),
     ...(status ? { status } : {}),
+    ...(establishmentId ? { establishmentId } : {}),
   });
   const documents = useApi<DocumentRow[]>(`/facture/documents?${query}`);
 
@@ -108,6 +114,20 @@ function Documents({ canManage, aiQuote }: { canManage: boolean; aiQuote: boolea
               })),
             ]}
           />
+          {establishments.state === 'success' && establishments.data.length > 0 && (
+            <SelectField
+              label="Établissement"
+              value={establishmentId}
+              onChange={(e) => setEstablishmentId(e.target.value)}
+              options={[
+                { value: '', label: 'Tous' },
+                ...establishments.data.map((e) => ({
+                  value: e.id,
+                  label: e.isActive ? e.name : `${e.name} (désactivé)`,
+                })),
+              ]}
+            />
+          )}
         </CardBody>
       </Card>
       {documents.state === 'loading' && <LoadingState />}
@@ -133,6 +153,9 @@ function Documents({ canManage, aiQuote }: { canManage: boolean; aiQuote: boolea
                         {FACTURE_DOCUMENT_TYPE_LABELS[d.type]} {d.number ?? '(brouillon)'}
                       </Link>
                       <span className="block text-xs text-muted">{d.subject ?? ''}</span>
+                      {d.establishmentName && (
+                        <span className="block text-xs text-muted">{d.establishmentName}</span>
+                      )}
                     </Td>
                     <Td>{d.client.name}</Td>
                     <Td>{formatXof(d.totalTtc)}</Td>

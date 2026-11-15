@@ -81,6 +81,9 @@ interface DocumentView {
   intervention: { id: string; number: string } | null;
   /** S5 : facture d'une vente en caisse Ocall Stock (lignes déjà sorties du stock). */
   stockSaleNumber: string | null;
+  /** Établissement émetteur (référentiel commun des sites) ; copie figée une fois le document émis. */
+  establishmentId: string | null;
+  establishment: EstablishmentView | null;
   /** S5 : avoir dont la marchandise revient en stock. */
   stockReturnGoods: boolean;
   /** S5 : demande de mouvement transmise (ou non) à Ocall Stock. */
@@ -103,6 +106,26 @@ interface DocumentView {
     status: FactureDocumentStatus;
   }[];
 }
+
+interface EstablishmentView {
+  id: string;
+  name: string;
+  address: string | null;
+  city: string | null;
+  phone: string | null;
+  /** null : copie figée à l'émission. */
+  isActive: boolean | null;
+}
+
+interface EstablishmentChoice {
+  id: string;
+  name: string;
+  city: string | null;
+  isActive: boolean;
+}
+
+const establishmentText = (e: EstablishmentView) =>
+  [e.name, [e.address, e.city].filter(Boolean).join(', ')].filter(Boolean).join(' — ');
 
 const TEXTAREA =
   'w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm focus:border-forest focus:outline-none focus:ring-2 focus:ring-forest/30 disabled:opacity-60';
@@ -164,6 +187,12 @@ function DocumentScreen({
         </a>
       </div>
       {doc.stockSync && <StockSyncNote sync={doc.stockSync} />}
+      {doc.establishment && (
+        <p className="text-sm text-muted" data-testid="facture-document-establishment">
+          Établissement émetteur : {establishmentText(doc.establishment)}
+          {doc.establishment.isActive === false && ' (désactivé)'}
+        </p>
+      )}
       {(doc.source ||
         doc.derived.length > 0 ||
         doc.creditedInvoice ||
@@ -237,6 +266,10 @@ function DraftEditor({ doc, onSaved }: { doc: DocumentView; onSaved: () => void 
   const items = useApi<FactureItemView[]>('/facture/items');
   const stock = useApi<{ available: boolean; writable: boolean }>('/facture/stock/status');
   const stockOn = stock.state === 'success' && stock.data.available;
+  const establishments = useApi<EstablishmentChoice[]>('/facture/establishments');
+  // Vente en caisse : la boutique de la vente ; avoir : l'établissement de la facture corrigée.
+  const establishmentLocked = doc.stockSaleNumber !== null || doc.type === 'CREDIT_NOTE';
+  const [establishmentId, setEstablishmentId] = useState(doc.establishmentId ?? '');
   const [returnGoods, setReturnGoods] = useState(doc.stockReturnGoods);
   const [form, setForm] = useState(() => ({
     clientId: doc.clientId,
@@ -319,6 +352,7 @@ function DraftEditor({ doc, onSaved }: { doc: DocumentView; onSaved: () => void 
     terms: form.terms,
     notes: form.notes,
     vatExemptionReason: form.vatExemptionReason,
+    ...(establishmentLocked ? {} : { establishmentId: establishmentId || null }),
     ...(doc.type === 'QUOTE' || doc.type === 'PRO_FORMA'
       ? { validityDays: form.validityDays }
       : {}),
@@ -398,6 +432,37 @@ function DraftEditor({ doc, onSaved }: { doc: DocumentView; onSaved: () => void 
               : [{ id: doc.clientId, name: doc.client.name }]
             ).map((c) => ({ value: c.id, label: c.name }))}
           />
+          {(doc.establishmentId ||
+            (establishments.state === 'success' &&
+              establishments.data.some((e) => e.isActive))) && (
+            <SelectField
+              label="Établissement émetteur (facultatif)"
+              hint={
+                establishmentLocked
+                  ? doc.type === 'CREDIT_NOTE'
+                    ? 'Celui de la facture corrigée.'
+                    : 'Celui de la boutique de la vente.'
+                  : 'Imprimé sur le document ; la numérotation reste celle de l’organisation.'
+              }
+              disabled={establishmentLocked}
+              value={establishmentId}
+              onChange={(e) => setEstablishmentId(e.target.value)}
+              data-testid="facture-establishment-select"
+              options={[
+                { value: '', label: 'Aucun (organisation)' },
+                ...(establishments.state === 'success'
+                  ? establishments.data
+                      .filter((e) => e.isActive || e.id === doc.establishmentId)
+                      .map((e) => ({
+                        value: e.id,
+                        label: `${e.name}${e.city ? ` — ${e.city}` : ''}${e.isActive ? '' : ' (désactivé)'}`,
+                      }))
+                  : doc.establishment
+                    ? [{ value: doc.establishment.id, label: doc.establishment.name }]
+                    : []),
+              ]}
+            />
+          )}
           <InputField label="Titre du document (objet)" maxLength={200} {...field('subject')} />
           <InputField label="Référence du client" maxLength={80} {...field('clientReference')} />
           {doc.type === 'INVOICE' && (
