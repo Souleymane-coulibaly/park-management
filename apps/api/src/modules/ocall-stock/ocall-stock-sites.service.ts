@@ -331,6 +331,14 @@ export class OcallStockSitesService implements OnModuleInit {
           message: 'Un site porte déjà ce code.',
         });
       }
+      // Ocall Suite Sprint 2C : nom déjà pris dans le référentiel, refusé avant toute écriture.
+      if (await this.registryService.findByName(ctx.organizationId, fields.name)) {
+        throw new ConflictException({
+          code: 'ESTABLISHMENT_NAME_TAKEN',
+          message:
+            'Un site de ce nom existe déjà dans votre organisation : rattachez-le plutôt que d’en créer un second.',
+        });
+      }
     }
     const establishmentId = createEstablishment
       ? (
@@ -372,6 +380,15 @@ export class OcallStockSitesService implements OnModuleInit {
       });
       return this.site(ctx, site.id);
     } catch (e) {
+      // Ocall Suite Sprint 2C : le lieu créé pour ce site est annulé si le site n'a pas pu être créé.
+      if (createEstablishment && establishmentId) {
+        await this.registryService.discardNewSite({
+          organizationId: ctx.organizationId,
+          actorUserId: ctx.userId,
+          source: STOCK_PRODUCT_CODE,
+          id: establishmentId,
+        });
+      }
       if (isUnique(e)) {
         if (pgMessage(e).includes('establishmentId')) throw this.establishmentTaken();
         throw new ConflictException({

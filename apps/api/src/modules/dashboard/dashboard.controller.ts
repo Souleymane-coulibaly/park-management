@@ -27,9 +27,12 @@ export class DashboardController {
     const tenant = requireTenant(auth);
     const { role, organizationId, businessType } = tenant.membership;
 
+    // Ocall Suite Sprint 2C : établissements Park ou Restaurant seulement ; un lieu du référentiel sans
+    // activité Park (boutique, école…) n'est pas compté dans le tableau de bord Park.
+    const parkSites = { ...establishmentScope(tenant), businessType: { not: 'NONE' as const } };
     const [establishmentsTotal, establishmentsActive] = await Promise.all([
-      this.prisma.establishment.count({ where: establishmentScope(tenant) }),
-      this.prisma.establishment.count({ where: { ...establishmentScope(tenant), isActive: true } }),
+      this.prisma.establishment.count({ where: parkSites }),
+      this.prisma.establishment.count({ where: { ...parkSites, isActive: true } }),
     ]);
 
     const employees = hasPermission(role, 'employee.read')

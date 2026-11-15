@@ -19,6 +19,7 @@ export * from './partners';
 export * from './suite-contracts';
 export * from './suite-commercial';
 export * from './suite-sites';
+export * from './suite-organizations';
 export * from './school';
 export * from './school-students';
 export * from './school-i18n';

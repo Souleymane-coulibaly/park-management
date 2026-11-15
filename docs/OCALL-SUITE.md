@@ -202,3 +202,30 @@ Décisions et architecture : `ocall-audits/audit-architecture-multisite-ocall-su
   rôle applicatif ne ferme que cette application. Un compte réservé aux applications n'a pas encore de
   désactivation unique (à prévoir à l'étape D).
 - **Tests** : `apps/api/test/suite-s2b-etablissements.integration.spec.ts`, `e2e/suite-s2b-sites.spec.ts`.
+
+## Sprint 2C (multi-établissements) — plusieurs organisations pour un même compte
+
+- **Invitation acceptée.** Le propriétaire ou un administrateur invite une personne qui a déjà un compte
+  Ocall, par son e-mail ou son identifiant, avec un rôle (jamais propriétaire ; un administrateur
+  n'invite pas d'administrateur) et, pour un rôle limité, ses établissements Park. La réponse est la même
+  que le compte existe ou non. Rien n'est créé avant l'acceptation par la personne, depuis son propre
+  compte (portail Suite) ; refus possible ; invitation échue après 7 jours ; révocable. Une seule
+  invitation en attente par organisation et par personne (index unique partiel).
+- **Changement d'organisation** (sélecteur dans l'en-tête du portail) : `POST /auth/switch-organization`
+  ouvre une nouvelle session liée à la seule adhésion choisie et ferme la session courante ; la page est
+  entièrement rechargée. Organisation sans adhésion active, adhésion désactivée ou organisation suspendue :
+  introuvable. La connexion ouvre la plus ancienne organisation active.
+- **Compte partagé** : depuis une seule organisation, ni réinitialisation du mot de passe ni modification
+  de l'identité ou de l'e-mail (`SHARED_ACCOUNT`) ; chaque organisation garde la main sur son adhésion
+  (rôle, établissements, désactivation).
+- **API** : `GET|POST /organization/invitations`, `POST /organization/invitations/:id/revoke`
+  (`employee.manage`) ; `GET /auth/organizations`, `POST /auth/switch-organization`,
+  `GET /auth/invitations`, `POST /auth/invitations/:id/accept|decline`.
+- **Écarts de l'étape B corrigés** : tableau de bord et analyses Park sans les lieux sans activité Park ;
+  pages Park Établissements et Employés limitées aux établissements Park ; un lieu encore rattaché à une
+  application ne se désactive pas (`ESTABLISHMENT_IN_USE`) ; création d'un site Stock : nom du lieu
+  vérifié avant toute écriture, et lieu tout juste créé annulé si le site échoue
+  (`establishment.creation_rolled_back`).
+- **Migration** `20261212000000_suite_s2c_invitations_organisation` (base Suite, additive).
+- **Tests** : `apps/api/test/suite-s2c-organisations.integration.spec.ts`,
+  `e2e/suite-s2c-organisations.spec.ts`.

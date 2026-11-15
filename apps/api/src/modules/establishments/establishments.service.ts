@@ -170,6 +170,7 @@ export class EstablishmentsService {
     await this.get(auth, id);
     if (dto.businessType) this.assertCompatible(auth.membership.businessType, dto.businessType);
     if (dto.brandId) await this.assertBrand(organizationId, dto.brandId);
+    if (dto.isActive === false) await this.assertNotUsedElsewhere(organizationId, id);
     return this.prisma.$transaction(async (tx) => {
       // Le filtre organizationId est répété dans l'écriture : défense en profondeur.
       const result = await tx.establishment.updateMany({
@@ -200,6 +201,23 @@ export class EstablishmentsService {
       );
       return tx.establishment.findUniqueOrThrow({ where: { id }, select: SELECT });
     });
+  }
+
+  /**
+   * Ocall Suite Sprint 2C : un lieu encore utilisé par une autre application (site Stock, école…) ne se
+   * désactive pas : il faut d'abord retirer le rattachement dans l'application, pour ne pas laisser de
+   * fiche rattachée à un lieu fermé. L'usage Park (activité du lieu) reste géré comme avant.
+   */
+  private async assertNotUsedElsewhere(organizationId: string, id: string) {
+    const usages = (await this.registryService.usages(organizationId)).get(id) ?? [];
+    const others = usages.filter((u) => u.appSiteId !== null);
+    if (others.length > 0) {
+      throw new ConflictException({
+        code: 'ESTABLISHMENT_IN_USE',
+        message: `Ce lieu est encore utilisé par ${[...new Set(others.map((u) => u.label))].join(', ')} : retirez d'abord le rattachement dans l'application.`,
+        applications: [...new Set(others.map((u) => u.product))],
+      });
+    }
   }
 
   /** Enseigne active de l'organisation ; une enseigne d'un autre client est introuvable. */

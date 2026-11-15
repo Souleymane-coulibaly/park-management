@@ -19,6 +19,14 @@ enum BusinessType {
   NONE
 }
 
+/// Sprint Suite 2C : invitation d'un compte existant dans une autre organisation.
+enum OrganizationInvitationStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  REVOKED
+}
+
 /// Sprint Suite 2B : nature du lieu physique (descriptive ; l'activité Park reste dans `businessType`).
 enum EstablishmentKind {
   PARK
@@ -115,6 +123,7 @@ model Organization {
 
   establishments       Establishment[]
   brands               Brand[]
+  invitations          OrganizationInvitation[]
   memberships          OrganizationMembership[]
   assignments          EstablishmentAssignment[]
   subscriptions        Subscription[]
@@ -247,6 +256,30 @@ model Brand {
 
   @@unique([organizationId, id])
   @@unique([organizationId, name])
+}
+
+/// Sprint Suite 2C : invitation d'une personne qui a déjà un compte Ocall à rejoindre une autre
+/// organisation. Rien n'est créé sans son acceptation depuis son propre compte ; la création ne révèle
+/// jamais si le compte existe. Jamais supprimée : refusée, révoquée ou acceptée ; échue à `expiresAt`.
+model OrganizationInvitation {
+  id               String                       @id @default(uuid()) @db.Uuid
+  organizationId   String                       @db.Uuid
+  /// E-mail (minuscules) ou identifiant (majuscules) du compte invité.
+  identifier       String
+  role             MemberRole
+  /// Établissements affectés à l'acceptation (rôles limités à leurs établissements).
+  establishmentIds String[]                     @db.Uuid
+  status           OrganizationInvitationStatus @default(PENDING)
+  invitedByUserId  String                       @db.Uuid
+  decidedByUserId  String?                      @db.Uuid
+  expiresAt        DateTime
+  decidedAt        DateTime?
+  createdAt        DateTime                     @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status])
+  @@index([identifier, status])
 }
 
 model User {

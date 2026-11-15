@@ -45,12 +45,15 @@ export async function visibleEstablishments(
     orderBy: { name: 'asc' },
   });
   const orgActivities = activitiesOf(tenant.membership.businessType);
-  return rows.map((e) => ({
-    id: e.id,
-    name: e.name,
-    timezone: e.timezone,
-    activities: activitiesOf(e.businessType).filter((a) => orgActivities.includes(a)),
-  }));
+  // Ocall Suite Sprint 2C : un lieu sans activité Park (référentiel commun) n'entre pas dans les analyses.
+  return rows
+    .map((e) => ({
+      id: e.id,
+      name: e.name,
+      timezone: e.timezone,
+      activities: activitiesOf(e.businessType).filter((a) => orgActivities.includes(a)),
+    }))
+    .filter((e) => e.activities.length > 0);
 }
 
 export async function resolveAnalyticsScope(

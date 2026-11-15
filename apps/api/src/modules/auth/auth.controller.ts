@@ -1,9 +1,21 @@
-import { Body, Controller, Get, HttpCode, Inject, Patch, Post, Req, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Inject,
+  Param,
+  ParseUUIDPipe,
+  Patch,
+  Post,
+  Req,
+  Res,
+} from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { SensitiveRoute } from '../../common/throttling';
 import type { Request, Response } from 'express';
 import { APP_CONFIG, type AppConfig, SESSION_COOKIE } from '../../config/app-config';
-import type { AuthContext } from '../../common/auth-context';
+import { type AuthContext, requireTenant } from '../../common/auth-context';
 import {
   AllowMfaPending,
   AllowPendingPassword,
@@ -24,6 +36,8 @@ import {
 } from './auth.dto';
 import { AuthService } from './auth.service';
 import { MfaService } from './mfa.service';
+import { OrganizationAccessService } from './organization-access.service';
+import { SwitchOrganizationDto } from './organization-access.dto';
 import { type MeResponse, toMe } from './me';
 
 @ApiTags('Authentification')
@@ -34,6 +48,7 @@ export class AuthController {
     private readonly sessions: SessionService,
     private readonly mfa: MfaService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    private readonly access: OrganizationAccessService,
   ) {}
 
   @Public()
@@ -71,6 +86,48 @@ export class AuthController {
   ): Promise<void> {
     await this.auth.logout(auth);
     res.clearCookie(SESSION_COOKIE, this.cookieOptions());
+  }
+
+  /** Ocall Suite Sprint 2C : organisations du compte (adhésions actives). */
+  @Get('organizations')
+  organizations(@CurrentAuth() auth: AuthContext) {
+    return this.access.organizations(requireTenant(auth));
+  }
+
+  /** Nouvelle session dans une autre organisation du compte ; la session courante est fermée. */
+  @SensitiveRoute()
+  @HttpCode(200)
+  @Post('switch-organization')
+  async switchOrganization(
+    @CurrentAuth() auth: AuthContext,
+    @Body() dto: SwitchOrganizationDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<MeResponse> {
+    const token = await this.access.switch(
+      requireTenant(auth),
+      dto.organizationId,
+      requestMeta(req),
+    );
+    return this.openSession(token, res);
+  }
+
+  @Get('invitations')
+  invitations(@CurrentAuth() auth: AuthContext) {
+    return this.access.invitations(requireTenant(auth));
+  }
+
+  @SensitiveRoute()
+  @HttpCode(200)
+  @Post('invitations/:id/accept')
+  acceptInvitation(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
+    return this.access.accept(requireTenant(auth), id);
+  }
+
+  @HttpCode(200)
+  @Post('invitations/:id/decline')
+  declineInvitation(@CurrentAuth() auth: AuthContext, @Param('id', ParseUUIDPipe) id: string) {
+    return this.access.decline(requireTenant(auth), id);
   }
 
   @AllowPendingPassword()

@@ -218,7 +218,11 @@ export default function EmployesPage() {
         <EmployeeDialog
           employee={dialog.mode === 'edit' ? dialog.employee : null}
           establishments={
-            establishments.state === 'success' ? establishments.data.filter((s) => s.isActive) : []
+            // Établissements Park ou Restaurant actifs : un lieu sans activité Park (référentiel Suite)
+            // ne reçoit pas d'employé Park.
+            establishments.state === 'success'
+              ? establishments.data.filter((s) => s.isActive && s.businessType !== 'NONE')
+              : []
           }
           onClose={() => setDialog(null)}
           onSaved={(created) => {

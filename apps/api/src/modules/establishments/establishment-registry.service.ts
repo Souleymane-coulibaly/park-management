@@ -58,6 +58,48 @@ export class EstablishmentRegistryService implements SiteRegistry {
     return row ? toSite(row) : null;
   }
 
+  async findByName(organizationId: string, name: string): Promise<RegistrySite | null> {
+    const row = await this.prisma.establishment.findFirst({
+      where: { organizationId, name: name.trim() },
+      select: SITE_SELECT,
+    });
+    return row ? toSite(row) : null;
+  }
+
+  async discardNewSite(input: {
+    organizationId: string;
+    actorUserId: string;
+    source: string;
+    id: string;
+  }): Promise<boolean> {
+    const used = (await this.usages(input.organizationId)).get(input.id) ?? [];
+    if (used.length > 0) return false;
+    return this.prisma.$transaction(async (tx) => {
+      const { count } = await tx.establishment.deleteMany({
+        where: {
+          id: input.id,
+          organizationId: input.organizationId,
+          businessType: 'NONE',
+          createdAt: { gt: new Date(Date.now() - 10 * 60_000) },
+          assignments: { none: {} },
+        },
+      });
+      if (count !== 1) return false;
+      await this.audit.record(
+        {
+          organizationId: input.organizationId,
+          actorUserId: input.actorUserId,
+          action: 'establishment.creation_rolled_back',
+          targetType: 'Establishment',
+          targetId: input.id,
+          metadata: { source: input.source },
+        },
+        tx,
+      );
+      return true;
+    });
+  }
+
   async list(organizationId: string): Promise<RegistrySite[]> {
     const rows = await this.prisma.establishment.findMany({
       where: { organizationId },

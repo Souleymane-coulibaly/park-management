@@ -145,11 +145,19 @@ export class AuthService {
       });
     }
     if (!user.platformRole && !partner) {
-      const membership = await this.prisma.organizationMembership.findFirst({
-        where: { userId: user.id, isActive: true },
-        include: { organization: { select: { status: true } } },
-        orderBy: { createdAt: 'asc' },
-      });
+      // Ocall Suite Sprint 2C : plusieurs organisations possibles ; la plus ancienne organisation active
+      // ouvre la session (changement d'organisation ensuite). Toutes suspendues : refus comme avant.
+      const membership =
+        (await this.prisma.organizationMembership.findFirst({
+          where: { userId: user.id, isActive: true, organization: { status: 'ACTIVE' } },
+          include: { organization: { select: { status: true } } },
+          orderBy: { createdAt: 'asc' },
+        })) ??
+        (await this.prisma.organizationMembership.findFirst({
+          where: { userId: user.id, isActive: true },
+          include: { organization: { select: { status: true } } },
+          orderBy: { createdAt: 'asc' },
+        }));
       // Sans adhésion : seul un compte de portail actif (parents, Sprint 6) peut ouvrir une session.
       if (!membership && !(await this.portals.kindOf(user.id)))
         throw new ForbiddenException({

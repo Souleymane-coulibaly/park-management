@@ -11,6 +11,7 @@ export default async function SuitePage() {
       organizationName={me.organization!.name}
       firstName={me.user.firstName}
       canSites={me.permissions.includes('establishment.read')}
+      canInvite={me.permissions.includes('employee.manage')}
     />
   );
 }

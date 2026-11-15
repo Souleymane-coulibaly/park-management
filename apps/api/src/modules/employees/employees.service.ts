@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -138,6 +139,7 @@ export class EmployeesService {
 
   async update(auth: TenantContext, id: string, dto: UpdateEmployeeDto) {
     const target = await this.findManageable(auth, id);
+    await this.assertNotShared(target);
     await this.prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id: target.userId },
@@ -272,6 +274,7 @@ export class EmployeesService {
   /** Réinitialisation par l'administrateur, pour les employés sans e-mail. */
   async resetPassword(auth: TenantContext, id: string) {
     const target = await this.findManageable(auth, id);
+    await this.assertNotShared(target);
     this.assertNotSelf(auth, target.id, 'réinitialiser votre propre mot de passe ici');
     const temporaryPassword = generateTemporaryPassword();
     const passwordHash = await this.passwords.hash(temporaryPassword);
@@ -306,6 +309,25 @@ export class EmployeesService {
     });
     if (!membership) throw new NotFoundException(NOT_FOUND);
     return membership;
+  }
+
+  /**
+   * Ocall Suite Sprint 2C : un compte qui appartient aussi à une autre organisation ne se modifie pas
+   * depuis une seule d'entre elles (identité, e-mail, mot de passe) : sinon son administrateur pourrait
+   * prendre l'accès à l'autre organisation. Seul le titulaire modifie son compte ; chaque organisation
+   * garde la main sur son adhésion (rôle, établissements, désactivation).
+   */
+  private async assertNotShared(target: { userId: string; organizationId: string }) {
+    const elsewhere = await this.prisma.organizationMembership.count({
+      where: { userId: target.userId, organizationId: { not: target.organizationId } },
+    });
+    if (elsewhere > 0) {
+      throw new ConflictException({
+        code: 'SHARED_ACCOUNT',
+        message:
+          'Ce compte appartient aussi à une autre organisation : seule la personne peut modifier son identité ou son mot de passe.',
+      });
+    }
   }
 
   /** Un membre ne gère que les comptes dont il pourrait attribuer le rôle (un ADMIN ne touche pas un OWNER). */

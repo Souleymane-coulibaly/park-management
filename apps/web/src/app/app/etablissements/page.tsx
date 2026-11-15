@@ -25,7 +25,13 @@ import { useApi } from '@/lib/use-api';
 export default function EtablissementsPage() {
   const canRead = useCan('establishment.read');
   const canManage = useCan('establishment.manage');
-  const list = useApi<Establishment[]>(canRead ? '/establishments' : null);
+  const all = useApi<Establishment[]>(canRead ? '/establishments' : null);
+  // Ocall Suite Sprint 2C : Park n'affiche que ses établissements ; les autres lieux (boutiques, écoles…)
+  // se gèrent dans « Sites de l'organisation ».
+  const list =
+    all.state === 'success'
+      ? { ...all, data: all.data.filter((e) => e.businessType !== 'NONE') }
+      : all;
   const [editing, setEditing] = useState<Establishment | 'new' | null>(null);
   const [toggleError, setToggleError] = useState<ApiError | null>(null);
 
@@ -54,8 +60,15 @@ export default function EtablissementsPage() {
         description="Les sites de votre organisation et leurs activités."
         action={addButton}
       />
-      <div className="mb-4">
+      <div className="mb-4 space-y-2">
         <ApiErrorAlert error={toggleError} />
+        <p className="text-sm text-muted">
+          Les autres lieux de l’organisation (boutiques, dépôts, écoles…) se gèrent dans{' '}
+          <a href="/suite/sites" className="font-semibold underline">
+            Sites de l’organisation
+          </a>
+          .
+        </p>
       </div>
       <Card>
         {list.state === 'loading' && <LoadingState />}

@@ -29,6 +29,7 @@ import {
   formatXof,
   quoteSubscription,
 } from '@ocall/shared';
+import { PendingInvitations } from '@/components/suite/pending-invitations';
 import { SuiteShell } from '@/components/suite/suite-shell';
 import { Button } from '@/components/ui/button';
 import { Alert, ApiErrorAlert, ErrorState, LoadingState } from '@/components/ui/states';
@@ -81,11 +82,14 @@ export function SuitePortal({
   organizationName,
   firstName,
   canSites = false,
+  canInvite = false,
 }: {
   organizationName: string;
   firstName: string;
   /** Ocall Suite Sprint 2B : lien vers le référentiel des sites (propriétaire, administrateurs). */
   canSites?: boolean;
+  /** Ocall Suite Sprint 2C : invitations de personnes ayant déjà un compte (propriétaire, administrateurs). */
+  canInvite?: boolean;
 }) {
   const apps = useApi<SuitePortalApp[]>('/suite/overview');
   const unread = useApi<{ unread: number }>('/suite/notifications/unread-count');
@@ -108,16 +112,28 @@ export function SuitePortal({
             Bonjour {firstName}
           </h1>
           <p className="mt-1 text-suite-ink-soft">Choisissez votre application.</p>
-          {canSites && (
-            <Link
-              href="/suite/sites"
-              className="mt-2 inline-block text-sm font-semibold text-suite-green hover:underline"
-              data-testid="suite-sites-link"
-            >
-              Sites de l’organisation
-            </Link>
-          )}
+          <div className="mt-2 flex flex-wrap gap-4">
+            {canSites && (
+              <Link
+                href="/suite/sites"
+                className="text-sm font-semibold text-suite-green hover:underline"
+                data-testid="suite-sites-link"
+              >
+                Sites de l’organisation
+              </Link>
+            )}
+            {canInvite && (
+              <Link
+                href="/suite/invitations"
+                className="text-sm font-semibold text-suite-green hover:underline"
+                data-testid="suite-invite-link"
+              >
+                Inviter une personne
+              </Link>
+            )}
+          </div>
         </div>
+        <PendingInvitations />
         {apps.state === 'loading' && <LoadingState />}
         {apps.state === 'error' && <ErrorState error={apps.error} onRetry={apps.reload} />}
         {apps.state === 'success' && (

@@ -52,6 +52,19 @@ export interface SiteRegistry {
     address?: string | null;
     phone?: string | null;
   }): Promise<RegistrySite>;
+  /** Établissement de l'organisation portant exactement ce nom (unicité en base), sinon null. */
+  findByName(organizationId: string, name: string): Promise<RegistrySite | null>;
+  /**
+   * Annule un lieu que l'appelant vient de créer dans la même opération, quand la suite a échoué : effacé
+   * seulement s'il n'a aucune activité Park, aucun rattachement, aucune affectation, et a moins de
+   * 10 minutes. Sinon rien n'est touché. Journalisé.
+   */
+  discardNewSite(input: {
+    organizationId: string;
+    actorUserId: string;
+    source: string;
+    id: string;
+  }): Promise<boolean>;
   /** Chaque application déclare au démarrage la lecture de ses rattachements. */
   registerUsage(provider: SiteUsageProvider): void;
 }

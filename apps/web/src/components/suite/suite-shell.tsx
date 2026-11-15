@@ -5,6 +5,7 @@ import { type ReactNode, useEffect } from 'react';
 import { Bell } from 'lucide-react';
 import { LogoutButton } from '@/components/app/logout-button';
 import { SuiteLogo } from '@/components/brand/suite-logo';
+import { OrganizationSwitcher } from '@/components/suite/organization-switcher';
 import { useApi } from '@/lib/use-api';
 
 /**
@@ -31,7 +32,8 @@ export function SuiteShell({
           <Link href="/suite" aria-label="Accueil Ocall Suite">
             <SuiteLogo />
           </Link>
-          <div className="flex items-center gap-1">
+          <div className="flex min-w-0 items-center gap-1">
+            <OrganizationSwitcher />
             <Link
               href="/suite/notifications"
               className="relative grid h-10 w-10 place-items-center rounded-xl text-suite-ink-soft hover:bg-suite-ivory focus-visible:outline focus-visible:outline-2 focus-visible:outline-suite-green"
