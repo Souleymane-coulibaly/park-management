@@ -417,6 +417,44 @@ const key = () => randomUUID().replace(/-/g, '');
     const issued = (await issue(invoice.id).expect(200)).body;
     expect(issued.establishment).toMatchObject({ id: kayes, name: 'Agence Kayes Centre' });
 
+    // Historique : la boutique est détachée puis l'établissement désactivé ; la facture émise garde
+    // l'identité copiée à l'émission (document et PDF), et un brouillon préparé avant reste émissible avec
+    // l'établissement de la vente.
+    const secondSale = await sale(shop, 'CK2');
+    const pending = (
+      await a
+        .post(api('/facture/stock/sales/invoice'))
+        .send({ sale: secondSale.id, clientId: clientA })
+        .expect(201)
+    ).body;
+    expect(pending.establishmentId).toBe(kayes);
+    const inUse = await a
+      .patch(api(`/establishments/${kayes}`))
+      .send({ isActive: false })
+      .expect(409);
+    expect(inUse.body.code).toBe('ESTABLISHMENT_IN_USE');
+    const detached = await a
+      .put(api(`/ocall-stock/sites/${shop.id}/establishment`))
+      .send({ establishmentId: null });
+    expect(detached.status).toBeLessThan(300);
+    await a
+      .patch(api(`/establishments/${kayes}`))
+      .send({ isActive: false })
+      .expect(200);
+    expect(issued.establishment.city).toBe('Kayes');
+    const afterClose = await get(invoice.id);
+    expect(afterClose.number).toBe(issued.number);
+    expect(afterClose.establishment).toEqual(issued.establishment);
+    const pdf = await a.get(api(`/facture/documents/${invoice.id}/pdf`)).expect(200);
+    expect(pdf.headers['content-type']).toContain('application/pdf');
+    const lateIssued = (await issue(pending.id).expect(200)).body;
+    expect(lateIssued.establishment).toEqual(issued.establishment);
+    const choices = (await a.get(api('/facture/establishments')).expect(200)).body as {
+      id: string;
+      isActive: boolean;
+    }[];
+    expect(choices.find((c) => c.id === kayes)?.isActive).toBe(false);
+
     // Boutique sans établissement : facture de l'organisation, comme avant.
     const fromFree = await sale(unlinked, 'CL1');
     const plain = (
@@ -426,5 +464,5 @@ const key = () => randomUUID().replace(/-/g, '');
         .expect(201)
     ).body;
     expect(plain.establishmentId).toBeNull();
-  });
+  }, 180_000);
 });
