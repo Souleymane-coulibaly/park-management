@@ -85,7 +85,8 @@ test('Ocall Stock : prix par boutique et vitrine multi-boutiques', async ({ page
     .click();
   await expect(products.getByText('Publié')).toHaveCount(1);
   await page.getByTestId('stock-showcase-publish').click();
-  await expect(page.getByText('Site en ligne')).toBeVisible();
+  // Titre exact : « … sur le site en ligne. » (aide de la carte Articles) est visible avant la publication.
+  await expect(page.getByText('Site en ligne', { exact: true })).toBeVisible();
 
   // Visiteur : sans boutique, prix commun et invitation à choisir.
   await page.goto(`/m/${slug}/catalogue`);

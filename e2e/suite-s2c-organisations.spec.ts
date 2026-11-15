@@ -68,11 +68,18 @@ test('Ocall Suite S2C : invitation acceptée, passage d’une organisation à l�
   const invitation = person.getByTestId('suite-invitation');
   await expect(invitation).toContainText(`Parc Beta ${E2E_SUFFIX}`);
   await invitation.getByRole('button', { name: 'Accepter' }).click();
+  // Ancien onglet resté sur l'espace Park de A : il se recharge sur le portail après le changement.
+  const oldTab = await person.context().newPage();
+  await oldTab.goto('/app');
+  await expect(oldTab).toHaveURL(/\/app/);
   await person
     .getByTestId('suite-invitation-joined')
     .getByRole('button', { name: 'Passer à cette organisation' })
     .click();
   await expect(person.getByTestId('suite-organization')).toContainText('Parc Beta');
+  await expect(oldTab).toHaveURL(/\/suite$/);
+  await expect(oldTab.getByTestId('suite-organization')).toContainText('Parc Beta');
+  await oldTab.close();
 
   // Sélecteur d'organisation : retour dans A.
   const switcher = person.getByTestId('organization-switcher').getByLabel('Organisation');

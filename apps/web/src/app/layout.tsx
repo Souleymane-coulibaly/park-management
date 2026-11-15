@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Inter, Outfit } from 'next/font/google';
 import type { ReactNode } from 'react';
+import { OrganizationChangeWatcher } from '@/components/organization-change-watcher';
 import { isIndexingBlocked } from '@/lib/indexing';
 import './globals.css';
 
@@ -47,7 +48,10 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="fr" className={`${body.variable} ${display.variable}`}>
-      <body className="min-h-screen">{children}</body>
+      <body className="min-h-screen">
+        <OrganizationChangeWatcher />
+        {children}
+      </body>
     </html>
   );
 }

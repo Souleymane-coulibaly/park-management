@@ -229,3 +229,35 @@ Décisions et architecture : `ocall-audits/audit-architecture-multisite-ocall-su
 - **Migration** `20261212000000_suite_s2c_invitations_organisation` (base Suite, additive).
 - **Tests** : `apps/api/test/suite-s2c-organisations.integration.spec.ts`,
   `e2e/suite-s2c-organisations.spec.ts`.
+- **Flux temps réel et anciens onglets** (risque traité avant la production) : chaque évènement d'un flux
+  SSE est revérifié avant l'envoi (session, adhésion, rôle, établissement) ; une session révoquée par un
+  changement d'organisation, une déconnexion ou une désactivation ne reçoit plus rien et le flux se ferme,
+  sans attendre le battement suivant (`suite-s2c-realtime.integration.spec.ts`). Le cookie de session étant
+  commun aux onglets, l'onglet qui change d'organisation le signale aux autres (`storage` et
+  `BroadcastChannel`) : les onglets des espaces connectés se rechargent sur le portail.
+- **Échec intermittent du parcours Stock S10** : cause identifiée, indépendante de l'étape C. Le test
+  attendait « Site en ligne » par `getByText`, qui cherche une sous-chaîne sans casse : l'aide « … sur le
+  site en ligne. » de la carte Articles, visible avant la publication, satisfaisait l'attente ; le test
+  ouvrait la vitrine pendant que la publication était encore en cours (trace : publication interrompue,
+  catalogue 404). Attente corrigée en texte exact dans `stock-s10` et `stock-s7`.
+
+## Sprint 2D (multi-établissements) — accès harmonisés entre applications
+
+- **Désactivation d'une adhésion** (`POST /employees/:id/deactivate|reactivate`) : durable
+  (`OrganizationMembership.suspendedAt`, `suspendedByUserId`) et limitée à l'organisation ; les adhésions du
+  même compte ailleurs et leurs sessions ne changent pas. Compte réservé aux applications (`PRODUCT_USER`) :
+  désactivé par le propriétaire seulement ; tant qu'il est désactivé, aucun rôle d'application ne rouvre
+  l'adhésion (`ProductUserAccountsService.syncActive` relit la suspension sous verrou). La réactivation
+  ne rouvre ce compte que si une application lui donne encore un rôle actif. Page Employés : statut
+  « Sans rôle d'application » pour un compte fermé par les applications.
+- **Portail** (`GET /suite/overview`) : `hasRole` par application, lu comme la garde de l'application
+  (propriétaire : responsable d'office ; Park : tout rôle Park ; School, Facture, Stock : membre actif).
+  « Mes applications » ne contient que les applications ouvertes où la personne a un rôle ; sans droit de
+  facturation, rien d'autre n'est présenté ; propriétaire et administrateurs voient aussi les applications
+  ouvertes sans rôle pour eux (sans lien) et le catalogue.
+- **Gardes School, Facture, Stock** : étapes communes dans `common/app-guard.ts` (application activée,
+  adhésion, droit commercial, lecture seule, propriétaire responsable d'office, refus uniforme) ; règles
+  propres à chaque application inchangées.
+- **Migration** `20261213000000_suite_s2d_suspension_adhesion` (base Suite, additive, sans modification des
+  lignes existantes).
+- **Tests** : `apps/api/test/suite-s2d-acces.integration.spec.ts`, `e2e/suite-s2d-acces.spec.ts`.

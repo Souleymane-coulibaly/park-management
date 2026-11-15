@@ -5,6 +5,7 @@ import { INVITATION_ROLE_LABELS, type MemberRole } from '@ocall/shared';
 import { Button } from '@/components/ui/button';
 import { ApiErrorAlert } from '@/components/ui/states';
 import { ApiError, api } from '@/lib/api';
+import { announceOrganizationChange } from '@/lib/organization-change';
 import { useApi } from '@/lib/use-api';
 
 interface PendingInvitation {
@@ -46,6 +47,7 @@ export function PendingInvitations() {
     setBusy(true);
     try {
       await api('/auth/switch-organization', { method: 'POST', body: { organizationId } });
+      announceOrganizationChange(organizationId);
       window.location.assign('/suite');
     } catch (e) {
       setError(e instanceof ApiError ? e : null);

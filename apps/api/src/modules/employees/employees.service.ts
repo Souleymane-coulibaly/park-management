@@ -20,6 +20,7 @@ import { PasswordService } from '../../common/security/password.service';
 import { generateTemporaryPassword } from '../../common/security/tokens';
 import { membershipScope } from '../../common/tenant-scope';
 import { OrganizationProvisioningService } from '../organizations/organization-provisioning.service';
+import { ProductUserAccountsService } from '../organizations/product-user-accounts.service';
 import type {
   ChangeRoleDto,
   CreateEmployeeDto,
@@ -55,6 +56,8 @@ function toEmployee(m: MembershipWithUser) {
     loginId: m.user.loginId,
     role: m.role,
     isActive: m.isActive,
+    /** Sprint Suite 2D : désactivé par l'organisation (et non par le retrait de ses rôles d'application). */
+    suspended: m.suspendedAt !== null,
     mustChangePassword: m.user.mustChangePassword,
     lastLoginAt: m.user.lastLoginAt,
     establishments: m.assignments.map((a) => a.establishment),
@@ -71,6 +74,7 @@ export class EmployeesService {
     private readonly audit: AuditService,
     private readonly passwords: PasswordService,
     private readonly provisioning: OrganizationProvisioningService,
+    private readonly productAccounts: ProductUserAccountsService,
   ) {}
 
   async list(auth: TenantContext) {
@@ -221,16 +225,20 @@ export class EmployeesService {
     return this.get(auth, id);
   }
 
-  /** Désactive le compte dans l'organisation et révoque immédiatement ses sessions. */
+  /**
+   * Désactive le compte dans l'organisation et révoque immédiatement ses sessions. Sprint Suite 2D : la
+   * désactivation est durable (un rôle d'application ne rouvre pas l'adhésion) et limitée à cette
+   * organisation (les adhésions du même compte ailleurs restent ouvertes).
+   */
   async deactivate(auth: TenantContext, id: string) {
-    const target = await this.findManageable(auth, id);
+    const target = await this.findSuspendable(auth, id);
     this.assertNotSelf(auth, target.id, 'désactiver votre propre compte');
     await this.prisma.$transaction(async (tx) => {
       if (target.role === 'OWNER')
         await assertKeepsAnActiveOwner(tx, target.organizationId, target.id);
       await tx.organizationMembership.update({
         where: { id: target.id },
-        data: { isActive: false },
+        data: { isActive: false, suspendedAt: new Date(), suspendedByUserId: auth.user.id },
       });
       await tx.session.updateMany({
         where: { membershipId: target.id, revokedAt: null },
@@ -250,12 +258,21 @@ export class EmployeesService {
     return this.get(auth, id);
   }
 
+  /**
+   * Lève la désactivation. Un compte réservé aux applications (PRODUCT_USER) ne rouvre que si une
+   * application lui donne encore un rôle actif : l'état est recalculé par les applications.
+   */
   async reactivate(auth: TenantContext, id: string) {
-    const target = await this.findManageable(auth, id);
+    const target = await this.findSuspendable(auth, id);
+    const productOnly = target.role === 'PRODUCT_USER';
     await this.prisma.$transaction(async (tx) => {
       await tx.organizationMembership.update({
         where: { id: target.id },
-        data: { isActive: true },
+        data: {
+          suspendedAt: null,
+          suspendedByUserId: null,
+          ...(productOnly ? {} : { isActive: true }),
+        },
       });
       await this.audit.record(
         {
@@ -268,6 +285,7 @@ export class EmployeesService {
         tx,
       );
     });
+    if (productOnly) await this.productAccounts.syncActive(target.organizationId, target.userId);
     return this.get(auth, id);
   }
 
@@ -333,6 +351,23 @@ export class EmployeesService {
   /** Un membre ne gère que les comptes dont il pourrait attribuer le rôle (un ADMIN ne touche pas un OWNER). */
   private async findManageable(auth: TenantContext, id: string): Promise<MembershipWithUser> {
     const target = await this.find(auth, id);
+    if (!canManageRole(auth.membership.role, target.role)) {
+      throw new ForbiddenException({
+        code: 'ROLE_NOT_MANAGEABLE',
+        message: `Vous ne pouvez pas gérer un compte « ${ROLE_LABELS[target.role]} ».`,
+      });
+    }
+    return target;
+  }
+
+  /**
+   * Sprint Suite 2D : comptes que l'on peut désactiver ou réactiver. Un compte réservé aux applications
+   * (PRODUCT_USER, sans rôle Park) n'est désactivé que par le propriétaire ; ni son rôle ni son mot de passe
+   * ne se gèrent ici (ils relèvent des applications et de la personne).
+   */
+  private async findSuspendable(auth: TenantContext, id: string): Promise<MembershipWithUser> {
+    const target = await this.find(auth, id);
+    if (target.role === 'PRODUCT_USER' && auth.membership.role === 'OWNER') return target;
     if (!canManageRole(auth.membership.role, target.role)) {
       throw new ForbiddenException({
         code: 'ROLE_NOT_MANAGEABLE',

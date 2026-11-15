@@ -218,9 +218,14 @@ export interface SuitePortalApp {
   name: string;
   tagline: string;
   productStatus: SaasProductStatus;
-  /** Lien vers l'application si l'accès est ouvert. */
+  /** Lien vers l'application si l'accès est ouvert et que la personne y a un rôle. */
   href: string | null;
   access: ProductAccess;
+  /**
+   * Sprint Suite 2D : la personne connectée a un rôle actif dans l'application (propriétaire : toujours ;
+   * Park : tout rôle Park). Sans rôle, l'application n'est jamais présentée comme « ouverte » pour elle.
+   */
+  hasRole: boolean;
   subscription: {
     state: CommercialState;
     /** Offre en vigueur (référence d'une demande de renouvellement). */

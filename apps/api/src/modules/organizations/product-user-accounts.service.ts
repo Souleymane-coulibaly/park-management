@@ -115,6 +115,16 @@ export class ProductUserAccountsService {
     }
   }
 
+  /**
+   * Sprint Suite 2D : le compte a-t-il un rôle actif dans l'application `product` ? Même lecture que la
+   * garde de l'application (membre actif) ; faux pour une application qui n'a pas déclaré ses membres.
+   * Le propriétaire de l'organisation, responsable d'office de chaque application, n'est pas lu ici.
+   */
+  async hasActiveRole(product: string, organizationId: string, userId: string): Promise<boolean> {
+    const probe = this.probes.get(product);
+    return probe ? probe.isActiveMember(organizationId, userId) : false;
+  }
+
   /** Chaque application déclare sa lecture de l'état de ses membres (au démarrage). */
   registerProbe(probe: ProductMemberProbe): void {
     this.probes.set(probe.product, probe);
@@ -197,7 +207,8 @@ export class ProductUserAccountsService {
   /**
    * Recopie l'état validé par les applications (relu sous verrou) sur les adhésions PRODUCT_USER du compte :
    * ouverte si une application au moins lui donne un rôle actif. Une fermeture ferme aussi les sessions
-   * ouvertes. Un rôle Park (adhésion non PRODUCT_USER) n'est jamais modifié ici.
+   * ouvertes. Un rôle Park (adhésion non PRODUCT_USER) n'est jamais modifié ici. Sprint Suite 2D : une
+   * adhésion désactivée par l'organisation (`suspendedAt`) reste fermée, quels que soient ses rôles.
    */
   async syncActive(organizationId: string, userId: string): Promise<void> {
     const readValidatedActive = async () => {
@@ -212,16 +223,26 @@ export class ProductUserAccountsService {
         select: { id: true },
       });
       const ids = memberships.map((m) => m.id);
-      await tx.$queryRaw`
-        SELECT id FROM "OrganizationMembership" WHERE id = ANY(${ids}::uuid[]) FOR UPDATE`;
-      const isActive = await readValidatedActive();
-      await tx.organizationMembership.updateMany({
-        where: { id: { in: ids } },
-        data: { isActive },
-      });
-      if (!isActive) {
+      // Verrou puis relecture : une désactivation concurrente par l'organisation est toujours vue.
+      const locked = await tx.$queryRaw<{ id: string; suspended: boolean }[]>`
+        SELECT id, "suspendedAt" IS NOT NULL AS suspended
+        FROM "OrganizationMembership" WHERE id = ANY(${ids}::uuid[]) FOR UPDATE`;
+      const validated = await readValidatedActive();
+      const open = locked.filter((m) => validated && !m.suspended).map((m) => m.id);
+      const closed = locked.filter((m) => !open.includes(m.id)).map((m) => m.id);
+      if (open.length) {
+        await tx.organizationMembership.updateMany({
+          where: { id: { in: open } },
+          data: { isActive: true },
+        });
+      }
+      if (closed.length) {
+        await tx.organizationMembership.updateMany({
+          where: { id: { in: closed } },
+          data: { isActive: false },
+        });
         await tx.session.updateMany({
-          where: { membershipId: { in: ids }, revokedAt: null },
+          where: { membershipId: { in: closed }, revokedAt: null },
           data: { revokedAt: new Date() },
         });
       }

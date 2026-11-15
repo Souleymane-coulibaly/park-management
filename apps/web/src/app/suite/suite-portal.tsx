@@ -83,6 +83,7 @@ export function SuitePortal({
   firstName,
   canSites = false,
   canInvite = false,
+  canBilling = false,
 }: {
   organizationName: string;
   firstName: string;
@@ -90,10 +91,16 @@ export function SuitePortal({
   canSites?: boolean;
   /** Ocall Suite Sprint 2C : invitations de personnes ayant déjà un compte (propriétaire, administrateurs). */
   canInvite?: boolean;
+  /** Ocall Suite Sprint 2D : catalogue et abonnements (propriétaire, administrateurs). */
+  canBilling?: boolean;
 }) {
   const apps = useApi<SuitePortalApp[]>('/suite/overview');
   const unread = useApi<{ unread: number }>('/suite/notifications/unread-count');
-  const mine = apps.state === 'success' ? apps.data.filter((a) => a.access !== 'none') : [];
+  // Sprint Suite 2D : « Mes applications » = applications ouvertes où la personne a un rôle actif.
+  const mine =
+    apps.state === 'success' ? apps.data.filter((a) => a.access !== 'none' && a.hasRole) : [];
+  const withoutRole =
+    apps.state === 'success' ? apps.data.filter((a) => a.access !== 'none' && !a.hasRole) : [];
   const others = apps.state === 'success' ? apps.data.filter((a) => a.access === 'none') : [];
   // Échéance de tout abonnement, même pour une application dont l'accès est fermé (activité non ouverte).
   const due = nextDue(apps.state === 'success' ? apps.data : []);
@@ -185,8 +192,9 @@ export function SuitePortal({
               </h2>
               {mine.length === 0 ? (
                 <Alert tone="info" title="Aucune application ouverte">
-                  Aucune application n’est encore ouverte pour votre organisation. Démarrez un essai
-                  gratuit ou demandez une activation ci-dessous.
+                  {canBilling
+                    ? 'Aucune application ne vous est encore attribuée. Démarrez un essai gratuit ou demandez une activation ci-dessous.'
+                    : 'Aucune application ne vous est attribuée dans cette organisation. Demandez un rôle à votre responsable.'}
                 </Alert>
               ) : (
                 <ul className="grid gap-5 sm:grid-cols-2" data-testid="suite-apps">
@@ -198,6 +206,24 @@ export function SuitePortal({
                 </ul>
               )}
             </section>
+            {withoutRole.length > 0 && (
+              <section aria-labelledby="sans-role" className="space-y-4">
+                <h2 id="sans-role" className="font-display text-xl font-bold text-suite-ink">
+                  Ouvertes pour l’organisation, sans rôle pour vous
+                </h2>
+                <p className="text-sm text-suite-ink-soft">
+                  Pour y accéder, demandez au propriétaire ou à un administrateur de l’application
+                  de vous ajouter à son équipe.
+                </p>
+                <ul className="grid gap-5 sm:grid-cols-2" data-testid="suite-apps-without-role">
+                  {withoutRole.map((app) => (
+                    <li key={app.code}>
+                      <AppCard app={app} onChange={apps.reload} />
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
             {others.length > 0 && (
               <section aria-labelledby="autres-applications" className="space-y-4">
                 <h2

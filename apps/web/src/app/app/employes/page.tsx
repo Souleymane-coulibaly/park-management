@@ -25,6 +25,18 @@ import { formatDateTime, initials } from '@/lib/format';
 import type { Employee, Establishment } from '@/lib/types';
 import { useApi } from '@/lib/use-api';
 
+/**
+ * Sprint Suite 2D : un compte réservé aux applications (PRODUCT_USER) peut être fermé sans décision de
+ * l'organisation (plus aucun rôle d'application). Il reste désactivable, pour que la fermeture soit durable.
+ */
+const canDeactivate = (e: Employee) => e.isActive || (e.role === 'PRODUCT_USER' && !e.suspended);
+
+function StatusBadge({ e }: { e: Employee }) {
+  if (e.isActive) return <Badge tone="forest">Actif</Badge>;
+  if (e.role === 'PRODUCT_USER' && !e.suspended) return <Badge>Sans rôle d’application</Badge>;
+  return <Badge>Désactivé</Badge>;
+}
+
 interface Credentials {
   name: string;
   loginId: string;
@@ -76,14 +88,15 @@ export default function EmployesPage() {
 
   const toggle = (e: Employee) =>
     run(async () => {
+      const deactivate = canDeactivate(e);
       if (
-        e.isActive &&
+        deactivate &&
         !window.confirm(
-          `Désactiver le compte de ${e.firstName} ${e.lastName} ? Ses sessions seront fermées immédiatement.`,
+          `Désactiver le compte de ${e.firstName} ${e.lastName} dans votre organisation ? Ses sessions seront fermées immédiatement ; ses autres organisations ne changent pas.`,
         )
       )
         return;
-      await api(`/employees/${e.id}/${e.isActive ? 'deactivate' : 'reactivate'}`, {
+      await api(`/employees/${e.id}/${deactivate ? 'deactivate' : 'reactivate'}`, {
         method: 'POST',
       });
     });
@@ -134,6 +147,9 @@ export default function EmployesPage() {
           >
             {list.data.map((e) => {
               const manageable = canManage && canManageRole(actorRole, e.role);
+              // Compte réservé aux applications : désactivation par le propriétaire seulement.
+              const suspendable =
+                manageable || (canManage && actorRole === 'OWNER' && e.role === 'PRODUCT_USER');
               const isSelf = e.userId === me.user.id;
               return (
                 <tr key={e.id} className={e.isActive ? '' : 'opacity-60'}>
@@ -174,33 +190,37 @@ export default function EmployesPage() {
                     )}
                   </Td>
                   <Td>
-                    {e.isActive ? <Badge tone="forest">Actif</Badge> : <Badge>Désactivé</Badge>}
+                    <StatusBadge e={e} />
                   </Td>
                   <Td>
-                    {manageable && (
+                    {suspendable && (
                       <div className="flex justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setDialog({ mode: 'edit', employee: e })}
-                          icon={<Pencil className="h-4 w-4" />}
-                          aria-label={`Modifier ${e.firstName} ${e.lastName}`}
-                        />
+                        {manageable && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setDialog({ mode: 'edit', employee: e })}
+                            icon={<Pencil className="h-4 w-4" />}
+                            aria-label={`Modifier ${e.firstName} ${e.lastName}`}
+                          />
+                        )}
                         {!isSelf && (
                           <>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => resetPassword(e)}
-                              icon={<KeyRound className="h-4 w-4" />}
-                              aria-label={`Réinitialiser le mot de passe de ${e.firstName} ${e.lastName}`}
-                            />
+                            {manageable && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => resetPassword(e)}
+                                icon={<KeyRound className="h-4 w-4" />}
+                                aria-label={`Réinitialiser le mot de passe de ${e.firstName} ${e.lastName}`}
+                              />
+                            )}
                             <Button
                               variant="ghost"
                               size="sm"
                               onClick={() => toggle(e)}
                               icon={<Power className="h-4 w-4" />}
-                              aria-label={`${e.isActive ? 'Désactiver' : 'Réactiver'} ${e.firstName} ${e.lastName}`}
+                              aria-label={`${canDeactivate(e) ? 'Désactiver' : 'Réactiver'} ${e.firstName} ${e.lastName}`}
                             />
                           </>
                         )}

@@ -2,10 +2,8 @@ import {
   type CanActivate,
   createParamDecorator,
   type ExecutionContext,
-  ForbiddenException,
   Inject,
   Injectable,
-  NotFoundException,
   SetMetadata,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
@@ -19,13 +17,18 @@ import {
   stockSitePermissions,
 } from '@ocall/shared';
 import { loadAppAccess } from '../../common/app-access';
-import type { TenantContext } from '../../common/auth-context';
+import {
+  appDenied,
+  appTenant,
+  assertAppActivated,
+  assertAppEnabled,
+  assertSubscriptionWritable,
+} from '../../common/app-guard';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { OcallStockPrismaService } from './ocall-stock-prisma.service';
 
 const STOCK_PERMISSION = 'ocallStockPermission';
-const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 /** Contexte d'une requête Ocall Stock : seule source fiable de l'organisation, du rôle et des droits. */
 export interface StockContext {
@@ -104,28 +107,14 @@ export class OcallStockAccessGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    if (!this.config.stock.enabled) {
-      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Ressource introuvable.' });
-    }
+    assertAppEnabled(this.config.stock.enabled);
     const req = context.switchToHttp().getRequest<StockRequest>();
-    const auth = req.auth as TenantContext | undefined;
-    if (!auth?.membership) throw this.denied();
+    const auth = appTenant(req.auth);
     const organizationId = auth.membership.organizationId;
 
     const access = await loadAppAccess(this.core, organizationId, STOCK_PRODUCT_CODE);
-    if (access === 'none') {
-      throw new ForbiddenException({
-        code: 'PRODUCT_NOT_ENABLED',
-        message: 'Ocall Stock n’est pas activé pour votre organisation.',
-      });
-    }
-    // Essai échu, abonnement expiré ou suspendu : consultation uniquement, aucune donnée supprimée.
-    if (access === 'read_only' && !SAFE_METHODS.has(req.method)) {
-      throw new ForbiddenException({
-        code: 'SUBSCRIPTION_READ_ONLY',
-        message: 'Votre abonnement Ocall Stock ne permet plus que la consultation.',
-      });
-    }
+    assertAppActivated(access, 'Ocall Stock');
+    assertSubscriptionWritable(access, req.method, 'Ocall Stock');
 
     const required = this.reflector.getAllAndOverride<StockPermission[] | undefined>(
       STOCK_PERMISSION,
@@ -138,8 +127,8 @@ export class OcallStockAccessGuard implements CanActivate {
       auth.membership.role,
       required,
     );
-    if (!member) throw this.denied();
-    if (required && !required.some((p) => member.permissions.includes(p))) throw this.denied();
+    if (!member) throw appDenied();
+    if (required && !required.some((p) => member.permissions.includes(p))) throw appDenied();
 
     req.ocallStock = {
       organizationId,
@@ -148,13 +137,6 @@ export class OcallStockAccessGuard implements CanActivate {
       ...member,
     };
     return true;
-  }
-
-  private denied() {
-    return new ForbiddenException({
-      code: 'FORBIDDEN',
-      message: "Vous n'avez pas les droits nécessaires.",
-    });
   }
 }
 

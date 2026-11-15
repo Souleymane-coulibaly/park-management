@@ -62,7 +62,8 @@ test('Ocall Stock : site vitrine, catalogue public et demande de devis', async (
     .click();
   await expect(products.getByText('Publié')).toHaveCount(1);
   await page.getByTestId('stock-showcase-publish').click();
-  await expect(page.getByText('Site en ligne')).toBeVisible();
+  // Titre exact : « … sur le site en ligne. » (aide de la carte Articles) est visible avant la publication.
+  await expect(page.getByText('Site en ligne', { exact: true })).toBeVisible();
 
   // Côté visiteur : accueil, catalogue (l'article interne n'y est pas), fiche article.
   await page.goto(`/m/${slug}`);

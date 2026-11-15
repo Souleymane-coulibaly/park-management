@@ -38,6 +38,7 @@ export interface StreamParams {
  * Flux SSE (Server-Sent Events) d'un établissement. La connexion est authentifiée par le cookie de
  * session (garde globale) ; l'établissement a été contrôlé par l'appelant. Ensuite, à chaque battement :
  * la session, le rôle et l'affectation à l'établissement sont revérifiés ; une révocation ferme le flux.
+ * Les mêmes contrôles précèdent l'envoi de chaque évènement : rien ne part vers une session révoquée.
  *
  * Les évènements ne contiennent que des identifiants : l'écran recharge les données par l'API REST.
  * Le premier message (« ready ») sert de point de resynchronisation : à chaque (re)connexion, l'écran
@@ -63,19 +64,29 @@ export function restaurantStream(p: StreamParams): Observable<MessageEvent> {
     concatMap(() => from(stillAuthorized())),
     share(),
   );
-  const revoked$ = checks$.pipe(filter((ok) => !ok));
   const heartbeat$ = checks$.pipe(
     filter((ok) => ok),
     map((): MessageEvent => ({ type: 'ping', data: { at: new Date().toISOString() } })),
   );
-  const events$ = p.events
+  // Sprint 2C : chaque évènement est revérifié avant l'envoi. Une session révoquée (changement
+  // d'organisation, déconnexion, désactivation) ne reçoit plus rien, même entre deux battements.
+  const checkedEvents$ = p.events
     .stream(p.auth.membership.organizationId, p.establishmentId, p.topic)
     .pipe(
-      map((e): MessageEvent => ({
-        type: e.type,
-        data: { type: e.type, saleId: e.saleId ?? null, requestId: e.requestId ?? null, at: e.at },
-      })),
+      concatMap((e) => from(stillAuthorized()).pipe(map((ok) => ({ ok, e })))),
+      share(),
     );
+  const events$ = checkedEvents$.pipe(
+    filter(({ ok }) => ok),
+    map(({ e }): MessageEvent => ({
+      type: e.type,
+      data: { type: e.type, saleId: e.saleId ?? null, requestId: e.requestId ?? null, at: e.at },
+    })),
+  );
+  const revoked$ = merge(
+    checks$.pipe(filter((ok) => !ok)),
+    checkedEvents$.pipe(filter(({ ok }) => !ok)),
+  );
   const ready$ = of<MessageEvent>({
     type: 'ready',
     // Délai de reconnexion conseillé au navigateur après une coupure.

@@ -12,6 +12,7 @@ export default async function SuitePage() {
       firstName={me.user.firstName}
       canSites={me.permissions.includes('establishment.read')}
       canInvite={me.permissions.includes('employee.manage')}
+      canBilling={me.permissions.includes('subscription.read')}
     />
   );
 }

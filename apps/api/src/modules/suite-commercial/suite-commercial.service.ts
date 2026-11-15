@@ -33,6 +33,7 @@ import { APP_CONFIG, type AppConfig } from '../../config/app-config';
 import { loadAppAccess } from '../../common/app-access';
 import { loadParkAccess } from '../../common/park-access';
 import { notifyOrganization } from '../../common/suite-notify';
+import { ProductUserAccountsService } from '../organizations/product-user-accounts.service';
 import { SuiteContractsService } from '../suite-contracts/suite-contracts.service';
 
 type Tx = Prisma.TransactionClient;
@@ -65,6 +66,7 @@ export class SuiteCommercialService {
     private readonly audit: AuditService,
     private readonly contracts: SuiteContractsService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
+    private readonly productAccounts: ProductUserAccountsService,
   ) {}
 
   // ─── Essai gratuit ───
@@ -350,6 +352,10 @@ export class SuiteCommercialService {
             : p.code === STOCK_PRODUCT_CODE
               ? stockAccess
               : 'none';
+      // Sprint Suite 2D : rôle réellement attribué à la personne connectée dans cette application.
+      const hasRole = await this.hasRoleIn(auth, p.code, access);
+      // Sans droit de facturation, seules les applications où la personne a un rôle sont présentées.
+      if (!canSeeBilling && !(access !== 'none' && hasRole)) continue;
       const trialUsed = trials.some((t) => t.productId === p.id);
       const fee = fees.find((f) => f.productId === (sub?.productId ?? p.id));
       const pendingRequest = pending.find((r) => r.productId === p.id) ?? null;
@@ -374,8 +380,9 @@ export class SuiteCommercialService {
         name: p.name,
         tagline: p.tagline,
         productStatus: status,
-        href: access !== 'none' ? (APP_HREF[p.code] ?? null) : null,
+        href: access !== 'none' && hasRole ? (APP_HREF[p.code] ?? null) : null,
         access,
+        hasRole,
         subscription:
           sub && canSeeBilling
             ? {
@@ -837,6 +844,22 @@ export class SuiteCommercialService {
       return 'none';
     }
     return loadParkAccess(this.prisma, auth.membership.organizationId, now);
+  }
+
+  /**
+   * Rôle de la personne dans une application ouverte : le propriétaire est responsable d'office de chaque
+   * application ; Park, tout rôle Park (jamais PRODUCT_USER) ; School, Facture, Stock, membre actif lu par
+   * l'application elle-même (même règle que sa garde d'accès).
+   */
+  private async hasRoleIn(
+    auth: TenantContext,
+    code: string,
+    access: ProductAccess,
+  ): Promise<boolean> {
+    if (access === 'none') return false;
+    if (code === PARK_PRODUCT_CODE) return auth.membership.role !== 'PRODUCT_USER';
+    if (auth.membership.role === 'OWNER') return true;
+    return this.productAccounts.hasActiveRole(code, auth.membership.organizationId, auth.user.id);
   }
 
   private async schoolAccess(organizationId: string): Promise<ProductAccess> {

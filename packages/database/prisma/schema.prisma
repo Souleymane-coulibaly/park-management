@@ -344,6 +344,11 @@ model OrganizationMembership {
   userId         String     @db.Uuid
   role           MemberRole
   isActive       Boolean    @default(true)
+  /// Sprint Suite 2D : désactivation décidée dans l'organisation. Tant qu'elle est posée, l'adhésion reste
+  /// fermée, même si une application donne encore un rôle au compte. Limitée à cette organisation : les
+  /// adhésions du même compte ailleurs ne changent pas.
+  suspendedAt       DateTime?
+  suspendedByUserId String?   @db.Uuid
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 

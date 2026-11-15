@@ -2,10 +2,8 @@ import {
   type CanActivate,
   createParamDecorator,
   type ExecutionContext,
-  ForbiddenException,
   Inject,
   Injectable,
-  NotFoundException,
   SetMetadata,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
@@ -18,13 +16,19 @@ import {
   hasFacturePermission,
 } from '@ocall/shared';
 import { loadAppAccess } from '../../common/app-access';
-import type { TenantContext } from '../../common/auth-context';
+import {
+  appDenied,
+  appTenant,
+  assertAppActivated,
+  assertAppEnabled,
+  assertSubscriptionWritable,
+  isOrganizationOwner,
+} from '../../common/app-guard';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { FacturePrismaService } from './facture-prisma.service';
 
 const FACTURE_PERMISSION = 'facturePermission';
-const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 /** Contexte d'une requête Ocall Facture : seule source fiable du client, du rôle et du droit. */
 export interface FactureContext {
@@ -62,30 +66,16 @@ export class FactureAccessGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    if (!this.config.facture.enabled) {
-      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Ressource introuvable.' });
-    }
+    assertAppEnabled(this.config.facture.enabled);
     const req = context.switchToHttp().getRequest<FactureRequest>();
-    const auth = req.auth as TenantContext | undefined;
-    if (!auth?.membership) throw this.denied();
+    const auth = appTenant(req.auth);
     const organizationId = auth.membership.organizationId;
 
     const access = await loadAppAccess(this.core, organizationId, FACTURE_PRODUCT_CODE);
-    if (access === 'none') {
-      throw new ForbiddenException({
-        code: 'PRODUCT_NOT_ENABLED',
-        message: 'Ocall Facture n’est pas activé pour votre organisation.',
-      });
-    }
-    // Essai échu, abonnement expiré ou suspendu : consultation uniquement, aucune donnée supprimée.
-    if (access === 'read_only' && !SAFE_METHODS.has(req.method)) {
-      throw new ForbiddenException({
-        code: 'SUBSCRIPTION_READ_ONLY',
-        message: 'Votre abonnement Ocall Facture ne permet plus que la consultation.',
-      });
-    }
+    assertAppActivated(access, 'Ocall Facture');
+    assertSubscriptionWritable(access, req.method, 'Ocall Facture');
 
-    const isOwner = auth.membership.role === 'OWNER';
+    const isOwner = isOrganizationOwner(auth);
     // Sprint Suite 2A : rôle Facture pour tout membre de l'organisation (employé Park compris) ; le
     // propriétaire reste responsable d'office.
     const member = isOwner
@@ -94,7 +84,7 @@ export class FactureAccessGuard implements CanActivate {
           where: { organizationId, userId: auth.user.id, isActive: true },
           select: { id: true, role: true },
         });
-    if (!isOwner && !member) throw this.denied();
+    if (!isOwner && !member) throw appDenied();
     const role: FactureRole = member?.role ?? 'MANAGER';
 
     const permissions = this.reflector.getAllAndOverride<FacturePermission[] | undefined>(
@@ -102,7 +92,7 @@ export class FactureAccessGuard implements CanActivate {
       [context.getHandler(), context.getClass()],
     );
     if (permissions && !permissions.some((p) => hasFacturePermission(role, p))) {
-      throw this.denied();
+      throw appDenied();
     }
 
     req.facture = {
@@ -114,12 +104,5 @@ export class FactureAccessGuard implements CanActivate {
       isOwner,
     };
     return true;
-  }
-
-  private denied() {
-    return new ForbiddenException({
-      code: 'FORBIDDEN',
-      message: "Vous n'avez pas les droits nécessaires.",
-    });
   }
 }

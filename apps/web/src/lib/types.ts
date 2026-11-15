@@ -107,6 +107,8 @@ export interface Employee {
   loginId: string;
   role: MemberRole;
   isActive: boolean;
+  /** Sprint Suite 2D : désactivé par l'organisation (durable, limité à cette organisation). */
+  suspended: boolean;
   mustChangePassword: boolean;
   lastLoginAt: string | null;
   establishments: { id: string; name: string }[];

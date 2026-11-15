@@ -5,7 +5,6 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
-  NotFoundException,
   SetMetadata,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
@@ -20,13 +19,18 @@ import {
   hasAllSchoolsScope,
   hasSchoolPermission,
 } from '@ocall/shared';
-import type { TenantContext } from '../../common/auth-context';
+import {
+  appDenied,
+  appTenant,
+  assertAppEnabled,
+  isOrganizationOwner,
+  isSafeMethod,
+} from '../../common/app-guard';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
 import { SuiteContractsService } from '../suite-contracts/suite-contracts.service';
 import { SchoolPrismaService } from './school-prisma.service';
 
 const SCHOOL_PERMISSION = 'schoolPermission';
-const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const ALLOWED_IN_READ_ONLY = 'schoolAllowedInReadOnly';
 
 /** Contexte d'une requête School : seule source fiable du client, du rôle et des établissements. */
@@ -95,12 +99,9 @@ export class SchoolAccessGuard implements CanActivate {
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-    if (!this.config.school.enabled) {
-      throw new NotFoundException({ code: 'NOT_FOUND', message: 'Ressource introuvable.' });
-    }
+    assertAppEnabled(this.config.school.enabled);
     const req = context.switchToHttp().getRequest<SchoolRequest>();
-    const auth = req.auth as TenantContext | undefined;
-    if (!auth?.membership) throw this.denied();
+    const auth = appTenant(req.auth);
     const organizationId = auth.membership.organizationId;
 
     const entitlement = await this.contracts.entitlement(organizationId, SCHOOL_PRODUCT_CODE);
@@ -115,7 +116,7 @@ export class SchoolAccessGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
-    const write = !SAFE_METHODS.has(req.method) && !protective;
+    const write = !isSafeMethod(req.method) && !protective;
     if (entitlement.access === 'read_only' && write) {
       throw new ForbiddenException({
         code: 'CONTRACT_READ_ONLY',
@@ -125,16 +126,16 @@ export class SchoolAccessGuard implements CanActivate {
 
     // Sprint Suite 2A : rôle School pour tout membre de l'organisation (employé Park compris) ; le
     // propriétaire reste directeur de groupe d'office.
-    const member =
-      auth.membership.role === 'OWNER' ? null : await this.member(organizationId, auth.user.id);
-    if (auth.membership.role !== 'OWNER' && !member) throw this.denied();
+    const isOwner = isOrganizationOwner(auth);
+    const member = isOwner ? null : await this.member(organizationId, auth.user.id);
+    if (!isOwner && !member) throw appDenied();
     const role: SchoolRole = member?.role ?? 'GROUP_DIRECTOR';
 
     const permission = this.reflector.getAllAndOverride<SchoolPermission | undefined>(
       SCHOOL_PERMISSION,
       [context.getHandler(), context.getClass()],
     );
-    if (permission && !hasSchoolPermission(role, permission)) throw this.denied();
+    if (permission && !hasSchoolPermission(role, permission)) throw appDenied();
 
     const assigned = hasAllSchoolsScope(role)
       ? null
@@ -182,12 +183,5 @@ export class SchoolAccessGuard implements CanActivate {
     return row
       ? { id: row.id, role: row.role, assignments: row.schoolIds.map((schoolId) => ({ schoolId })) }
       : null;
-  }
-
-  private denied() {
-    return new ForbiddenException({
-      code: 'FORBIDDEN',
-      message: "Vous n'avez pas les droits nécessaires.",
-    });
   }
 }

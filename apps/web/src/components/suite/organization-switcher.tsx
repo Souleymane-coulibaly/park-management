@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { ApiError, api } from '@/lib/api';
+import { announceOrganizationChange } from '@/lib/organization-change';
 import { useApi } from '@/lib/use-api';
 
 interface MyOrganization {
@@ -29,6 +30,7 @@ export function OrganizationSwitcher() {
     setError(null);
     try {
       await api('/auth/switch-organization', { method: 'POST', body: { organizationId } });
+      announceOrganizationChange(organizationId);
       window.location.assign('/suite');
     } catch (e) {
       setError(e instanceof ApiError ? e.message : 'Changement impossible.');
