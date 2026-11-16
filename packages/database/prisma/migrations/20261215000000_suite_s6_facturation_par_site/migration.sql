@@ -36,6 +36,7 @@ CREATE TABLE "SiteActivation" (
     "organizationId" UUID NOT NULL,
     "productCode" TEXT NOT NULL,
     "siteKey" TEXT NOT NULL,
+    "unitKey" TEXT NOT NULL,
     "establishmentId" UUID,
     "label" TEXT NOT NULL,
     "startedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -53,9 +54,9 @@ CREATE INDEX "SiteActivation_organizationId_productCode_endedAt_idx" ON "SiteAct
 ALTER TABLE "SiteActivation" ADD CONSTRAINT "SiteActivation_organizationId_fkey" FOREIGN KEY ("organizationId") REFERENCES "Organization"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 
--- Au plus une activation ouverte par (organisation, application, site) : un site n'est jamais compté deux
--- fois pour la même application.
-CREATE UNIQUE INDEX "SiteActivation_open_key" ON "SiteActivation"("organizationId", "productCode", "siteKey") WHERE "endedAt" IS NULL;
+-- Au plus une activation ouverte par (organisation, application, unité) : un site n'est jamais compté deux
+-- fois pour la même application ; un rattachement à un autre établissement garde la même activation.
+CREATE UNIQUE INDEX "SiteActivation_open_unit" ON "SiteActivation"("organizationId", "productCode", "unitKey") WHERE "endedAt" IS NULL;
 
 -- Cohérence des tarifs : montants positifs ; une offre PER_SITE a toujours un prix de site supplémentaire.
 ALTER TABLE "SubscriptionPlan" ADD CONSTRAINT "SubscriptionPlan_per_site_prices_check" CHECK (

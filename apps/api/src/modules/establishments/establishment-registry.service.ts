@@ -215,7 +215,14 @@ export class EstablishmentRegistryService implements SiteRegistry {
    */
   async billableSites(organizationId: string, source: string): Promise<BillableSite[]> {
     if (source === 'OCALL_FACTURE') {
-      return [{ siteKey: ORGANIZATION_SITE_KEY, establishmentId: null, label: 'Organisation' }];
+      return [
+        {
+          siteKey: ORGANIZATION_SITE_KEY,
+          unitKey: ORGANIZATION_SITE_KEY,
+          establishmentId: null,
+          label: 'Organisation',
+        },
+      ];
     }
     const establishments = await this.prisma.establishment.findMany({
       where: { organizationId, isActive: true },
@@ -226,7 +233,7 @@ export class EstablishmentRegistryService implements SiteRegistry {
       const activity = source === SITE_SOURCE_PARK ? 'PARK' : 'RESTAURANT';
       return establishments
         .filter((e) => activitiesOf(e.businessType).includes(activity))
-        .map((e) => ({ siteKey: e.id, establishmentId: e.id, label: e.name }));
+        .map((e) => ({ siteKey: e.id, unitKey: e.id, establishmentId: e.id, label: e.name }));
     }
     const provider = this.providers.get(source);
     // Application non chargée (module désactivé) : erreur, jamais « aucun site » (sous-facturation).
@@ -240,6 +247,7 @@ export class EstablishmentRegistryService implements SiteRegistry {
       if (out.has(siteKey)) continue;
       out.set(siteKey, {
         siteKey,
+        unitKey: `${source}:${site.appSiteId}`,
         establishmentId: linked ? site.establishmentId : null,
         label: linked ? active.get(site.establishmentId!)! : site.appSiteName,
       });

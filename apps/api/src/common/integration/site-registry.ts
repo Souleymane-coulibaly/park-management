@@ -45,6 +45,11 @@ export interface SiteUsageProvider {
 export interface BillableSite {
   /** Établissement du référentiel, sinon « <application>:<fiche> », ou « organization » (Facture). */
   siteKey: string;
+  /**
+   * Identité stable du site : l'établissement (Parc, Restaurant), la fiche de l'application
+   * (« <application>:<fiche> »), ou « organization ». Un rattachement change siteKey, jamais unitKey.
+   */
+  unitKey: string;
   establishmentId: string | null;
   label: string;
 }

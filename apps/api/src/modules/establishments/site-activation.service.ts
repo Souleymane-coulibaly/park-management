@@ -18,9 +18,10 @@ import { PrismaService } from '../../prisma/prisma.service';
 /** Rapprochement horaire des activations des abonnements par site (hors tests). */
 const SYNC_INTERVAL_MS = 60 * 60_000;
 
-/** Site facturé d'un abonnement : une clé, ses applications sources, sa première activation ouverte. */
+/** Site facturé d'un abonnement : une clé, ses unités, ses applications sources, sa première activation. */
 export interface BilledSite {
   siteKey: string;
+  unitKeys: string[];
   label: string;
   sources: string[];
   startedAt: Date;
@@ -58,13 +59,14 @@ export class SiteActivationService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * Rapproche les activations ouvertes d'une application source avec ses sites facturables : ouvre les
-   * nouveaux, ferme ceux qui ont disparu. Lecture impossible d'une application : erreur 503, rien n'est
-   * fermé (jamais de décompte sous-estimé).
+   * Rapproche les activations ouvertes d'une application source avec ses sites facturables, par unité
+   * (identité stable du site) : ouvre les nouvelles, ferme celles qui ont disparu, et garde l'activation
+   * d'un site simplement rattaché à un autre établissement (même début, nouvelle clé de décompte).
+   * Lecture impossible d'une application : erreur 503, rien n'est fermé (jamais de décompte sous-estimé).
    */
   async sync(organizationId: string, source: string, now = new Date()): Promise<void> {
     const current = await this.read(organizationId, source);
-    const keys = new Set(current.map((s) => s.siteKey));
+    const units = new Set(current.map((s) => s.unitKey));
     // Colonnes « timestamp » sans fuseau, en UTC comme celles écrites par Prisma : jamais l'heure de session.
     const at = Prisma.sql`(${now.toISOString()}::timestamptz AT TIME ZONE 'UTC')`;
     await this.prisma.$transaction(async (tx) => {
@@ -73,20 +75,23 @@ export class SiteActivationService implements OnModuleInit, OnModuleDestroy {
           organizationId,
           productCode: source,
           endedAt: null,
-          siteKey: { notIn: [...keys] },
+          unitKey: { notIn: [...units] },
         },
         data: { endedAt: now },
       });
       for (const site of current) {
-        // Index unique partiel : une seule activation ouverte par site, même en concurrence.
+        // Index unique partiel : une seule activation ouverte par unité, même en concurrence ; un
+        // rattachement met à jour la clé de décompte sans rouvrir l'activation.
         await tx.$executeRaw`
           INSERT INTO "SiteActivation"
-            ("id", "organizationId", "productCode", "siteKey", "establishmentId", "label", "startedAt", "createdAt", "updatedAt")
-          VALUES (gen_random_uuid(), ${organizationId}::uuid, ${source}, ${site.siteKey},
+            ("id", "organizationId", "productCode", "siteKey", "unitKey", "establishmentId", "label", "startedAt", "createdAt", "updatedAt")
+          VALUES (gen_random_uuid(), ${organizationId}::uuid, ${source}, ${site.siteKey}, ${site.unitKey},
                   ${site.establishmentId}::uuid, ${site.label}, ${at}, ${at}, ${at})
-          ON CONFLICT ("organizationId", "productCode", "siteKey") WHERE "endedAt" IS NULL
-          DO UPDATE SET "label" = EXCLUDED."label", "updatedAt" = EXCLUDED."updatedAt"
-          WHERE "SiteActivation"."label" IS DISTINCT FROM EXCLUDED."label"`;
+          ON CONFLICT ("organizationId", "productCode", "unitKey") WHERE "endedAt" IS NULL
+          DO UPDATE SET "siteKey" = EXCLUDED."siteKey", "establishmentId" = EXCLUDED."establishmentId",
+                        "label" = EXCLUDED."label", "updatedAt" = EXCLUDED."updatedAt"
+          WHERE ("SiteActivation"."siteKey", "SiteActivation"."establishmentId", "SiteActivation"."label")
+                IS DISTINCT FROM (EXCLUDED."siteKey", EXCLUDED."establishmentId", EXCLUDED."label")`;
       }
     });
   }
@@ -126,22 +131,45 @@ export class SiteActivationService implements OnModuleInit, OnModuleDestroy {
     for (const source of sources) await this.sync(organizationId, source, now);
     const open = await this.prisma.siteActivation.findMany({
       where: { organizationId, productCode: { in: sources }, endedAt: null },
-      select: { siteKey: true, label: true, productCode: true, startedAt: true },
+      select: { siteKey: true, unitKey: true, label: true, productCode: true, startedAt: true },
       orderBy: [{ startedAt: 'asc' }, { siteKey: 'asc' }],
     });
     const out = new Map<string, BilledSite>();
     for (const a of open) {
       const site = out.get(a.siteKey);
-      if (site) site.sources.push(a.productCode);
-      else
+      if (site) {
+        if (!site.sources.includes(a.productCode)) site.sources.push(a.productCode);
+        if (!site.unitKeys.includes(a.unitKey)) site.unitKeys.push(a.unitKey);
+      } else
         out.set(a.siteKey, {
           siteKey: a.siteKey,
+          unitKeys: [a.unitKey],
           label: a.label,
           sources: [a.productCode],
           startedAt: a.startedAt,
         });
     }
     return [...out.values()];
+  }
+
+  /**
+   * Activations des sources du produit commencées après `since`, OUVERTES OU FERMÉES : base du prorata
+   * (un retrait ne prend effet qu'à l'échéance, un site retiré depuis reste dû pour la période).
+   */
+  async activationsSince(
+    organizationId: string,
+    productCode: string,
+    since: Date,
+  ): Promise<{ unitKey: string; label: string; startedAt: Date }[]> {
+    return this.prisma.siteActivation.findMany({
+      where: {
+        organizationId,
+        productCode: { in: billedSiteSources(productCode) },
+        startedAt: { gt: since },
+      },
+      select: { unitKey: true, label: true, startedAt: true },
+      orderBy: { startedAt: 'asc' },
+    });
   }
 
   /**

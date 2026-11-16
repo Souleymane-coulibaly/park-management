@@ -226,13 +226,14 @@ describe('Ocall Suite S6 — facturation par site', () => {
     // Facture : toujours un site ; School sans école : le minimum d'un site.
     expect(await sitesService.countLive(org.organizationId, 'OCALL_FACTURE')).toBe(1);
     expect(await sitesService.countLive(org.organizationId, 'OCALL_RESTAURANT')).toBe(2);
-    // Index unique partiel : jamais deux activations ouvertes pour le même site.
+    // Index unique partiel : jamais deux activations ouvertes pour le même site (unité).
     await expect(
       prisma.siteActivation.create({
         data: {
           organizationId: org.organizationId,
           productCode: 'OCALL_PARK',
           siteKey: estMain,
+          unitKey: estMain,
           label: 'doublon',
         },
       }),
@@ -330,6 +331,131 @@ describe('Ocall Suite S6 — facturation par site', () => {
       subscription: { monthlyPrice: number } | null;
     }[];
     expect(overview.find((a) => a.code === 'OCALL_PARK')?.subscription?.monthlyPrice).toBe(32_500);
+  });
+
+  it('ajouts et retraits dans la période, renouvellement, changement d’offre : chaque site payé une seule fois', async () => {
+    const sync = () =>
+      billing.agent.get(api(`/platform/subscriptions/${parkSubId}/sites`)).expect(200);
+    const setActive = (id: string, isActive: boolean) =>
+      prisma.establishment.update({ where: { id }, data: { isActive } });
+    const prorataOf = (invoice: Awaited<ReturnType<typeof issue>>) =>
+      invoice.lines.find((l) => l.kind === 'SITE_PRORATA')?.amount ?? 0;
+    const extraOf = (invoice: Awaited<ReturnType<typeof issue>>) =>
+      invoice.lines.find((l) => l.kind === 'EXTRA_SITES')?.quantity ?? 0;
+    const expected = async (unitKey: string) => {
+      // Activation la plus récente du site (celle que la facture porte au prorata).
+      const [first] = await prisma.siteActivation.findMany({
+        where: { organizationId: org.organizationId, unitKey },
+        orderBy: { startedAt: 'desc' },
+        take: 1,
+      });
+      const { expiresAt } = await prisma.subscription.findUniqueOrThrow({
+        where: { id: parkSubId },
+      });
+      const days = Math.ceil((expiresAt!.getTime() - first!.startedAt.getTime()) / DAY);
+      return Math.round((7_500 * days) / 30);
+    };
+
+    // 1. Ajouté puis retiré avant la facture suivante : prorata conservé jusqu'à l'échéance.
+    const p3 = await establishment('Parc 3 S6', 'PARK');
+    await sync();
+    await setActive(p3, false);
+    await sync();
+    const withRemoved = await issue(parkSubId, [{ kind: 'MONTHLY', months: 1 }]);
+    expect(prorataOf(withRemoved)).toBe(await expected(p3));
+    // Le site retiré n'est pas porté par les mensualités suivantes (retrait effectif à l'échéance).
+    expect(extraOf(withRemoved)).toBe(2);
+
+    // 2. Facture intermédiaire pendant le retrait, puis retour dans la même période : déjà payé.
+    const meanwhile = await issue(parkSubId, [{ kind: 'MONTHLY', months: 1 }]);
+    expect(prorataOf(meanwhile)).toBe(0);
+    await setActive(p3, true);
+    await sync();
+    const readded = await issue(parkSubId, [{ kind: 'MONTHLY', months: 1 }]);
+    expect(prorataOf(readded)).toBe(0);
+    expect(extraOf(readded)).toBe(3);
+
+    // 3. Renouvellement réglé (nouvelle période) puis retrait et retour : couvert par les mensualités.
+    const sub = await prisma.subscription.findUniqueOrThrow({ where: { id: parkSubId } });
+    await prisma.$transaction((tx) =>
+      extendSubscription(tx, {
+        subscriptionId: parkSubId,
+        periodStart: sub.expiresAt!,
+        periodEnd: new Date(sub.expiresAt!.getTime() + 29 * DAY),
+        actorUserId: null,
+        reason: 'Renouvellement fictif S6',
+      }),
+    );
+    await setActive(p3, false);
+    await sync();
+    await setActive(p3, true);
+    await sync();
+    // Parc 2 : porté au prorata de l'ancienne période puis retiré avant le renouvellement ; rajouté
+    // dans la nouvelle période, il n'y est pas payé : de nouveau dû (une fois).
+    const p2 = (
+      await prisma.establishment.findFirstOrThrow({
+        where: { organizationId: org.organizationId, name: `Parc 2 S6 ${RUN}` },
+      })
+    ).id;
+    await setActive(p2, true);
+    await sync();
+    const p4 = await establishment('Parc 4 S6', 'PARK');
+    await sync();
+    const renewed = await issue(parkSubId, [{ kind: 'MONTHLY', months: 1 }]);
+    // Parc 3 (payé par les mensualités) : rien ; Parc 2 et Parc 4 : prorata jusqu'à la nouvelle échéance.
+    expect(prorataOf(renewed)).toBe((await expected(p2)) + (await expected(p4)));
+    expect(extraOf(renewed)).toBe(5);
+    const stored = await prisma.invoice.findUniqueOrThrow({ where: { id: renewed.id } });
+    const snap = stored.sitesSnapshot as { prorata: { unitKey: string }[]; coveredUnits: string[] };
+    expect(snap.prorata.map((x) => x.unitKey)).toEqual([p2, p4]);
+    expect(snap.coveredUnits).toEqual(expect.arrayContaining([p3, p4, estMain]));
+
+    // 4. Changement d'offre (vitrine) : tarif refigé, pas de prorata, aucun site facturé deux fois.
+    const product = await prisma.saasProduct.findUniqueOrThrow({ where: { code: 'OCALL_PARK' } });
+    const showcase = await prisma.subscriptionPlan.create({
+      data: {
+        productId: product.id,
+        name: `S6 OCALL_PARK par site avec vitrine ${RUN}`,
+        monthlyPrice: 17_500,
+        setupFee: 150_000,
+        pricingMode: 'PER_SITE',
+        extraSiteMonthlyPrice: 7_500,
+        showcaseMonthlyPrice: 5_000,
+        extraAppSetupFee: 112_500,
+        includesShowcase: true,
+        isActive: true,
+      },
+    });
+    plans.push(showcase.id);
+    try {
+      await owner.agent
+        .post(api(`/platform/subscriptions/${parkSubId}/change-plan`))
+        .send({ planId: showcase.id, reason: 'Ajout de la vitrine (essai S6)' })
+        .expect(200);
+    } finally {
+      await prisma.subscriptionPlan.update({
+        where: { id: showcase.id },
+        data: { isActive: false },
+      });
+    }
+    const p5 = await establishment('Parc 5 S6', 'PARK');
+    await sync();
+    const afterChange = await issue(parkSubId, [{ kind: 'MONTHLY', months: 1 }]);
+    expect(prorataOf(afterChange)).toBe(0);
+    expect(extraOf(afterChange)).toBe(6);
+    expect(afterChange.lines.find((l) => l.kind === 'SHOWCASE')?.amount).toBe(5_000);
+    const again = await issue(parkSubId, [{ kind: 'MONTHLY', months: 1 }]);
+    expect(prorataOf(again)).toBe(0);
+
+    // Aucune activation supprimée : chaque retrait a fermé une période, chaque retour en a ouvert une.
+    expect(
+      await prisma.siteActivation.count({
+        where: { organizationId: org.organizationId, unitKey: p3 },
+      }),
+    ).toBe(3);
+    // Retour à l'état des tests suivants (parc, restaurant, mixte).
+    for (const id of [p2, p3, p4, p5]) await setActive(id, false);
+    await sync();
   });
 
   it('application supplémentaire : changement d’offre vers le par site, mise en service 112 500, Restaurant compté seul', async () => {
@@ -578,10 +704,33 @@ describe('Ocall Suite S6 — facturation par site', () => {
       // Une boutique par établissement au plus (règle Stock) : l'établissement mixte compte aussi pour
       // Stock, une fois, indépendamment de Park.
       await shop('S6B', estBoth);
-      await shop('S6C', null);
+      const unlinked = await shop('S6C', null);
       const archived = await shop('S6D', null);
       await stockDb.stockSite.update({ where: { id: archived.id }, data: { isArchived: true } });
       expect(await sitesService.countLive(org.organizationId, STOCK_PRODUCT_CODE)).toBe(3);
+
+      // Rattachement à un établissement : même activation (même début), nouvelle clé de décompte.
+      const unit = `${STOCK_PRODUCT_CODE}:${unlinked.id}`;
+      await sitesService.sync(org.organizationId, STOCK_PRODUCT_CODE);
+      const before = await prisma.siteActivation.findFirstOrThrow({
+        where: { organizationId: org.organizationId, unitKey: unit, endedAt: null },
+      });
+      expect(before.siteKey).toBe(unit);
+      await org.agent
+        .put(api(`/ocall-stock/sites/${unlinked.id}/establishment`))
+        .send({ establishmentId: estResto })
+        .expect((r) => expect(r.status).toBeLessThan(300));
+      await sitesService.sync(org.organizationId, STOCK_PRODUCT_CODE);
+      const rows = await prisma.siteActivation.findMany({
+        where: { organizationId: org.organizationId, unitKey: unit },
+      });
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({
+        id: before.id,
+        siteKey: estResto,
+        endedAt: null,
+        startedAt: before.startedAt,
+      });
     },
   );
 

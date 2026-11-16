@@ -356,7 +356,14 @@ site**. Aucun contrat existant n'est modifié automatiquement.
   `SHOWCASE` et `SITE_PRORATA` ; `MONTHLY` garde le sens « mois » (paiement en ligne et commissions
   inchangés ; les nouvelles natures comptent comme mensualités). Les sites facturés sont photographiés
   (`Invoice.sitesSnapshot`) et jamais recalculés. Ajout de site : prorata jusqu'à l'échéance (jours
-  entamés, mois de 30 jours) sur la facture suivante, une seule fois ; retrait : effet à l'échéance.
+  entamés, mois de 30 jours) sur la facture suivante, **une seule fois par site et par période** ; retrait :
+  effet à l'échéance, donc un site ajouté puis retiré dans la période reste dû jusqu'à l'échéance, et un
+  site retiré puis rajouté dans la même période n'est pas refacturé. Chaque activation porte une identité
+  stable (`unitKey` : établissement, ou fiche de l'application) : un rattachement à un autre établissement
+  garde la même activation. La photographie note les sites payés pour la période (`coveredUnits`, cumulés
+  tant que l'échéance ne bouge pas ; après un règlement, seuls les sites portés par les mensualités). Pas de
+  prorata au changement d'offre (règle existante) : le tarif est refigé et la facture suivante repart des
+  sites ouverts.
 - **Écrans** : Super Admin (prix par site des offres, aperçu de séparation, estimation et sites facturés
   des factures), portail (devis par site, mise en service dégressive), page Tarifs (grille par site dès
   qu'une offre par site est active).

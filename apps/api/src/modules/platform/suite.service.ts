@@ -24,6 +24,7 @@ import {
   type InvoiceSitesSnapshot,
   billedSiteCount,
   computeSiteProrata,
+  coveredUnitsForPeriod,
   zonedMidnight,
   subscriptionMonthlyAmount,
 } from '@ocall/shared';
@@ -541,6 +542,7 @@ export class SuiteService {
         agreedMonthlyPrice: true,
         agreedExtraSitePrice: true,
         agreedShowcasePrice: true,
+        agreedAt: true,
         plan: { select: FREEZE_PLAN_SELECT },
         product: { select: { status: true, code: true } },
       },
@@ -751,9 +753,11 @@ export class SuiteService {
 
   /**
    * Étape 6 : photographie des sites d'une facture par site portant des mensualités — sites facturés
-   * (au moins un), prix figés, prorata des sites ajoutés depuis la facture précédente jusqu'à
-   * l'échéance. Null pour un forfait ou une facture sans mensualité. Sous verrou de l'abonnement : deux
-   * émissions simultanées ne portent jamais deux fois le même prorata.
+   * (au moins un), prix figés, prorata des sites ajoutés depuis la facture précédente jusqu'à l'échéance
+   * (y compris ceux retirés depuis : le retrait ne prend effet qu'à l'échéance), sites payés pour la
+   * période (base de la facture suivante). Le prorata repart de zéro après un changement d'offre (règle
+   * existante : pas de prorata au changement d'offre). Null pour un forfait ou une facture sans mensualité.
+   * Sous verrou de l'abonnement : deux émissions simultanées ne portent jamais deux fois le même site.
    */
   private async perSiteSnapshot(
     tx: Tx,
@@ -776,32 +780,57 @@ export class SuiteService {
         subscriptionId: agreed.sub.id,
         status: { not: 'CANCELLED' },
         sitesSnapshot: { not: Prisma.DbNull },
+        // Facture du tarif en vigueur seulement (un changement d'offre refige les prix, sans prorata).
+        ...(agreed.sub.agreedAt ? { issuedAt: { gte: agreed.sub.agreedAt } } : {}),
       },
       orderBy: { issuedAt: 'desc' },
       select: { issuedAt: true, sitesSnapshot: true },
     });
-    const previousBilled = (previous?.sitesSnapshot as { billedSites?: number } | null)
-      ?.billedSites;
+    const prev = previous?.sitesSnapshot as Partial<InvoiceSitesSnapshot> | null | undefined;
+    const activations = previous
+      ? await this.siteActivations.activationsSince(
+          agreed.sub.organizationId,
+          agreed.sub.product.code,
+          previous.issuedAt,
+        )
+      : [];
+    const coverageEnd = agreed.sub.status === 'ACTIVE' ? agreed.sub.expiresAt : null;
+    // Sites déjà payés pour la période en cours (cumulés tant que l'échéance n'a pas bougé).
+    const base = prev ? coveredUnitsForPeriod(prev, coverageEnd) : [];
     const prorata = computeSiteProrata({
       extraSitePrice: agreed.extraSitePrice,
       previous:
-        previous && previousBilled
-          ? { billedSites: previousBilled, issuedAt: previous.issuedAt }
+        previous && prev?.billedSites
+          ? { issuedAt: previous.issuedAt, billedSites: prev.billedSites, coveredUnits: base }
           : null,
-      open: sites,
-      coverageEnd: agreed.sub.status === 'ACTIVE' ? agreed.sub.expiresAt : null,
+      activations,
+      coverageEnd,
       now,
     });
+    const covered = new Set([
+      ...base,
+      ...sites.flatMap((x) => x.unitKeys),
+      ...prorata.items.map((i) => i.unitKey),
+      ...prorata.freeUnits,
+    ]);
     return {
       pricingMode: 'PER_SITE',
       billedSites: billedSiteCount(sites.map((x) => x.siteKey)),
-      sites: sites.map((x) => ({ siteKey: x.siteKey, label: x.label, sources: x.sources })),
+      sites: sites.map((x) => ({
+        siteKey: x.siteKey,
+        unitKeys: x.unitKeys,
+        label: x.label,
+        sources: x.sources,
+      })),
       prices: {
         firstSite: agreed.monthlyPrice,
         extraSite: agreed.extraSitePrice,
         showcase: agreed.showcasePrice ?? 0,
       },
-      prorata,
+      prorata: prorata.items,
+      freeUnits: prorata.freeUnits,
+      coveredUnits: [...covered],
+      coverageEnd: coverageEnd?.toISOString() ?? null,
     };
   }
 

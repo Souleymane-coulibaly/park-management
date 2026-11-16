@@ -125,20 +125,36 @@ export function planSetupFee(
 export const SITE_PRORATA_DAYS_PER_MONTH = 30;
 const DAY_MS = 86_400_000;
 
+/** Facture par site précédente, vue par le prorata. */
+export interface SiteProrataPrevious {
+  issuedAt: Date;
+  /** Sites facturés par cette facture (au moins 1). */
+  billedSites: number;
+  /**
+   * Sites (unités) déjà payés jusqu'à l'échéance à son émission : sites facturés, sites portés au prorata
+   * et site couvert par le minimum d'un site.
+   */
+  coveredUnits: string[];
+}
+
 export interface SiteProrataInput {
   /** Prix figé d'un site supplémentaire. */
   extraSitePrice: number;
-  /** Sites facturés par la facture précédente (au moins 1) et date de son émission. */
-  previous: { billedSites: number; issuedAt: Date } | null;
-  /** Activations ouvertes au moment de l'émission. */
-  open: { siteKey: string; label: string; startedAt: Date }[];
+  /** Facture par site précédente du même tarif ; null sans facture (ou après un changement d'offre). */
+  previous: SiteProrataPrevious | null;
+  /**
+   * Activations de l'abonnement, OUVERTES OU FERMÉES depuis : un retrait ne prend effet qu'à l'échéance,
+   * un site ajouté puis retiré dans la période reste donc dû jusqu'à l'échéance.
+   */
+  activations: { unitKey: string; label: string; startedAt: Date }[];
   /** Échéance de la période en cours (fin de la couverture payée), null sans couverture. */
   coverageEnd: Date | null;
   now: Date;
 }
 
 export interface SiteProrataItem {
-  siteKey: string;
+  /** Identité stable du site (établissement, ou fiche de l'application) : jamais facturé deux fois. */
+  unitKey: string;
   label: string;
   from: string;
   to: string;
@@ -146,42 +162,85 @@ export interface SiteProrataItem {
   amount: number;
 }
 
+export interface SiteProrataResult {
+  items: SiteProrataItem[];
+  /** Sites ajoutés couverts par le minimum d'un site déjà payé (aucun montant). */
+  freeUnits: string[];
+}
+
 /**
- * Ajout de site en cours de période (décision D6) : chaque site facturable au-delà de ceux de la facture
- * précédente est facturé au prorata, du jour de son activation jusqu'à l'échéance (jours entamés,
- * mois de 30 jours, prix d'un site supplémentaire). Les plus récentes activations portent l'écart, de
- * sorte qu'un site simplement rattaché à un autre établissement (une fin, une ouverture) n'est jamais
- * facturé deux fois. Un retrait prend effet à l'échéance : il ne réduit jamais la période en cours.
+ * Ajout de site en cours de période (décision D6) : chaque site activé depuis la facture précédente et
+ * pas encore payé pour la période est facturé au prorata, de son activation jusqu'à l'échéance (jours
+ * entamés, mois de 30 jours, prix d'un site supplémentaire), UNE seule fois — même s'il a été retiré
+ * depuis (le retrait ne prend effet qu'à l'échéance) ou ajouté, retiré puis rajouté (première activation
+ * retenue). Un site déjà payé pour la période (facturé, au prorata ou couvert par le minimum) n'est jamais
+ * refacturé : un retrait suivi d'un retour, ou un rattachement à un autre établissement, est gratuit.
+ * Sans facture précédente, sans couverture en cours, ou après un changement d'offre : aucun prorata.
  */
-export function computeSiteProrata(input: SiteProrataInput): SiteProrataItem[] {
+export function computeSiteProrata(input: SiteProrataInput): SiteProrataResult {
   const { previous, coverageEnd, now } = input;
-  if (!previous || !coverageEnd || coverageEnd <= now) return [];
-  const extra = billedSiteCount(input.open.map((s) => s.siteKey)) - previous.billedSites;
-  if (extra <= 0) return [];
-  const added = input.open
-    .filter((s) => s.startedAt > previous.issuedAt && s.startedAt < coverageEnd)
-    .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())
-    .slice(0, extra);
-  return added.map((s) => {
-    const days = Math.ceil((coverageEnd.getTime() - s.startedAt.getTime()) / DAY_MS);
-    return {
-      siteKey: s.siteKey,
-      label: s.label,
-      from: s.startedAt.toISOString(),
+  if (!previous || !coverageEnd || coverageEnd <= now) return { items: [], freeUnits: [] };
+  const covered = new Set(previous.coveredUnits);
+  // Minimum d'un site payé sans site réel : le premier site ajouté est déjà couvert.
+  let free = Math.max(0, previous.billedSites - covered.size);
+  const first = new Map<string, { unitKey: string; label: string; startedAt: Date }>();
+  for (const a of [...input.activations].sort(
+    (x, y) => x.startedAt.getTime() - y.startedAt.getTime(),
+  )) {
+    if (a.startedAt <= previous.issuedAt || a.startedAt >= coverageEnd) continue;
+    if (covered.has(a.unitKey) || first.has(a.unitKey)) continue;
+    first.set(a.unitKey, a);
+  }
+  const items: SiteProrataItem[] = [];
+  const freeUnits: string[] = [];
+  for (const a of first.values()) {
+    if (free > 0) {
+      free -= 1;
+      freeUnits.push(a.unitKey);
+      continue;
+    }
+    const days = Math.ceil((coverageEnd.getTime() - a.startedAt.getTime()) / DAY_MS);
+    items.push({
+      unitKey: a.unitKey,
+      label: a.label,
+      from: a.startedAt.toISOString(),
       to: coverageEnd.toISOString(),
       days,
       amount: Math.round((input.extraSitePrice * days) / SITE_PRORATA_DAYS_PER_MONTH),
-    };
-  });
+    });
+  }
+  return { items, freeUnits };
 }
 
 /** Photographie des sites d'une facture par site (enregistrée à l'émission, jamais recalculée). */
 export interface InvoiceSitesSnapshot {
   pricingMode: 'PER_SITE';
   billedSites: number;
-  sites: { siteKey: string; label: string; sources: string[] }[];
+  sites: { siteKey: string; unitKeys: string[]; label: string; sources: string[] }[];
   prices: PerSitePrices;
   prorata: SiteProrataItem[];
+  /** Sites ajoutés couverts par le minimum d'un site (aucun montant). */
+  freeUnits: string[];
+  /** Sites payés pour la période en cours à l'émission : base du prorata de la facture suivante. */
+  coveredUnits: string[];
+  /** Échéance de la période en cours à l'émission (null sans couverture). */
+  coverageEnd: string | null;
+}
+
+/**
+ * Sites déjà payés pour la période en cours, d'après la facture par site précédente. Même période (aucun
+ * règlement n'a déplacé l'échéance depuis) : tout ce qu'elle tenait pour payé, cumulé. Nouvelle période
+ * (sa mensualité a été réglée) : les seuls sites portés par ses mensualités, c'est-à-dire ouverts à son
+ * émission — un site retiré avant n'est plus payé au-delà de l'ancienne échéance.
+ */
+export function coveredUnitsForPeriod(
+  previous: Partial<Pick<InvoiceSitesSnapshot, 'coveredUnits' | 'coverageEnd' | 'sites'>>,
+  coverageEnd: Date | null,
+): string[] {
+  const samePeriod = (previous.coverageEnd ?? null) === (coverageEnd?.toISOString() ?? null);
+  return samePeriod
+    ? (previous.coveredUnits ?? [])
+    : (previous.sites ?? []).flatMap((x) => x.unitKeys ?? []);
 }
 
 /** Contrat Park historique (forfait) à examiner pour la séparation Parc / Restaurant. */

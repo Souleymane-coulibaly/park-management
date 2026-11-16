@@ -574,12 +574,15 @@ model SubscriptionPriceHistory {
 /// source (OCALL_PARK = activité parc, OCALL_RESTAURANT = activité restaurant, OCALL_STOCK…) ;
 /// `siteKey` = l'établissement du référentiel, sinon la fiche non rattachée de l'application
 /// (« OCALL_STOCK:<id> »), ou « organization » (Facture, toujours un site). Au plus une activation
-/// ouverte par (organisation, application, site) : index unique partiel de la migration.
+/// ouverte par (organisation, application, unité) : index unique partiel de la migration.
 model SiteActivation {
   id              String    @id @default(uuid()) @db.Uuid
   organizationId  String    @db.Uuid
   productCode     String
   siteKey         String
+  /// Identité stable du site (établissement pour Parc / Restaurant, « <application>:<fiche> » sinon,
+  /// « organization » pour Facture) : un rattachement change siteKey, jamais unitKey ni startedAt.
+  unitKey         String
   establishmentId String?   @db.Uuid
   label           String
   startedAt       DateTime  @default(now())

@@ -5,6 +5,7 @@ import {
   billedSiteCount,
   billedSiteSources,
   computeSiteProrata,
+  coveredUnitsForPeriod,
   perSiteMonthlyAmount,
   planSetupFee,
   proposeParkRestaurantSplit,
@@ -76,70 +77,107 @@ describe('Ocall Suite étape 6 — facturation par site', () => {
     expect(planSetupFee({ setupFee: 200_000, extraAppSetupFee: null }, true)).toBe(200_000);
   });
 
-  it('prorata : site ajouté en cours de période jusqu’à l’échéance, jamais pour un simple rattachement', () => {
+  describe('prorata des sites ajoutés (retrait effectif à l’échéance)', () => {
     const issuedAt = at('2026-11-01T00:00:00Z');
     const coverageEnd = at('2026-12-01T00:00:00Z');
-    const now = at('2026-11-20T10:00:00Z');
-    const base = { siteKey: 'a', label: 'A', startedAt: at('2026-10-01T00:00:00Z') };
-    const added = { siteKey: 'b', label: 'B', startedAt: at('2026-11-16T00:00:00Z') };
-    const items = computeSiteProrata({
-      extraSitePrice: 7_500,
-      previous: { billedSites: 1, issuedAt },
-      open: [base, added],
-      coverageEnd,
-      now,
+    const now = at('2026-11-25T10:00:00Z');
+    const previous = { issuedAt, billedSites: 1, coveredUnits: ['a'] };
+    const act = (unitKey: string, day: number) => ({
+      unitKey,
+      label: unitKey.toUpperCase(),
+      startedAt: at(`2026-11-${String(day).padStart(2, '0')}T00:00:00Z`),
     });
-    expect(items).toEqual([expect.objectContaining({ siteKey: 'b', days: 15, amount: 3_750 })]);
-    // Rattachement : une activation fermée, une ouverte, même nombre de sites → aucun prorata.
-    expect(
-      computeSiteProrata({
-        extraSitePrice: 7_500,
-        previous: { billedSites: 2, issuedAt },
-        open: [base, added],
-        coverageEnd,
-        now,
-      }),
-    ).toEqual([]);
-    // Trois sites retirés, deux ajoutés : moins de sites qu'à la facture précédente, aucun prorata.
-    const added2 = { siteKey: 'c', label: 'C', startedAt: at('2026-11-18T00:00:00Z') };
-    expect(
-      computeSiteProrata({
-        extraSitePrice: 7_500,
-        previous: { billedSites: 4, issuedAt },
-        open: [base, added, added2],
-        coverageEnd,
-        now,
-      }),
-    ).toEqual([]);
-    // Premier site réel couvert par le minimum d'un site.
-    expect(
-      computeSiteProrata({
-        extraSitePrice: 7_500,
-        previous: { billedSites: 1, issuedAt },
-        open: [added],
-        coverageEnd,
-        now,
-      }),
-    ).toEqual([]);
-    // Sans facture précédente ni période en cours : rien.
-    expect(
-      computeSiteProrata({
-        extraSitePrice: 7_500,
-        previous: null,
-        open: [base, added],
-        coverageEnd,
-        now,
-      }),
-    ).toEqual([]);
-    expect(
-      computeSiteProrata({
-        extraSitePrice: 7_500,
-        previous: { billedSites: 1, issuedAt },
-        open: [base, added],
-        coverageEnd: new Date(now.getTime() - DAY),
-        now,
-      }),
-    ).toEqual([]);
+    const run = (activations: ReturnType<typeof act>[], prev = previous) =>
+      computeSiteProrata({ extraSitePrice: 7_500, previous: prev, activations, coverageEnd, now });
+
+    it('site ajouté : du jour d’activation à l’échéance, prix d’un site supplémentaire', () => {
+      expect(run([act('b', 16)]).items).toEqual([
+        expect.objectContaining({ unitKey: 'b', days: 15, amount: 3_750 }),
+      ]);
+    });
+
+    it('ajouté puis retiré dans la période : dû jusqu’à l’échéance, une seule fois', () => {
+      // L'activation fermée est fournie (retrait à l'échéance) : facturée comme si le site était resté.
+      expect(run([act('b', 16)]).items.map((i) => [i.unitKey, i.amount])).toEqual([['b', 3_750]]);
+      // Facture suivante : le site est couvert, jamais refacturé.
+      const next = {
+        issuedAt: at('2026-11-20T00:00:00Z'),
+        billedSites: 1,
+        coveredUnits: ['a', 'b'],
+      };
+      expect(run([act('b', 16)], next).items).toEqual([]);
+    });
+
+    it('ajouté, retiré puis rajouté dans la période : une seule activation retenue (la première)', () => {
+      expect(run([act('b', 22), act('b', 10)]).items).toEqual([
+        expect.objectContaining({ unitKey: 'b', days: 21, amount: 5_250 }),
+      ]);
+    });
+
+    it('site payé retiré puis rajouté dans la période : aucun prorata', () => {
+      expect(run([act('a', 12)]).items).toEqual([]);
+    });
+
+    it('plusieurs ajouts et retraits successifs : chacun une fois, du jour de son activation', () => {
+      const r = run([act('b', 6), act('c', 11), act('b', 20), act('d', 24)]);
+      expect(r.items.map((i) => [i.unitKey, i.days, i.amount])).toEqual([
+        ['b', 25, 6_250],
+        ['c', 20, 5_000],
+        ['d', 7, 1_750],
+      ]);
+    });
+
+    it('rattachement à un autre établissement : même site (unité), aucun prorata', () => {
+      // La clé de décompte change, l'unité (fiche de l'application) reste : déjà couverte.
+      expect(run([act('a', 18)]).items).toEqual([]);
+    });
+
+    it('minimum d’un site sans site réel : le premier ajouté est couvert, le suivant facturé', () => {
+      const empty = { issuedAt, billedSites: 1, coveredUnits: [] };
+      const r = run([act('b', 6), act('c', 16)], empty);
+      expect(r.freeUnits).toEqual(['b']);
+      expect(r.items.map((i) => i.unitKey)).toEqual(['c']);
+      // Le site gratuit retiré puis remplacé : le remplaçant est facturé (le minimum reste occupé).
+      const after = { issuedAt: at('2026-11-10T00:00:00Z'), billedSites: 1, coveredUnits: ['b'] };
+      expect(run([act('c', 16)], after).items.map((i) => i.unitKey)).toEqual(['c']);
+    });
+
+    it('période : cumul tant que l’échéance ne bouge pas, mensualités seules après un règlement', () => {
+      const prev = {
+        coveredUnits: ['a', 'b', 'gone'],
+        coverageEnd: coverageEnd.toISOString(),
+        sites: [{ siteKey: 'a', unitKeys: ['a'], label: 'A', sources: [] }],
+      };
+      expect(coveredUnitsForPeriod(prev, coverageEnd)).toEqual(['a', 'b', 'gone']);
+      expect(coveredUnitsForPeriod(prev, at('2026-12-31T00:00:00Z'))).toEqual(['a']);
+      expect(coveredUnitsForPeriod({}, null)).toEqual([]);
+    });
+
+    it('activations antérieures à la facture précédente ou après l’échéance : ignorées', () => {
+      expect(run([act('b', 1), act('c', 1)]).items).toEqual([]);
+      expect(
+        computeSiteProrata({
+          extraSitePrice: 7_500,
+          previous,
+          activations: [{ unitKey: 'b', label: 'B', startedAt: at('2026-12-02T00:00:00Z') }],
+          coverageEnd,
+          now,
+        }).items,
+      ).toEqual([]);
+    });
+
+    it('sans facture précédente (ou après un changement d’offre) ni couverture : rien', () => {
+      expect(run([act('b', 16)], null as unknown as typeof previous).items).toEqual([]);
+      expect(
+        computeSiteProrata({
+          extraSitePrice: 7_500,
+          previous,
+          activations: [act('b', 16)],
+          coverageEnd: new Date(now.getTime() - DAY),
+          now,
+        }).items,
+      ).toEqual([]);
+    });
   });
 
   it('facture par site : premier site, sites supplémentaires, vitrine et prorata ; forfait inchangé', () => {
