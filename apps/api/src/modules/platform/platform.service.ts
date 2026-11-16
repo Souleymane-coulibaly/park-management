@@ -1,5 +1,10 @@
-import { PARK_APP_PRODUCT_CODES } from '@ocall/shared';
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { PARK_APP_PRODUCT_CODES, subscriptionMonthlyAmount } from '@ocall/shared';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
 import type { AuthContext } from '../../common/auth-context';
@@ -11,6 +16,10 @@ import type {
   SetOrganizationStatusDto,
   UpdatePlanDto,
 } from './platform.dto';
+import {
+  MONTHLY_AMOUNT_PLAN_SELECT,
+  MONTHLY_AMOUNT_SUB_SELECT,
+} from '../../common/subscription-billing';
 
 /**
  * Administration du SaaS. Le Super Admin voit des métadonnées et des agrégats
@@ -34,7 +43,7 @@ export class PlatformService {
         this.prisma.subscription.groupBy({ by: ['status'], _count: { _all: true } }),
         this.prisma.subscription.findMany({
           where: { status: 'ACTIVE' },
-          select: { agreedMonthlyPrice: true, plan: { select: { monthlyPrice: true } } },
+          select: { ...MONTHLY_AMOUNT_SUB_SELECT, plan: { select: MONTHLY_AMOUNT_PLAN_SELECT } },
         }),
         this.prisma.organizationMembership.count({
           where: { isActive: true, organization: { status: 'ACTIVE' } },
@@ -53,7 +62,7 @@ export class PlatformService {
       subscriptions: { byStatus: count(subscriptionsByStatus, 'status') },
       /** Revenu mensuel récurrent contractuel des abonnements actifs (tarif accepté), en FCFA. */
       monthlyRecurringRevenue: activeSubscriptions.reduce(
-        (s, sub) => s + (sub.agreedMonthlyPrice ?? sub.plan.monthlyPrice),
+        (s, sub) => s + subscriptionMonthlyAmount(sub),
         0,
       ),
       activeAccounts,
@@ -196,6 +205,24 @@ export class PlatformService {
       const plan = await tx.subscriptionPlan.findUnique({ where: { id } });
       if (!plan)
         throw new NotFoundException({ code: 'PLAN_NOT_FOUND', message: 'Offre introuvable.' });
+      // Étape 6 : les prix par site ne concernent que les offres par site (le mode n'est jamais modifié).
+      const perSiteFields = [
+        dto.extraSiteMonthlyPrice,
+        dto.showcaseMonthlyPrice,
+        dto.extraAppSetupFee,
+      ];
+      if (plan.pricingMode !== 'PER_SITE' && perSiteFields.some((v) => v !== undefined)) {
+        throw new BadRequestException({
+          code: 'PLAN_NOT_PER_SITE',
+          message: 'Prix par site : seulement pour une offre par site.',
+        });
+      }
+      if (!plan.includesShowcase && dto.showcaseMonthlyPrice !== undefined) {
+        throw new BadRequestException({
+          code: 'PLAN_WITHOUT_SHOWCASE',
+          message: 'Supplément vitrine : seulement pour une offre avec vitrine.',
+        });
+      }
       const updated = await tx.subscriptionPlan.update({ where: { id }, data: dto });
       // Historique des prix : l'ancienne et la nouvelle valeur sont conservées dans l'audit.
       await this.audit.record(
@@ -214,6 +241,9 @@ export class PlatformService {
               aiMonthlyCallQuota: plan.aiMonthlyCallQuota,
               storageQuotaMb: plan.storageQuotaMb,
               activationMode: plan.activationMode,
+              extraSiteMonthlyPrice: plan.extraSiteMonthlyPrice,
+              showcaseMonthlyPrice: plan.showcaseMonthlyPrice,
+              extraAppSetupFee: plan.extraAppSetupFee,
             },
             after: { ...dto },
             // Le mode figé des abonnements existants n'est jamais modifié (pas de rétroactivité).

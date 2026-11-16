@@ -320,3 +320,43 @@ Cadrage validé le 15/11/2026 (décisions D1 à D5). Aucune migration.
 - **Tests** : `apps/api/test/suite-s5-reporting.integration.spec.ts`,
   `apps/api/src/common/integration/organization-reporting.spec.ts`, `packages/shared/src/organization-report.spec.ts`,
   `e2e/suite-s5-dashboard.spec.ts`.
+
+## Étape 6 — facturation par site activé
+
+Grille validée (FCFA) : par application, **premier site 17 500 / mois**, **chaque site supplémentaire
+7 500 / mois**, **supplément vitrine 5 000 / mois par application** ; **mise en service 150 000** pour la
+première application installée, **112 500** pour chacune des suivantes ; Facture compte toujours **un
+site**. Aucun contrat existant n'est modifié automatiquement.
+
+- **Offres** : `SubscriptionPlan.pricingMode` = `FLAT` (offres historiques, inchangées) ou `PER_SITE`
+  (`monthlyPrice` = premier site, `extraSiteMonthlyPrice`, `showcaseMonthlyPrice`, `extraAppSetupFee`).
+  Les offres « — Par site » et « — Par site avec vitrine » de Park, Restaurant, School, Facture et Stock
+  sont créées **inactives** par la migration `20261215000000_suite_s6_facturation_par_site` ; Ocall les
+  active depuis le Super Admin. Un client passe au par site par un **changement d'offre explicite**.
+  L'inscription et l'essai ne choisissent **jamais** une offre par site, même active (offre forfaitaire
+  en vigueur seulement) : le prix le plus bas n'est pas une règle commerciale.
+- **Tarif figé** : une seule règle (`freezeAgreedPrices`) à la première facture, à la première activation et
+  au changement d'offre ; prix du site supplémentaire et de la vitrine figés sur l'abonnement
+  (`agreedExtraSitePrice`, `agreedShowcasePrice`) et dans l'historique des prix.
+- **Sites facturés** : `SiteActivation` (base Suite) — une activation par (organisation, application
+  source, site), jamais supprimée ; index unique partiel sur les activations ouvertes. Sources : activité
+  parc (`OCALL_PARK`) et activité restaurant (`OCALL_RESTAURANT`) comptées **séparément** ; boutiques et
+  entrepôts Stock non archivés ; écoles actives ; Facture = `organization`. Une fiche rattachée compte pour
+  son établissement (jamais deux fois pour la même application), une fiche non rattachée pour elle-même.
+  Rapprochement à chaque facture, au changement d'offre et toutes les heures (abonnements par site
+  seulement) ; une application illisible ou non chargée donne 503 `SITE_COUNT_UNAVAILABLE` (aucune
+  facture, aucune activation fermée), jamais un décompte réduit ; le devis du portail n'affiche alors
+  aucun montant.
+- **Parc et Restaurant** : préparés comme deux applications commerciales indépendantes ; tant que
+  `PARK_RESTAURANT_SEPARATED` vaut `false`, Ocall Park couvre les établissements parc **ou** restaurant
+  (un établissement mixte compté une fois). `GET /platform/subscriptions/park-restaurant-split` donne un
+  **aperçu** de la migration des contrats combinés (aucune écriture, aucun prix changé) ; la bascule se fera
+  au sprint de retrait de l'offre « Parc + Restaurant ».
+- **Facture** : la mensualité d'une offre par site ajoute `EXTRA_SITES` (sites supplémentaires × mois),
+  `SHOWCASE` et `SITE_PRORATA` ; `MONTHLY` garde le sens « mois » (paiement en ligne et commissions
+  inchangés ; les nouvelles natures comptent comme mensualités). Les sites facturés sont photographiés
+  (`Invoice.sitesSnapshot`) et jamais recalculés. Ajout de site : prorata jusqu'à l'échéance (jours
+  entamés, mois de 30 jours) sur la facture suivante, une seule fois ; retrait : effet à l'échéance.
+- **Écrans** : Super Admin (prix par site des offres, aperçu de séparation, estimation et sites facturés
+  des factures), portail (devis par site, mise en service dégressive), page Tarifs (grille par site dès
+  qu'une offre par site est active).

@@ -20,7 +20,12 @@ import { Alert, ApiErrorAlert, EmptyState, ErrorState, LoadingState } from '@/co
 import { Table, Td } from '@/components/ui/table';
 import { ApiError, api } from '@/lib/api';
 import { formatDate } from '@/lib/format';
-import type { PlatformOrganization, SuiteInvoice, SuiteOrganization } from '@/lib/types';
+import type {
+  PlatformOrganization,
+  SubscriptionSites,
+  SuiteInvoice,
+  SuiteOrganization,
+} from '@/lib/types';
 import { useApi } from '@/lib/use-api';
 
 const STATUS_TONE: Record<InvoiceStatus, 'savanna' | 'forest' | 'neutral'> = {
@@ -109,6 +114,12 @@ export default function InvoicesPage() {
                         </li>
                       ))}
                     </ul>
+                    {i.sitesSnapshot && (
+                      <p className="mt-1 text-xs text-muted" data-testid="invoice-sites">
+                        {i.sitesSnapshot.billedSites} site(s) facturé(s) :{' '}
+                        {i.sitesSnapshot.sites.map((s) => s.label).join(', ') || 'organisation'}
+                      </p>
+                    )}
                   </Td>
                   <Td className="tabular-nums font-semibold">{formatXof(i.total)}</Td>
                   <Td>{formatDate(i.dueAt)}</Td>
@@ -193,8 +204,18 @@ function IssueDialog({
     org.state === 'success'
       ? org.data.subscriptions.find((s) => s.id === subscriptionId)
       : undefined;
+  // Étape 6 : abonnement par site → mensualité au décompte des sites du jour.
+  const sites = useApi<SubscriptionSites>(
+    subscriptionId ? `/platform/subscriptions/${subscriptionId}/sites` : null,
+  );
+  const perSite =
+    sites.state === 'success' && sites.data.pricingMode === 'PER_SITE' ? sites.data : null;
   const setupFee = sub ? (sub.agreedSetupFee ?? sub.plan.setupFee) : 0;
-  const monthly = sub ? (sub.agreedMonthlyPrice ?? sub.plan.monthlyPrice) : 0;
+  const monthly = perSite
+    ? perSite.monthlyAmount
+    : sub
+      ? (sub.agreedMonthlyPrice ?? sub.plan.monthlyPrice)
+      : 0;
   const monthsN = Number(months) || 0;
   const adjN = Number(adjustment.amount) || 0;
   const estimate = (setup ? setupFee : 0) + monthly * monthsN + adjN;
@@ -288,7 +309,11 @@ function IssueDialog({
               Frais de mise en service ({formatXof(setupFee)})
             </label>
             <InputField
-              label={`Mensualités (${formatXof(monthly)} / mois)`}
+              label={
+                perSite
+                  ? `Mensualités (${formatXof(monthly)} / mois pour ${perSite.billedSites} site(s))`
+                  : `Mensualités (${formatXof(monthly)} / mois)`
+              }
               type="number"
               min={0}
               max={INVOICE_MAX_MONTHS}
@@ -322,6 +347,8 @@ function IssueDialog({
               Total estimé : <strong className="tabular-nums">{formatXof(estimate)}</strong>
               <span className="block text-xs text-muted">
                 Le montant définitif est calculé par le serveur.
+                {perSite &&
+                  ' Offre par site : prorata des sites ajoutés depuis la dernière facture et mise en service dégressive calculés à l’émission.'}
               </span>
             </p>
           </>

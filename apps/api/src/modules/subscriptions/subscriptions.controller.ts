@@ -26,6 +26,11 @@ export class SubscriptionsController {
         currency: true,
         includesShowcase: true,
         trialDays: true,
+        // Étape 6 : offres par site (premier site, site supplémentaire, vitrine, mise en service dégressive).
+        pricingMode: true,
+        extraSiteMonthlyPrice: true,
+        showcaseMonthlyPrice: true,
+        extraAppSetupFee: true,
         product: { select: { code: true, name: true, slug: true } },
       },
       orderBy: [{ product: { sortOrder: 'asc' } }, { monthlyPrice: 'asc' }],

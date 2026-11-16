@@ -10,6 +10,7 @@
 import type { ProductAccess } from './suite-contracts';
 import type { SubscriptionStatus } from './subscription';
 import type { SaasProductStatus } from './platform';
+import { perSiteMonthlyAmount, planSetupFee } from './site-billing';
 
 /** Grille officielle (XOF) : par application et par organisation. */
 export const SUITE_PRICING = {
@@ -84,18 +85,44 @@ export interface SubscriptionQuote {
   recurring: number;
 }
 
-/** Montant de souscription d'une application, à partir de son offre (prix figés ou en vigueur). */
+/**
+ * Montant de souscription d'une application, à partir de son offre (prix figés ou en vigueur). Étape 6 :
+ * une offre par site (`pricingMode` PER_SITE) facture le premier site, les sites supplémentaires
+ * (`perSite.sites`, au moins un) et le supplément vitrine ; sa mise en service est dégressive quand une
+ * autre application de l'organisation est déjà installée. Une offre forfaitaire est inchangée.
+ */
 export function quoteSubscription(
-  plan: { monthlyPrice: number; setupFee: number },
+  plan: {
+    monthlyPrice: number;
+    setupFee: number;
+    pricingMode?: string | null;
+    extraSiteMonthlyPrice?: number | null;
+    showcaseMonthlyPrice?: number | null;
+    includesShowcase?: boolean | null;
+    extraAppSetupFee?: number | null;
+  },
   setupStatus: SetupFeeStatus | null | undefined,
+  perSite?: { sites: number; otherAppInstalled: boolean },
 ): SubscriptionQuote {
   if (plan.monthlyPrice < 0 || plan.setupFee < 0) throw new Error('Tarif invalide.');
-  const setupFee = isSetupFeeDue(setupStatus) ? plan.setupFee : 0;
+  const per = plan.pricingMode === 'PER_SITE';
+  const setup = per ? planSetupFee(plan, perSite?.otherAppInstalled ?? false) : plan.setupFee;
+  const setupFee = isSetupFeeDue(setupStatus) ? setup : 0;
+  const monthlyPrice = per
+    ? perSiteMonthlyAmount(
+        {
+          firstSite: plan.monthlyPrice,
+          extraSite: plan.extraSiteMonthlyPrice ?? 0,
+          showcase: plan.includesShowcase ? (plan.showcaseMonthlyPrice ?? 0) : 0,
+        },
+        perSite?.sites ?? 1,
+      )
+    : plan.monthlyPrice;
   return {
     setupFee,
-    monthlyPrice: plan.monthlyPrice,
-    firstPayment: setupFee + plan.monthlyPrice,
-    recurring: plan.monthlyPrice,
+    monthlyPrice,
+    firstPayment: setupFee + monthlyPrice,
+    recurring: monthlyPrice,
   };
 }
 
@@ -250,8 +277,19 @@ export interface SuitePortalApp {
     monthlyPrice: number;
     setupFee: number;
     includesShowcase: boolean;
+    /** Étape 6 : offre par site (premier site = monthlyPrice). */
+    pricingMode?: string;
+    extraSiteMonthlyPrice?: number | null;
+    showcaseMonthlyPrice?: number | null;
+    extraAppSetupFee?: number | null;
   }[];
   setupFeeStatus: SetupFeeStatus | null;
+  /**
+   * Étape 6 : devis d'une offre par site — sites facturables aujourd'hui (null si le décompte est
+   * momentanément indisponible) et application déjà installée (mise en service dégressive). Null sans
+   * offre par site proposée.
+   */
+  siteBilling?: { sites: number | null; otherAppInstalled: boolean } | null;
   /** Sprint S2 : demande en attente (activation, renouvellement, changement d'offre). */
   pendingRequest: { kind: 'ACTIVATION' | 'RENEWAL' | 'PLAN_CHANGE'; createdAt: string } | null;
   /** Demandes que le client peut faire maintenant. */

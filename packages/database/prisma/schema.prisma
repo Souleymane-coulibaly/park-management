@@ -86,6 +86,13 @@ enum ActivationMode {
   ADMIN_APPROVAL
 }
 
+/// Étape 6 : tarification d'une offre. FLAT = un prix mensuel (offres historiques, inchangées) ;
+/// PER_SITE = premier site + chaque site supplémentaire activé (+ supplément vitrine).
+enum PricingMode {
+  FLAT
+  PER_SITE
+}
+
 /// Décision d'activation portée par un règlement en ligne (mode ADMIN_APPROVAL).
 enum PaymentActivationStatus {
   NOT_REQUIRED
@@ -124,6 +131,7 @@ model Organization {
   establishments       Establishment[]
   brands               Brand[]
   invitations          OrganizationInvitation[]
+  siteActivations      SiteActivation[]
   memberships          OrganizationMembership[]
   assignments          EstablishmentAssignment[]
   subscriptions        Subscription[]
@@ -339,18 +347,18 @@ model User {
 }
 
 model OrganizationMembership {
-  id             String     @id @default(uuid()) @db.Uuid
-  organizationId String     @db.Uuid
-  userId         String     @db.Uuid
-  role           MemberRole
-  isActive       Boolean    @default(true)
+  id                String     @id @default(uuid()) @db.Uuid
+  organizationId    String     @db.Uuid
+  userId            String     @db.Uuid
+  role              MemberRole
+  isActive          Boolean    @default(true)
   /// Sprint Suite 2D : désactivation décidée dans l'organisation. Tant qu'elle est posée, l'adhésion reste
   /// fermée, même si une application donne encore un rôle au compte. Limitée à cette organisation : les
   /// adhésions du même compte ailleurs ne changent pas.
   suspendedAt       DateTime?
-  suspendedByUserId String?   @db.Uuid
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  suspendedByUserId String?    @db.Uuid
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
 
   organization Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   user         User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -441,28 +449,36 @@ model PasswordResetToken {
 
 /// Offres commerciales. Les prix ne vivent qu'ici et sont modifiables par le Super Admin.
 model SubscriptionPlan {
-  id                 String         @id @default(uuid()) @db.Uuid
+  id                    String         @id @default(uuid()) @db.Uuid
   /// Métier de l'application Ocall Park couvert par l'offre ; null pour un autre produit (ex. Ocall School).
-  businessType       BusinessType?
+  businessType          BusinessType?
   /// Produit SaaS de l'offre (catalogue Ocall Suite).
-  productId          String?        @db.Uuid
-  name               String
-  monthlyPrice       Int
+  productId             String?        @db.Uuid
+  name                  String
+  monthlyPrice          Int
   /// Frais de mise en service unique (FCFA), réglés hors plateforme (Sprint 10).
-  setupFee           Int            @default(0)
-  currency           String         @default("XOF") @db.Char(3)
+  setupFee              Int            @default(0)
+  currency              String         @default("XOF") @db.Char(3)
   /// Quotas de l'offre (Sprint 11B) : appels IA par mois et stockage de fichiers (Mo).
-  aiMonthlyCallQuota Int            @default(500)
-  storageQuotaMb     Int            @default(1024)
+  aiMonthlyCallQuota    Int            @default(500)
+  storageQuotaMb        Int            @default(1024)
   /// Activation après paiement en ligne vérifié (Sprint 12A). Défaut : approbation d'Ocall.
-  activationMode     ActivationMode @default(ADMIN_APPROVAL)
+  activationMode        ActivationMode @default(ADMIN_APPROVAL)
   /// Offre avec site vitrine (socle S1) : seule une telle offre permet de publier un site.
-  includesShowcase   Boolean        @default(false)
+  includesShowcase      Boolean        @default(false)
   /// Durée de l'essai gratuit de l'application (jours, socle S1).
-  trialDays          Int            @default(14)
-  isActive           Boolean        @default(true)
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
+  trialDays             Int            @default(14)
+  /// Étape 6 : FLAT (historique) ou PER_SITE. En PER_SITE, monthlyPrice = prix du premier site.
+  pricingMode           PricingMode    @default(FLAT)
+  /// PER_SITE : prix mensuel de chaque site supplémentaire.
+  extraSiteMonthlyPrice Int?
+  /// PER_SITE : supplément vitrine mensuel par application (offre includesShowcase).
+  showcaseMonthlyPrice  Int?
+  /// PER_SITE : mise en service quand une autre application de l'organisation est déjà installée.
+  extraAppSetupFee      Int?
+  isActive              Boolean        @default(true)
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
 
   subscriptions Subscription[]
   payments      SubscriptionPayment[]
@@ -474,22 +490,27 @@ model SubscriptionPlan {
 }
 
 model Subscription {
-  id                 String             @id @default(uuid()) @db.Uuid
-  organizationId     String             @db.Uuid
+  id                   String             @id @default(uuid()) @db.Uuid
+  organizationId       String             @db.Uuid
   /// Produit SaaS souscrit : une organisation peut souscrire plusieurs produits (un abonnement chacun).
-  productId          String             @db.Uuid
-  planId             String             @db.Uuid
-  status             SubscriptionStatus @default(NOT_ACTIVATED)
-  startedAt          DateTime?
-  expiresAt          DateTime?
+  productId            String             @db.Uuid
+  planId               String             @db.Uuid
+  status               SubscriptionStatus @default(NOT_ACTIVATED)
+  startedAt            DateTime?
+  expiresAt            DateTime?
   /// Tarif accepté par le client, figé (jamais recalculé lors d'un changement de prix des offres).
-  agreedSetupFee     Int?
-  agreedMonthlyPrice Int?
-  agreedAt           DateTime?
+  agreedSetupFee       Int?
+  agreedMonthlyPrice   Int?
+  agreedAt             DateTime?
+  /// Étape 6, offre PER_SITE : prix figés du site supplémentaire et du supplément vitrine.
+  agreedExtraSitePrice Int?
+  agreedShowcasePrice  Int?
+  /// Étape 6 : nombre de sites facturables au dernier décompte (au moins 1), pour le revenu mensuel.
+  billedSiteCount      Int?
   /// Mode d'activation figé à la souscription (ou au changement d'offre explicite).
-  activationMode     ActivationMode     @default(ADMIN_APPROVAL)
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
+  activationMode       ActivationMode     @default(ADMIN_APPROVAL)
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
 
   organization   Organization               @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   plan           SubscriptionPlan           @relation(fields: [planId], references: [id])
@@ -532,6 +553,9 @@ model SubscriptionPriceHistory {
   planId         String    @db.Uuid
   setupFee       Int
   monthlyPrice   Int
+  /// Étape 6, offre PER_SITE : prix du site supplémentaire et du supplément vitrine acceptés.
+  extraSitePrice Int?
+  showcasePrice  Int?
   currency       String    @default("XOF") @db.Char(3)
   effectiveFrom  DateTime
   effectiveTo    DateTime?
@@ -543,6 +567,29 @@ model SubscriptionPriceHistory {
   plan         SubscriptionPlan @relation(fields: [planId], references: [id])
 
   @@index([subscriptionId, effectiveFrom])
+}
+
+/// Étape 6 : activation d'une application sur un site, base du décompte des sites facturés et du
+/// prorata. Jamais supprimée : la fin d'activation ferme la période. `productCode` est l'application
+/// source (OCALL_PARK = activité parc, OCALL_RESTAURANT = activité restaurant, OCALL_STOCK…) ;
+/// `siteKey` = l'établissement du référentiel, sinon la fiche non rattachée de l'application
+/// (« OCALL_STOCK:<id> »), ou « organization » (Facture, toujours un site). Au plus une activation
+/// ouverte par (organisation, application, site) : index unique partiel de la migration.
+model SiteActivation {
+  id              String    @id @default(uuid()) @db.Uuid
+  organizationId  String    @db.Uuid
+  productCode     String
+  siteKey         String
+  establishmentId String?   @db.Uuid
+  label           String
+  startedAt       DateTime  @default(now())
+  endedAt         DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, productCode, endedAt])
 }
 
 /// Moyen de règlement d'un abonnement SaaS (Sprint 12A). Saisissables : CASH et MANUAL_TRANSFER ;
@@ -2083,6 +2130,12 @@ enum InvoiceLineKind {
   SETUP
   MONTHLY
   ADJUSTMENT
+  /// Étape 6 : sites supplémentaires (quantité = sites supplémentaires × mois).
+  EXTRA_SITES
+  /// Étape 6 : supplément vitrine (quantité = mois).
+  SHOWCASE
+  /// Étape 6 : sites ajoutés en cours de période, au prorata jusqu'à l'échéance.
+  SITE_PRORATA
 }
 
 /// Facture SaaS émise par Ocall : montants figés à l'émission (tarif accepté), jamais recalculés.
@@ -2105,6 +2158,8 @@ model Invoice {
   createdById    String        @db.Uuid
   /// Clé d'idempotence : une nouvelle tentative ne crée pas de seconde facture.
   idempotencyKey String        @unique
+  /// Étape 6, offre PER_SITE : sites facturés photographiés à l'émission (jamais recalculés).
+  sitesSnapshot  Json?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 

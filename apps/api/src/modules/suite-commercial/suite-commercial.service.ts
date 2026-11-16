@@ -25,6 +25,7 @@ import {
   quoteSubscription,
   trialDaysRemaining,
   trialEndsAt,
+  subscriptionMonthlyAmount,
 } from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
@@ -35,6 +36,12 @@ import { loadParkAccess } from '../../common/park-access';
 import { notifyOrganization } from '../../common/suite-notify';
 import { ProductUserAccountsService } from '../organizations/product-user-accounts.service';
 import { SuiteContractsService } from '../suite-contracts/suite-contracts.service';
+import {
+  MONTHLY_AMOUNT_PLAN_SELECT,
+  MONTHLY_AMOUNT_SUB_SELECT,
+  otherAppInstalled,
+} from '../../common/subscription-billing';
+import { SiteActivationService } from '../establishments/site-activation.service';
 
 type Tx = Prisma.TransactionClient;
 const APP_HREF: Record<string, string> = {
@@ -67,6 +74,7 @@ export class SuiteCommercialService {
     private readonly contracts: SuiteContractsService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly productAccounts: ProductUserAccountsService,
+    private readonly siteActivations: SiteActivationService,
   ) {}
 
   // ─── Essai gratuit ───
@@ -112,8 +120,9 @@ export class SuiteCommercialService {
       });
       if (legacy) throw this.trialNotAllowed();
     }
+    // Étape 6 : l'essai n'attribue jamais une offre par site (changement d'offre explicite seulement).
     const plan = await tx.subscriptionPlan.findFirst({
-      where: { productId: product.id, isActive: true },
+      where: { productId: product.id, isActive: true, pricingMode: 'FLAT' },
       orderBy: [{ includesShowcase: 'asc' }, { monthlyPrice: 'asc' }],
       select: { id: true, trialDays: true },
     });
@@ -296,6 +305,10 @@ export class SuiteCommercialService {
               monthlyPrice: true,
               setupFee: true,
               includesShowcase: true,
+              pricingMode: true,
+              extraSiteMonthlyPrice: true,
+              showcaseMonthlyPrice: true,
+              extraAppSetupFee: true,
             },
           },
         },
@@ -308,9 +321,9 @@ export class SuiteCommercialService {
           status: true,
           startedAt: true,
           expiresAt: true,
-          agreedMonthlyPrice: true,
+          ...MONTHLY_AMOUNT_SUB_SELECT,
           product: { select: { code: true } },
-          plan: { select: { name: true, monthlyPrice: true, includesShowcase: true } },
+          plan: { select: { name: true, ...MONTHLY_AMOUNT_PLAN_SELECT } },
         },
       }),
       this.prisma.productTrial.findMany({ where: { organizationId } }),
@@ -359,6 +372,19 @@ export class SuiteCommercialService {
       const trialUsed = trials.some((t) => t.productId === p.id);
       const fee = fees.find((f) => f.productId === (sub?.productId ?? p.id));
       const pendingRequest = pending.find((r) => r.productId === p.id) ?? null;
+      // Étape 6 : devis d'une offre par site proposée (décompte en lecture seule, jamais bloquant).
+      const offered = canSeeBilling && (status === 'ACTIVE' || status === 'PREPRODUCTION');
+      const siteBilling =
+        offered && p.plans.some((pl) => pl.pricingMode === 'PER_SITE')
+          ? {
+              sites: await this.siteActivations.countLive(organizationId, p.code).catch(() => null),
+              otherAppInstalled: fees.some(
+                (f) =>
+                  f.productId !== (sub?.productId ?? p.id) &&
+                  ['INVOICED', 'PAID', 'WAIVED'].includes(f.status),
+              ),
+            }
+          : null;
       const canRequest =
         canSeeBilling &&
         hasPermission(auth.membership.role, 'subscription.pay') &&
@@ -396,7 +422,7 @@ export class SuiteCommercialService {
                 ),
                 planId: sub.planId,
                 planName: sub.plan.name,
-                monthlyPrice: sub.agreedMonthlyPrice ?? sub.plan.monthlyPrice,
+                monthlyPrice: subscriptionMonthlyAmount(sub),
                 includesShowcase: sub.plan.includesShowcase,
                 expiresAt: sub.expiresAt?.toISOString() ?? null,
                 daysRemaining: sub.expiresAt
@@ -419,7 +445,8 @@ export class SuiteCommercialService {
           !trialUsed &&
           (!sub || sub.status === 'NOT_ACTIVATED'),
         canRequestActivation: requestKinds.includes('ACTIVATION'),
-        plans: canSeeBilling && (status === 'ACTIVE' || status === 'PREPRODUCTION') ? p.plans : [],
+        plans: offered ? p.plans : [],
+        siteBilling,
         setupFeeStatus: canSeeBilling
           ? ((fee?.status as SetupFeeStatus | undefined) ?? null)
           : null,
@@ -558,7 +585,17 @@ export class SuiteCommercialService {
         planId: true,
         startedAt: true,
         agreedMonthlyPrice: true,
-        plan: { select: { id: true, name: true, monthlyPrice: true, setupFee: true } },
+        agreedExtraSitePrice: true,
+        agreedShowcasePrice: true,
+        plan: {
+          select: {
+            id: true,
+            name: true,
+            setupFee: true,
+            ...MONTHLY_AMOUNT_PLAN_SELECT,
+            extraAppSetupFee: true,
+          },
+        },
       },
     });
     if (sub?.status === 'CANCELED') {
@@ -586,7 +623,7 @@ export class SuiteCommercialService {
         message: 'Aucun abonnement payant à renouveler : demandez d’abord l’activation.',
       });
     }
-    let plan: { id: string; name: string; monthlyPrice: number; setupFee: number } | null;
+    let plan: NonNullable<typeof sub>['plan'] | null;
     if (kind === 'RENEWAL') {
       // Offre contractuelle de l'abonnement, même retirée du catalogue ou historique (famille Park).
       if (planId !== sub!.planId) {
@@ -599,7 +636,13 @@ export class SuiteCommercialService {
     } else {
       plan = await this.prisma.subscriptionPlan.findFirst({
         where: { id: planId, productId: product.id, isActive: true },
-        select: { id: true, name: true, monthlyPrice: true, setupFee: true },
+        select: {
+          id: true,
+          name: true,
+          setupFee: true,
+          ...MONTHLY_AMOUNT_PLAN_SELECT,
+          extraAppSetupFee: true,
+        },
       });
       if (!plan)
         throw new NotFoundException({
@@ -619,13 +662,31 @@ export class SuiteCommercialService {
       },
       select: { status: true },
     });
+    // Étape 6 : offre par site → sites facturables aujourd'hui et mise en service dégressive.
+    const subProductId = sub?.productId ?? product.id;
+    const perSite =
+      plan.pricingMode === 'PER_SITE'
+        ? {
+            sites: await this.siteActivations.countLive(organizationId, product.code),
+            otherAppInstalled: await otherAppInstalled(this.prisma, organizationId, subProductId),
+          }
+        : undefined;
     // Renouvellement : devis entier au tarif contractuel figé (tarif historique), jamais le tarif du jour.
-    const quote = quoteSubscription(
+    const frozen =
       kind === 'RENEWAL' && sub?.agreedMonthlyPrice != null
-        ? { ...plan, monthlyPrice: sub.agreedMonthlyPrice }
-        : plan,
-      fee?.status as SetupFeeStatus | undefined,
-    );
+        ? {
+            ...plan,
+            monthlyPrice: sub.agreedMonthlyPrice,
+            ...(sub.agreedExtraSitePrice != null
+              ? {
+                  extraSiteMonthlyPrice: sub.agreedExtraSitePrice,
+                  showcaseMonthlyPrice: sub.agreedShowcasePrice ?? 0,
+                  includesShowcase: true,
+                }
+              : {}),
+          }
+        : plan;
+    const quote = quoteSubscription(frozen, fee?.status as SetupFeeStatus | undefined, perSite);
     try {
       return await this.prisma.$transaction(async (tx) => {
         const request = await tx.activationRequest.create({

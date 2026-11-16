@@ -5,6 +5,7 @@ import {
   SCHOOL_PRODUCT_CODE,
   addDays,
   isProductBillable,
+  planSetupFee,
   zonedMidnight,
 } from '@ocall/shared';
 import { markSetupFeePaid } from './setup-fee';
@@ -104,7 +105,7 @@ export async function extendSubscription(
       startedAt: true,
       expiresAt: true,
       agreedMonthlyPrice: true,
-      plan: { select: { setupFee: true, monthlyPrice: true, currency: true } },
+      plan: { select: FREEZE_PLAN_SELECT },
       organizationId: true,
       productId: true,
       product: { select: { code: true, name: true } },
@@ -124,22 +125,14 @@ export async function extendSubscription(
         status: 'ACTIVE',
         startedAt: s.startedAt ?? zonedMidnight(dateOnly(input.periodStart), tz),
         expiresAt,
-        ...(firstAgreement
-          ? {
-              agreedSetupFee: s.plan.setupFee,
-              agreedMonthlyPrice: s.plan.monthlyPrice,
-              agreedAt: now,
-            }
-          : {}),
       },
     });
     if (firstAgreement) {
-      await recordPriceChange(tx, {
+      await freezeAgreedPrices(tx, {
         subscriptionId: s.id,
-        planId: s.planId,
-        setupFee: s.plan.setupFee,
-        monthlyPrice: s.plan.monthlyPrice,
-        currency: s.plan.currency,
+        organizationId: s.organizationId,
+        productId: s.productId,
+        plan: { id: s.planId, ...s.plan },
         actorUserId: input.actorUserId,
         reason: 'Tarif accepté à la première activation',
         at: now,
@@ -269,6 +262,9 @@ export async function recordPriceChange(
     planId: string;
     setupFee: number | null;
     monthlyPrice: number | null;
+    /** Étape 6, offre par site : prix du site supplémentaire et du supplément vitrine. */
+    extraSitePrice?: number | null;
+    showcasePrice?: number | null;
     currency: string;
     actorUserId: string | null;
     reason: string;
@@ -287,10 +283,128 @@ export async function recordPriceChange(
       planId: input.planId,
       setupFee: input.setupFee ?? 0,
       monthlyPrice: input.monthlyPrice,
+      extraSitePrice: input.extraSitePrice ?? null,
+      showcasePrice: input.showcasePrice ?? null,
       currency: input.currency,
       effectiveFrom: at,
       reason: input.reason,
       actorUserId: input.actorUserId,
     },
   });
+}
+
+/** Champs d'une offre nécessaires pour figer son tarif (forfait ou par site). */
+export const FREEZE_PLAN_SELECT = {
+  setupFee: true,
+  monthlyPrice: true,
+  currency: true,
+  pricingMode: true,
+  extraSiteMonthlyPrice: true,
+  showcaseMonthlyPrice: true,
+  includesShowcase: true,
+  extraAppSetupFee: true,
+} as const;
+
+export type FreezablePlan = Prisma.SubscriptionPlanGetPayload<{
+  select: typeof FREEZE_PLAN_SELECT;
+}> & { id: string };
+
+export interface AgreedPrices {
+  setupFee: number;
+  monthlyPrice: number;
+  /** Offre par site : prix figés du site supplémentaire et de la vitrine ; null pour un forfait. */
+  extraSitePrice: number | null;
+  showcasePrice: number | null;
+}
+
+/**
+ * Fige le tarif d'une offre sur l'abonnement (première facture, première activation, changement d'offre)
+ * et l'historise : une seule règle. Offre forfaitaire : prix mensuel et mise en service de l'offre, comme
+ * avant l'étape 6. Offre par site : premier site, site supplémentaire, vitrine (si l'offre l'inclut), et
+ * mise en service dégressive : prix « application supplémentaire » quand une autre application de
+ * l'organisation est déjà installée (mise en service facturée, payée ou exonérée).
+ */
+export async function freezeAgreedPrices(
+  tx: Prisma.TransactionClient,
+  input: {
+    subscriptionId: string;
+    organizationId: string;
+    productId: string;
+    plan: FreezablePlan;
+    actorUserId: string | null;
+    reason: string;
+    at: Date;
+  },
+): Promise<AgreedPrices> {
+  const { plan } = input;
+  const installed =
+    plan.extraAppSetupFee !== null &&
+    (await otherAppInstalled(tx, input.organizationId, input.productId));
+  const perSite = plan.pricingMode === 'PER_SITE';
+  const prices: AgreedPrices = {
+    setupFee: planSetupFee(plan, installed),
+    monthlyPrice: plan.monthlyPrice,
+    extraSitePrice: perSite ? (plan.extraSiteMonthlyPrice ?? 0) : null,
+    showcasePrice: perSite ? (plan.includesShowcase ? (plan.showcaseMonthlyPrice ?? 0) : 0) : null,
+  };
+  await tx.subscription.update({
+    where: { id: input.subscriptionId },
+    data: {
+      agreedSetupFee: prices.setupFee,
+      agreedMonthlyPrice: prices.monthlyPrice,
+      agreedExtraSitePrice: prices.extraSitePrice,
+      agreedShowcasePrice: prices.showcasePrice,
+      agreedAt: input.at,
+    },
+  });
+  await recordPriceChange(tx, {
+    subscriptionId: input.subscriptionId,
+    planId: plan.id,
+    setupFee: prices.setupFee,
+    monthlyPrice: prices.monthlyPrice,
+    extraSitePrice: prices.extraSitePrice,
+    showcasePrice: prices.showcasePrice,
+    currency: plan.currency,
+    actorUserId: input.actorUserId,
+    reason: input.reason,
+    at: input.at,
+  });
+  return prices;
+}
+
+/**
+ * Étape 6 : champs d'un abonnement pour son revenu mensuel (`subscriptionMonthlyAmount`), un seul calcul
+ * pour le revenu mensuel récurrent, les rappels, le portail et l'espace partenaire.
+ */
+export const MONTHLY_AMOUNT_SUB_SELECT = {
+  agreedMonthlyPrice: true,
+  agreedExtraSitePrice: true,
+  agreedShowcasePrice: true,
+  billedSiteCount: true,
+} as const;
+export const MONTHLY_AMOUNT_PLAN_SELECT = {
+  monthlyPrice: true,
+  pricingMode: true,
+  extraSiteMonthlyPrice: true,
+  showcaseMonthlyPrice: true,
+  includesShowcase: true,
+} as const;
+
+/**
+ * Étape 6 (décision D5) : une autre application de l'organisation est-elle déjà installée ? Mise en
+ * service facturée, payée ou exonérée (abonnements antérieurs au socle S1).
+ */
+export async function otherAppInstalled(
+  db: Pick<Prisma.TransactionClient, 'productSetupFee'>,
+  organizationId: string,
+  productId: string,
+): Promise<boolean> {
+  const count = await db.productSetupFee.count({
+    where: {
+      organizationId,
+      productId: { not: productId },
+      status: { in: ['INVOICED', 'PAID', 'WAIVED'] },
+    },
+  });
+  return count > 0;
 }

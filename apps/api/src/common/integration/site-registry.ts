@@ -31,6 +31,22 @@ export interface SiteUsageProvider {
   usages(
     organizationId: string,
   ): Promise<{ establishmentId: string; appSiteId: string; appSiteName: string }[]>;
+  /**
+   * Étape 6 : fiches facturables de l'application (actives, rattachées ou non). Une fiche rattachée compte
+   * pour son établissement (un établissement partagé n'est compté qu'une fois), une fiche non rattachée
+   * pour elle-même. Une lecture impossible lève une erreur : jamais de décompte sous-estimé.
+   */
+  billableSites(
+    organizationId: string,
+  ): Promise<{ establishmentId: string | null; appSiteId: string; appSiteName: string }[]>;
+}
+
+/** Site facturable d'une application (étape 6). */
+export interface BillableSite {
+  /** Établissement du référentiel, sinon « <application>:<fiche> », ou « organization » (Facture). */
+  siteKey: string;
+  establishmentId: string | null;
+  label: string;
 }
 
 export interface SiteRegistry {
@@ -67,4 +83,9 @@ export interface SiteRegistry {
   }): Promise<boolean>;
   /** Chaque application déclare au démarrage la lecture de ses rattachements. */
   registerUsage(provider: SiteUsageProvider): void;
+  /**
+   * Étape 6 : sites facturables d'une application source (OCALL_PARK = activité parc, OCALL_RESTAURANT =
+   * activité restaurant, OCALL_FACTURE = un site, sinon l'application déclarée), sans doublon.
+   */
+  billableSites(organizationId: string, source: string): Promise<BillableSite[]>;
 }

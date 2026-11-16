@@ -584,7 +584,14 @@ const enabled = Boolean(
       select: { id: true, userId: true },
     });
     const service = app.get(OrganizationReportService);
-    const now = new Date();
+    // Instant de référence juste après la dernière vente Stock : la journée locale contient les ventes
+    // quelle que soit l'heure d'exécution (un minuit local entre les ventes et ce test faussait le jour).
+    const lastSale = await stockDb.stockSale.findFirstOrThrow({
+      where: { organizationId: org.organizationId },
+      orderBy: { createdAt: 'desc' },
+      select: { createdAt: true },
+    });
+    const now = new Date(lastSale.createdAt.getTime() + 1_000);
     // Kiritimati (UTC+14) et Pago Pago (UTC-11) : à toute heure, l'un des deux n'est pas au jour UTC.
     for (const timezone of ['Pacific/Kiritimati', 'Pacific/Pago_Pago']) {
       const auth = {

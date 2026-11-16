@@ -14,6 +14,7 @@ export * from './organization-report';
 export * from './saas';
 export * from './sites';
 export * from './platform';
+export * from './site-billing';
 export * from './support';
 export * from './commercial';
 export * from './partners';

@@ -7,6 +7,7 @@ import {
   ACTIVATION_MODE_LABELS,
   type ActivationMode,
   BUSINESS_TYPE_LABELS,
+  PRICING_MODE_LABELS,
   SUBSCRIPTION_STATUS_LABELS,
   formatXof,
 } from '@ocall/shared';
@@ -19,12 +20,13 @@ import { Alert, ApiErrorAlert, EmptyState, ErrorState, LoadingState } from '@/co
 import { Table, Td } from '@/components/ui/table';
 import { ApiError, api } from '@/lib/api';
 import { formatDate } from '@/lib/format';
-import type { Plan, PlatformSubscription } from '@/lib/types';
+import type { ParkRestaurantSplit, Plan, PlatformSubscription } from '@/lib/types';
 import { useApi } from '@/lib/use-api';
 
 export default function AdminAbonnementsPage() {
   const plans = useApi<Plan[]>('/platform/plans');
   const subs = useApi<PlatformSubscription[]>('/platform/subscriptions');
+  const split = useApi<ParkRestaurantSplit[]>('/platform/subscriptions/park-restaurant-split');
 
   return (
     <>
@@ -93,6 +95,58 @@ export default function AdminAbonnementsPage() {
           </Table>
         )}
       </Card>
+      <div data-testid="park-restaurant-split">
+        <Card className="mt-6">
+          <CardHeader
+            title="Séparation Parc / Restaurant — aperçu"
+            description="Contrats Ocall Park en cours et ce qu’ils deviendraient avec deux applications indépendantes. Aperçu seulement : aucun contrat ni prix n’est modifié ; la bascule se fera au sprint de retrait de l’offre « Parc + Restaurant », contrat par contrat."
+          />
+          {split.state === 'loading' && <LoadingState />}
+          {split.state === 'error' && <ErrorState error={split.error} onRetry={split.reload} />}
+          {split.state === 'success' && split.data.filter((c) => c.combined).length === 0 && (
+            <CardBody>
+              <p className="text-sm text-muted">
+                Aucun contrat ne couvre à la fois parc et restaurant.
+              </p>
+            </CardBody>
+          )}
+          {split.state === 'success' && split.data.some((c) => c.combined) && (
+            <div className="overflow-x-auto">
+              <Table
+                head={[
+                  'Organisation',
+                  'Contrat actuel (conservé)',
+                  'Sites parc',
+                  'Sites restaurant',
+                  'Cible indicative',
+                ]}
+              >
+                {split.data
+                  .filter((c) => c.combined)
+                  .map((c) => (
+                    <tr key={c.subscriptionId}>
+                      <Td className="font-semibold">{c.organizationName}</Td>
+                      <Td>
+                        <p>{c.planName}</p>
+                        <p className="text-xs text-muted">{formatXof(c.monthlyAmount)} / mois</p>
+                      </Td>
+                      <Td>{c.parkSites}</Td>
+                      <Td>{c.restaurantSites}</Td>
+                      <Td className="text-xs">
+                        {c.targets.map((t) => (
+                          <p key={t.productCode}>
+                            {t.productCode === 'OCALL_PARK' ? 'Ocall Parc' : 'Ocall Restaurant'} :{' '}
+                            {t.sites} site(s), {formatXof(t.indicativeMonthly)} / mois
+                          </p>
+                        ))}
+                      </Td>
+                    </tr>
+                  ))}
+              </Table>
+            </div>
+          )}
+        </Card>
+      </div>
     </>
   );
 }
@@ -103,6 +157,10 @@ function PlanEditor({ plan, onSaved }: { plan: Plan; onSaved: () => void }) {
   const [aiQuota, setAiQuota] = useState(String(plan.aiMonthlyCallQuota ?? ''));
   const [storageQuota, setStorageQuota] = useState(String(plan.storageQuotaMb ?? ''));
   const [mode, setMode] = useState<ActivationMode>(plan.activationMode ?? 'ADMIN_APPROVAL');
+  const perSite = plan.pricingMode === 'PER_SITE';
+  const [extraSite, setExtraSite] = useState(String(plan.extraSiteMonthlyPrice ?? ''));
+  const [showcase, setShowcase] = useState(String(plan.showcaseMonthlyPrice ?? ''));
+  const [extraApp, setExtraApp] = useState(String(plan.extraAppSetupFee ?? ''));
   const [error, setError] = useState<ApiError | null>(null);
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -110,7 +168,15 @@ function PlanEditor({ plan, onSaved }: { plan: Plan; onSaved: () => void }) {
   const setupValue = Number(setup);
   const aiValue = Number(aiQuota);
   const storageValue = Number(storageQuota);
-  const valid = [value, setupValue, aiValue, storageValue].every(
+  // Étape 6 : prix par site (offre par site seulement ; vitrine si l'offre l'inclut).
+  const perSiteBody: Record<string, number> = perSite
+    ? {
+        extraSiteMonthlyPrice: Number(extraSite),
+        extraAppSetupFee: Number(extraApp),
+        ...(plan.includesShowcase ? { showcaseMonthlyPrice: Number(showcase) } : {}),
+      }
+    : {};
+  const valid = [value, setupValue, aiValue, storageValue, ...Object.values(perSiteBody)].every(
     (n) => Number.isInteger(n) && n >= 0,
   );
   const changed =
@@ -118,7 +184,11 @@ function PlanEditor({ plan, onSaved }: { plan: Plan; onSaved: () => void }) {
     setupValue !== plan.setupFee ||
     aiValue !== plan.aiMonthlyCallQuota ||
     storageValue !== plan.storageQuotaMb ||
-    mode !== plan.activationMode;
+    mode !== plan.activationMode ||
+    (perSite &&
+      (Number(extraSite) !== plan.extraSiteMonthlyPrice ||
+        Number(extraApp) !== plan.extraAppSetupFee ||
+        (plan.includesShowcase === true && Number(showcase) !== plan.showcaseMonthlyPrice)));
 
   async function save() {
     setLoading(true);
@@ -133,6 +203,7 @@ function PlanEditor({ plan, onSaved }: { plan: Plan; onSaved: () => void }) {
           aiMonthlyCallQuota: aiValue,
           storageQuotaMb: storageValue,
           activationMode: mode,
+          ...perSiteBody,
         },
       });
       setSaved(true);
@@ -148,10 +219,13 @@ function PlanEditor({ plan, onSaved }: { plan: Plan; onSaved: () => void }) {
     <div className="space-y-3 rounded-xl border border-line p-4">
       <div className="flex items-center justify-between">
         <p className="font-semibold">{plan.name}</p>
-        {plan.isActive === false && <Badge>Inactive</Badge>}
+        <div className="flex gap-1.5">
+          {perSite && <Badge tone="forest">{PRICING_MODE_LABELS.PER_SITE}</Badge>}
+          {plan.isActive === false && <Badge>Inactive</Badge>}
+        </div>
       </div>
       <InputField
-        label="Prix mensuel (FCFA)"
+        label={perSite ? 'Premier site (FCFA / mois)' : 'Prix mensuel (FCFA)'}
         type="number"
         min={0}
         step={500}
@@ -166,7 +240,38 @@ function PlanEditor({ plan, onSaved }: { plan: Plan; onSaved: () => void }) {
         step={5000}
         value={setup}
         onChange={(e) => setSetup(e.target.value)}
+        hint={perSite ? 'Première application installée de l’organisation.' : undefined}
       />
+      {perSite && (
+        <>
+          <InputField
+            label="Site supplémentaire (FCFA / mois)"
+            type="number"
+            min={0}
+            step={500}
+            value={extraSite}
+            onChange={(e) => setExtraSite(e.target.value)}
+          />
+          {plan.includesShowcase && (
+            <InputField
+              label="Supplément vitrine (FCFA / mois)"
+              type="number"
+              min={0}
+              step={500}
+              value={showcase}
+              onChange={(e) => setShowcase(e.target.value)}
+            />
+          )}
+          <InputField
+            label="Mise en service d’une application supplémentaire (FCFA)"
+            type="number"
+            min={0}
+            step={2500}
+            value={extraApp}
+            onChange={(e) => setExtraApp(e.target.value)}
+          />
+        </>
+      )}
       <SelectField
         label="Activation après paiement vérifié"
         hint="Figé pour chaque nouvel abonnement : un changement n’est jamais rétroactif."

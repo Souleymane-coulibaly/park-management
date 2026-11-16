@@ -55,8 +55,10 @@ export class OrganizationProvisioningService {
     // Ocall Park est une seule application pour tous les métiers (socle S1, D2) : offre « sans vitrine »
     // en vigueur. Vérifie aussi que le métier relève bien de Park.
     parkProductCode(input.businessType);
+    // Étape 6 : jamais d'offre par site choisie automatiquement (le prix le plus bas n'est pas une règle
+    // commerciale) ; elle n'est attribuée que par un changement d'offre explicite validé par Ocall.
     const plan = await tx.subscriptionPlan.findFirst({
-      where: { product: { code: PARK_PRODUCT_CODE }, isActive: true },
+      where: { product: { code: PARK_PRODUCT_CODE }, isActive: true, pricingMode: 'FLAT' },
       orderBy: [{ includesShowcase: 'asc' }, { monthlyPrice: 'asc' }],
     });
     if (!plan)

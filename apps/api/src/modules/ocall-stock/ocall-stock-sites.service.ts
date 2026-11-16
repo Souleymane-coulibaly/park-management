@@ -79,6 +79,19 @@ export class OcallStockSitesService implements OnModuleInit {
           appSiteId: s.id,
           appSiteName: s.name,
         })),
+      // Étape 6 : boutiques et entrepôts non archivés, rattachés ou non.
+      billableSites: async (organizationId) =>
+        (
+          await this.db.stockSite.findMany({
+            where: { organizationId, isArchived: false },
+            select: { id: true, name: true, establishmentId: true },
+            orderBy: { createdAt: 'asc' },
+          })
+        ).map((s) => ({
+          establishmentId: s.establishmentId,
+          appSiteId: s.id,
+          appSiteName: s.name,
+        })),
     });
   }
 

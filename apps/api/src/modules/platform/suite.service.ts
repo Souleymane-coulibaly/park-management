@@ -21,9 +21,14 @@ import {
   formatInvoiceNumber,
   isProductBillable,
   isProductCode,
+  type InvoiceSitesSnapshot,
+  billedSiteCount,
+  computeSiteProrata,
   zonedMidnight,
+  subscriptionMonthlyAmount,
 } from '@ocall/shared';
-import { recordPriceChange } from '../../common/subscription-billing';
+import { FREEZE_PLAN_SELECT, freezeAgreedPrices } from '../../common/subscription-billing';
+import { type BilledSite, SiteActivationService } from '../establishments/site-activation.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
 import { releaseSetupFee, reserveSetupFee } from '../../common/setup-fee';
@@ -33,6 +38,10 @@ import { SessionService } from '../../common/security/session.service';
 import { nextPlatformSequence } from '../../common/platform-counter';
 import { PLATFORM_TIMEZONE, platformPeriod } from './platform-period';
 import { generateTemporaryPassword } from '../../common/security/tokens';
+import {
+  MONTHLY_AMOUNT_PLAN_SELECT,
+  MONTHLY_AMOUNT_SUB_SELECT,
+} from '../../common/subscription-billing';
 
 type Tx = Prisma.TransactionClient;
 const DAY_MS = 86_400_000;
@@ -121,6 +130,7 @@ export class SuiteService {
     private readonly audit: AuditService,
     private readonly passwords: PasswordService,
     private readonly sessions: SessionService,
+    private readonly siteActivations: SiteActivationService,
   ) {}
 
   // ─── Catalogue de produits ───
@@ -513,7 +523,10 @@ export class SuiteService {
     });
   }
 
-  /** Fige le tarif accepté s'il ne l'est pas encore (première facture ou première activation). */
+  /**
+   * Tarif accepté, figé s'il ne l'est pas encore (première facture ou première activation) par la règle
+   * commune (forfait, ou par site avec mise en service dégressive).
+   */
   private async agreedPrices(tx: Tx, subscriptionId: string) {
     const s = await tx.subscription.findUniqueOrThrow({
       where: { id: subscriptionId },
@@ -522,33 +535,40 @@ export class SuiteService {
         organizationId: true,
         productId: true,
         planId: true,
+        status: true,
+        expiresAt: true,
         agreedSetupFee: true,
         agreedMonthlyPrice: true,
-        plan: { select: { setupFee: true, monthlyPrice: true, currency: true } },
+        agreedExtraSitePrice: true,
+        agreedShowcasePrice: true,
+        plan: { select: FREEZE_PLAN_SELECT },
         product: { select: { status: true, code: true } },
       },
     });
-    if (s.agreedMonthlyPrice !== null && s.agreedSetupFee !== null) {
-      return { sub: s, setupFee: s.agreedSetupFee, monthlyPrice: s.agreedMonthlyPrice };
+    const perSite = s.plan.pricingMode === 'PER_SITE';
+    if (
+      s.agreedMonthlyPrice !== null &&
+      s.agreedSetupFee !== null &&
+      (!perSite || s.agreedExtraSitePrice !== null)
+    ) {
+      return {
+        sub: s,
+        setupFee: s.agreedSetupFee,
+        monthlyPrice: s.agreedMonthlyPrice,
+        extraSitePrice: perSite ? s.agreedExtraSitePrice : null,
+        showcasePrice: perSite ? (s.agreedShowcasePrice ?? 0) : null,
+      };
     }
-    await tx.subscription.update({
-      where: { id: s.id },
-      data: {
-        agreedSetupFee: s.plan.setupFee,
-        agreedMonthlyPrice: s.plan.monthlyPrice,
-        agreedAt: new Date(),
-      },
-    });
-    await recordPriceChange(tx, {
+    const prices = await freezeAgreedPrices(tx, {
       subscriptionId: s.id,
-      planId: s.planId,
-      setupFee: s.plan.setupFee,
-      monthlyPrice: s.plan.monthlyPrice,
-      currency: s.plan.currency,
+      organizationId: s.organizationId,
+      productId: s.productId,
+      plan: { id: s.planId, ...s.plan },
       actorUserId: null,
       reason: 'Tarif accepté à la première facture',
+      at: new Date(),
     });
-    return { sub: s, setupFee: s.plan.setupFee, monthlyPrice: s.plan.monthlyPrice };
+    return { sub: s, ...prices };
   }
 
   // ─── Factures ───
@@ -558,7 +578,7 @@ export class SuiteService {
     organizationId?: string;
     productCode?: string;
   }) {
-    return this.prisma.invoice.findMany({
+    const rows = await this.prisma.invoice.findMany({
       where: {
         ...(filters.status ? { status: filters.status } : {}),
         ...(filters.organizationId ? { organizationId: filters.organizationId } : {}),
@@ -577,6 +597,8 @@ export class SuiteService {
         cancelReason: true,
         organization: { select: { id: true, name: true } },
         product: { select: { code: true, name: true } },
+        // Étape 6 : sites facturés photographiés à l'émission (offre par site).
+        sitesSnapshot: true,
         lines: {
           select: {
             kind: true,
@@ -596,6 +618,10 @@ export class SuiteService {
       orderBy: { issuedAt: 'desc' },
       take: 200,
     });
+    return rows.map((r) => ({
+      ...r,
+      sitesSnapshot: r.sitesSnapshot as unknown as InvoiceSitesSnapshot | null,
+    }));
   }
 
   /**
@@ -625,6 +651,16 @@ export class SuiteService {
       }
       return (await this.invoices({})).find((i) => i.id === existing.id) ?? existing;
     }
+    // Étape 6, offre par site : sites facturés décomptés AVANT la transaction (bases des applications).
+    const head = await this.prisma.subscription.findUnique({
+      where: { id: dto.subscriptionId },
+      select: { plan: { select: { pricingMode: true } } },
+    });
+    const withMonthly = dto.lines.some((l) => l.kind === 'MONTHLY');
+    let sites: BilledSite[] | null = null;
+    if (head?.plan.pricingMode === 'PER_SITE' && withMonthly) {
+      sites = (await this.siteActivations.refreshSubscription(dto.subscriptionId))?.sites ?? null;
+    }
     const id = await this.prisma.$transaction(async (tx) => {
       const exists = await tx.subscription.findUnique({
         where: { id: dto.subscriptionId },
@@ -642,14 +678,25 @@ export class SuiteService {
           message: 'Produit non commercialisable : aucune facture possible.',
         });
       }
+      const issuedAt = new Date();
+      const snapshot = await this.perSiteSnapshot(tx, agreed, sites, withMonthly, issuedAt);
       const computed = computeInvoiceLines(dto.lines, {
         setupFee: agreed.setupFee,
         monthlyPrice: agreed.monthlyPrice,
+        ...(snapshot
+          ? {
+              perSite: {
+                billedSites: snapshot.billedSites,
+                extraSitePrice: snapshot.prices.extraSite,
+                showcasePrice: snapshot.prices.showcase,
+                prorata: snapshot.prorata,
+              },
+            }
+          : {}),
       });
       if ('error' in computed)
         throw new BadRequestException({ code: 'INVOICE_LINES_INVALID', message: computed.error });
       const { year, sequence } = await nextPlatformSequence(tx, 'invoice');
-      const issuedAt = new Date();
       const dueAt = dto.dueAt
         ? zonedMidnight(dto.dueAt, PLATFORM_TIMEZONE)
         : new Date(issuedAt.getTime() + INVOICE_DUE_DAYS * DAY_MS);
@@ -665,6 +712,7 @@ export class SuiteService {
           notes: dto.notes ?? null,
           createdById: auth.user.id,
           idempotencyKey: dto.idempotencyKey,
+          ...(snapshot ? { sitesSnapshot: snapshot as unknown as Prisma.InputJsonValue } : {}),
           lines: { create: computed.lines.map((l, position) => ({ ...l, position })) },
         },
         select: { id: true, number: true, total: true },
@@ -691,6 +739,7 @@ export class SuiteService {
             organizationId: agreed.sub.organizationId,
             total: invoice.total,
             lines: computed.lines.map((l) => ({ kind: l.kind, amount: l.amount })),
+            ...(snapshot ? { billedSites: snapshot.billedSites } : {}),
           },
         },
         tx,
@@ -698,6 +747,62 @@ export class SuiteService {
       return invoice.id;
     });
     return (await this.invoices({})).find((i) => i.id === id)!;
+  }
+
+  /**
+   * Étape 6 : photographie des sites d'une facture par site portant des mensualités — sites facturés
+   * (au moins un), prix figés, prorata des sites ajoutés depuis la facture précédente jusqu'à
+   * l'échéance. Null pour un forfait ou une facture sans mensualité. Sous verrou de l'abonnement : deux
+   * émissions simultanées ne portent jamais deux fois le même prorata.
+   */
+  private async perSiteSnapshot(
+    tx: Tx,
+    agreed: Awaited<ReturnType<SuiteService['agreedPrices']>>,
+    sites: BilledSite[] | null,
+    withMonthly: boolean,
+    now: Date,
+  ): Promise<InvoiceSitesSnapshot | null> {
+    if (agreed.extraSitePrice === null || !withMonthly) return null;
+    if (!sites) {
+      // L'offre est devenue « par site » entre le décompte et l'émission : recommencer.
+      throw new ConflictException({
+        code: 'SITE_COUNT_STALE',
+        message: 'L’offre de cet abonnement vient de changer : émettez la facture de nouveau.',
+      });
+    }
+    await tx.$queryRaw`SELECT "id" FROM "Subscription" WHERE "id" = ${agreed.sub.id}::uuid FOR UPDATE`;
+    const previous = await tx.invoice.findFirst({
+      where: {
+        subscriptionId: agreed.sub.id,
+        status: { not: 'CANCELLED' },
+        sitesSnapshot: { not: Prisma.DbNull },
+      },
+      orderBy: { issuedAt: 'desc' },
+      select: { issuedAt: true, sitesSnapshot: true },
+    });
+    const previousBilled = (previous?.sitesSnapshot as { billedSites?: number } | null)
+      ?.billedSites;
+    const prorata = computeSiteProrata({
+      extraSitePrice: agreed.extraSitePrice,
+      previous:
+        previous && previousBilled
+          ? { billedSites: previousBilled, issuedAt: previous.issuedAt }
+          : null,
+      open: sites,
+      coverageEnd: agreed.sub.status === 'ACTIVE' ? agreed.sub.expiresAt : null,
+      now,
+    });
+    return {
+      pricingMode: 'PER_SITE',
+      billedSites: billedSiteCount(sites.map((x) => x.siteKey)),
+      sites: sites.map((x) => ({ siteKey: x.siteKey, label: x.label, sources: x.sources })),
+      prices: {
+        firstSite: agreed.monthlyPrice,
+        extraSite: agreed.extraSitePrice,
+        showcase: agreed.showcasePrice ?? 0,
+      },
+      prorata,
+    };
   }
 
   /** Annulation motivée ; impossible si un règlement est en attente ou validé. */
@@ -811,7 +916,7 @@ export class SuiteService {
       }),
       this.prisma.subscription.findMany({
         where: { status: 'ACTIVE', ...productWhere },
-        select: { agreedMonthlyPrice: true, plan: { select: { monthlyPrice: true } } },
+        select: { ...MONTHLY_AMOUNT_SUB_SELECT, plan: { select: MONTHLY_AMOUNT_PLAN_SELECT } },
       }),
       this.prisma.invoice.findMany({
         where: { status: 'ISSUED', ...productWhere },
@@ -921,7 +1026,7 @@ export class SuiteService {
       demoRequests: { new: demoNew, received: demoReceived },
       partnerApplicationsPending,
       invoiced: invoiced._sum.total ?? 0,
-      theoreticalMrr: active.reduce((t, s) => t + (s.agreedMonthlyPrice ?? s.plan.monthlyPrice), 0),
+      theoreticalMrr: active.reduce((t, s) => t + subscriptionMonthlyAmount(s), 0),
       unpaid: {
         amount: outstanding.reduce((t, o) => t + o.amount, 0),
         overdueAmount: outstanding.filter((o) => o.overdue).reduce((t, o) => t + o.amount, 0),

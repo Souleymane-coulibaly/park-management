@@ -42,6 +42,19 @@ export class SchoolEstablishmentsService implements OnModuleInit {
           appSiteId: s.id,
           appSiteName: s.name,
         })),
+      // Étape 6 : écoles actives, rattachées ou non.
+      billableSites: async (organizationId) =>
+        (
+          await this.db.school.findMany({
+            where: { organizationId, isActive: true },
+            select: { id: true, name: true, establishmentId: true },
+            orderBy: { createdAt: 'asc' },
+          })
+        ).map((s) => ({
+          establishmentId: s.establishmentId,
+          appSiteId: s.id,
+          appSiteName: s.name,
+        })),
     });
   }
 

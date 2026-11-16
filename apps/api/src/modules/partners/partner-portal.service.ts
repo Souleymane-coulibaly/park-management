@@ -18,6 +18,7 @@ import {
   normalizeCompanyName,
   normalizeEmail,
   phoneMatchKey,
+  subscriptionMonthlyAmount,
 } from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
@@ -31,6 +32,10 @@ import type {
   ResellerRequestDto,
   UpdateProspectDto,
 } from './partners.dto';
+import {
+  MONTHLY_AMOUNT_PLAN_SELECT,
+  MONTHLY_AMOUNT_SUB_SELECT,
+} from '../../common/subscription-billing';
 
 const DAY_MS = 86_400_000;
 const PAGE = 50;
@@ -518,10 +523,10 @@ export class PartnerPortalService {
           status: true,
           startedAt: true,
           expiresAt: true,
-          agreedMonthlyPrice: true,
+          ...MONTHLY_AMOUNT_SUB_SELECT,
           planId: true,
           product: { select: { code: true, name: true } },
-          plan: { select: { name: true, monthlyPrice: true, includesShowcase: true } },
+          plan: { select: { name: true, ...MONTHLY_AMOUNT_PLAN_SELECT } },
         },
       }),
       this.prisma.subscriptionPayment.findMany({
@@ -569,7 +574,7 @@ export class PartnerPortalService {
                 // Offre contractuelle (même retirée du catalogue) : base du renouvellement.
                 planId: s.planId,
                 includesShowcase: s.plan.includesShowcase,
-                monthlyPrice: s.agreedMonthlyPrice ?? s.plan.monthlyPrice,
+                monthlyPrice: subscriptionMonthlyAmount(s),
                 startedAt: s.startedAt,
               }
             : {}),

@@ -18,6 +18,20 @@ export class ChangePlanDto extends ReasonDto {
 export class SubscriptionAdminController {
   constructor(private readonly subscriptions: SubscriptionAdminService) {}
 
+  /** Étape 6 : aperçu de la séparation Parc / Restaurant des contrats en cours (aucune écriture). */
+  @RequirePlatformPermission('platform.billing.read')
+  @Get('park-restaurant-split')
+  parkRestaurantSplit() {
+    return this.subscriptions.parkRestaurantSplit();
+  }
+
+  /** Étape 6 : sites facturés d'un abonnement par site. */
+  @RequirePlatformPermission('platform.billing.read')
+  @Get(':id/sites')
+  sites(@Param('id', ParseUUIDPipe) id: string) {
+    return this.subscriptions.sites(id);
+  }
+
   @RequirePlatformPermission('platform.billing.read')
   @Get(':id/history')
   history(@Param('id', ParseUUIDPipe) id: string) {

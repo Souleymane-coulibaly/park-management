@@ -24,9 +24,9 @@ import {
   BUSINESS_TYPES,
   type BusinessType,
   SUPPORTED_COUNTRIES,
-  INVOICE_LINE_KINDS,
+  INVOICE_INPUT_LINE_KINDS,
   INVOICE_STATUSES,
-  type InvoiceLineKind,
+  type InvoiceInputLineKind,
   type InvoiceStatus,
   PLATFORM_ROLES,
   type PlatformRoleName,
@@ -131,6 +131,31 @@ export class UpdatePlanDto {
   @IsOptional()
   @IsIn(ACTIVATION_MODES)
   activationMode?: ActivationMode;
+
+  @ApiPropertyOptional({
+    description: 'Offre par site : prix mensuel de chaque site supplémentaire.',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100_000_000)
+  extraSiteMonthlyPrice?: number;
+
+  @ApiPropertyOptional({ description: 'Offre par site avec vitrine : supplément vitrine mensuel.' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100_000_000)
+  showcaseMonthlyPrice?: number;
+
+  @ApiPropertyOptional({
+    description: 'Offre par site : mise en service quand une autre application est déjà installée.',
+  })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100_000_000)
+  extraAppSetupFee?: number;
 }
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -305,9 +330,9 @@ export class SubscribeProductDto {
 }
 
 export class InvoiceLineDto {
-  @ApiProperty({ enum: INVOICE_LINE_KINDS })
-  @IsIn(INVOICE_LINE_KINDS)
-  kind: InvoiceLineKind;
+  @ApiProperty({ enum: INVOICE_INPUT_LINE_KINDS })
+  @IsIn(INVOICE_INPUT_LINE_KINDS)
+  kind: InvoiceInputLineKind;
 
   @ApiPropertyOptional({ description: 'Mensualités facturées (MONTHLY).' })
   @IsOptional()

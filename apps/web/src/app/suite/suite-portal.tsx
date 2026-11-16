@@ -511,7 +511,20 @@ function RequestForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const plan = app.plans.find((p) => p.id === planId);
-  const quote = plan && kind !== 'RENEWAL' ? quoteSubscription(plan, app.setupFeeStatus) : null;
+  // Étape 6 : offre par site → sites facturables aujourd'hui et mise en service dégressive. Décompte
+  // indisponible : aucun montant affiché (jamais un devis sous-estimé à un seul site).
+  const perSitePlan = plan?.pricingMode === 'PER_SITE';
+  const siteCountUnavailable = perSitePlan && (app.siteBilling?.sites ?? null) === null;
+  const quote =
+    plan && kind !== 'RENEWAL' && !siteCountUnavailable
+      ? quoteSubscription(
+          plan,
+          app.setupFeeStatus,
+          perSitePlan && app.siteBilling?.sites
+            ? { sites: app.siteBilling.sites, otherAppInstalled: app.siteBilling.otherAppInstalled }
+            : undefined,
+        )
+      : null;
 
   async function submit() {
     setBusy(true);
@@ -563,7 +576,9 @@ function RequestForm({
             />
             <span>
               {p.includesShowcase ? 'Avec site vitrine' : 'Sans site vitrine'} —{' '}
-              {formatXof(p.monthlyPrice)} / mois
+              {p.pricingMode === 'PER_SITE'
+                ? `${formatXof(p.monthlyPrice)} / mois le premier site, + ${formatXof(p.extraSiteMonthlyPrice ?? 0)} par site supplémentaire${p.includesShowcase ? `, vitrine + ${formatXof(p.showcaseMonthlyPrice ?? 0)}` : ''}`
+                : `${formatXof(p.monthlyPrice)} / mois`}
             </span>
           </label>
         ))
@@ -575,7 +590,17 @@ function RequestForm({
             : 'Mise en service déjà réglée ou non due. '}
           Première échéance :{' '}
           <strong className="text-suite-ink">{formatXof(quote.firstPayment)}</strong>, puis{' '}
-          {formatXof(quote.recurring)} par mois.
+          {formatXof(quote.recurring)} par mois
+          {plan?.pricingMode === 'PER_SITE' && app.siteBilling?.sites
+            ? ` pour ${app.siteBilling.sites} site(s) aujourd’hui`
+            : ''}
+          .
+        </p>
+      )}
+      {siteCountUnavailable && kind !== 'RENEWAL' && (
+        <p className="text-suite-ink-soft" data-testid="activation-quote-unavailable">
+          Décompte de vos sites momentanément indisponible : le montant exact vous sera confirmé par
+          Ocall avec votre demande.
         </p>
       )}
       {quote && kind === 'PLAN_CHANGE' && (

@@ -180,7 +180,8 @@ suite('Ocall School — Sprint 1 (intégration)', () => {
       expect(org._count.subscriptions).toBe(0);
       // Socle S1 : grille unifiée (50 000 / 65 000 + 200 000) ; School en préproduction (D1).
       const plans = await prisma.subscriptionPlan.findMany({
-        where: { product: { code: 'OCALL_SCHOOL' } },
+        // Grille forfaitaire S1 ; les offres par site (étape 6, inactives) sont vérifiées par suite-s6.
+        where: { product: { code: 'OCALL_SCHOOL' }, pricingMode: 'FLAT' },
         select: { monthlyPrice: true, setupFee: true, product: { select: { status: true } } },
         orderBy: { monthlyPrice: 'asc' },
       });

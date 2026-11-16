@@ -4,9 +4,14 @@ import {
   type SaasStats,
   localMoment,
   zonedMidnight,
+  subscriptionMonthlyAmount,
 } from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
+import {
+  MONTHLY_AMOUNT_PLAN_SELECT,
+  MONTHLY_AMOUNT_SUB_SELECT,
+} from '../../common/subscription-billing';
 
 /** Fuseau de référence d'Ocall pour les mois d'encaissement SaaS. */
 const PLATFORM_TIMEZONE = 'Africa/Bamako';
@@ -99,7 +104,7 @@ export class SaasService {
     });
     const activeSubs = await this.prisma.subscription.findMany({
       where: { status: 'ACTIVE' },
-      select: { agreedMonthlyPrice: true, plan: { select: { monthlyPrice: true } } },
+      select: { ...MONTHLY_AMOUNT_SUB_SELECT, plan: { select: MONTHLY_AMOUNT_PLAN_SELECT } },
     });
 
     const planName = new Map(plans.map((p) => [p.id, p.name]));
@@ -139,10 +144,7 @@ export class SaasService {
         rejectedCount: rejected,
         byMonth,
       },
-      theoreticalMonthlyRevenue: activeSubs.reduce(
-        (s, x) => s + (x.agreedMonthlyPrice ?? x.plan.monthlyPrice),
-        0,
-      ),
+      theoreticalMonthlyRevenue: activeSubs.reduce((s, x) => s + subscriptionMonthlyAmount(x), 0),
       renewals: renewalRows.map((r) => ({
         subscriptionId: r.id,
         organization: r.organization,

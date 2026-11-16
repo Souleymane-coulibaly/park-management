@@ -215,13 +215,36 @@ export const INVOICE_STATUS_LABELS: Record<InvoiceStatus, string> = {
   CANCELLED: 'Annulée',
 };
 
-export const INVOICE_LINE_KINDS = ['SETUP', 'MONTHLY', 'ADJUSTMENT'] as const;
+export const INVOICE_LINE_KINDS = [
+  'SETUP',
+  'MONTHLY',
+  'ADJUSTMENT',
+  'EXTRA_SITES',
+  'SHOWCASE',
+  'SITE_PRORATA',
+] as const;
 export type InvoiceLineKind = (typeof INVOICE_LINE_KINDS)[number];
 export const INVOICE_LINE_KIND_LABELS: Record<InvoiceLineKind, string> = {
   SETUP: 'Frais de mise en service',
   MONTHLY: 'Abonnement mensuel',
   ADJUSTMENT: 'Ajustement',
+  EXTRA_SITES: 'Sites supplémentaires',
+  SHOWCASE: 'Supplément vitrine',
+  SITE_PRORATA: 'Sites ajoutés en cours de période (prorata)',
 };
+/**
+ * Natures saisies par Ocall à l'émission. Les lignes de sites (EXTRA_SITES, SHOWCASE, SITE_PRORATA) sont
+ * toujours calculées par le serveur à partir de la mensualité d'une offre par site.
+ */
+export const INVOICE_INPUT_LINE_KINDS = ['SETUP', 'MONTHLY', 'ADJUSTMENT'] as const;
+export type InvoiceInputLineKind = (typeof INVOICE_INPUT_LINE_KINDS)[number];
+/** Natures récurrentes (mensualités) : comptées comme telles dans les encaissements et commissions. */
+export const RECURRING_INVOICE_LINE_KINDS: readonly InvoiceLineKind[] = [
+  'MONTHLY',
+  'EXTRA_SITES',
+  'SHOWCASE',
+  'SITE_PRORATA',
+];
 
 export const INVOICE_MAX_MONTHS = 24;
 export const INVOICE_MAX_ADJUSTMENT = 10_000_000;
@@ -232,7 +255,7 @@ export function formatInvoiceNumber(year: number, sequence: number): string {
 }
 
 export interface InvoiceLineInput {
-  kind: InvoiceLineKind;
+  kind: InvoiceInputLineKind;
   /** Mensualités facturées (MONTHLY). */
   months?: number;
   /** Montant d'un ajustement (positif ou négatif, ADJUSTMENT uniquement). */
@@ -255,7 +278,20 @@ export interface ComputedInvoiceLine {
  */
 export function computeInvoiceLines(
   lines: InvoiceLineInput[],
-  agreed: { setupFee: number; monthlyPrice: number },
+  agreed: {
+    setupFee: number;
+    monthlyPrice: number;
+    /**
+     * Étape 6, offre par site : `monthlyPrice` est le prix du premier site ; chaque mensualité ajoute les
+     * sites supplémentaires et le supplément vitrine, et la facture porte le prorata des sites ajoutés.
+     */
+    perSite?: {
+      billedSites: number;
+      extraSitePrice: number;
+      showcasePrice: number;
+      prorata: { amount: number }[];
+    };
+  },
 ): { lines: ComputedInvoiceLine[]; total: number } | { error: string } {
   if (lines.length === 0 || lines.length > 10) return { error: 'Entre 1 et 10 lignes.' };
   const out: ComputedInvoiceLine[] = [];
@@ -276,14 +312,54 @@ export function computeInvoiceLines(
       if (!Number.isInteger(months) || months < 1 || months > INVOICE_MAX_MONTHS) {
         return { error: `Entre 1 et ${INVOICE_MAX_MONTHS} mensualités.` };
       }
+      const perSite = agreed.perSite;
+      // Offre par site : une seule mensualité, pour que le prorata ne soit jamais porté deux fois.
+      if (perSite && out.some((x) => x.kind === 'MONTHLY'))
+        return { error: 'Une seule ligne de mensualités.' };
       out.push({
         kind: 'MONTHLY',
-        label: `${INVOICE_LINE_KIND_LABELS.MONTHLY} × ${months}`,
+        label: perSite
+          ? `${INVOICE_LINE_KIND_LABELS.MONTHLY} — premier site × ${months}`
+          : `${INVOICE_LINE_KIND_LABELS.MONTHLY} × ${months}`,
         quantity: months,
         unitAmount: agreed.monthlyPrice,
         amount: agreed.monthlyPrice * months,
         reason: null,
       });
+      if (perSite) {
+        const extra = Math.max(0, perSite.billedSites - 1);
+        if (extra > 0 && perSite.extraSitePrice > 0) {
+          out.push({
+            kind: 'EXTRA_SITES',
+            label: `${INVOICE_LINE_KIND_LABELS.EXTRA_SITES} : ${extra} × ${months} mois`,
+            quantity: extra * months,
+            unitAmount: perSite.extraSitePrice,
+            amount: perSite.extraSitePrice * extra * months,
+            reason: null,
+          });
+        }
+        if (perSite.showcasePrice > 0) {
+          out.push({
+            kind: 'SHOWCASE',
+            label: `${INVOICE_LINE_KIND_LABELS.SHOWCASE} × ${months}`,
+            quantity: months,
+            unitAmount: perSite.showcasePrice,
+            amount: perSite.showcasePrice * months,
+            reason: null,
+          });
+        }
+        const prorata = perSite.prorata.reduce((t, p) => t + p.amount, 0);
+        if (prorata > 0) {
+          out.push({
+            kind: 'SITE_PRORATA',
+            label: `${INVOICE_LINE_KIND_LABELS.SITE_PRORATA} : ${perSite.prorata.length} site(s)`,
+            quantity: 1,
+            unitAmount: prorata,
+            amount: prorata,
+            reason: null,
+          });
+        }
+      }
     } else {
       const amount = l.amount ?? 0;
       const reason = (l.reason ?? '').trim();

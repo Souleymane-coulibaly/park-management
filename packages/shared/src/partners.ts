@@ -4,6 +4,8 @@
  * Ocall (CommissionRule).
  */
 
+import { type InvoiceLineKind, RECURRING_INVOICE_LINE_KINDS } from './platform';
+
 export const PARTNER_STATUS_LABELS = {
   PENDING_VERIFICATION: 'À vérifier',
   ACTIVE: 'Actif',
@@ -220,7 +222,7 @@ export function formatPayoutNumber(year: number, sequence: number): string {
  * bord commercial et au calcul des commissions (une seule règle).
  */
 export function allocatePayment(
-  lines: { kind: 'SETUP' | 'MONTHLY' | 'ADJUSTMENT'; amount: number }[],
+  lines: { kind: InvoiceLineKind; amount: number }[],
   invoiceTotal: number,
   paymentAmount: number,
 ): { setup: number; monthly: number; adjustments: number } {
@@ -234,7 +236,8 @@ export function allocatePayment(
         : Math.round((paymentAmount * l.amount) / invoiceTotal);
     allocated += share;
     if (l.kind === 'SETUP') out.setup += share;
-    else if (l.kind === 'MONTHLY') out.monthly += share;
+    // Étape 6 : sites supplémentaires, vitrine et prorata de sites sont des mensualités.
+    else if (RECURRING_INVOICE_LINE_KINDS.includes(l.kind)) out.monthly += share;
     else out.adjustments += share;
   });
   return out;

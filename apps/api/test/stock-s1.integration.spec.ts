@@ -124,7 +124,12 @@ const UPCA = '036000291452';
     const apps = (await orgA.agent.get(api('/suite/apps')).expect(200)).body;
     expect(apps.map((a: { code: string }) => a.code)).not.toContain(STOCK_PRODUCT_CODE);
     const plans = await prisma.subscriptionPlan.findMany({
-      where: { product: { code: STOCK_PRODUCT_CODE }, name: { startsWith: 'Ocall Stock — ' } },
+      // Grille forfaitaire historique ; les offres par site (étape 6) sont vérifiées par suite-s6.
+      where: {
+        product: { code: STOCK_PRODUCT_CODE },
+        name: { startsWith: 'Ocall Stock — ' },
+        pricingMode: 'FLAT',
+      },
       select: {
         name: true,
         monthlyPrice: true,

@@ -13,10 +13,15 @@ import {
   reminderDedupeKey,
   reminderStage,
   trialDaysRemaining,
+  subscriptionMonthlyAmount,
 } from '@ocall/shared';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
 import { notifyOrganization } from '../../common/suite-notify';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  MONTHLY_AMOUNT_PLAN_SELECT,
+  MONTHLY_AMOUNT_SUB_SELECT,
+} from '../../common/subscription-billing';
 
 const DAY_MS = 86_400_000;
 const JOB = 'suite-reminders';
@@ -297,8 +302,8 @@ export class SuiteRemindersService implements OnModuleInit, OnModuleDestroy {
           id: true,
           status: true,
           expiresAt: true,
-          agreedMonthlyPrice: true,
-          plan: { select: { name: true, monthlyPrice: true, includesShowcase: true } },
+          ...MONTHLY_AMOUNT_SUB_SELECT,
+          plan: { select: { name: true, ...MONTHLY_AMOUNT_PLAN_SELECT } },
           product: { select: { code: true, name: true } },
           organization: { select: { id: true, name: true, code: true } },
         },
@@ -336,7 +341,7 @@ export class SuiteRemindersService implements OnModuleInit, OnModuleDestroy {
         product: s.product,
         planName: s.plan.name,
         includesShowcase: s.plan.includesShowcase,
-        monthlyPrice: s.agreedMonthlyPrice ?? s.plan.monthlyPrice,
+        monthlyPrice: subscriptionMonthlyAmount(s),
         status: s.status,
         state: commercialState(
           { status: s.status, expiresAt: s.expiresAt, trialEndsAt: null },

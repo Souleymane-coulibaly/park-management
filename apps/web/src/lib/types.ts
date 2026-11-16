@@ -1,4 +1,7 @@
 import type {
+  InvoiceSitesSnapshot,
+  ParkRestaurantSplitProposal,
+  PricingMode,
   SupportTicketCategory,
   SupportTicketPriority,
   SupportTicketStatus,
@@ -138,7 +141,15 @@ export interface Plan {
   aiMonthlyCallQuota?: number;
   storageQuotaMb?: number;
   activationMode?: 'AUTO' | 'ADMIN_APPROVAL';
+  /** Étape 6 : forfait (historique) ou par site ; en PER_SITE, monthlyPrice = premier site. */
+  pricingMode?: PricingMode;
+  extraSiteMonthlyPrice?: number | null;
+  showcaseMonthlyPrice?: number | null;
+  extraAppSetupFee?: number | null;
 }
+
+/** Étape 6 : aperçu de la séparation Parc / Restaurant d'un contrat Park (aucune écriture). */
+export type ParkRestaurantSplit = ParkRestaurantSplitProposal;
 
 export interface Subscription {
   status: SubscriptionStatus;
@@ -1153,6 +1164,16 @@ export interface SuiteInvoice {
     reason: string | null;
   }[];
   payments: { id: string; amount: number; status: SubscriptionPaymentStatus }[];
+  /** Étape 6 : sites facturés photographiés à l'émission (offre par site), sinon null. */
+  sitesSnapshot?: InvoiceSitesSnapshot | null;
+}
+
+/** Étape 6 : sites facturés d'un abonnement (Super Admin). */
+export interface SubscriptionSites {
+  pricingMode: PricingMode;
+  billedSites: number | null;
+  monthlyAmount: number;
+  sites: { siteKey: string; label: string; sources: string[]; startedAt: string }[];
 }
 
 export interface InternalUser {

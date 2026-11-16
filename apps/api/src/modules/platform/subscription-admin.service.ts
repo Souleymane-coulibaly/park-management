@@ -8,12 +8,22 @@ import {
   type OnModuleInit,
 } from '@nestjs/common';
 import type { Prisma } from '@ocall/database';
+import {
+  PARK_APP_PRODUCT_CODES,
+  activitiesOf,
+  proposeParkRestaurantSplit,
+  subscriptionMonthlyAmount,
+} from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
 import type { AuthContext } from '../../common/auth-context';
-import { recordPriceChange } from '../../common/subscription-billing';
+import {
+  MONTHLY_AMOUNT_PLAN_SELECT,
+  MONTHLY_AMOUNT_SUB_SELECT,
+  freezeAgreedPrices,
+} from '../../common/subscription-billing';
+import { SiteActivationService } from '../establishments/site-activation.service';
 import { notifyOrganization } from '../../common/suite-notify';
-import { PARK_APP_PRODUCT_CODES } from '@ocall/shared';
 
 type Tx = Prisma.TransactionClient;
 const EXPIRY_INTERVAL_MS = 60 * 60_000;
@@ -32,6 +42,7 @@ export class SubscriptionAdminService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly siteActivations: SiteActivationService,
   ) {}
 
   onModuleInit() {
@@ -150,7 +161,7 @@ export class SubscriptionAdminService implements OnModuleInit, OnModuleDestroy {
    * attente (décider d'abord) ou sur un abonnement résilié.
    */
   async changePlan(auth: AuthContext, id: string, planId: string, reason: string) {
-    return this.prisma.$transaction(async (tx) => {
+    const changed = await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT "id" FROM "Subscription" WHERE "id" = ${id}::uuid FOR UPDATE`;
       const sub = await this.find(tx, id);
       if (sub.status === 'CANCELED') {
@@ -181,20 +192,14 @@ export class SubscriptionAdminService implements OnModuleInit, OnModuleDestroy {
       const now = new Date();
       await tx.subscription.update({
         where: { id },
-        data: {
-          planId,
-          activationMode: plan.activationMode,
-          agreedSetupFee: plan.setupFee,
-          agreedMonthlyPrice: plan.monthlyPrice,
-          agreedAt: now,
-        },
+        // Étape 6 : un passage au forfait efface le décompte par site (recalculé si l'offre est par site).
+        data: { planId, activationMode: plan.activationMode, billedSiteCount: null },
       });
-      await recordPriceChange(tx, {
+      const agreed = await freezeAgreedPrices(tx, {
         subscriptionId: id,
-        planId,
-        setupFee: plan.setupFee,
-        monthlyPrice: plan.monthlyPrice,
-        currency: plan.currency,
+        organizationId: sub.organizationId,
+        productId: sub.productId,
+        plan,
         actorUserId: auth.user.id,
         reason: `Changement d'offre : ${reason}`,
         at: now,
@@ -221,6 +226,9 @@ export class SubscriptionAdminService implements OnModuleInit, OnModuleDestroy {
             fromPlanId: sub.planId,
             toPlanId: planId,
             monthlyPrice: plan.monthlyPrice,
+            pricingMode: plan.pricingMode,
+            extraSitePrice: agreed.extraSitePrice,
+            showcasePrice: agreed.showcasePrice,
             activationMode: plan.activationMode,
             reason,
           },
@@ -229,6 +237,98 @@ export class SubscriptionAdminService implements OnModuleInit, OnModuleDestroy {
       );
       return { id, planId, activationMode: plan.activationMode };
     });
+    // Étape 6 : offre par site → premier décompte des sites (hors transaction : bases des applications).
+    // Indisponible : le rapprochement horaire et l'émission de la facture le referont.
+    await this.siteActivations.refreshSubscription(id).catch((error: unknown) => {
+      this.logger.warn(`Décompte des sites de ${id} reporté : ${String(error)}`);
+    });
+    return changed;
+  }
+
+  /**
+   * Étape 6 : sites facturés d'un abonnement par site (décompte à jour, mensualité correspondante) ;
+   * null pour une offre forfaitaire.
+   */
+  async sites(id: string) {
+    const sub = await this.prisma.subscription.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        ...MONTHLY_AMOUNT_SUB_SELECT,
+        plan: { select: MONTHLY_AMOUNT_PLAN_SELECT },
+      },
+    });
+    if (!sub) {
+      throw new NotFoundException({
+        code: 'SUBSCRIPTION_NOT_FOUND',
+        message: 'Abonnement introuvable.',
+      });
+    }
+    const refreshed = await this.siteActivations.refreshSubscription(id);
+    if (!refreshed)
+      return {
+        pricingMode: 'FLAT' as const,
+        sites: [],
+        billedSites: null,
+        monthlyAmount: subscriptionMonthlyAmount(sub),
+      };
+    return {
+      pricingMode: 'PER_SITE' as const,
+      sites: refreshed.sites.map((x) => ({
+        siteKey: x.siteKey,
+        label: x.label,
+        sources: x.sources,
+        startedAt: x.startedAt.toISOString(),
+      })),
+      billedSites: refreshed.count,
+      monthlyAmount: subscriptionMonthlyAmount({ ...sub, billedSiteCount: refreshed.count }),
+    };
+  }
+
+  /**
+   * Étape 6 (décision D2 adaptée) : APERÇU de la séparation Parc / Restaurant des contrats Park en cours,
+   * sans aucune écriture ni changement de prix. Sites comptés dans le référentiel (activités parc et
+   * restaurant séparées, établissements actifs).
+   */
+  async parkRestaurantSplit() {
+    const subs = await this.prisma.subscription.findMany({
+      where: { product: { code: { in: PARK_APP_PRODUCT_CODES } }, status: { not: 'CANCELED' } },
+      select: {
+        id: true,
+        status: true,
+        expiresAt: true,
+        organizationId: true,
+        organization: { select: { name: true } },
+        product: { select: { code: true } },
+        ...MONTHLY_AMOUNT_SUB_SELECT,
+        plan: { select: { name: true, ...MONTHLY_AMOUNT_PLAN_SELECT } },
+      },
+      orderBy: { createdAt: 'asc' },
+      take: 2_000,
+    });
+    const establishments = await this.prisma.establishment.findMany({
+      where: { organizationId: { in: subs.map((x) => x.organizationId) }, isActive: true },
+      select: { organizationId: true, businessType: true },
+    });
+    const count = (organizationId: string, activity: 'PARK' | 'RESTAURANT') =>
+      establishments.filter(
+        (e) =>
+          e.organizationId === organizationId && activitiesOf(e.businessType).includes(activity),
+      ).length;
+    return subs.map((x) =>
+      proposeParkRestaurantSplit({
+        subscriptionId: x.id,
+        organizationId: x.organizationId,
+        organizationName: x.organization.name,
+        productCode: x.product.code,
+        status: x.status,
+        planName: x.plan.name,
+        monthlyAmount: subscriptionMonthlyAmount(x),
+        expiresAt: x.expiresAt?.toISOString() ?? null,
+        parkSites: count(x.organizationId, 'PARK'),
+        restaurantSites: count(x.organizationId, 'RESTAURANT'),
+      }),
+    );
   }
 
   /** Historique d'un abonnement : tarifs appliqués et évènements. */

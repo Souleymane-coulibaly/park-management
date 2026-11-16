@@ -2,12 +2,16 @@ import { ConflictException, Injectable } from '@nestjs/common';
 import { Prisma } from '@ocall/database';
 import {
   type EstablishmentKind,
+  ORGANIZATION_SITE_KEY,
+  SITE_SOURCE_PARK,
+  SITE_SOURCE_RESTAURANT,
   type SiteUsage,
   activitiesOf,
   isEstablishmentKind,
 } from '@ocall/shared';
 import { AuditService } from '../../common/audit/audit.service';
 import type {
+  BillableSite,
   RegistrySite,
   SiteRegistry,
   SiteUsageProvider,
@@ -201,5 +205,45 @@ export class EstablishmentRegistryService implements SiteRegistry {
       }
     }
     return out;
+  }
+
+  /**
+   * Étape 6 : sites facturables d'une application source. Parc et Restaurant : établissements actifs avec
+   * l'activité correspondante (comptés séparément ; un établissement « parc et restaurant » apparaît dans
+   * les deux). Facture : toujours un site. Applications à base séparée : leurs fiches facturables, une
+   * fiche rattachée à un établissement actif de l'organisation comptant pour cet établissement.
+   */
+  async billableSites(organizationId: string, source: string): Promise<BillableSite[]> {
+    if (source === 'OCALL_FACTURE') {
+      return [{ siteKey: ORGANIZATION_SITE_KEY, establishmentId: null, label: 'Organisation' }];
+    }
+    const establishments = await this.prisma.establishment.findMany({
+      where: { organizationId, isActive: true },
+      select: { id: true, name: true, businessType: true },
+      orderBy: { name: 'asc' },
+    });
+    if (source === SITE_SOURCE_PARK || source === SITE_SOURCE_RESTAURANT) {
+      const activity = source === SITE_SOURCE_PARK ? 'PARK' : 'RESTAURANT';
+      return establishments
+        .filter((e) => activitiesOf(e.businessType).includes(activity))
+        .map((e) => ({ siteKey: e.id, establishmentId: e.id, label: e.name }));
+    }
+    const provider = this.providers.get(source);
+    // Application non chargée (module désactivé) : erreur, jamais « aucun site » (sous-facturation).
+    if (!provider) throw new Error(`Sites de ${source} illisibles : application non chargée.`);
+    const active = new Map(establishments.map((e) => [e.id, e.name]));
+    const out = new Map<string, BillableSite>();
+    for (const site of await provider.billableSites(organizationId)) {
+      // Rattachée à un établissement actif de l'organisation : un seul site pour cet établissement.
+      const linked = site.establishmentId !== null && active.has(site.establishmentId);
+      const siteKey = linked ? site.establishmentId! : `${source}:${site.appSiteId}`;
+      if (out.has(siteKey)) continue;
+      out.set(siteKey, {
+        siteKey,
+        establishmentId: linked ? site.establishmentId : null,
+        label: linked ? active.get(site.establishmentId!)! : site.appSiteName,
+      });
+    }
+    return [...out.values()];
   }
 }
