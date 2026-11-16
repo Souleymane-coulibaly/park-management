@@ -16,6 +16,7 @@ import {
   Repeat,
   Sparkles,
   Ticket,
+  UtensilsCrossed,
 } from 'lucide-react';
 import {
   COMMERCIAL_STATE_LABELS,
@@ -44,6 +45,12 @@ import { useApi } from '@/lib/use-api';
  */
 const APP_STYLE: Record<string, { icon: typeof Ticket; tile: string; soft: string }> = {
   OCALL_PARK: { icon: Ticket, tile: 'bg-suite-clay text-suite-ivory', soft: 'bg-suite-clay-soft' },
+  // Sprint 7 : Ocall Restaurant, application distincte d'Ocall Parc.
+  OCALL_RESTAURANT: {
+    icon: UtensilsCrossed,
+    tile: 'bg-suite-clay text-suite-ivory',
+    soft: 'bg-suite-clay-soft',
+  },
   OCALL_SCHOOL: {
     icon: GraduationCap,
     tile: 'bg-suite-green text-suite-ivory',
@@ -356,6 +363,14 @@ function AppCard({ app, onChange }: { app: SuitePortalApp; onChange: () => void 
           {statusLabel && (
             <span className="rounded-full bg-suite-ivory px-2.5 py-1 text-xs font-semibold text-suite-ink">
               {statusLabel}
+            </span>
+          )}
+          {app.includedIn && (
+            <span
+              className="rounded-full bg-suite-green-soft px-2.5 py-1 text-xs font-semibold text-suite-green"
+              data-testid="suite-app-included"
+            >
+              Inclus dans votre contrat Ocall Park
             </span>
           )}
           {app.access === 'read_only' && (

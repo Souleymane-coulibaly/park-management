@@ -15,7 +15,6 @@ import { PasswordService } from '../../common/security/password.service';
 import { PortalAccounts } from '../../common/security/portal-accounts';
 import { SessionService } from '../../common/security/session.service';
 import { generateToken, hashToken } from '../../common/security/tokens';
-import { PARK_PRODUCT_CODE } from '@ocall/shared';
 import { OrganizationProvisioningService } from '../organizations/organization-provisioning.service';
 import type {
   ChangePasswordDto,
@@ -71,18 +70,23 @@ export class AuthService {
           })
         : null;
       if (partner && partner.user.email !== dto.email) {
-        const park = await tx.saasProduct.findUniqueOrThrow({
-          where: { code: PARK_PRODUCT_CODE },
-          select: { id: true },
+        // Sprint 7 (décision D5) : une attribution par application souscrite à l'inscription (Ocall
+        // Park, ou Ocall Parc et Ocall Restaurant après l'ouverture de Restaurant).
+        const subscribed = await tx.subscription.findMany({
+          where: { organizationId: created.organizationId },
+          select: { productId: true },
+          orderBy: { createdAt: 'asc' },
         });
-        await tx.attribution.create({
-          data: {
-            organizationId: created.organizationId,
-            partnerId: partner.id,
-            productId: park.id,
-            source: 'REFERRAL',
-          },
-        });
+        for (const { productId } of subscribed) {
+          await tx.attribution.create({
+            data: {
+              organizationId: created.organizationId,
+              partnerId: partner.id,
+              productId,
+              source: 'REFERRAL',
+            },
+          });
+        }
       }
       await this.audit.record(
         {

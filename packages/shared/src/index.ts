@@ -15,6 +15,7 @@ export * from './saas';
 export * from './sites';
 export * from './platform';
 export * from './site-billing';
+export * from './park-restaurant';
 export * from './support';
 export * from './commercial';
 export * from './partners';

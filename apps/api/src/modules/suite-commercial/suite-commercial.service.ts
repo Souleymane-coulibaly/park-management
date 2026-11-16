@@ -26,13 +26,21 @@ import {
   trialDaysRemaining,
   trialEndsAt,
   subscriptionMonthlyAmount,
+  PARK_RESTAURANT_LEGACY_CODE,
+  RESTAURANT_COMMERCIAL_CODE,
+  commercialAppName,
 } from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
 import type { AuthContext, TenantContext } from '../../common/auth-context';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
 import { loadAppAccess } from '../../common/app-access';
-import { loadParkAccess } from '../../common/park-access';
+import { loadActivityAccess, loadParkAccess } from '../../common/park-access';
+import {
+  isRestaurantOpen,
+  keepCombinedBeforeOpening,
+  portalSubscriptionWhere,
+} from '../../common/park-subscription';
 import { notifyOrganization } from '../../common/suite-notify';
 import { ProductUserAccountsService } from '../organizations/product-user-accounts.service';
 import { SuiteContractsService } from '../suite-contracts/suite-contracts.service';
@@ -46,6 +54,8 @@ import { SiteActivationService } from '../establishments/site-activation.service
 type Tx = Prisma.TransactionClient;
 const APP_HREF: Record<string, string> = {
   OCALL_PARK: '/app',
+  // Sprint 7 : Ocall Restaurant partage l'espace de l'application (navigation unifiée, une session).
+  OCALL_RESTAURANT: '/app',
   OCALL_SCHOOL: '/school',
   OCALL_FACTURE: '/facture',
   OCALL_STOCK: '/stock',
@@ -54,9 +64,12 @@ const APP_HREF: Record<string, string> = {
 const NOT_FOUND = { code: 'PRODUCT_NOT_FOUND', message: 'Application introuvable.' };
 const DAY_MS = 86_400_000;
 
-/** Nom présenté au client (la famille Park historique s'affiche « Ocall Park »). */
+/**
+ * Nom présenté au client : Ocall Restaurant sous son nom (sprint 7), le reste de la famille Park historique
+ * (Parc, contrat « Parc + Restaurant ») sous « Ocall Park ».
+ */
 function displayName(product: { code: string; name: string }): string {
-  return PARK_APP_PRODUCT_CODES.includes(product.code) ? 'Ocall Park' : product.name;
+  return commercialAppName(product.code, product.name);
 }
 
 /**
@@ -109,16 +122,24 @@ export class SuiteCommercialService {
             : 'Cette application n’est pas encore commercialisée : aucun essai possible.',
       });
     }
-    // Ocall Park : une seule application de la famille Park par organisation (abonnements historiques).
-    if (product.code === PARK_PRODUCT_CODE) {
-      const legacy = await tx.subscription.findFirst({
-        where: {
-          organizationId: input.organizationId,
-          product: { code: { in: PARK_APP_PRODUCT_CODES.filter((c) => c !== PARK_PRODUCT_CODE) } },
-        },
-        select: { id: true },
+    // Famille Park (sprint 7) : un contrat combiné couvre déjà parc et restaurant ; Ocall Restaurant ne
+    // s'ouvre qu'après sa présentation au catalogue par Ocall ; l'offre combinée historique est retirée.
+    if (PARK_APP_PRODUCT_CODES.includes(product.code)) {
+      if (product.code === PARK_RESTAURANT_LEGACY_CODE) throw this.trialNotAvailable();
+      if (product.code === RESTAURANT_COMMERCIAL_CODE && !(await isRestaurantOpen(tx))) {
+        throw this.trialNotAvailable();
+      }
+      const combined = await tx.parkCombinedContract.findFirst({
+        where: { organizationId: input.organizationId, status: 'ACTIVE' },
+        select: { subscription: { select: { product: { select: { code: true } } } } },
       });
-      if (legacy) throw this.trialNotAllowed();
+      if (combined && combined.subscription.product.code !== product.code) {
+        throw new ConflictException({
+          code: 'INCLUDED_IN_COMBINED_CONTRACT',
+          message:
+            'Votre contrat Ocall Park couvre déjà le parc et le restaurant : aucun essai séparé n’est nécessaire.',
+        });
+      }
     }
     // Étape 6 : l'essai n'attribue jamais une offre par site (changement d'offre explicite seulement).
     const plan = await tx.subscriptionPlan.findFirst({
@@ -201,6 +222,12 @@ export class SuiteCommercialService {
         },
       });
     }
+    // Sprint 7 : avant l'ouverture d'Ocall Restaurant, un abonnement Ocall Park reste combiné.
+    await keepCombinedBeforeOpening(tx, {
+      id: subscriptionId,
+      organizationId: input.organizationId,
+      productCode: product.code,
+    });
     // Ocall School : l'accès passe par un contrat (périmètre) ; contrat d'essai jusqu'à la fin de
     // l'essai, puis lecture seule automatique (aucune donnée supprimée). Les contrats sont datés au
     // jour (UTC, dernier jour entier) : le dernier jour est celui de l'échéance de l'essai, pour ne
@@ -324,6 +351,7 @@ export class SuiteCommercialService {
           ...MONTHLY_AMOUNT_SUB_SELECT,
           product: { select: { code: true } },
           plan: { select: { name: true, ...MONTHLY_AMOUNT_PLAN_SELECT } },
+          parkCombined: { select: { status: true } },
         },
       }),
       this.prisma.productTrial.findMany({ where: { organizationId } }),
@@ -351,20 +379,32 @@ export class SuiteCommercialService {
       const status = p.status as SaasProductStatus;
       if (!isPublicProductStatus(status) && status !== 'SUSPENDED') continue;
       const isPark = p.code === PARK_PRODUCT_CODE;
-      // Ocall Park : l'abonnement peut être historique (Restaurant, Parc + Restaurant).
+      const isRestaurant = p.code === RESTAURANT_COMMERCIAL_CODE;
+      // Sprint 7 : contrat combiné (historique, ou souscrit avant l'ouverture d'Ocall Restaurant) présenté
+      // sous Ocall Park ; Ocall Restaurant y est alors inclus (droits conservés, aucun essai séparé).
+      const combinedSub = subs.find((s) => s.parkCombined?.status === 'ACTIVE') ?? null;
       const sub = isPark
-        ? subs.find((s) => PARK_APP_PRODUCT_CODES.includes(s.product.code))
-        : subs.find((s) => s.productId === p.id);
+        ? (combinedSub ?? subs.find((s) => s.product.code === PARK_PRODUCT_CODE))
+        : isRestaurant
+          ? combinedSub
+            ? undefined
+            : subs.find((s) => s.product.code === RESTAURANT_COMMERCIAL_CODE)
+          : subs.find((s) => s.productId === p.id);
+      const includedIn = isRestaurant && combinedSub ? ('OCALL_PARK' as const) : null;
       const trial = trials.find((t) => t.productId === (sub?.productId ?? p.id)) ?? null;
       const access: ProductAccess = isPark
-        ? parkAccess
-        : p.code === SCHOOL_PRODUCT_CODE
-          ? schoolAccess
-          : p.code === FACTURE_PRODUCT_CODE
-            ? factureAccess
-            : p.code === STOCK_PRODUCT_CODE
-              ? stockAccess
-              : 'none';
+        ? combinedSub || parkAccess === 'none'
+          ? parkAccess
+          : await this.activityAccessFor(auth, 'PARK', now)
+        : isRestaurant
+          ? await this.activityAccessFor(auth, 'RESTAURANT', now)
+          : p.code === SCHOOL_PRODUCT_CODE
+            ? schoolAccess
+            : p.code === FACTURE_PRODUCT_CODE
+              ? factureAccess
+              : p.code === STOCK_PRODUCT_CODE
+                ? stockAccess
+                : 'none';
       // Sprint Suite 2D : rôle réellement attribué à la personne connectée dans cette application.
       const hasRole = await this.hasRoleIn(auth, p.code, access);
       // Sans droit de facturation, seules les applications où la personne a un rôle sont présentées.
@@ -377,7 +417,9 @@ export class SuiteCommercialService {
       const siteBilling =
         offered && p.plans.some((pl) => pl.pricingMode === 'PER_SITE')
           ? {
-              sites: await this.siteActivations.countLive(organizationId, p.code).catch(() => null),
+              sites: await this.siteActivations
+                .countLive(organizationId, p.code, isPark && !!combinedSub)
+                .catch(() => null),
               otherAppInstalled: fees.some(
                 (f) =>
                   f.productId !== (sub?.productId ?? p.id) &&
@@ -387,6 +429,7 @@ export class SuiteCommercialService {
           : null;
       const canRequest =
         canSeeBilling &&
+        !includedIn &&
         hasPermission(auth.membership.role, 'subscription.pay') &&
         (status === 'ACTIVE' || status === 'PREPRODUCTION') &&
         !pendingRequest &&
@@ -442,11 +485,13 @@ export class SuiteCommercialService {
           canSeeBilling &&
           hasPermission(auth.membership.role, 'subscription.pay') &&
           canStartTrial(status, 'customer') &&
+          !includedIn &&
           !trialUsed &&
           (!sub || sub.status === 'NOT_ACTIVATED'),
         canRequestActivation: requestKinds.includes('ACTIVATION'),
-        plans: offered ? p.plans : [],
+        plans: offered && !includedIn ? p.plans : [],
         siteBilling,
+        includedIn,
         setupFeeStatus: canSeeBilling
           ? ((fee?.status as SetupFeeStatus | undefined) ?? null)
           : null,
@@ -463,9 +508,8 @@ export class SuiteCommercialService {
   /** Contrat d'une application de l'organisation (abonnement, offre, tarifs figés, historique). */
   async contract(auth: TenantContext, productCode: string) {
     const organizationId = auth.membership.organizationId;
-    const codes = productCode === PARK_PRODUCT_CODE ? [...PARK_APP_PRODUCT_CODES] : [productCode];
     const sub = await this.prisma.subscription.findFirst({
-      where: { organizationId, product: { code: { in: codes } } },
+      where: portalSubscriptionWhere(organizationId, productCode),
       select: {
         id: true,
         status: true,
@@ -568,17 +612,28 @@ export class SuiteCommercialService {
         message: 'Cette application n’est pas commercialisée : aucune activation possible.',
       });
     }
-    const subProductIds =
-      product.code === PARK_PRODUCT_CODE
-        ? (
-            await this.prisma.saasProduct.findMany({
-              where: { code: { in: [...PARK_APP_PRODUCT_CODES] } },
-              select: { id: true },
-            })
-          ).map((p) => p.id)
-        : [product.id];
+    // Sprint 7 : Ocall Restaurant ouvert par Ocall seulement ; déjà inclus dans un contrat combiné.
+    if (product.code === RESTAURANT_COMMERCIAL_CODE) {
+      if (!(await isRestaurantOpen(this.prisma))) {
+        throw new ConflictException({
+          code: 'PRODUCT_NOT_AVAILABLE',
+          message: 'Cette application n’est pas encore proposée : aucune activation possible.',
+        });
+      }
+      if (
+        (await this.prisma.parkCombinedContract.count({
+          where: { organizationId, status: 'ACTIVE' },
+        })) > 0
+      ) {
+        throw new ConflictException({
+          code: 'INCLUDED_IN_COMBINED_CONTRACT',
+          message:
+            'Votre contrat Ocall Park couvre déjà le parc et le restaurant : aucune souscription séparée n’est nécessaire.',
+        });
+      }
+    }
     const sub = await this.prisma.subscription.findFirst({
-      where: { organizationId, productId: { in: subProductIds } },
+      where: portalSubscriptionWhere(organizationId, product.code),
       select: {
         status: true,
         productId: true,
@@ -897,6 +952,21 @@ export class SuiteCommercialService {
 
   // ─── Droits ───
 
+  /** Sprint 7 : droit d'une activité (Ocall Parc ou Ocall Restaurant) ; aucun hors métier Park. */
+  private async activityAccessFor(
+    auth: TenantContext,
+    activity: 'PARK' | 'RESTAURANT',
+    now: Date,
+  ): Promise<ProductAccess> {
+    if (
+      !activitiesOf(auth.membership.businessType).includes(activity) ||
+      auth.membership.role === 'PRODUCT_USER'
+    ) {
+      return 'none';
+    }
+    return loadActivityAccess(this.prisma, auth.membership.organizationId, activity, now);
+  }
+
   private async parkAccessFor(auth: TenantContext, now: Date): Promise<ProductAccess> {
     if (
       activitiesOf(auth.membership.businessType).length === 0 ||
@@ -918,7 +988,8 @@ export class SuiteCommercialService {
     access: ProductAccess,
   ): Promise<boolean> {
     if (access === 'none') return false;
-    if (code === PARK_PRODUCT_CODE) return auth.membership.role !== 'PRODUCT_USER';
+    if (code === PARK_PRODUCT_CODE || code === RESTAURANT_COMMERCIAL_CODE)
+      return auth.membership.role !== 'PRODUCT_USER';
     if (auth.membership.role === 'OWNER') return true;
     return this.productAccounts.hasActiveRole(code, auth.membership.organizationId, auth.user.id);
   }
@@ -926,6 +997,13 @@ export class SuiteCommercialService {
   private async schoolAccess(organizationId: string): Promise<ProductAccess> {
     if (!this.config.school.enabled) return 'none';
     return (await this.contracts.entitlement(organizationId, SCHOOL_PRODUCT_CODE)).access;
+  }
+
+  private trialNotAvailable() {
+    return new ConflictException({
+      code: 'TRIAL_NOT_AVAILABLE',
+      message: 'Cette application n’est pas encore proposée : aucun essai possible.',
+    });
   }
 
   private trialNotAllowed() {

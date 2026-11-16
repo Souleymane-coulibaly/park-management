@@ -39,6 +39,9 @@ import { MfaService } from './mfa.service';
 import { OrganizationAccessService } from './organization-access.service';
 import { SwitchOrganizationDto } from './organization-access.dto';
 import { type MeResponse, toMe } from './me';
+import { type Activity, type ProductAccess, activitiesOf } from '@ocall/shared';
+import { loadActivityAccess } from '../../common/park-access';
+import { PrismaService } from '../../prisma/prisma.service';
 
 @ApiTags('Authentification')
 @Controller('auth')
@@ -49,7 +52,25 @@ export class AuthController {
     private readonly mfa: MfaService,
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly access: OrganizationAccessService,
+    private readonly prisma: PrismaService,
   ) {}
+
+  /** Sprint 7 : droit par activité couverte par le métier (lecture impossible : rien d'annoncé). */
+  private async activityAccess(
+    auth: AuthContext,
+  ): Promise<Partial<Record<Activity, ProductAccess>>> {
+    const m = auth.membership;
+    if (!m) return {};
+    const out: Partial<Record<Activity, ProductAccess>> = {};
+    try {
+      for (const activity of activitiesOf(m.businessType)) {
+        out[activity] = await loadActivityAccess(this.prisma, m.organizationId, activity);
+      }
+    } catch {
+      return {};
+    }
+    return out;
+  }
 
   @Public()
   @SensitiveRoute()
@@ -133,8 +154,8 @@ export class AuthController {
   @AllowPendingPassword()
   @AllowMfaPending()
   @Get('me')
-  me(@CurrentAuth() auth: AuthContext): MeResponse {
-    return toMe(auth);
+  async me(@CurrentAuth() auth: AuthContext): Promise<MeResponse> {
+    return toMe(auth, await this.activityAccess(auth));
   }
 
   @Patch('me')
@@ -208,7 +229,7 @@ export class AuthController {
     res.cookie(SESSION_COOKIE, token, { ...this.cookieOptions(), maxAge: this.sessions.ttlMs });
     const auth = await this.sessions.resolve(token);
     if (!auth) throw new Error('Session créée introuvable.');
-    return toMe(auth);
+    return toMe(auth, await this.activityAccess(auth));
   }
 
   private cookieOptions() {

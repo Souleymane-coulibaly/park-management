@@ -18,6 +18,7 @@ import {
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
 import type { TenantContext } from '../../common/auth-context';
+import { loadActivityAccess } from '../../common/park-access';
 import { establishmentScope } from '../../common/tenant-scope';
 import { recordOrderEvent } from '../pos/order-events';
 import { findSellingEstablishment, lockRow } from '../pos/pos-scope';
@@ -160,6 +161,14 @@ export class QrOrdersService {
   ) {
     const replay = await this.findReplay(point, dto.clientRequestId);
     if (replay) return replay;
+    // Sprint 7 (décision D6) : menu toujours consultable, nouvelle commande seulement avec un droit
+    // Ocall Restaurant actif (abonnement Restaurant ou contrat combiné).
+    if ((await loadActivityAccess(this.prisma, point.organizationId, 'RESTAURANT')) !== 'full') {
+      throw new ConflictException({
+        code: 'ONLINE_ORDERING_UNAVAILABLE',
+        message: 'Commande en ligne momentanément indisponible : adressez-vous au personnel.',
+      });
+    }
 
     // Montants indicatifs calculés par le serveur ; la vente sera revalorisée à la validation.
     const priced = await this.pricing.price(

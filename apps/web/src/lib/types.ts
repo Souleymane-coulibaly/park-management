@@ -74,6 +74,8 @@ export interface Me {
     status: 'available' | 'upcoming';
     href: string | null;
   }[];
+  /** Sprint 7 : droit par activité (Ocall Parc, Ocall Restaurant ou contrat combiné). */
+  activityAccess?: Partial<Record<'PARK' | 'RESTAURANT', 'full' | 'read_only' | 'none'>>;
 }
 
 export interface Organization {

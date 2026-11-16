@@ -250,6 +250,7 @@ export class SubscriptionPaymentsService {
             dto.organizationId,
             invoice.subscription.productId,
             dto.amount,
+            invoice.subscriptionId,
           );
         }
         let collectedById: string | null = null;
@@ -1085,6 +1086,7 @@ export class SubscriptionPaymentsService {
     organizationId: string,
     productId: string,
     amount: number,
+    subscriptionId?: string,
   ) {
     await tx.$queryRaw`SELECT "id" FROM "Partner" WHERE "id" = ${partnerId}::uuid FOR UPDATE`;
     const partner = await tx.partner.findUniqueOrThrow({
@@ -1099,7 +1101,7 @@ export class SubscriptionPaymentsService {
     }
     // Attribution de l'application facturée (famille Park comprise) ou antérieure « toutes
     // applications » : jamais les factures d'une autre application de l'organisation.
-    const scope = await attributionScope(tx, productId);
+    const scope = await attributionScope(tx, productId, subscriptionId);
     const attributed = await tx.attribution.count({
       where: {
         partnerId,

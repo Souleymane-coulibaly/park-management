@@ -290,6 +290,11 @@ export interface SuitePortalApp {
    * offre par site proposée.
    */
   siteBilling?: { sites: number | null; otherAppInstalled: boolean } | null;
+  /**
+   * Sprint 7 : application incluse dans un autre contrat (Ocall Restaurant couvert par un contrat Ocall Park
+   * combiné) : droits conservés, aucun essai ni souscription séparés.
+   */
+  includedIn?: 'OCALL_PARK' | null;
   /** Sprint S2 : demande en attente (activation, renouvellement, changement d'offre). */
   pendingRequest: { kind: 'ACTIVATION' | 'RENEWAL' | 'PLAN_CHANGE'; createdAt: string } | null;
   /** Demandes que le client peut faire maintenant. */

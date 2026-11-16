@@ -127,7 +127,7 @@ export const PRODUCT_CONTENT: Record<string, ProductContent> = {
       },
       {
         title: 'Restauration du parc',
-        text: 'Commandes, écran cuisine (KDS) et stocks avec l’offre Parc + Restaurant.',
+        text: 'Commandes, écran cuisine (KDS) et stocks pour votre activité restaurant, sur le même compte.',
       },
       { title: 'Clients et fidélité', text: 'Fichier clients, points de fidélité, historique.' },
       { title: 'Planning du personnel', text: 'Postes et affectations des équipes.' },

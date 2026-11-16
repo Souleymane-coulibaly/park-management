@@ -29,6 +29,7 @@ import {
   subscriptionMonthlyAmount,
 } from '@ocall/shared';
 import { FREEZE_PLAN_SELECT, freezeAgreedPrices } from '../../common/subscription-billing';
+import { isRestaurantOpen, keepCombinedBeforeOpening } from '../../common/park-subscription';
 import { type BilledSite, SiteActivationService } from '../establishments/site-activation.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
@@ -325,6 +326,21 @@ export class SuiteService {
           });
         }
       }
+      // Sprint 7 : présenter Ocall Restaurant au catalogue OUVRE la séparation commerciale (inscription en
+      // deux applications) ; il faut une offre forfaitaire Restaurant active (essais), jamais par site
+      // (étape 6 : aucune offre par site attribuée automatiquement).
+      if (before.code === 'OCALL_RESTAURANT' && dto.listed === true && !before.listed) {
+        const flat = await tx.subscriptionPlan.count({
+          where: { productId: id, isActive: true, pricingMode: 'FLAT' },
+        });
+        if (flat === 0) {
+          throw new ConflictException({
+            code: 'RESTAURANT_PLAN_REQUIRED',
+            message:
+              'Activez d’abord une offre forfaitaire Ocall Restaurant : les nouveaux clients en démarrent l’essai.',
+          });
+        }
+      }
       const { slug, tagline, listed, appUrl, availableAt, ...core } = dto;
       const product = await tx.saasProduct.update({
         where: { id },
@@ -462,16 +478,24 @@ export class SuiteService {
           message: 'Offre inconnue ou d’un autre produit.',
         });
       }
-      // Au plus un produit de la famille Ocall Park (lié au métier de l'organisation).
+      // Famille Ocall Park (sprint 7) : Ocall Parc et Ocall Restaurant peuvent coexister (deux applications)
+      // ; un contrat combiné couvre déjà les deux ; l'offre combinée historique n'est plus souscrite ;
+      // Ocall Restaurant seulement une fois ouvert par Ocall.
       if (PARK_APP_PRODUCT_CODES.includes(product.code)) {
-        const park = await tx.subscription.count({
-          where: { organizationId, product: { code: { in: [...PARK_APP_PRODUCT_CODES] } } },
+        const combined = await tx.parkCombinedContract.count({
+          where: { organizationId, status: 'ACTIVE' },
         });
-        if (park > 0) {
+        const legacyOffer = product.code === 'OCALL_PARK_RESTAURANT';
+        const closedRestaurant =
+          product.code === 'OCALL_RESTAURANT' && !(await isRestaurantOpen(tx));
+        if (combined > 0 || legacyOffer || closedRestaurant) {
           throw new ConflictException({
             code: 'PARK_PRODUCT_EXISTS',
-            message:
-              'Cette organisation a déjà un abonnement Ocall Park : changez son métier plutôt.',
+            message: legacyOffer
+              ? 'L’offre « Parc + Restaurant » est retirée : souscrivez Ocall Parc et Ocall Restaurant.'
+              : closedRestaurant
+                ? 'Ocall Restaurant n’est pas encore ouvert à la souscription.'
+                : 'Cette organisation a déjà un contrat Ocall Park couvrant le parc et le restaurant.',
           });
         }
       }
@@ -494,6 +518,12 @@ export class SuiteService {
             toStatus: 'NOT_ACTIVATED',
             actorUserId: auth.user.id,
           },
+        });
+        // Avant l'ouverture d'Ocall Restaurant : un abonnement Ocall Park reste combiné.
+        await keepCombinedBeforeOpening(tx, {
+          id: sub.id,
+          organizationId,
+          productCode: product.code,
         });
         await this.audit.record(
           {
@@ -545,6 +575,7 @@ export class SuiteService {
         agreedAt: true,
         plan: { select: FREEZE_PLAN_SELECT },
         product: { select: { status: true, code: true } },
+        parkCombined: { select: { status: true } },
       },
     });
     const perSite = s.plan.pricingMode === 'PER_SITE';
@@ -792,6 +823,7 @@ export class SuiteService {
           agreed.sub.organizationId,
           agreed.sub.product.code,
           previous.issuedAt,
+          agreed.sub.parkCombined?.status === 'ACTIVE',
         )
       : [];
     const coverageEnd = agreed.sub.status === 'ACTIVE' ? agreed.sub.expiresAt : null;

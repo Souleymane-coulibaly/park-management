@@ -6,10 +6,20 @@ import {
   PARK_PRODUCT_CODE,
   SUPPORTED_COUNTRIES,
   parkProductCode,
+  productsForBusinessType,
   trialEndsAt,
 } from '@ocall/shared';
 import { randomInt } from 'node:crypto';
 import { notifyOrganization } from '../../common/suite-notify';
+import { isRestaurantOpen, keepCombinedBeforeOpening } from '../../common/park-subscription';
+
+/** Offre d'essai d'une application de la famille Park (sprint 7). */
+export interface ParkFamilyOffer {
+  code: string;
+  productId: string;
+  productName: string;
+  plan: { id: string; trialDays: number };
+}
 
 export interface ProvisionOrganizationInput {
   organizationName: string;
@@ -52,20 +62,19 @@ export class OrganizationProvisioningService {
       });
     const timezone = input.timezone ?? country.timezone ?? DEFAULT_TIMEZONE;
 
-    // Ocall Park est une seule application pour tous les métiers (socle S1, D2) : offre « sans vitrine »
-    // en vigueur. Vérifie aussi que le métier relève bien de Park.
+    // Vérifie que le métier relève de Park. Sprint 7 : avant l'ouverture d'Ocall Restaurant, une seule
+    // application Ocall Park (contrat combiné parc et restaurant, comme le socle S1) ; après, une
+    // application par activité du métier (Ocall Parc et/ou Ocall Restaurant, décision D2) — deux
+    // abonnements distincts, une seule inscription, une seule session.
     parkProductCode(input.businessType);
+    const restaurantOpen = await isRestaurantOpen(tx);
+    const productCodes = restaurantOpen
+      ? productsForBusinessType(input.businessType)
+      : [PARK_PRODUCT_CODE];
     // Étape 6 : jamais d'offre par site choisie automatiquement (le prix le plus bas n'est pas une règle
     // commerciale) ; elle n'est attribuée que par un changement d'offre explicite validé par Ocall.
-    const plan = await tx.subscriptionPlan.findFirst({
-      where: { product: { code: PARK_PRODUCT_CODE }, isActive: true, pricingMode: 'FLAT' },
-      orderBy: [{ includesShowcase: 'asc' }, { monthlyPrice: 'asc' }],
-    });
-    if (!plan)
-      throw new NotFoundException({
-        code: 'PLAN_NOT_FOUND',
-        message: 'Aucune offre pour ce métier.',
-      });
+    const offers: ParkFamilyOffer[] = [];
+    for (const code of productCodes) offers.push(await this.parkFamilyOffer(tx, code));
 
     const organization = await tx.organization.create({
       data: {
@@ -103,28 +112,57 @@ export class OrganizationProvisioningService {
       data: { organizationId: organization.id, userId: user.id, role: 'OWNER' },
     });
 
-    // Abonnement Ocall Park : l'essai gratuit démarre à l'activation effective du compte (socle S1),
-    // une seule fois par organisation (unicité en base), dates calculées en UTC par le serveur.
-    const product = await tx.saasProduct.findUniqueOrThrow({
-      where: { code: PARK_PRODUCT_CODE },
-      select: { id: true },
-    });
+    // Abonnements de la famille Park : l'essai gratuit démarre à l'activation effective du compte (socle
+    // S1), une seule fois par organisation et application (unicité en base), dates calculées en UTC.
     const now = new Date();
-    const endsAt = trialEndsAt(now, plan.trialDays);
+    for (const offer of offers) {
+      await this.startParkFamilyTrialTx(tx, {
+        organizationId: organization.id,
+        userId: user.id,
+        offer,
+        combined: !restaurantOpen,
+        now,
+      });
+    }
+
+    return {
+      organizationId: organization.id,
+      userId: user.id,
+      membershipId: membership.id,
+      loginId,
+    };
+  }
+
+  /**
+   * Essai d'une application de la famille Park (abonnement en essai, évènement, notification). Sprint 7 :
+   * `combined` (avant l'ouverture d'Ocall Restaurant) garde l'abonnement Ocall Park combiné.
+   */
+  async startParkFamilyTrialTx(
+    tx: Prisma.TransactionClient,
+    input: {
+      organizationId: string;
+      userId: string;
+      offer: ParkFamilyOffer;
+      combined: boolean;
+      now: Date;
+    },
+  ): Promise<string> {
+    const { offer } = input;
+    const endsAt = trialEndsAt(input.now, offer.plan.trialDays);
     await tx.productTrial.create({
       data: {
-        organizationId: organization.id,
-        productId: product.id,
-        startedAt: now,
+        organizationId: input.organizationId,
+        productId: offer.productId,
+        startedAt: input.now,
         endsAt,
-        startedByUserId: user.id,
+        startedByUserId: input.userId,
       },
     });
     const subscription = await tx.subscription.create({
       data: {
-        organizationId: organization.id,
-        productId: product.id,
-        planId: plan.id,
+        organizationId: input.organizationId,
+        productId: offer.productId,
+        planId: offer.plan.id,
         status: 'TRIALING',
       },
     });
@@ -132,26 +170,47 @@ export class OrganizationProvisioningService {
       data: {
         subscriptionId: subscription.id,
         type: 'CREATED',
-        toPlanId: plan.id,
+        toPlanId: offer.plan.id,
         toStatus: 'TRIALING',
-        actorUserId: user.id,
-        reason: `Essai gratuit de ${plan.trialDays} jours.`,
+        actorUserId: input.userId,
+        reason: `Essai gratuit de ${offer.plan.trialDays} jours.`,
       },
     });
+    if (input.combined) {
+      await keepCombinedBeforeOpening(tx, {
+        id: subscription.id,
+        organizationId: input.organizationId,
+        productCode: offer.code,
+      });
+    }
     // Sprint S2 : le propriétaire est prévenu dans le portail Ocall Suite.
     await notifyOrganization(tx, {
-      organizationId: organization.id,
+      organizationId: input.organizationId,
       kind: 'TRIAL_STARTED',
-      productCode: PARK_PRODUCT_CODE,
-      params: { productName: 'Ocall Park', endsAt: endsAt.toISOString() },
+      productCode: offer.code,
+      params: { productName: offer.productName, endsAt: endsAt.toISOString() },
       dedupeKey: `trial-start:${subscription.id}`,
     });
+    return subscription.id;
+  }
 
+  /** Offre forfaitaire d'essai d'une application de la famille Park (jamais une offre par site). */
+  async parkFamilyOffer(tx: Prisma.TransactionClient, code: string): Promise<ParkFamilyOffer> {
+    const plan = await tx.subscriptionPlan.findFirst({
+      where: { product: { code }, isActive: true, pricingMode: 'FLAT' },
+      orderBy: [{ includesShowcase: 'asc' }, { monthlyPrice: 'asc' }],
+      select: { id: true, trialDays: true, product: { select: { id: true, name: true } } },
+    });
+    if (!plan)
+      throw new NotFoundException({
+        code: 'PLAN_NOT_FOUND',
+        message: 'Aucune offre pour ce métier.',
+      });
     return {
-      organizationId: organization.id,
-      userId: user.id,
-      membershipId: membership.id,
-      loginId,
+      code,
+      productId: plan.product!.id,
+      productName: code === PARK_PRODUCT_CODE ? 'Ocall Park' : plan.product!.name,
+      plan: { id: plan.id, trialDays: plan.trialDays },
     };
   }
 

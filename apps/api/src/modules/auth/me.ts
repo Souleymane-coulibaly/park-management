@@ -1,4 +1,6 @@
 import {
+  type Activity,
+  type ProductAccess,
   ROLE_PERMISSIONS,
   navigationFor,
   type Permission,
@@ -23,9 +25,17 @@ export interface MeResponse {
   accountKind: 'member' | 'internal' | 'partner' | 'guardian';
   partner: AuthContext['partner'];
   navigation: { key: string; label: string; status: string; href: string | null }[];
+  /**
+   * Sprint 7 : droit par activité de l'organisation (Ocall Parc, Ocall Restaurant ou contrat combiné) ;
+   * une partie en lecture seule n'empêche pas d'écrire dans l'autre.
+   */
+  activityAccess: Partial<Record<Activity, ProductAccess>>;
 }
 
-export function toMe(auth: AuthContext): MeResponse {
+export function toMe(
+  auth: AuthContext,
+  activityAccess: Partial<Record<Activity, ProductAccess>> = {},
+): MeResponse {
   const m = auth.membership;
   return {
     user: auth.user,
@@ -52,5 +62,6 @@ export function toMe(auth: AuthContext): MeResponse {
           href: mod.href ?? null,
         }))
       : [],
+    activityAccess,
   };
 }

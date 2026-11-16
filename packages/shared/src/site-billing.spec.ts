@@ -29,14 +29,13 @@ describe('Ocall Suite étape 6 — facturation par site', () => {
     expect(SITE_PRICING).toMatchObject({ firstAppSetupFee: 150_000, extraAppSetupFee: 112_500 });
   });
 
-  it('Parc et Restaurant comptés séparément ; séparation commerciale non activée par défaut', () => {
-    expect(billedSiteSources('OCALL_PARK')).toEqual(['OCALL_PARK', 'OCALL_RESTAURANT']);
-    expect(billedSiteSources('OCALL_PARK', true)).toEqual(['OCALL_PARK']);
+  it('Parc et Restaurant comptés séparément ; un contrat combiné compte les deux activités', () => {
+    expect(billedSiteSources('OCALL_PARK')).toEqual(['OCALL_PARK']);
+    expect(billedSiteSources('OCALL_PARK', true)).toEqual(['OCALL_PARK', 'OCALL_RESTAURANT']);
     expect(billedSiteSources('OCALL_RESTAURANT')).toEqual(['OCALL_RESTAURANT']);
-    expect(billedSiteSources('OCALL_PARK_RESTAURANT', true)).toEqual([
-      'OCALL_PARK',
-      'OCALL_RESTAURANT',
-    ]);
+    expect(billedSiteSources('OCALL_RESTAURANT', true)).toEqual(['OCALL_PARK', 'OCALL_RESTAURANT']);
+    expect(billedSiteSources('OCALL_STOCK', true)).toEqual(['OCALL_STOCK']);
+    expect(billedSiteSources('OCALL_PARK_RESTAURANT')).toEqual(['OCALL_PARK', 'OCALL_RESTAURANT']);
     expect(billedSiteSources('OCALL_STOCK')).toEqual(['OCALL_STOCK']);
   });
 
@@ -282,8 +281,21 @@ describe('Ocall Suite étape 6 — facturation par site', () => {
       productCode: 'OCALL_PARK',
       parkSites: 2,
       restaurantSites: 1,
+      contractCombined: true,
     });
     expect(mixed).toMatchObject({ combined: true, monthlyAmount: 50_000 });
+    // Montant total conservé, réparti au prorata de la grille (25 000 / 17 500).
+    expect(mixed.defaultSplit).toEqual({ park: 29_412, restaurant: 20_588 });
+    // Abonnement Ocall Parc séparé (pas de contrat combiné) : rien à basculer.
+    expect(
+      proposeParkRestaurantSplit({
+        ...base,
+        productCode: 'OCALL_PARK',
+        parkSites: 2,
+        restaurantSites: 1,
+        contractCombined: false,
+      }),
+    ).toMatchObject({ combined: false, defaultSplit: null });
     expect(mixed.targets).toEqual([
       { productCode: 'OCALL_PARK', sites: 2, indicativeMonthly: 25_000 },
       { productCode: 'OCALL_RESTAURANT', sites: 1, indicativeMonthly: 17_500 },
@@ -293,6 +305,7 @@ describe('Ocall Suite étape 6 — facturation par site', () => {
       productCode: 'OCALL_PARK',
       parkSites: 1,
       restaurantSites: 0,
+      contractCombined: true,
     });
     expect(parkOnly.combined).toBe(false);
     expect(

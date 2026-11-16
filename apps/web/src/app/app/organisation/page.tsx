@@ -215,8 +215,10 @@ function BusinessTypeCard({
         <div className="space-y-4">
           <ApiErrorAlert error={error} />
           <Alert tone="info">
-            Votre abonnement basculera sur l’offre Parc + Restaurant. Le changement est enregistré
-            dans l’historique de l’abonnement.
+            Votre abonnement actuel, son offre et son tarif sont conservés. Si votre contrat ne
+            couvre pas encore la nouvelle activité, l’essai gratuit de l’application correspondante
+            (Ocall Restaurant ou Ocall Parc) démarre ; vous la retrouvez dans le portail Ocall
+            Suite.
           </Alert>
           <div className="flex justify-end gap-2">
             <Button variant="secondary" onClick={() => setOpen(false)}>

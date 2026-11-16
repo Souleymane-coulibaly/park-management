@@ -98,8 +98,8 @@ export default function AdminAbonnementsPage() {
       <div data-testid="park-restaurant-split">
         <Card className="mt-6">
           <CardHeader
-            title="Séparation Parc / Restaurant — aperçu"
-            description="Contrats Ocall Park en cours et ce qu’ils deviendraient avec deux applications indépendantes. Aperçu seulement : aucun contrat ni prix n’est modifié ; la bascule se fera au sprint de retrait de l’offre « Parc + Restaurant », contrat par contrat."
+            title="Séparation Parc / Restaurant — contrats combinés"
+            description="Contrats Ocall Park couvrant parc et restaurant. Ils gardent leur tarif et leurs droits ; la bascule vers Ocall Parc + Ocall Restaurant est explicite, contrat par contrat : montant mensuel total conservé et réparti, aucune mise en service, échéance inchangée, attributions des partenaires prolongées."
           />
           {split.state === 'loading' && <LoadingState />}
           {split.state === 'error' && <ErrorState error={split.error} onRetry={split.reload} />}
@@ -119,6 +119,7 @@ export default function AdminAbonnementsPage() {
                   'Sites parc',
                   'Sites restaurant',
                   'Cible indicative',
+                  'Bascule',
                 ]}
               >
                 {split.data
@@ -139,6 +140,9 @@ export default function AdminAbonnementsPage() {
                             {t.sites} site(s), {formatXof(t.indicativeMonthly)} / mois
                           </p>
                         ))}
+                      </Td>
+                      <Td>
+                        <SwitchForm contract={c} onDone={split.reload} />
                       </Td>
                     </tr>
                   ))}
@@ -306,6 +310,73 @@ function PlanEditor({ plan, onSaved }: { plan: Plan; onSaved: () => void }) {
         icon={<Save className="h-4 w-4" />}
       >
         Enregistrer
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * Sprint 7 : bascule explicite d'un contrat combiné. Répartition pré-remplie (total conservé, au prorata
+ * de la grille) et modifiable ; le serveur refuse toute répartition dont la somme diffère du total.
+ */
+function SwitchForm({ contract, onDone }: { contract: ParkRestaurantSplit; onDone: () => void }) {
+  const [park, setPark] = useState(String(contract.defaultSplit?.park ?? ''));
+  const [restaurant, setRestaurant] = useState(String(contract.defaultSplit?.restaurant ?? ''));
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState<ApiError | null>(null);
+  const [loading, setLoading] = useState(false);
+  const sum = Number(park) + Number(restaurant);
+  const valid =
+    Number.isInteger(Number(park)) &&
+    Number.isInteger(Number(restaurant)) &&
+    sum === contract.monthlyAmount &&
+    reason.trim().length >= 3;
+
+  async function submit() {
+    setLoading(true);
+    setError(null);
+    try {
+      await api(`/platform/subscriptions/${contract.subscriptionId}/park-restaurant-switch`, {
+        method: 'POST',
+        body: { park: Number(park), restaurant: Number(restaurant), reason: reason.trim() },
+      });
+      onDone();
+    } catch (e) {
+      setError(e instanceof ApiError ? e : null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="min-w-56 space-y-2" data-testid="park-restaurant-switch">
+      <div className="grid grid-cols-2 gap-2">
+        <InputField
+          label="Ocall Parc / mois"
+          type="number"
+          min={0}
+          value={park}
+          onChange={(e) => setPark(e.target.value)}
+        />
+        <InputField
+          label="Ocall Restaurant / mois"
+          type="number"
+          min={0}
+          value={restaurant}
+          onChange={(e) => setRestaurant(e.target.value)}
+        />
+      </div>
+      <p className={`text-xs ${sum === contract.monthlyAmount ? 'text-muted' : 'text-terracotta'}`}>
+        Total {formatXof(sum)} sur {formatXof(contract.monthlyAmount)} actuels
+      </p>
+      <InputField
+        label="Motif (accord du client)"
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+      />
+      <ApiErrorAlert error={error} />
+      <Button size="sm" onClick={submit} loading={loading} disabled={!valid}>
+        Basculer
       </Button>
     </div>
   );

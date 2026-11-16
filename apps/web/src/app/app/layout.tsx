@@ -49,7 +49,36 @@ export default async function MemberLayout({ children }: { children: ReactNode }
         </>
       }
     >
+      <ActivityAccessNotice access={me.activityAccess ?? {}} />
       {children}
     </AppShell>
+  );
+}
+
+/**
+ * Sprint 7 : Ocall Parc et Ocall Restaurant ont des droits distincts ; une partie en lecture seule (essai
+ * échu, abonnement absent ou suspendu) n'empêche pas d'écrire dans l'autre. Données toujours conservées.
+ */
+function ActivityAccessNotice({
+  access,
+}: {
+  access: Partial<Record<'PARK' | 'RESTAURANT', 'full' | 'read_only' | 'none'>>;
+}) {
+  const readOnly = (['PARK', 'RESTAURANT'] as const).filter((a) => access[a] === 'read_only');
+  if (readOnly.length === 0) return null;
+  const names = readOnly.map((a) => (a === 'PARK' ? 'Ocall Parc' : 'Ocall Restaurant'));
+  return (
+    <div
+      className="mb-4 rounded-xl border border-savanna/40 bg-savanna/10 px-4 py-3 text-sm text-charcoal"
+      role="status"
+      data-testid="activity-read-only"
+    >
+      {names.join(' et ')} : consultation seule (essai échu ou abonnement inactif). Vos données sont
+      conservées ;{' '}
+      <Link href="/suite" className="font-semibold text-forest hover:underline">
+        activez l’abonnement depuis le portail
+      </Link>
+      .
+    </div>
   );
 }

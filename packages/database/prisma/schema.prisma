@@ -128,65 +128,66 @@ model Organization {
   createdAt              DateTime           @default(now())
   updatedAt              DateTime           @updatedAt
 
-  establishments       Establishment[]
-  brands               Brand[]
-  invitations          OrganizationInvitation[]
-  siteActivations      SiteActivation[]
-  memberships          OrganizationMembership[]
-  assignments          EstablishmentAssignment[]
-  subscriptions        Subscription[]
-  suiteContracts       SuiteContract[]
-  productTrials        ProductTrial[]
-  productSetupFees     ProductSetupFee[]
-  activationRequests   ActivationRequest[]
-  suiteNotifications   SuiteNotification[]
-  invoices             Invoice[]
-  subscriptionPayments SubscriptionPayment[]
-  publicSites          PublicSite[]
-  publicSiteMedia      PublicSiteMedia[]
-  publicSiteDomains    PublicSiteDomain[]
-  auditLogs            AuditLog[]
-  categories           ProductCategory[]
-  products             Product[]
-  variants             ProductVariant[]
-  variantPrices        VariantPrice[]
-  cashSessions         CashSession[]
-  sales                Sale[]
-  saleLines            SaleLine[]
-  payments             Payment[]
-  posTerminals         PosTerminal[]
-  printJobs            PrintJob[]
-  drawerEvents         DrawerEvent[]
-  ticketCategories     TicketCategory[]
-  tickets              Ticket[]
-  ticketScans          TicketScan[]
-  parkSchedules        ParkOpeningSchedule[]
-  parkExceptions       ParkCalendarException[]
-  orderEvents          OrderEvent[]
-  diningZones          DiningZone[]
-  diningTables         DiningTable[]
-  qrOrderRequests      QrOrderRequest[]
-  stockItems           StockItem[]
-  stockMovements       StockMovement[]
-  recipeComponents     RecipeComponent[]
-  reservations         Reservation[]
-  kioskDevices         KioskDevice[]
-  customers            Customer[]
-  loyaltyRules         LoyaltyRule[]
-  loyaltyWallets       LoyaltyWallet[]
-  loyaltyTransactions  LoyaltyTransaction[]
-  staffPositions       StaffPosition[]
-  staffAssignments     StaffAssignment[]
-  aiSettings           AiSettings?
-  aiUsages             AiUsage[]
-  aiImports            AiImport[]
-  voiceOrderDrafts     VoiceOrderDraft[]
-  storedFiles          StoredFile[]
-  supportTickets       SupportTicket[]
-  onlinePayments       OnlinePayment[]
-  attributions         Attribution[]
-  commissions          Commission[]
-  prospects            Prospect[]
+  establishments        Establishment[]
+  brands                Brand[]
+  invitations           OrganizationInvitation[]
+  siteActivations       SiteActivation[]
+  parkCombinedContracts ParkCombinedContract[]
+  memberships           OrganizationMembership[]
+  assignments           EstablishmentAssignment[]
+  subscriptions         Subscription[]
+  suiteContracts        SuiteContract[]
+  productTrials         ProductTrial[]
+  productSetupFees      ProductSetupFee[]
+  activationRequests    ActivationRequest[]
+  suiteNotifications    SuiteNotification[]
+  invoices              Invoice[]
+  subscriptionPayments  SubscriptionPayment[]
+  publicSites           PublicSite[]
+  publicSiteMedia       PublicSiteMedia[]
+  publicSiteDomains     PublicSiteDomain[]
+  auditLogs             AuditLog[]
+  categories            ProductCategory[]
+  products              Product[]
+  variants              ProductVariant[]
+  variantPrices         VariantPrice[]
+  cashSessions          CashSession[]
+  sales                 Sale[]
+  saleLines             SaleLine[]
+  payments              Payment[]
+  posTerminals          PosTerminal[]
+  printJobs             PrintJob[]
+  drawerEvents          DrawerEvent[]
+  ticketCategories      TicketCategory[]
+  tickets               Ticket[]
+  ticketScans           TicketScan[]
+  parkSchedules         ParkOpeningSchedule[]
+  parkExceptions        ParkCalendarException[]
+  orderEvents           OrderEvent[]
+  diningZones           DiningZone[]
+  diningTables          DiningTable[]
+  qrOrderRequests       QrOrderRequest[]
+  stockItems            StockItem[]
+  stockMovements        StockMovement[]
+  recipeComponents      RecipeComponent[]
+  reservations          Reservation[]
+  kioskDevices          KioskDevice[]
+  customers             Customer[]
+  loyaltyRules          LoyaltyRule[]
+  loyaltyWallets        LoyaltyWallet[]
+  loyaltyTransactions   LoyaltyTransaction[]
+  staffPositions        StaffPosition[]
+  staffAssignments      StaffAssignment[]
+  aiSettings            AiSettings?
+  aiUsages              AiUsage[]
+  aiImports             AiImport[]
+  voiceOrderDrafts      VoiceOrderDraft[]
+  storedFiles           StoredFile[]
+  supportTickets        SupportTicket[]
+  onlinePayments        OnlinePayment[]
+  attributions          Attribution[]
+  commissions           Commission[]
+  prospects             Prospect[]
 
   @@index([status])
   @@index([businessType])
@@ -520,6 +521,7 @@ model Subscription {
   payments       SubscriptionPayment[]
   priceHistory   SubscriptionPriceHistory[]
   onlinePayments OnlinePayment[]
+  parkCombined   ParkCombinedContract?
 
   @@unique([organizationId, productId])
   @@index([status])
@@ -575,6 +577,39 @@ model SubscriptionPriceHistory {
 /// `siteKey` = l'établissement du référentiel, sinon la fiche non rattachée de l'application
 /// (« OCALL_STOCK:<id> »), ou « organization » (Facture, toujours un site). Au plus une activation
 /// ouverte par (organisation, application, unité) : index unique partiel de la migration.
+/// Sprint 7 (séparation commerciale Parc / Restaurant) : contrat Ocall Park « combiné » — il couvre les
+/// activités parc ET restaurant, comme avant la séparation. Une ligne par abonnement historique de la
+/// famille Park (inscrite par la migration, sans modifier l'abonnement) ou souscrit avant l'ouverture
+/// d'Ocall Restaurant. Jamais supprimée : une bascule explicite la passe à SWITCHED, avec les deux
+/// abonnements cibles et la répartition du montant mensuel.
+model ParkCombinedContract {
+  id                       String                     @id @default(uuid()) @db.Uuid
+  organizationId           String                     @db.Uuid
+  subscriptionId           String                     @unique @db.Uuid
+  /// MIGRATION (abonnement antérieur) ou SIGNUP (souscrit avant l'ouverture d'Ocall Restaurant).
+  origin                   String
+  status                   ParkCombinedContractStatus @default(ACTIVE)
+  switchedAt               DateTime?
+  switchedById             String?                    @db.Uuid
+  switchReason             String?
+  parkSubscriptionId       String?                    @db.Uuid
+  restaurantSubscriptionId String?                    @db.Uuid
+  /// Répartition du montant mensuel à la bascule : { total, park, restaurant, basis }.
+  split                    Json?
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status])
+}
+
+enum ParkCombinedContractStatus {
+  ACTIVE
+  SWITCHED
+}
+
 model SiteActivation {
   id              String    @id @default(uuid()) @db.Uuid
   organizationId  String    @db.Uuid
@@ -2608,6 +2643,9 @@ model Attribution {
   status          AttributionStatus @default(PENDING)
   /// Règle de commission figée à la confirmation.
   ruleId          String?           @db.Uuid
+  /// Sprint 7 (séparation Parc / Restaurant) : attribution d'origine dont celle-ci est la copie tracée,
+  /// créée à la bascule d'un contrat combiné (même partenaire, même règle).
+  derivedFromId   String?           @db.Uuid
   confirmedById   String?           @db.Uuid
   confirmedAt     DateTime?
   rejectionReason String?

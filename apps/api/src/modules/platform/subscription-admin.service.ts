@@ -13,6 +13,10 @@ import {
   activitiesOf,
   proposeParkRestaurantSplit,
   subscriptionMonthlyAmount,
+  commercialAppName,
+  PARK_COMMERCIAL_CODE,
+  RESTAURANT_COMMERCIAL_CODE,
+  isValidSwitchSplit,
 } from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
@@ -21,6 +25,7 @@ import {
   MONTHLY_AMOUNT_PLAN_SELECT,
   MONTHLY_AMOUNT_SUB_SELECT,
   freezeAgreedPrices,
+  recordPriceChange,
 } from '../../common/subscription-billing';
 import { SiteActivationService } from '../establishments/site-activation.service';
 import { notifyOrganization } from '../../common/suite-notify';
@@ -302,6 +307,7 @@ export class SubscriptionAdminService implements OnModuleInit, OnModuleDestroy {
         product: { select: { code: true } },
         ...MONTHLY_AMOUNT_SUB_SELECT,
         plan: { select: { name: true, ...MONTHLY_AMOUNT_PLAN_SELECT } },
+        parkCombined: { select: { status: true } },
       },
       orderBy: { createdAt: 'asc' },
       take: 2_000,
@@ -327,6 +333,7 @@ export class SubscriptionAdminService implements OnModuleInit, OnModuleDestroy {
         expiresAt: x.expiresAt?.toISOString() ?? null,
         parkSites: count(x.organizationId, 'PARK'),
         restaurantSites: count(x.organizationId, 'RESTAURANT'),
+        contractCombined: x.parkCombined?.status === 'ACTIVE',
       }),
     );
   }
@@ -444,9 +451,7 @@ export class SubscriptionAdminService implements OnModuleInit, OnModuleDestroy {
           productCode: product.code,
           params: {
             // Motif interne non transmis : le client contacte Ocall.
-            productName: PARK_APP_PRODUCT_CODES.includes(product.code)
-              ? 'Ocall Park'
-              : product.name,
+            productName: commercialAppName(product.code, product.name),
           },
           dedupeKey: `sub:${id}:event:${event.id}`,
         });
@@ -475,5 +480,333 @@ export class SubscriptionAdminService implements OnModuleInit, OnModuleDestroy {
       });
     }
     return sub;
+  }
+
+  // ─── Sprint 7 : bascule d'un contrat combiné vers Ocall Parc + Ocall Restaurant ───
+
+  /**
+   * Bascule EXPLICITE d'un contrat Ocall Park combiné (parc et restaurant) vers deux abonnements, Ocall
+   * Parc et Ocall Restaurant (décisions D1, D3, D4, D5) :
+   * - montant mensuel total CONSERVÉ, réparti explicitement entre les deux applications (prix figés,
+   *   historisés « repris du contrat ») ; aucune facture, aucun paiement, aucune commission réécrits ;
+   * - même statut, même début et même échéance : aucun droit perdu, aucune période facturée deux fois ;
+   * - aucune nouvelle mise en service (enregistrée « non due ») ;
+   * - attributions des partenaires prolongées par une copie tracée vers l'application ajoutée ;
+   * - refusée tant qu'une facture du contrat est ouverte, qu'une activation attend une décision, ou pour
+   *   un contrat par site (total dépendant des sites).
+   * Le contrat combiné est clos (droits portés par les deux nouveaux abonnements), jamais supprimé.
+   */
+  async switchCombined(
+    auth: AuthContext,
+    id: string,
+    dto: { park: number; restaurant: number; reason: string },
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT "id" FROM "Subscription" WHERE "id" = ${id}::uuid FOR UPDATE`;
+      const sub = await tx.subscription.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          organizationId: true,
+          productId: true,
+          status: true,
+          startedAt: true,
+          expiresAt: true,
+          agreedSetupFee: true,
+          ...MONTHLY_AMOUNT_SUB_SELECT,
+          product: { select: { code: true } },
+          plan: { select: MONTHLY_AMOUNT_PLAN_SELECT },
+          parkCombined: { select: { id: true, status: true } },
+        },
+      });
+      if (!sub) {
+        throw new NotFoundException({
+          code: 'SUBSCRIPTION_NOT_FOUND',
+          message: 'Abonnement introuvable.',
+        });
+      }
+      if (sub.parkCombined?.status !== 'ACTIVE') {
+        throw new ConflictException({
+          code: 'NOT_COMBINED_CONTRACT',
+          message: 'Cet abonnement n’est pas un contrat Ocall Park combiné à basculer.',
+        });
+      }
+      if (sub.status === 'CANCELED' || sub.status === 'SUSPENDED') {
+        throw new ConflictException({
+          code: 'SWITCH_NOT_ALLOWED',
+          message: 'Contrat résilié ou suspendu : réactivez-le avant toute bascule.',
+        });
+      }
+      if (sub.plan.pricingMode === 'PER_SITE') {
+        throw new ConflictException({
+          code: 'SWITCH_PER_SITE_UNSUPPORTED',
+          message:
+            'Contrat par site : son montant dépend des sites ; bascule à préparer avec Ocall (non automatique).',
+        });
+      }
+      const [openInvoices, pendingActivations] = await Promise.all([
+        tx.invoice.count({ where: { subscriptionId: id, status: 'ISSUED' } }),
+        tx.subscriptionPayment.count({
+          where: { subscriptionId: id, activationStatus: 'PENDING' },
+        }),
+      ]);
+      if (openInvoices > 0 || pendingActivations > 0) {
+        throw new ConflictException({
+          code: 'SWITCH_OPEN_BILLING',
+          message:
+            'Une facture du contrat est ouverte ou une activation attend une décision : réglez-la d’abord.',
+        });
+      }
+      const total = subscriptionMonthlyAmount(sub);
+      const split = { park: dto.park, restaurant: dto.restaurant };
+      if (!isValidSwitchSplit(total, split)) {
+        throw new BadRequestException({
+          code: 'SWITCH_SPLIT_INVALID',
+          message: `La répartition doit être deux montants entiers positifs dont la somme est ${total} FCFA (montant mensuel actuel).`,
+        });
+      }
+      const products = await tx.saasProduct.findMany({
+        where: { code: { in: [PARK_COMMERCIAL_CODE, RESTAURANT_COMMERCIAL_CODE] } },
+        select: { id: true, code: true },
+      });
+      const productOf = (code: string) => products.find((p) => p.code === code)!.id;
+      const now = new Date();
+      const reason = `Bascule du contrat Ocall Park combiné : ${dto.reason}`;
+      const targets: Record<'park' | 'restaurant', string> = { park: '', restaurant: '' };
+      for (const side of ['park', 'restaurant'] as const) {
+        const code = side === 'park' ? PARK_COMMERCIAL_CODE : RESTAURANT_COMMERCIAL_CODE;
+        const amount = split[side];
+        if (sub.product.code === code) {
+          // Abonnement repris pour son application : tarif refigé à sa part, historisé.
+          await tx.subscription.update({
+            where: { id },
+            data: { agreedMonthlyPrice: amount, agreedAt: now },
+          });
+          await recordPriceChange(tx, {
+            subscriptionId: id,
+            planId: (
+              await tx.subscription.findUniqueOrThrow({ where: { id }, select: { planId: true } })
+            ).planId,
+            setupFee: sub.agreedSetupFee ?? 0,
+            monthlyPrice: amount,
+            currency: 'XOF',
+            actorUserId: auth.user.id,
+            reason,
+            at: now,
+          });
+          targets[side] = id;
+          continue;
+        }
+        const productId = productOf(code);
+        if (
+          await tx.subscription.count({ where: { organizationId: sub.organizationId, productId } })
+        ) {
+          throw new ConflictException({
+            code: 'SWITCH_TARGET_EXISTS',
+            message: 'Un abonnement de cette application existe déjà pour l’organisation.',
+          });
+        }
+        const plan = await tx.subscriptionPlan.findFirst({
+          where: { productId, pricingMode: 'FLAT', includesShowcase: sub.plan.includesShowcase },
+          orderBy: [{ isActive: 'desc' }, { monthlyPrice: 'asc' }],
+          select: { id: true, activationMode: true, currency: true },
+        });
+        if (!plan) {
+          throw new ConflictException({
+            code: 'SWITCH_PLAN_MISSING',
+            message: 'Aucune offre forfaitaire de cette application : créez-la avant la bascule.',
+          });
+        }
+        const created = await tx.subscription.create({
+          data: {
+            organizationId: sub.organizationId,
+            productId,
+            planId: plan.id,
+            status: sub.status,
+            startedAt: sub.startedAt,
+            expiresAt: sub.expiresAt,
+            activationMode: plan.activationMode,
+            agreedMonthlyPrice: amount,
+            agreedSetupFee: 0,
+            agreedAt: now,
+          },
+          select: { id: true },
+        });
+        await tx.subscriptionEvent.create({
+          data: {
+            subscriptionId: created.id,
+            type: 'CREATED',
+            toPlanId: plan.id,
+            toStatus: sub.status,
+            actorUserId: auth.user.id,
+            reason,
+          },
+        });
+        await recordPriceChange(tx, {
+          subscriptionId: created.id,
+          planId: plan.id,
+          setupFee: 0,
+          monthlyPrice: amount,
+          currency: plan.currency,
+          actorUserId: auth.user.id,
+          reason,
+          at: now,
+        });
+        // Essai en cours : même échéance d'essai pour la nouvelle application (aucun droit perdu).
+        if (sub.status === 'TRIALING') {
+          const trial = await tx.productTrial.findUnique({
+            where: {
+              organizationId_productId: {
+                organizationId: sub.organizationId,
+                productId: sub.productId,
+              },
+            },
+            select: { startedAt: true, endsAt: true },
+          });
+          if (trial) {
+            await tx.productTrial.upsert({
+              where: {
+                organizationId_productId: { organizationId: sub.organizationId, productId },
+              },
+              create: {
+                organizationId: sub.organizationId,
+                productId,
+                startedAt: trial.startedAt,
+                endsAt: trial.endsAt,
+                startedByUserId: auth.user.id,
+                startedByOcall: true,
+              },
+              update: {},
+            });
+          }
+        }
+        // Décision D4 : aucune nouvelle mise en service à la bascule.
+        await tx.productSetupFee.upsert({
+          where: { organizationId_productId: { organizationId: sub.organizationId, productId } },
+          create: { organizationId: sub.organizationId, productId, amount: 0, status: 'WAIVED' },
+          update: {},
+        });
+        targets[side] = created.id;
+      }
+      // Contrat combiné d'un autre produit (historique « Parc + Restaurant ») : clos, droits portés par
+      // les deux nouveaux abonnements. Jamais supprimé, factures et paiements conservés.
+      if (targets.park !== id && targets.restaurant !== id) {
+        await tx.subscription.update({ where: { id }, data: { status: 'CANCELED' } });
+        await tx.subscriptionEvent.create({
+          data: {
+            subscriptionId: id,
+            type: 'STATUS_CHANGED',
+            fromStatus: sub.status,
+            toStatus: 'CANCELED',
+            actorUserId: auth.user.id,
+            reason,
+          },
+        });
+      }
+      await tx.parkCombinedContract.update({
+        where: { id: sub.parkCombined.id },
+        data: {
+          status: 'SWITCHED',
+          switchedAt: now,
+          switchedById: auth.user.id,
+          switchReason: dto.reason,
+          parkSubscriptionId: targets.park,
+          restaurantSubscriptionId: targets.restaurant,
+          split: { total, park: split.park, restaurant: split.restaurant, basis: 'explicit' },
+        },
+      });
+      const copied = await this.extendAttributions(tx, {
+        organizationId: sub.organizationId,
+        targetProductIds: [targets.park, targets.restaurant]
+          .filter((t) => t !== id)
+          .map((t) =>
+            t === targets.park
+              ? productOf(PARK_COMMERCIAL_CODE)
+              : productOf(RESTAURANT_COMMERCIAL_CODE),
+          ),
+        actorUserId: auth.user.id,
+      });
+      await this.audit.record(
+        {
+          organizationId: null,
+          actorUserId: auth.user.id,
+          action: 'platform.park_restaurant_switched',
+          targetType: 'Subscription',
+          targetId: id,
+          metadata: {
+            organizationId: sub.organizationId,
+            total,
+            split,
+            parkSubscriptionId: targets.park,
+            restaurantSubscriptionId: targets.restaurant,
+            attributionsCopied: copied,
+            reason: dto.reason,
+          },
+        },
+        tx,
+      );
+      return {
+        total,
+        split,
+        parkSubscriptionId: targets.park,
+        restaurantSubscriptionId: targets.restaurant,
+        attributionsCopied: copied,
+      };
+    });
+  }
+
+  /**
+   * Décision D5 : chaque attribution confirmée du contrat combiné (application Ocall Park) est prolongée
+   * vers l'application ajoutée par une copie tracée (même partenaire, même règle figée, même date de
+   * confirmation, `derivedFromId`). Aucune copie si l'application a déjà une attribution confirmée (une
+   * seule par organisation et application) : jamais de commission en double.
+   */
+  private async extendAttributions(
+    tx: Tx,
+    input: {
+      organizationId: string;
+      targetProductIds: string[];
+      actorUserId: string;
+    },
+  ): Promise<number> {
+    const family = await tx.saasProduct.findMany({
+      where: { code: { in: [...PARK_APP_PRODUCT_CODES] } },
+      select: { id: true },
+    });
+    const sources = await tx.attribution.findMany({
+      where: {
+        organizationId: input.organizationId,
+        status: 'CONFIRMED',
+        productId: { in: family.map((f) => f.id) },
+      },
+      orderBy: { confirmedAt: 'asc' },
+    });
+    let copied = 0;
+    for (const productId of input.targetProductIds) {
+      for (const a of sources) {
+        if (a.productId === productId) continue;
+        const exists = await tx.attribution.count({
+          where: { organizationId: input.organizationId, productId, status: 'CONFIRMED' },
+        });
+        if (exists > 0) continue;
+        await tx.attribution.create({
+          data: {
+            organizationId: input.organizationId,
+            productId,
+            partnerId: a.partnerId,
+            prospectId: a.prospectId,
+            source: 'ADMIN',
+            status: 'CONFIRMED',
+            ruleId: a.ruleId,
+            confirmedById: a.confirmedById,
+            confirmedAt: a.confirmedAt,
+            derivedFromId: a.id,
+            createdById: input.actorUserId,
+          },
+        });
+        copied += 1;
+      }
+    }
+    return copied;
   }
 }

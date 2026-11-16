@@ -14,6 +14,8 @@ import {
   reminderStage,
   trialDaysRemaining,
   subscriptionMonthlyAmount,
+  commercialAppCode,
+  commercialAppName,
 } from '@ocall/shared';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
 import { notifyOrganization } from '../../common/suite-notify';
@@ -236,7 +238,6 @@ export class SuiteRemindersService implements OnModuleInit, OnModuleDestroy {
       dedupeKey: string;
     },
   ) {
-    const park = PARK_APP_PRODUCT_CODES.includes(input.product.code);
     try {
       // Courte transaction : l'abonnement est verrouillé et relu, puis le rappel est créé. Une activation,
       // un renouvellement ou une suspension concurrents passent avant ou après, jamais entre les deux.
@@ -255,9 +256,9 @@ export class SuiteRemindersService implements OnModuleInit, OnModuleDestroy {
         return notifyOrganization(tx, {
           organizationId: input.organizationId,
           kind: input.kind,
-          productCode: park ? PARK_PRODUCT_CODE : input.product.code,
+          productCode: commercialAppCode(input.product.code),
           params: {
-            productName: park ? 'Ocall Park' : input.product.name,
+            productName: commercialAppName(input.product.code, input.product.name),
             endsAt: input.endsAt.toISOString(),
             ...(input.daysLeft !== undefined ? { daysLeft: input.daysLeft } : {}),
           },

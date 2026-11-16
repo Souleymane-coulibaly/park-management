@@ -31,22 +31,17 @@ export const SITE_SOURCE_RESTAURANT = 'OCALL_RESTAURANT';
 export const ORGANIZATION_SITE_KEY = 'organization';
 
 /**
- * Séparation commerciale de Parc et Restaurant (décision D2 adaptée) : préparée, NON activée avant le
- * sprint de retrait de l'offre « Parc + Restaurant ». Tant qu'elle ne l'est pas, Ocall Park couvre les
- * établissements avec activité parc ou restaurant, chacun compté une seule fois.
+ * Applications dont les activations comptent pour un abonnement au produit `productCode` (sprint 7) :
+ * Ocall Parc = activité parc, Ocall Restaurant = activité restaurant. Un contrat Ocall Park combiné
+ * (historique ou souscrit avant l'ouverture d'Ocall Restaurant, `combined`) et le produit combiné
+ * historique couvrent les deux activités, chaque établissement compté une seule fois.
  */
-export const PARK_RESTAURANT_SEPARATED = false;
-
-/** Applications dont les activations comptent pour un abonnement au produit `productCode`. */
-export function billedSiteSources(
-  productCode: string,
-  separated: boolean = PARK_RESTAURANT_SEPARATED,
-): string[] {
-  if (productCode === SITE_SOURCE_PARK) {
-    return separated ? [SITE_SOURCE_PARK] : [SITE_SOURCE_PARK, SITE_SOURCE_RESTAURANT];
+export function billedSiteSources(productCode: string, combined = false): string[] {
+  if (combined || productCode === 'OCALL_PARK_RESTAURANT') {
+    if ([SITE_SOURCE_PARK, SITE_SOURCE_RESTAURANT, 'OCALL_PARK_RESTAURANT'].includes(productCode)) {
+      return [SITE_SOURCE_PARK, SITE_SOURCE_RESTAURANT];
+    }
   }
-  // Produit combiné historique : ses contrats restent combinés (jamais d'offre par site).
-  if (productCode === 'OCALL_PARK_RESTAURANT') return [SITE_SOURCE_PARK, SITE_SOURCE_RESTAURANT];
   return [productCode];
 }
 
@@ -255,13 +250,17 @@ export interface ParkContractInput {
   expiresAt: string | null;
   parkSites: number;
   restaurantSites: number;
+  /** Sprint 7 : contrat combiné actif (droits parc et restaurant) ; absent = déduit du produit. */
+  contractCombined?: boolean;
 }
 
 export interface ParkRestaurantSplitProposal extends ParkContractInput {
-  /** Contrat qui couvre aujourd'hui parc ET restaurant (combiné ou Ocall Park sur un client mixte). */
+  /** Contrat combiné qui couvre aujourd'hui parc ET restaurant d'un client qui exerce les deux. */
   combined: boolean;
   /** Abonnements cibles après séparation, avec leur mensualité à la grille par site (indicative). */
   targets: { productCode: string; sites: number; indicativeMonthly: number }[];
+  /** Répartition par défaut à la bascule : montant mensuel total conservé (décision D3). */
+  defaultSplit: { park: number; restaurant: number } | null;
 }
 
 /**
@@ -272,8 +271,10 @@ export interface ParkRestaurantSplitProposal extends ParkContractInput {
  * restaurant » apparaît dans les deux, une fois chacun).
  */
 export function proposeParkRestaurantSplit(c: ParkContractInput): ParkRestaurantSplitProposal {
+  const coversBoth = c.contractCombined ?? c.productCode === 'OCALL_PARK_RESTAURANT';
   const combined =
-    c.productCode === 'OCALL_PARK_RESTAURANT' || (c.parkSites > 0 && c.restaurantSites > 0);
+    coversBoth &&
+    (c.productCode === 'OCALL_PARK_RESTAURANT' || (c.parkSites > 0 && c.restaurantSites > 0));
   const grid = (sites: number) =>
     perSiteMonthlyAmount(
       {
@@ -289,5 +290,51 @@ export function proposeParkRestaurantSplit(c: ParkContractInput): ParkRestaurant
   ]
     .filter((t) => t.sites > 0)
     .map((t) => ({ ...t, indicativeMonthly: grid(t.sites) }));
-  return { ...c, combined, targets };
+  return {
+    ...c,
+    combined,
+    targets,
+    defaultSplit: combined
+      ? defaultSwitchSplit(c.monthlyAmount, c.parkSites, c.restaurantSites)
+      : null,
+  };
+}
+
+/**
+ * Répartition par défaut du montant mensuel d'un contrat combiné à sa bascule (décision D3) : le total est
+ * CONSERVÉ et réparti au prorata de la grille par site de chaque application (au moins un site chacune),
+ * à l'unité près ; parc + restaurant = total.
+ */
+export function defaultSwitchSplit(
+  total: number,
+  parkSites: number,
+  restaurantSites: number,
+): { park: number; restaurant: number } {
+  const grid = (sites: number) =>
+    perSiteMonthlyAmount(
+      {
+        firstSite: SITE_PRICING.firstSiteMonthly,
+        extraSite: SITE_PRICING.extraSiteMonthly,
+        showcase: 0,
+      },
+      Math.max(1, sites),
+    );
+  const wp = grid(parkSites);
+  const wr = grid(restaurantSites);
+  const park = Math.round((total * wp) / (wp + wr));
+  return { park, restaurant: total - park };
+}
+
+/** Une répartition explicite est valide si ses deux parts sont des entiers positifs qui somment au total. */
+export function isValidSwitchSplit(
+  total: number,
+  split: { park: number; restaurant: number },
+): boolean {
+  return (
+    Number.isInteger(split.park) &&
+    Number.isInteger(split.restaurant) &&
+    split.park >= 0 &&
+    split.restaurant >= 0 &&
+    split.park + split.restaurant === total
+  );
 }

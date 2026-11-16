@@ -7,7 +7,7 @@ import {
   hasPermission,
 } from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
-import { loadParkAccess } from '../../common/park-access';
+import { loadActivityAccess } from '../../common/park-access';
 import {
   type OrgReportBlockData,
   type OrgReportQuery,
@@ -94,7 +94,11 @@ export class AnalyticsReportConnector implements OnModuleInit {
     if (membership.role === 'PRODUCT_USER') return null;
     if (!hasPermission(membership.role, 'analytics.read')) return null;
     if (!activitiesOf(membership.businessType).includes(activity)) return null;
-    if ((await loadParkAccess(this.prisma, membership.organizationId, q.now)) === 'none')
+    // Sprint 7 : droit de l'application de l'activité (Ocall Parc ou Ocall Restaurant, ou contrat
+    // combiné). Lecture seule : les rapports restent consultables, comme toute consultation.
+    if (
+      (await loadActivityAccess(this.prisma, membership.organizationId, activity, q.now)) === 'none'
+    )
       return null;
     let scope: AnalyticsScope;
     try {

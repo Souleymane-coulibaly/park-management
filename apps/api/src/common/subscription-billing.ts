@@ -1,12 +1,12 @@
 import { ConflictException } from '@nestjs/common';
 import type { Prisma } from '@ocall/database';
 import {
-  PARK_APP_PRODUCT_CODES,
   SCHOOL_PRODUCT_CODE,
   addDays,
   isProductBillable,
   planSetupFee,
   zonedMidnight,
+  commercialAppName,
 } from '@ocall/shared';
 import { markSetupFeePaid } from './setup-fee';
 import { notifyOrganization } from './suite-notify';
@@ -154,9 +154,7 @@ export async function extendSubscription(
       kind: 'ACTIVATION_CONFIRMED',
       productCode: s.product.code,
       params: {
-        productName: PARK_APP_PRODUCT_CODES.includes(s.product.code)
-          ? 'Ocall Park'
-          : s.product.name,
+        productName: commercialAppName(s.product.code, s.product.name),
         endsAt: expiresAt.toISOString(),
       },
       dedupeKey: `sub:${s.id}:active:${expiresAt.toISOString()}`,

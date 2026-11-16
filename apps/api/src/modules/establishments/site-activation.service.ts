@@ -100,9 +100,9 @@ export class SiteActivationService implements OnModuleInit, OnModuleDestroy {
    * Nombre de sites qui seraient facturés aujourd'hui pour le produit (au moins un), sans rien
    * enregistrer : devis du portail et des demandes d'activation.
    */
-  async countLive(organizationId: string, productCode: string): Promise<number> {
+  async countLive(organizationId: string, productCode: string, combined = false): Promise<number> {
     const keys = new Set<string>();
-    for (const source of billedSiteSources(productCode)) {
+    for (const source of billedSiteSources(productCode, combined)) {
       for (const site of await this.read(organizationId, source)) keys.add(site.siteKey);
     }
     return billedSiteCount(keys);
@@ -126,8 +126,9 @@ export class SiteActivationService implements OnModuleInit, OnModuleDestroy {
     organizationId: string,
     productCode: string,
     now = new Date(),
+    combined = false,
   ): Promise<BilledSite[]> {
-    const sources = billedSiteSources(productCode);
+    const sources = billedSiteSources(productCode, combined);
     for (const source of sources) await this.sync(organizationId, source, now);
     const open = await this.prisma.siteActivation.findMany({
       where: { organizationId, productCode: { in: sources }, endedAt: null },
@@ -160,11 +161,12 @@ export class SiteActivationService implements OnModuleInit, OnModuleDestroy {
     organizationId: string,
     productCode: string,
     since: Date,
+    combined = false,
   ): Promise<{ unitKey: string; label: string; startedAt: Date }[]> {
     return this.prisma.siteActivation.findMany({
       where: {
         organizationId,
-        productCode: { in: billedSiteSources(productCode) },
+        productCode: { in: billedSiteSources(productCode, combined) },
         startedAt: { gt: since },
       },
       select: { unitKey: true, label: true, startedAt: true },
@@ -186,10 +188,16 @@ export class SiteActivationService implements OnModuleInit, OnModuleDestroy {
         organizationId: true,
         product: { select: { code: true } },
         plan: { select: { pricingMode: true } },
+        parkCombined: { select: { status: true } },
       },
     });
     if (!sub || sub.plan.pricingMode !== 'PER_SITE') return null;
-    const sites = await this.billedSites(sub.organizationId, sub.product.code, now);
+    const sites = await this.billedSites(
+      sub.organizationId,
+      sub.product.code,
+      now,
+      sub.parkCombined?.status === 'ACTIVE',
+    );
     const count = billedSiteCount(sites.map((s) => s.siteKey));
     await this.prisma.subscription.update({
       where: { id: subscriptionId },

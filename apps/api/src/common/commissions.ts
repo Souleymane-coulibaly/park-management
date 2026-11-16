@@ -34,13 +34,13 @@ export async function accrueCommissions(tx: Tx, paymentId: string): Promise<numb
       organizationId: true,
       invoice: { select: { total: true, lines: { select: { kind: true, amount: true } } } },
       subscription: {
-        select: { startedAt: true, productId: true, product: { select: { code: true } } },
+        select: { id: true, startedAt: true, productId: true, product: { select: { code: true } } },
       },
     },
   });
   if (p.status !== 'CONFIRMED' || !p.invoice || p.amount <= 0) return 0;
   const productId = p.subscription.productId;
-  const scope = await attributionScope(tx, productId);
+  const scope = await attributionScope(tx, productId, p.subscription.id);
   const attribution = await tx.attribution.findFirst({
     where: {
       organizationId: p.organizationId,
@@ -119,13 +119,17 @@ export async function accrueCommissions(tx: Tx, paymentId: string): Promise<numb
 }
 
 /**
- * Périmètre d'attribution d'une application. La famille Ocall Park (Park, Restaurant, Park +
- * Restaurant) forme une seule application commerciale « Ocall Park » : `canonicalId` est l'application
- * des attributions et des règles, `productIds` les produits qu'elle couvre.
+ * Périmètre d'attribution d'une application. Un contrat combiné de la famille Ocall Park (historique,
+ * ou produit « Parc + Restaurant ») reste une seule application commerciale « Ocall Park » : `canonicalId`
+ * est l'application des attributions et des règles, `productIds` les produits qu'elle couvre — droits
+ * des partenaires conservés à l'identique. Sprint 7 : un abonnement séparé Ocall Parc ou Ocall Restaurant
+ * n'est couvert que par les attributions de SON application (ou « toutes applications ») : jamais une
+ * commission en double entre les deux.
  */
 export async function attributionScope(
   tx: Tx,
   productId: string,
+  subscriptionId?: string,
 ): Promise<{ canonicalId: string; productIds: string[] }> {
   const product = await tx.saasProduct.findUniqueOrThrow({
     where: { id: productId },
@@ -134,6 +138,12 @@ export async function attributionScope(
   if (!PARK_APP_PRODUCT_CODES.includes(product.code)) {
     return { canonicalId: productId, productIds: [productId] };
   }
+  const combined =
+    product.code === 'OCALL_PARK_RESTAURANT' ||
+    (subscriptionId
+      ? (await tx.parkCombinedContract.count({ where: { subscriptionId, status: 'ACTIVE' } })) > 0
+      : true);
+  if (!combined) return { canonicalId: productId, productIds: [productId] };
   const family = await tx.saasProduct.findMany({
     where: { code: { in: [...PARK_APP_PRODUCT_CODES] } },
     select: { id: true, code: true },

@@ -367,3 +367,35 @@ site**. Aucun contrat existant n'est modifié automatiquement.
 - **Écrans** : Super Admin (prix par site des offres, aperçu de séparation, estimation et sites facturés
   des factures), portail (devis par site, mise en service dégressive), page Tarifs (grille par site dès
   qu'une offre par site est active).
+
+## Sprint 7 — séparation commerciale Ocall Parc / Ocall Restaurant
+
+Décisions D1 à D8 validées. Deux applications commerciales, chacune avec son abonnement, ses droits et ses
+établissements activés ; une organisation abonnée aux deux garde une navigation unifiée (une session).
+
+- **Contrats combinés** (`ParkCombinedContract`, migration `20261216000000_suite_s7_separation_parc_restaurant`) :
+  chaque abonnement existant de la famille Park est inscrit, sans être modifié, comme contrat combiné ; il
+  garde ses droits sur le parc ET le restaurant et son tarif jusqu'à une bascule explicite (D1). Avant
+  l'ouverture d'Ocall Restaurant, un nouvel abonnement Ocall Park l'est aussi (comportement inchangé).
+- **Ouverture d'Ocall Restaurant** : action explicite d'Ocall — activer une offre forfaitaire Restaurant
+  (créées inactives, D8), puis présenter le produit au catalogue (`listed`, refusé sans offre forfaitaire
+  active : `RESTAURANT_PLAN_REQUIRED`). Jamais automatique.
+- **Droits par activité** (`loadActivityAccess`) : Ocall Parc → parc, Ocall Restaurant → restaurant, contrat
+  combiné → les deux. La garde de lecture seule applique le droit de l'activité de la route ; une route
+  commune (caisse, ventes, clients, paiements) reste ouverte si l'une des deux est active ; une vente est
+  contrôlée sur sa propre activité. `/auth/me` expose `activityAccess` (avis de lecture seule par activité).
+- **Inscription** (D2) : après ouverture, une application par activité du métier (deux essais, deux
+  abonnements, une session) ; changement de métier : essai de l'application ajoutée (sauf contrat combiné).
+  Parrainage : une attribution par application souscrite.
+- **Bornes et QR publics** (D6) : menu consultable ; nouvelle commande seulement avec un droit Restaurant actif
+  (`ONLINE_ORDERING_UNAVAILABLE`).
+- **Bascule** (D3, D4, D5) : `POST /platform/subscriptions/:id/park-restaurant-switch` (Super Admin, motif
+  obligatoire) — montant mensuel total conservé et réparti explicitement (somme contrôlée), même statut et
+  même échéance, mise en service « non due », attributions confirmées copiées (`derivedFromId`) vers
+  l'application ajoutée, contrat combiné marqué `SWITCHED` (le produit historique « Parc + Restaurant » est
+  clos, jamais supprimé). Refusée avec une facture ouverte, une activation en attente ou un contrat par site.
+- **Commissions** : un contrat combiné reste couvert par les attributions Ocall Park (famille) ; un abonnement
+  séparé seulement par celles de son application : jamais de doublon.
+- **Facturation par site** : un contrat combiné compte les établissements parc et restaurant (une fois
+  chacun) ; Ocall Parc et Ocall Restaurant séparés, chacun les siens.
+- **Billet + repas** (D7) : hors sprint ; clients, fidélité, caisses, paiements et rapports restent communs.

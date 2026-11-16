@@ -9,6 +9,8 @@ import { type Activity, type OrderChannel, computeChange } from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
 import type { TenantContext } from '../../common/auth-context';
+import { parkReadOnlyError } from '../../common/guards/park-read-only.guard';
+import { loadActivityAccess } from '../../common/park-access';
 import { PaymentMethodsService } from '../payments/payment-methods.service';
 import { TicketIssuanceService } from '../ticket-issuance/ticket-issuance.service';
 import { RestaurantEventsService } from '../realtime/restaurant-events.service';
@@ -172,6 +174,11 @@ export class SalesService {
     if (params.clientRequestId) {
       const replay = await this.findReplayedSale(auth, params.clientRequestId);
       if (replay) return replay;
+    }
+    // Sprint 7 : la vente relève de l'application de son activité (Ocall Parc ou Ocall Restaurant, ou
+    // contrat combiné) ; la caisse reste commune aux deux.
+    if ((await loadActivityAccess(this.prisma, organizationId, params.activity)) !== 'full') {
+      throw parkReadOnlyError(params.activity);
     }
     const establishment = await findSellingEstablishment(
       this.prisma,

@@ -1,6 +1,6 @@
 import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post } from '@nestjs/common';
 import { ApiProperty, ApiTags } from '@nestjs/swagger';
-import { IsUUID } from 'class-validator';
+import { IsInt, IsUUID, Max, Min } from 'class-validator';
 import type { AuthContext } from '../../common/auth-context';
 import { CurrentAuth, RequirePlatformPermission } from '../../common/decorators';
 import { ReasonDto } from './payments.dto';
@@ -10,6 +10,21 @@ export class ChangePlanDto extends ReasonDto {
   @ApiProperty()
   @IsUUID('4')
   planId: string;
+}
+
+/** Sprint 7 : répartition explicite du montant mensuel à la bascule d'un contrat combiné. */
+export class SwitchCombinedDto extends ReasonDto {
+  @ApiProperty({ description: 'Part mensuelle Ocall Parc (FCFA).' })
+  @IsInt()
+  @Min(0)
+  @Max(100_000_000)
+  park: number;
+
+  @ApiProperty({ description: 'Part mensuelle Ocall Restaurant (FCFA).' })
+  @IsInt()
+  @Min(0)
+  @Max(100_000_000)
+  restaurant: number;
 }
 
 /** Actions d'administration des abonnements (Sprint 12A), toutes motivées et journalisées. */
@@ -76,6 +91,18 @@ export class SubscriptionAdminController {
     @Body() dto: ReasonDto,
   ) {
     return this.subscriptions.cancel(auth, id, dto.reason);
+  }
+
+  /** Sprint 7 : bascule explicite d'un contrat combiné vers Ocall Parc + Ocall Restaurant. */
+  @RequirePlatformPermission('platform.subscriptions.manage')
+  @HttpCode(200)
+  @Post(':id/park-restaurant-switch')
+  switchCombined(
+    @CurrentAuth() auth: AuthContext,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SwitchCombinedDto,
+  ) {
+    return this.subscriptions.switchCombined(auth, id, dto);
   }
 
   @RequirePlatformPermission('platform.subscriptions.manage')

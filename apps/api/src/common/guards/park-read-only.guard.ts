@@ -8,8 +8,9 @@ import { PATH_METADATA } from '@nestjs/common/constants';
 import { Reflector } from '@nestjs/core';
 import type { Request } from 'express';
 import { PrismaService } from '../../prisma/prisma.service';
-import { ALLOW_IN_PARK_READ_ONLY } from '../decorators';
-import { loadParkAccess } from '../park-access';
+import { type Activity, coversActivity } from '@ocall/shared';
+import { ALLOW_IN_PARK_READ_ONLY, REQUIRED_ACTIVITY } from '../decorators';
+import { loadActivityAccess, loadParkAccess } from '../park-access';
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
@@ -73,19 +74,48 @@ export class ParkReadOnlyGuard implements CanActivate {
     const controllerPath =
       (Reflect.getMetadata(PATH_METADATA, context.getClass()) as string | undefined) ?? '';
     if (isParkReadOnlyExempt(controllerPath)) return true;
+    // Sprint 7 : droit de l'activité de la route (Ocall Parc ou Ocall Restaurant, ou contrat combiné).
+    // Route commune aux deux activités (caisse, ventes, clients…) : un droit actif sur l'une suffit.
+    const declared =
+      this.reflector.getAllAndOverride<Activity[] | undefined>(REQUIRED_ACTIVITY, [
+        context.getHandler(),
+        context.getClass(),
+      ]) ?? [];
+    const activities = declared.filter((a) => coversActivity(membership.businessType, a));
     // Refus sécurisé : une erreur de lecture des droits n'accorde jamais l'écriture.
-    let access: 'full' | 'read_only' | 'none';
+    let full = false;
     try {
-      access = await loadParkAccess(this.prisma, membership.organizationId);
+      full = activities.length
+        ? (
+            await Promise.all(
+              activities.map((a) => loadActivityAccess(this.prisma, membership.organizationId, a)),
+            )
+          ).includes('full')
+        : (await loadParkAccess(this.prisma, membership.organizationId)) === 'full';
     } catch {
-      access = 'read_only';
+      full = false;
     }
-    if (access === 'full') return true;
-    throw new ForbiddenException({
-      code: 'PARK_READ_ONLY',
-      message:
-        'Votre essai ou votre abonnement Ocall Park est échu ou suspendu : l’application est en lecture seule. ' +
-        'Vos données sont conservées ; demandez l’activation de votre abonnement depuis le portail Ocall Suite.',
-    });
+    if (full) return true;
+    throw parkReadOnlyError(activities.length === 1 ? activities[0]! : null);
   }
+}
+
+/**
+ * Refus d'écriture d'une activité sans droit actif (code inchangé `PARK_READ_ONLY` pour les écrans
+ * existants ; `activity` précise l'application concernée depuis le sprint 7).
+ */
+export function parkReadOnlyError(activity: Activity | null): ForbiddenException {
+  const app =
+    activity === 'RESTAURANT'
+      ? 'Ocall Restaurant'
+      : activity === 'PARK'
+        ? 'Ocall Parc'
+        : 'Ocall Park';
+  return new ForbiddenException({
+    code: 'PARK_READ_ONLY',
+    activity,
+    message:
+      `Votre essai ou votre abonnement ${app} est échu, suspendu ou absent : cette partie de l’application est en lecture seule. ` +
+      'Vos données sont conservées ; demandez l’activation de votre abonnement depuis le portail Ocall Suite.',
+  });
 }
