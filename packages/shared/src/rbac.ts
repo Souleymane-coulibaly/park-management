@@ -103,6 +103,8 @@ export const Permission = {
   ANALYTICS_READ: 'analytics.read',
   ANALYTICS_MARGINS: 'analytics.margins',
   ANALYTICS_EXPORT: 'analytics.export',
+  /** Ocall Suite étape 5 : tableau de bord de l'organisation (propriétaire et administrateur). */
+  ORGANIZATION_REPORTS_READ: 'organization.reports.read',
   SITE_MANAGE: 'site.manage',
   SITE_PUBLISH: 'site.publish',
   SITE_DOMAIN: 'site.domain',
@@ -158,6 +160,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   'analytics.read': 'Consulter les analyses et statistiques',
   'analytics.margins': 'Consulter les coûts matière et marges estimées',
   'analytics.export': 'Exporter les analyses (CSV)',
+  'organization.reports.read':
+    'Consulter le tableau de bord de l’organisation (chaque application selon ses propres droits)',
   'site.manage': 'Modifier le site vitrine (brouillon, médias, menu public)',
   'site.publish': 'Publier ou dépublier le site vitrine',
   'site.domain': 'Gérer le nom de domaine du site vitrine',

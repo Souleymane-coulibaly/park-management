@@ -277,3 +277,46 @@ Décisions et architecture : `ocall-audits/audit-architecture-multisite-ocall-su
 - **Migration** `20261214000000_facture_suite_etablissement_emetteur` (base Facture, additive).
 - **Tests** : `apps/api/test/facture-etablissement-emetteur.integration.spec.ts`,
   `apps/api/src/modules/facture/facture-document-pdf.spec.ts`, `e2e/facture-etablissement.spec.ts`.
+
+## Étape 5 — tableau de bord de l'organisation (reporting multi-établissements)
+
+Cadrage validé le 15/11/2026 (décisions D1 à D5). Aucune migration.
+
+- **Écran** `/suite/tableau-de-bord` (lien « Tableau de bord de l'organisation » du portail) et **API**
+  `GET /dashboard/organization?period&from&to&establishmentId` (`establishmentId` : un établissement du
+  référentiel, `none` = « Non rattaché », absent = tous ; un établissement d'une autre organisation : 404).
+- **Accès (D1)** : permission `organization.reports.read` (propriétaire, administrateur). Chaque bloc applique en
+  plus les **droits réels de l'application** : application ouverte (abonnement, essai ou contrat) et rôle avec le
+  droit de consulter ses indicateurs (Park/Restaurant `analytics.read` ; Facture `facture.documents.read` ;
+  Stock l'un des droits de son tableau de bord, boutiques du membre ; School `school.finance.reports`, écoles du
+  membre). Sans ce droit, le bloc n'apparaît pas.
+- **Blocs** : Parc (billetterie encaissée, ventes payées, entrées), Restaurant (encaissé, ventes, commandes,
+  panier moyen), Facture (facturé TTC net des avoirs, encaissé, reste à encaisser, en retard), Stock (ventes en
+  caisse encaissées, ventes, valeur du stock, alertes), School (encaissé, reste à percevoir, élèves inscrits de
+  l'année en cours, **par devise de l'école**). Chaque montant porte sa **nature** (encaissé, facturé, reste dû,
+  valeur du stock) et sa **devise**.
+- **Aucun total entre applications (D2)** ; les factures issues de ventes en caisse Stock sont **isolées** dans
+  Facture (« dont ventes Stock », D3) : déjà comptées dans le bloc Stock.
+- **Par établissement** : tableau comparatif ; ce qui n'est rattaché à aucun établissement (documents Facture
+  sans établissement, boutiques et écoles non rattachées) est dans « **Non rattaché** », jamais attribué
+  automatiquement. Les lieux Park sont tous des établissements.
+- **Fuseau et devise** : période résolue une fois dans le fuseau de l'organisation (jours locaux transmis aux
+  applications comptées au jour ; Park/Restaurant à l'heure locale de chaque établissement) ; devise de
+  l'organisation, montants d'une autre devise présentés à part.
+- **Connecteurs analytiques** (`apps/api/src/common/integration/organization-reporting.ts`) : chaque application
+  inscrit au démarrage un connecteur (`OrgReportConnector` : produit, libellé, ordre, lien, `report(query)`)
+  auprès du registre global ; une application future (Ocall Print, Sabatii…) ajoute le sien sans toucher au
+  tableau de bord. Appels en parallèle, délai de 20 s par bloc : une application en panne ou trop lente donne un
+  bloc « indisponible », jamais une erreur de la page.
+- **Lien « Détail »** : rapport de l'application sur la même période (jours explicites) et le même
+  établissement (Facture, Stock, analyses Park/Restaurant lisent ces paramètres).
+- **Lot B** : tableau de bord Facture (`from`, `to`, `establishmentId`, factures de ventes Stock isolées), exports
+  Facture (filtre et colonne « Établissement » = nom figé à l'émission), tableau de bord Stock (`establishmentId`
+  → boutiques rattachées, toujours dans celles du membre).
+- **Lot C** : copilote IA — un lieu sans activité Park/Restaurant est introuvable et n'est plus proposé ;
+  `/dashboard` — chiffre d'affaires d'un superviseur par `establishmentScope` (même résultat) ; analyses — devise
+  de l'organisation au lieu de XOF codé en dur.
+- **Hors périmètre** : tarification de l'étape 6 (inchangée), interconnexion Park ↔ Stock (étape 7, reportée).
+- **Tests** : `apps/api/test/suite-s5-reporting.integration.spec.ts`,
+  `apps/api/src/common/integration/organization-reporting.spec.ts`, `packages/shared/src/organization-report.spec.ts`,
+  `e2e/suite-s5-dashboard.spec.ts`.

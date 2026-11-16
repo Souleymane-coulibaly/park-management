@@ -276,7 +276,8 @@ export interface AnalyticsMeta {
   establishments: { id: string; name: string }[];
   activity: AnalyticsActivity;
   timezone: string;
-  currency: 'XOF';
+  /** Devise de l'organisation (code ISO, ex. XOF). */
+  currency: string;
   generatedAt: string;
 }
 

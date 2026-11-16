@@ -5,6 +5,7 @@ import { PasswordService } from './security/password.service';
 import { PortalAccounts } from './security/portal-accounts';
 import { SessionService } from './security/session.service';
 import { SiteDomainRegistry } from './sites/site-domain-registry';
+import { OrganizationReportingRegistry } from './integration/organization-reporting';
 
 @Global()
 @Module({
@@ -15,6 +16,7 @@ import { SiteDomainRegistry } from './sites/site-domain-registry';
     PortalAccounts,
     MailService,
     SiteDomainRegistry,
+    OrganizationReportingRegistry,
   ],
   exports: [
     AuditService,
@@ -23,6 +25,7 @@ import { SiteDomainRegistry } from './sites/site-domain-registry';
     PortalAccounts,
     MailService,
     SiteDomainRegistry,
+    OrganizationReportingRegistry,
   ],
 })
 export class CommonModule {}

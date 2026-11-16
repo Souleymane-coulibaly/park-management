@@ -39,6 +39,7 @@ import { OcallStockShowcaseService } from './ocall-stock-showcase.service';
 import { createDomainVerifier } from '../../common/sites/domain-verifier';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
 import { OcallStockReportsService } from './ocall-stock-reports.service';
+import { OcallStockReportConnector } from './ocall-stock-report.connector';
 import { OcallStockPurchasesController } from './ocall-stock-purchases.controller';
 import { OcallStockPurchasesService } from './ocall-stock-purchases.service';
 import { OcallStockReturnsService } from './ocall-stock-returns.service';
@@ -94,6 +95,7 @@ import { OcallStockService } from './ocall-stock.service';
     OcallStockCustomersService,
     OcallStockFactureGateway,
     OcallStockReportsService,
+    OcallStockReportConnector,
     OcallStockShowcaseService,
     OcallStockShowcaseDomainsService,
     OcallStockAiUsageStore,

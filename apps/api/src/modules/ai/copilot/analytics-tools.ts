@@ -31,6 +31,8 @@ export interface AnalyticsContext {
   prisma: PrismaService;
   organizationId: string;
   establishment: { id: string; name: string; timezone: string };
+  /** Devise de l'organisation. */
+  currency: string;
   now: Date;
   /** Analyses du Sprint 9 (lecture seule). */
   analytics: AnalyticsService;
@@ -108,6 +110,7 @@ function analyticsScope(
       activities: [activity],
       period: p,
       timezone: tz,
+      currency: ctx.currency,
     },
   };
 }

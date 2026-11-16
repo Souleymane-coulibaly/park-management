@@ -1,5 +1,5 @@
-import { Injectable } from '@nestjs/common';
-import { coversActivity, hasPermission, numbersAreGrounded } from '@ocall/shared';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { activitiesOf, coversActivity, hasPermission, numbersAreGrounded } from '@ocall/shared';
 import { PrismaService } from '../../../prisma/prisma.service';
 import type { TenantContext } from '../../../common/auth-context';
 import { type AiToolRejection, toolExecutor } from '../../../ai-core/ai-tools';
@@ -47,7 +47,19 @@ export class CopilotService {
   async ask(auth: TenantContext, establishmentId: string, question: string) {
     // Établissement contrôlé par le serveur : organisation et périmètre d'affectation du membre.
     const scoped = await findSellingEstablishment(this.prisma, auth, establishmentId);
+    // Ocall Suite étape 5 (lot C) : un lieu du référentiel sans activité Park ni Restaurant (boutique,
+    // école…) n'a aucune donnée à analyser : introuvable, comme dans les analyses.
+    if (activitiesOf(scoped.businessType).length === 0) {
+      throw new NotFoundException({
+        code: 'ESTABLISHMENT_NOT_FOUND',
+        message: 'Établissement introuvable.',
+      });
+    }
     const establishment = { id: scoped.id, name: scoped.name, timezone: scoped.timezone };
+    const { currency } = await this.prisma.organization.findUniqueOrThrow({
+      where: { id: auth.membership.organizationId },
+      select: { currency: true },
+    });
     const tools = this.availableTools(auth, scoped.businessType);
     const executor = toolExecutor<AnalyticsContext, AnalyticsTool, AnalyticsResult>({
       tools: ANALYTICS_TOOLS,
@@ -62,6 +74,7 @@ export class CopilotService {
         prisma: this.prisma,
         organizationId: auth.membership.organizationId,
         establishment,
+        currency,
         now: new Date(),
         analytics: this.analytics,
       }),

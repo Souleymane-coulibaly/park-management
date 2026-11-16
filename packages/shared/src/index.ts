@@ -10,6 +10,7 @@ export * from './restaurant';
 export * from './crm';
 export * from './ai';
 export * from './analytics';
+export * from './organization-report';
 export * from './saas';
 export * from './sites';
 export * from './platform';

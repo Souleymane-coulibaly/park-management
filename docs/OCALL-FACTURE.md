@@ -173,11 +173,16 @@ brouillon n'a pas de numéro.
 - **Relance** : e-mail rappelant le reste à payer et l'échéance, facture jointe ; comptée seulement si le
   fournisseur accepte le message (clé d'idempotence par rang de relance). Relance manuelle, pas d'envoi
   automatique en V1.
-- **Tableau de bord** (`/facture`) : facturé HT du mois net des avoirs, encaissé du mois, reste à
-  encaisser, retards (montant, nombre, 10 plus anciennes échéances), devis en attente.
+- **Tableau de bord** (`/facture`, `GET dashboard?from&to&establishmentId`) : facturé HT du mois (ou de la
+  période choisie, un an au plus, jours dans le fuseau de l'organisation) net des avoirs, encaissé, reste à
+  encaisser, retards (montant, nombre, 10 plus anciennes échéances), devis en attente ; filtre par établissement
+  émetteur (`none` : documents sans établissement). Les factures de ventes en caisse Ocall Stock sont isolées
+  (`fromStockSales`, « dont ventes Stock ») : déjà comptées comme ventes dans Stock. Sans paramètre : réponse
+  du mois en cours, comme avant (Ocall Suite étape 5).
 - **Exports CSV** (Excel français, « ; », UTF-8 avec BOM, cellules protégées contre l'injection de
   formules) : journal des ventes (factures et avoirs émis, avoirs en négatif, TVA par taux, échéance,
-  reste à payer) et journal des encaissements (annulations comprises), sur une période d'un an au plus.
+  reste à payer) et journal des encaissements (annulations comprises), sur une période d'un an au plus ;
+  colonne « Établissement » (nom figé à l'émission) et filtre `establishmentId` (Ocall Suite étape 5).
 - **PDF** : charte F1 ; la facture porte son échéance (ou son délai sur le brouillon), l'avoir la facture
   corrigée, le bloc « En faveur de » et le « Total de l'avoir ».
 - **Hors V1** : remboursement d'un trop-perçu, relances automatiques, paiement en ligne.

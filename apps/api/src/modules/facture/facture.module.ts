@@ -7,6 +7,7 @@ import { FactureAiController } from './facture-ai.controller';
 import { FactureAiService } from './facture-ai.service';
 import { FactureBillingController } from './facture-billing.controller';
 import { FactureBillingService } from './facture-billing.service';
+import { FactureReportConnector } from './facture-report.connector';
 import { FactureClientsService } from './facture-clients.service';
 import { FactureCommercialController } from './facture-commercial.controller';
 import { FactureDocumentsService } from './facture-documents.service';
@@ -67,6 +68,7 @@ import { FactureService } from './facture.service';
     FactureClientsService,
     FactureDocumentsService,
     FactureBillingService,
+    FactureReportConnector,
     FactureInterventionsService,
     FactureNotificationsService,
     FactureAiUsageStore,

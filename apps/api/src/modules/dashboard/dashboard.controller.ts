@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Query } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import {
   activitiesOf,
@@ -11,6 +11,10 @@ import { parkSubscriptionWhere } from '../../common/park-subscription';
 import { type AuthContext, requireTenant } from '../../common/auth-context';
 import { CurrentAuth, RequirePermission } from '../../common/decorators';
 import { establishmentScope, membershipScope } from '../../common/tenant-scope';
+import {
+  OrganizationReportQueryDto,
+  OrganizationReportService,
+} from './organization-report.service';
 
 /**
  * Indicateurs du tableau de bord, calculés uniquement sur des données réelles.
@@ -19,7 +23,20 @@ import { establishmentScope, membershipScope } from '../../common/tenant-scope';
 @ApiTags('Tableau de bord')
 @Controller('dashboard')
 export class DashboardController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly organizationReport: OrganizationReportService,
+  ) {}
+
+  /**
+   * Ocall Suite étape 5 : tableau de bord de l'organisation (propriétaire, administrateur). Un bloc par
+   * application ouverte où la personne a les droits de consultation ; aucun total entre applications.
+   */
+  @RequirePermission('organization.reports.read')
+  @Get('organization')
+  organization(@CurrentAuth() auth: AuthContext, @Query() query: OrganizationReportQueryDto) {
+    return this.organizationReport.report(requireTenant(auth), query);
+  }
 
   @RequirePermission('dashboard.read')
   @Get()
@@ -74,13 +91,23 @@ export class DashboardController {
         })
       : null;
 
+    // Ocall Suite étape 5 (lot C) : périmètre du chiffre d'affaires = celui de toute l'API
+    // (`establishmentScope`) ; null = toute l'organisation (propriétaire, administrateur).
+    const scopedSites = hasOrganizationWideScope(role)
+      ? null
+      : (
+          await this.prisma.establishment.findMany({
+            where: establishmentScope(tenant),
+            select: { id: true },
+          })
+        ).map((e) => e.id);
     const revenueFor = (activity: 'RESTAURANT' | 'PARK') =>
       coversActivity(businessType, activity) && hasPermission(role, 'sale.read_all')
         ? this.revenue(
             activity,
             tenant.membership.organizationId,
             tenant.membership.timezone,
-            hasOrganizationWideScope(role) ? null : tenant.membership.id,
+            scopedSites,
           )
         : Promise.resolve(null);
     const [restaurantRevenue, parkRevenue] = await Promise.all([
@@ -109,7 +136,8 @@ export class DashboardController {
     activity: 'RESTAURANT' | 'PARK',
     organizationId: string,
     timezone: string,
-    assignedMembershipId: string | null,
+    /** Établissements retenus ; null = toute l'organisation. */
+    establishmentIds: string[] | null,
   ) {
     const [row] = await this.prisma.$queryRaw<
       { today: bigint | null; last30: bigint | null; count30: bigint }[]
@@ -125,8 +153,7 @@ export class DashboardController {
         AND s."activity" = ${activity}::"SaleActivity"
         AND s."status" = 'OPEN'
         AND p."createdAt" >= now() - interval '30 days'
-        AND (${assignedMembershipId}::uuid IS NULL OR s."establishmentId" IN (
-          SELECT a."establishmentId" FROM "EstablishmentAssignment" a WHERE a."membershipId" = ${assignedMembershipId}::uuid))`;
+        AND (${establishmentIds === null}::boolean OR s."establishmentId" = ANY(${establishmentIds ?? []}::uuid[]))`;
     return {
       today: Number(row?.today ?? 0),
       last30Days: Number(row?.last30 ?? 0),

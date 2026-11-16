@@ -23,6 +23,7 @@ import { SchoolEstablishmentsService } from './school-establishments.service';
 import { SchoolMembersService } from './school-members.service';
 import { SchoolNotificationsService } from './school-notifications.service';
 import { SchoolPaymentsService } from './school-payments.service';
+import { SchoolReportConnector } from './school-report.connector';
 import { SchoolCalendarController, SchoolPlanningController } from './school-planning.controller';
 import { SchoolAiAnalysisService } from './ai/school-ai-analysis.service';
 import { SchoolAiCopilotService } from './ai/school-ai-copilot.service';
@@ -108,6 +109,7 @@ import { APP_CONFIG, type AppConfig } from '../../config/app-config';
     SchoolQuranService,
     SchoolFinanceService,
     SchoolPaymentsService,
+    SchoolReportConnector,
     // Sprint 6 : portail parents, présences, communication, notifications, SMS.
     // Seul le fournisseur simulé existe (configuration validée au démarrage) : aucun SMS réel.
     { provide: SCHOOL_SMS_PROVIDER, useClass: SimulatedSmsProvider },

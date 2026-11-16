@@ -24,6 +24,7 @@ import {
   assertSubscriptionWritable,
   isOrganizationOwner,
 } from '../../common/app-guard';
+import type { TenantContext } from '../../common/auth-context';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
 import { PrismaService } from '../../prisma/prisma.service';
 import { FacturePrismaService } from './facture-prisma.service';
@@ -68,41 +69,61 @@ export class FactureAccessGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     assertAppEnabled(this.config.facture.enabled);
     const req = context.switchToHttp().getRequest<FactureRequest>();
-    const auth = appTenant(req.auth);
-    const organizationId = auth.membership.organizationId;
-
-    const access = await loadAppAccess(this.core, organizationId, FACTURE_PRODUCT_CODE);
-    assertAppActivated(access, 'Ocall Facture');
-    assertSubscriptionWritable(access, req.method, 'Ocall Facture');
-
-    const isOwner = isOrganizationOwner(auth);
-    // Sprint Suite 2A : rôle Facture pour tout membre de l'organisation (employé Park compris) ; le
-    // propriétaire reste responsable d'office.
-    const member = isOwner
-      ? null
-      : await this.db.factureMember.findFirst({
-          where: { organizationId, userId: auth.user.id, isActive: true },
-          select: { id: true, role: true },
-        });
-    if (!isOwner && !member) throw appDenied();
-    const role: FactureRole = member?.role ?? 'MANAGER';
-
     const permissions = this.reflector.getAllAndOverride<FacturePermission[] | undefined>(
       FACTURE_PERMISSION,
       [context.getHandler(), context.getClass()],
     );
-    if (permissions && !permissions.some((p) => hasFacturePermission(role, p))) {
-      throw appDenied();
-    }
-
-    req.facture = {
-      organizationId,
-      userId: auth.user.id,
-      access,
-      role,
-      memberId: member?.id ?? null,
-      isOwner,
-    };
+    req.facture = await resolveFactureContext(
+      { core: this.core, db: this.db, config: this.config },
+      appTenant(req.auth),
+      req.method,
+      permissions,
+    );
     return true;
   }
+}
+
+/**
+ * Contexte Ocall Facture d'un membre, dans l'ordre de la garde : application activée, droit commercial,
+ * lecture seule, rôle Facture (le propriétaire est gérant d'office), permission (l'une suffit). Lève le
+ * même refus que la garde. Seule source de ce calcul : garde des routes et lectures demandées par une
+ * autre partie de l'API (tableau de bord de l'organisation).
+ */
+export async function resolveFactureContext(
+  deps: { core: PrismaService; db: FacturePrismaService; config: AppConfig },
+  auth: TenantContext,
+  method: string,
+  permissions?: readonly FacturePermission[],
+): Promise<FactureContext> {
+  assertAppEnabled(deps.config.facture.enabled);
+  const organizationId = auth.membership.organizationId;
+
+  const access = await loadAppAccess(deps.core, organizationId, FACTURE_PRODUCT_CODE);
+  assertAppActivated(access, 'Ocall Facture');
+  assertSubscriptionWritable(access, method, 'Ocall Facture');
+
+  const isOwner = isOrganizationOwner(auth);
+  // Sprint Suite 2A : rôle Facture pour tout membre de l'organisation (employé Park compris) ; le
+  // propriétaire reste responsable d'office.
+  const member = isOwner
+    ? null
+    : await deps.db.factureMember.findFirst({
+        where: { organizationId, userId: auth.user.id, isActive: true },
+        select: { id: true, role: true },
+      });
+  if (!isOwner && !member) throw appDenied();
+  const role: FactureRole = member?.role ?? 'MANAGER';
+
+  if (permissions && !permissions.some((p) => hasFacturePermission(role, p))) {
+    throw appDenied();
+  }
+
+  return {
+    organizationId,
+    userId: auth.user.id,
+    access,
+    role,
+    memberId: member?.id ?? null,
+    isOwner,
+  };
 }

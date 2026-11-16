@@ -431,8 +431,11 @@ Décisions du 13/11/2026 : liste de clients propre à Stock ; remises soumises �
 
 ## 12. Tableaux de bord, alertes et recherche globale (S6)
 
-**Tableau de bord** (`/stock`, `GET reports/dashboard?from&to&siteId`) : 30 derniers jours par défaut, un an
-au plus, un site ou tous ceux du membre. Chaque bloc n'apparaît qu'avec son droit ; sinon il vaut `null` :
+**Tableau de bord** (`/stock`, `GET reports/dashboard?from&to&siteId&establishmentId`) : 30 derniers jours par
+défaut, un an au plus, un site ou tous ceux du membre ; jours dans le fuseau de l'organisation. Ocall Suite
+étape 5 : `establishmentId` retient les boutiques rattachées à cet établissement du référentiel (`none` : les
+boutiques non rattachées), toujours parmi celles du membre ; la réponse donne l'établissement de chaque
+boutique et la liste des établissements rattachés (filtre de l'écran). Chaque bloc n'apparaît qu'avec son droit ; sinon il vaut `null` :
 
 | Bloc                                           | Droit                           |
 | ---------------------------------------------- | ------------------------------- |

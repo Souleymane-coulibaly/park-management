@@ -1,9 +1,9 @@
 'use client';
 
-import type { ReactNode } from 'react';
+import { type ReactNode, Suspense } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import type { AnalyticsScopeInfo } from '@ocall/shared';
+import { usePathname, useSearchParams } from 'next/navigation';
+import { ANALYTICS_PERIODS, type AnalyticsPeriod, type AnalyticsScopeInfo } from '@ocall/shared';
 import { AccessDenied } from '@/components/app/access-denied';
 import { useCan } from '@/components/app/session-context';
 import { AnalyticsFilters, AnalyticsProvider } from '@/components/analytics/filters';
@@ -15,11 +15,36 @@ import { useApi } from '@/lib/use-api';
 export default function AnalyticsLayout({ children }: { children: ReactNode }) {
   const canRead = useCan('analytics.read');
   if (!canRead) return <AccessDenied />;
-  return <AnalyticsShell>{children}</AnalyticsShell>;
+  return (
+    <Suspense fallback={<LoadingState />}>
+      <AnalyticsShell>{children}</AnalyticsShell>
+    </Suspense>
+  );
+}
+
+/**
+ * Filtres de départ lus dans l'adresse (lien du tableau de bord de l'organisation) : une période connue,
+ * des dates AAAA-MM-JJ, un établissement du périmètre ; tout le reste est ignoré.
+ */
+function initialFilters(params: URLSearchParams, scope: AnalyticsScopeInfo) {
+  const day = (v: string | null) => (v && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : '');
+  const period = params.get('period');
+  const establishmentId = params.get('establishmentId') ?? '';
+  return {
+    ...(period && (ANALYTICS_PERIODS as readonly string[]).includes(period)
+      ? {
+          period: period as AnalyticsPeriod,
+          from: day(params.get('from')),
+          to: day(params.get('to')),
+        }
+      : {}),
+    ...(scope.establishments.some((e) => e.id === establishmentId) ? { establishmentId } : {}),
+  };
 }
 
 function AnalyticsShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const params = useSearchParams();
   const scope = useApi<AnalyticsScopeInfo>('/analytics/scope');
   if (scope.state === 'loading') return <LoadingState />;
   if (scope.state === 'error') return <ErrorState error={scope.error} onRetry={scope.reload} />;
@@ -48,7 +73,7 @@ function AnalyticsShell({ children }: { children: ReactNode }) {
     pathname === '/app/analytics' || pathname === '/app/analytics/etablissements';
 
   return (
-    <AnalyticsProvider scope={s}>
+    <AnalyticsProvider scope={s} initial={initialFilters(params, s)}>
       <PageHeader
         eyebrow="Analyses"
         title="Statistiques et rentabilité"

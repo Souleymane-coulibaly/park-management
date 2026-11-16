@@ -139,6 +139,8 @@ describe('Analyses — périmètre résolu par le serveur', () => {
   const prisma = (rows = establishments) =>
     ({
       establishment: { findMany: jest.fn().mockResolvedValue(rows) },
+      // Devise de l'organisation (Ocall Suite étape 5, lot C).
+      organization: { findUniqueOrThrow: jest.fn().mockResolvedValue({ currency: 'XOF' }) },
     }) as unknown as PrismaService;
   const tenant = (role: 'OWNER' | 'SUPERVISOR', businessType = 'PARK_RESTAURANT') =>
     ({

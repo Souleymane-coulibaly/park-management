@@ -44,6 +44,7 @@ export default function CopilotPage() {
         {() => (
           <EstablishmentScope<Establishment>
             source="/establishments"
+            filter={(e) => e.businessType !== 'NONE'}
             storageKey="ocp.copilot.establishment"
             emptyTitle="Aucun établissement disponible"
             emptyDescription="Le copilote analyse un établissement auquel vous êtes affecté."

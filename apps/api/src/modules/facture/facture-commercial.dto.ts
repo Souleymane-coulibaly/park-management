@@ -465,6 +465,10 @@ export class CancelFacturePaymentDto {
   reason: string;
 }
 
+/** Établissement émetteur d'un rapport : un UUID, ou « none » (documents sans établissement). */
+const ESTABLISHMENT_OR_NONE =
+  /^(none|[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
+
 /** Période d'un export (dates incluses, un an au plus). */
 export class FactureExportQueryDto {
   @ApiProperty({ description: 'Premier jour (AAAA-MM-JJ)' })
@@ -476,4 +480,32 @@ export class FactureExportQueryDto {
   @Matches(ISO_DAY)
   @IsISO8601({ strict: true })
   to: string;
+
+  @ApiPropertyOptional({
+    description: 'Ocall Suite étape 5 : établissement émetteur, ou « none » (sans établissement).',
+  })
+  @IsOptional()
+  @Matches(ESTABLISHMENT_OR_NONE)
+  establishmentId?: string;
+}
+
+/**
+ * Tableau de bord Facture (Ocall Suite étape 5) : période facultative (jours inclus, un an au plus ;
+ * sans dates, le mois en cours) et établissement émetteur (UUID ou « none »).
+ */
+export class FactureDashboardQueryDto {
+  @ApiPropertyOptional({ description: 'Premier jour (AAAA-MM-JJ)' })
+  @IsOptional()
+  @Matches(ISO_DAY)
+  from?: string;
+
+  @ApiPropertyOptional({ description: 'Dernier jour (AAAA-MM-JJ)' })
+  @IsOptional()
+  @Matches(ISO_DAY)
+  to?: string;
+
+  @ApiPropertyOptional({ description: 'Établissement émetteur, ou « none » (sans établissement).' })
+  @IsOptional()
+  @Matches(ESTABLISHMENT_OR_NONE)
+  establishmentId?: string;
 }

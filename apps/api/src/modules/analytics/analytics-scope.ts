@@ -32,6 +32,8 @@ export interface AnalyticsScope {
   activities: Activity[];
   period: ResolvedAnalyticsPeriod;
   timezone: string;
+  /** Devise de l'organisation (Ocall Suite étape 5, lot C : plus de devise codée en dur). */
+  currency: string;
 }
 
 /** Établissements visibles par le membre, avec leurs activités (y compris désactivés : historique). */
@@ -83,7 +85,14 @@ export async function resolveAnalyticsScope(
     });
   }
 
-  let establishments = await visibleEstablishments(prisma, tenant);
+  const [visible, organization] = await Promise.all([
+    visibleEstablishments(prisma, tenant),
+    prisma.organization.findUniqueOrThrow({
+      where: { id: tenant.membership.organizationId },
+      select: { currency: true },
+    }),
+  ]);
+  let establishments = visible;
   if (query.establishmentId) {
     establishments = establishments.filter((e) => e.id === query.establishmentId);
     if (establishments.length === 0) {
@@ -109,6 +118,7 @@ export async function resolveAnalyticsScope(
     activities,
     period,
     timezone: tenant.membership.timezone,
+    currency: organization.currency,
   };
 }
 
@@ -123,7 +133,7 @@ export function metaOf(scope: AnalyticsScope, now = new Date()): AnalyticsMeta {
     establishments: scope.establishments.map((e) => ({ id: e.id, name: e.name })),
     activity: scope.activity,
     timezone: scope.timezone,
-    currency: 'XOF',
+    currency: scope.currency,
     generatedAt: now.toISOString(),
   };
 }

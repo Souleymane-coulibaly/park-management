@@ -22,16 +22,21 @@ export function EstablishmentScope<T extends ScopedEstablishment>({
   storageKey,
   emptyTitle,
   emptyDescription,
+  filter,
   children,
 }: {
   /** Route de l'API listant les établissements accessibles pour cet écran. */
   source: string;
+  /** Établissements retenus pour cet écran (ex. ceux qui ont une activité Park ou Restaurant). */
+  filter?: (establishment: T) => boolean;
   storageKey: string;
   emptyTitle: string;
   emptyDescription: string;
   children: (establishment: T) => ReactNode;
 }) {
-  const establishments = useApi<T[]>(source);
+  const loaded = useApi<T[]>(source);
+  const establishments =
+    loaded.state === 'success' && filter ? { ...loaded, data: loaded.data.filter(filter) } : loaded;
   const [selected, choose] = useRememberedChoice(
     storageKey,
     establishments.state === 'success' ? establishments.data.map((e) => e.id) : null,

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@ocall/stock-database';
 import {
   STOCK_DEFAULT_SLOW_MOVING_DAYS,
@@ -12,9 +12,12 @@ import {
   stockValue,
   type StockPermission,
   stockWeightedCost,
+  localMoment,
+  zonedMidnight,
 } from '@ocall/shared';
 import { type StockContext, stockCan, stockSiteAllowed, stockSitesFor } from './ocall-stock-access';
 import { OcallStockPrismaService } from './ocall-stock-prisma.service';
+import { SITE_REGISTRY, type SiteRegistry } from '../../common/integration/site-registry';
 
 const DAY = 86_400_000;
 const TOP = 10;
@@ -55,23 +58,67 @@ export interface StockAlertRow {
  */
 @Injectable()
 export class OcallStockReportsService {
-  constructor(private readonly db: OcallStockPrismaService) {}
+  constructor(
+    private readonly db: OcallStockPrismaService,
+    @Inject(SITE_REGISTRY) private readonly sites: SiteRegistry,
+  ) {}
 
-  async dashboard(ctx: StockContext, query: { from?: string; to?: string; siteId?: string }) {
-    const period = stockReportPeriod(query.from, query.to, new Date());
+  /**
+   * `siteIds` (tableau de bord de l'organisation, filtre par établissement) : sites retenus, toujours
+   * réduits à ceux du membre ; `timezone` : bornes des jours dans le fuseau de l'organisation (sinon UTC).
+   */
+  async dashboard(
+    ctx: StockContext,
+    query: {
+      from?: string;
+      to?: string;
+      siteId?: string;
+      siteIds?: string[];
+      establishmentId?: string;
+    },
+    options: { timezone?: string; now?: Date } = {},
+  ) {
+    // Ocall Suite étape 5 : établissement du référentiel → boutiques qui y sont explicitement rattachées
+    // (« none » : boutiques non rattachées) ; jamais de rattachement déduit.
+    if (query.establishmentId && !query.siteIds) {
+      const establishment = query.establishmentId.toLowerCase();
+      const linked = await this.db.stockSite.findMany({
+        where: {
+          organizationId: ctx.organizationId,
+          establishmentId: establishment === 'none' ? null : establishment,
+        },
+        select: { id: true },
+      });
+      const ids = linked.map((s) => s.id);
+      if (query.siteId && !ids.includes(query.siteId)) {
+        throw new NotFoundException({ code: 'STOCK_SITE_NOT_FOUND', message: 'Site introuvable.' });
+      }
+      query = { ...query, siteIds: query.siteId ? [query.siteId] : ids, siteId: undefined };
+    }
+    const now = options.now ?? new Date();
+    const period = stockReportPeriod(
+      query.from,
+      query.to,
+      options.timezone ? new Date(`${localMoment(now, options.timezone).date}T12:00:00Z`) : now,
+    );
     if (period.error) {
       throw new BadRequestException({ code: 'STOCK_REPORT_PERIOD', message: period.error });
     }
-    const scope = await this.scope(ctx, query.siteId);
-    const start = period.from;
-    const end = new Date(period.to.getTime() + DAY);
+    const scope = await this.scope(ctx, query.siteId, query.siteIds);
+    const day = (d: Date) => d.toISOString().slice(0, 10);
+    const start = options.timezone
+      ? zonedMidnight(day(period.from), options.timezone)
+      : period.from;
+    const end = options.timezone
+      ? zonedMidnight(day(new Date(period.to.getTime() + DAY)), options.timezone)
+      : new Date(period.to.getTime() + DAY);
     const seeCost = stockCan(ctx, 'stock.prices.purchase.read');
     const sites = await this.db.stockSite.findMany({
       where: {
         organizationId: ctx.organizationId,
         ...(scope.sites ? { id: { in: scope.sites } } : {}),
       },
-      select: { id: true, code: true, name: true },
+      select: { id: true, code: true, name: true, establishmentId: true },
       orderBy: { code: 'asc' },
     });
     const costs = seeCost ? await this.unitCosts(ctx.organizationId, end) : null;
@@ -97,6 +144,9 @@ export class OcallStockReportsService {
         to: period.to.toISOString().slice(0, 10),
       },
       siteId: query.siteId ?? null,
+      establishmentId: query.establishmentId?.toLowerCase() ?? null,
+      // Établissements du référentiel auxquels les boutiques du membre sont rattachées (filtre).
+      establishments: await this.linkedEstablishments(ctx),
       sales: sales ? (({ bySite: _b, ...rest }) => rest)(sales) : null,
       stock: stock ? (({ bySite: _b, ...rest }) => rest)(stock) : null,
       alerts,
@@ -361,6 +411,23 @@ export class OcallStockReportsService {
 
   // ─── Outils ───
 
+  /** Établissements (référentiel commun) des boutiques visibles par le membre, par nom. */
+  private async linkedEstablishments(ctx: StockContext) {
+    const sites = await this.db.stockSite.findMany({
+      where: {
+        organizationId: ctx.organizationId,
+        establishmentId: { not: null },
+        ...(ctx.siteIds ? { id: { in: ctx.siteIds } } : {}),
+      },
+      select: { establishmentId: true },
+    });
+    const ids = new Set(sites.map((s) => s.establishmentId!));
+    if (ids.size === 0) return [];
+    return (await this.sites.list(ctx.organizationId))
+      .filter((e) => ids.has(e.id))
+      .map((e) => ({ id: e.id, name: e.name, isActive: e.isActive }));
+  }
+
   /**
    * Périmètre d'une section : celui de la requête, limité aux sites où le membre porte la permission
    * (null si elle n'est portée nulle part : section masquée).
@@ -375,8 +442,18 @@ export class OcallStockReportsService {
     };
   }
 
-  /** Périmètre : un site précis (dans ceux du membre), sinon ceux du membre (null = tous). */
-  private async scope(ctx: StockContext, siteId?: string): Promise<Scope> {
+  /**
+   * Périmètre : un site précis (dans ceux du membre, sinon introuvable), une liste de sites (réduite à
+   * ceux du membre, sans erreur), sinon ceux du membre (null = tous).
+   */
+  private async scope(ctx: StockContext, siteId?: string, siteIds?: string[]): Promise<Scope> {
+    if (siteIds && !siteId) {
+      const allowed = ctx.siteIds;
+      return {
+        organizationId: ctx.organizationId,
+        sites: allowed === null ? [...siteIds] : siteIds.filter((id) => allowed.includes(id)),
+      };
+    }
     if (siteId) {
       const site = await this.db.stockSite.findUnique({
         where: { organizationId_id: { organizationId: ctx.organizationId, id: siteId } },

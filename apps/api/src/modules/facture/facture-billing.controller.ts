@@ -12,6 +12,8 @@ import {
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import type { Response } from 'express';
+import { type AuthContext, requireTenant } from '../../common/auth-context';
+import { CurrentAuth } from '../../common/decorators';
 import { download } from '../../common/download';
 import {
   CurrentFacture,
@@ -19,12 +21,13 @@ import {
   type FactureContext,
   RequireFacturePermission,
 } from './facture-access';
-import { FactureBillingService } from './facture-billing.service';
+import { FactureBillingService, factureEstablishmentFilter } from './facture-billing.service';
 import {
   CancelFacturePaymentDto,
   FactureExportQueryDto,
   RecordFacturePaymentDto,
   SendFactureDocumentDto,
+  FactureDashboardQueryDto,
 } from './facture-commercial.dto';
 import { FactureDocumentsService } from './facture-documents.service';
 
@@ -80,10 +83,23 @@ export class FactureBillingController {
     return this.documents.remind(ctx, id, dto);
   }
 
+  /**
+   * Indicateurs : période (sinon le mois en cours) et établissement émetteur facultatifs ; jours dans le
+   * fuseau de l'organisation (Ocall Suite étape 5). Sans paramètre, réponse inchangée.
+   */
   @RequireFacturePermission('facture.documents.read')
   @Get('dashboard')
-  dashboard(@CurrentFacture() ctx: FactureContext) {
-    return this.billing.dashboard(ctx);
+  dashboard(
+    @CurrentFacture() ctx: FactureContext,
+    @CurrentAuth() auth: AuthContext,
+    @Query() query: FactureDashboardQueryDto,
+  ) {
+    return this.billing.dashboard(ctx, {
+      from: query.from,
+      to: query.to,
+      timezone: requireTenant(auth).membership.timezone,
+      establishments: factureEstablishmentFilter(query.establishmentId),
+    });
   }
 
   @RequireFacturePermission('facture.reports.read')

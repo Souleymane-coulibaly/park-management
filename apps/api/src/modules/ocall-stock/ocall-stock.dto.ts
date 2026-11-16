@@ -298,6 +298,14 @@ export class StockReportQueryDto {
   @IsOptional()
   @IsUUID()
   siteId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Ocall Suite étape 5 : établissement du référentiel (boutiques qui y sont rattachées), ou « none » (boutiques non rattachées).',
+  })
+  @IsOptional()
+  @Matches(/^(none|[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i)
+  establishmentId?: string;
 }
 
 export class StockReportSiteQueryDto {

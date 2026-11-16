@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useMemo, useState } from 'react';
 import { AlertTriangle, Banknote, Boxes, ShoppingCart } from 'lucide-react';
 import { formatStockQuantity, formatXof } from '@ocall/shared';
 import { BarChart, Section, formatPct, shortDate } from '@/components/analytics/charts';
@@ -54,10 +54,13 @@ interface DashboardView {
     shortage: number;
     value: number | null;
   } | null;
+  /** Établissements du référentiel des boutiques du membre (filtre, Ocall Suite étape 5). */
+  establishments: { id: string; name: string; isActive: boolean }[];
   sites: {
     id: string;
     code: string;
     name: string;
+    establishmentId: string | null;
     revenue: number | null;
     salesCount: number | null;
     stockValue: number | null;
@@ -95,26 +98,39 @@ export default function StockHomePage() {
   return (
     <StockPage title="Tableau de bord" description="Ventes, marges, stock, alertes et achats.">
       {({ context, canWrite }) => (
-        <Home role={context.roleLabel} canCreate={canWrite('stock.catalog.manage')} />
+        <Suspense fallback={<LoadingState />}>
+          <Home role={context.roleLabel} canCreate={canWrite('stock.catalog.manage')} />
+        </Suspense>
       )}
     </StockPage>
   );
 }
 
 function Home({ role, canCreate }: { role: string; canCreate: boolean }) {
-  const [preset, setPreset] = useState('30');
+  // Période et établissement repris de l'adresse (lien du tableau de bord de l'organisation).
+  const params = useSearchParams();
+  const linked = Boolean(params.get('from') && params.get('to'));
+  const [preset, setPreset] = useState(linked ? 'custom' : '30');
   const today = useMemo(() => iso(new Date()), []);
-  const [from, setFrom] = useState(iso(new Date(Date.now() - 29 * 86_400_000)));
-  const [to, setTo] = useState(today);
+  const [from, setFrom] = useState(
+    linked ? params.get('from')! : iso(new Date(Date.now() - 29 * 86_400_000)),
+  );
+  const [to, setTo] = useState(linked ? params.get('to')! : today);
   const [siteId, setSiteId] = useState('');
+  const [establishmentId, setEstablishmentId] = useState(params.get('establishmentId') ?? '');
   const sites = useApi<StockSiteView[]>('/ocall-stock/sites');
   const range =
     preset === 'custom'
       ? { from, to }
       : { from: iso(new Date(Date.now() - (Number(preset) - 1) * 86_400_000)), to: today };
   const dashboard = useApi<DashboardView>(
-    `/ocall-stock/reports/dashboard?${new URLSearchParams({ ...range, ...(siteId ? { siteId } : {}) })}`,
+    `/ocall-stock/reports/dashboard?${new URLSearchParams({
+      ...range,
+      ...(siteId ? { siteId } : {}),
+      ...(establishmentId ? { establishmentId } : {}),
+    })}`,
   );
+  const establishments = dashboard.state === 'success' ? dashboard.data.establishments : [];
 
   return (
     <>
@@ -156,6 +172,24 @@ function Home({ role, canCreate }: { role: string; canCreate: boolean }) {
                 .map((s) => ({ value: s.id, label: `${s.code} · ${s.name}` })),
             ]}
           />
+          {(establishments.length > 0 || establishmentId) && (
+            <SelectField
+              label="Établissement"
+              value={establishmentId}
+              onChange={(e) => {
+                setEstablishmentId(e.target.value);
+                setSiteId('');
+              }}
+              options={[
+                { value: '', label: 'Tous les établissements' },
+                ...establishments.map((e) => ({
+                  value: e.id,
+                  label: `${e.name}${e.isActive ? '' : ' (désactivé)'}`,
+                })),
+                { value: 'none', label: 'Boutiques non rattachées' },
+              ]}
+            />
+          )}
         </CardBody>
       </Card>
       {dashboard.state === 'loading' && <LoadingState />}

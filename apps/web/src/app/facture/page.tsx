@@ -1,20 +1,30 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { Suspense, useState } from 'react';
 import { AlertTriangle, Building2, Download, Users } from 'lucide-react';
 import { formatXof } from '@ocall/shared';
 import { FacturePage } from '@/components/facture/facture-page';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
-import { InputField } from '@/components/ui/field';
+import { InputField, SelectField } from '@/components/ui/field';
 import { Alert, ErrorState, LoadingState } from '@/components/ui/states';
 import { Table, Td } from '@/components/ui/table';
 import { useApi } from '@/lib/use-api';
 
 interface Dashboard {
-  month: string;
-  invoiced: { count: number; creditNotes: number; netHt: number; netTtc: number };
-  collected: { count: number; amount: number };
+  /** Mois en cours (AAAA-MM) ; null pour une période choisie. */
+  month: string | null;
+  period: { from: string; to: string };
+  invoiced: {
+    count: number;
+    creditNotes: number;
+    netHt: number;
+    netTtc: number;
+    /** Dont factures de ventes en caisse Ocall Stock (déjà comptées dans Stock). */
+    fromStockSales: { count: number; netHt: number; netTtc: number };
+  };
+  collected: { count: number; amount: number; fromStockSales: number };
   outstanding: { count: number; amount: number };
   overdue: {
     count: number;
@@ -39,6 +49,27 @@ const monthFr = (month: string) =>
     year: 'numeric',
   });
 const plural = (n: number, word: string) => `${n} ${word}${n > 1 ? 's' : ''}`;
+
+interface EstablishmentChoice {
+  id: string;
+  name: string;
+  city: string | null;
+  isActive: boolean;
+}
+
+/** Choix d'établissement émetteur d'un rapport : tous, un établissement, ou sans établissement. */
+function useEstablishmentOptions() {
+  const establishments = useApi<EstablishmentChoice[]>('/facture/establishments');
+  const list = establishments.state === 'success' ? establishments.data : [];
+  return [
+    { value: '', label: 'Tous les établissements' },
+    ...list.map((e) => ({
+      value: e.id,
+      label: `${e.name}${e.city ? ` — ${e.city}` : ''}${e.isActive ? '' : ' (désactivé)'}`,
+    })),
+    { value: 'none', label: 'Sans établissement' },
+  ];
+}
 
 /**
  * Tableau de bord Ocall Facture : mentions légales à compléter, indicateurs du mois (facturé net des
@@ -71,7 +102,11 @@ export default function FactureHomePage() {
               </Alert>
             </div>
           )}
-          {context.permissions.includes('facture.documents.read') && <Indicators />}
+          {context.permissions.includes('facture.documents.read') && (
+            <Suspense fallback={<LoadingState />}>
+              <Indicators />
+            </Suspense>
+          )}
           {context.permissions.includes('facture.reports.read') && <Exports />}
           <div className="grid gap-4 sm:grid-cols-2">
             <Card>
@@ -137,29 +172,96 @@ function Tile({
   );
 }
 
+/**
+ * Indicateurs : mois en cours ou période choisie, tous les établissements émetteurs ou un seul (Ocall
+ * Suite étape 5). Période et établissement repris de l'adresse (lien du tableau de bord de
+ * l'organisation).
+ */
 function Indicators() {
-  const dashboard = useApi<Dashboard>('/facture/dashboard');
-  if (dashboard.state === 'loading') return <LoadingState />;
-  if (dashboard.state === 'error') {
-    return <ErrorState error={dashboard.error} onRetry={dashboard.reload} />;
-  }
-  const d = dashboard.data;
-  const notes = d.invoiced.creditNotes;
+  const params = useSearchParams();
+  const [mode, setMode] = useState(params.get('from') && params.get('to') ? 'custom' : 'month');
+  const [from, setFrom] = useState(params.get('from') ?? '');
+  const [to, setTo] = useState(params.get('to') ?? '');
+  const [establishmentId, setEstablishmentId] = useState(params.get('establishmentId') ?? '');
+  const options = useEstablishmentOptions();
+  const ready = mode === 'month' || (Boolean(from) && Boolean(to));
+  const query = new URLSearchParams({
+    ...(mode === 'custom' ? { from, to } : {}),
+    ...(establishmentId ? { establishmentId } : {}),
+  }).toString();
+  const dashboard = useApi<Dashboard>(
+    ready ? `/facture/dashboard${query ? `?${query}` : ''}` : null,
+  );
   return (
     <section className="space-y-4" aria-label="Indicateurs de facturation">
+      <div
+        className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+        data-testid="facture-dashboard-filters"
+      >
+        <SelectField
+          label="Période"
+          value={mode}
+          onChange={(e) => setMode(e.target.value)}
+          options={[
+            { value: 'month', label: 'Mois en cours' },
+            { value: 'custom', label: 'Période choisie' },
+          ]}
+        />
+        {mode === 'custom' && (
+          <>
+            <InputField
+              label="Du"
+              type="date"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+            />
+            <InputField label="Au" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+          </>
+        )}
+        <SelectField
+          label="Établissement émetteur"
+          value={establishmentId}
+          onChange={(e) => setEstablishmentId(e.target.value)}
+          options={options}
+        />
+      </div>
+      {!ready && <Alert tone="info">Choisissez la date de début et la date de fin.</Alert>}
+      {ready && dashboard.state === 'loading' && <LoadingState />}
+      {ready && dashboard.state === 'error' && (
+        <ErrorState error={dashboard.error} onRetry={dashboard.reload} />
+      )}
+      {ready && dashboard.state === 'success' && <IndicatorTiles d={dashboard.data} />}
+    </section>
+  );
+}
+
+function IndicatorTiles({ d }: { d: Dashboard }) {
+  const notes = d.invoiced.creditNotes;
+  const span = d.month
+    ? `en ${monthFr(d.month)}`
+    : `du ${dateFr(d.period.from)} au ${dateFr(d.period.to)}`;
+  const stock = d.invoiced.fromStockSales;
+  return (
+    <>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Tile
-          label={`Facturé en ${monthFr(d.month)} (HT)`}
+          label={`Facturé ${span} (HT)`}
           value={formatXof(d.invoiced.netHt)}
           detail={`${plural(d.invoiced.count, 'facture')}${
             notes ? `, ${plural(notes, 'avoir')} déduit${notes > 1 ? 's' : ''}` : ''
-          } · ${formatXof(d.invoiced.netTtc)} TTC`}
+          } · ${formatXof(d.invoiced.netTtc)} TTC${
+            stock.count ? ` · dont ventes Stock : ${formatXof(stock.netTtc)} TTC` : ''
+          }`}
           testId="facture-kpi-invoiced"
         />
         <Tile
-          label={`Encaissé en ${monthFr(d.month)}`}
+          label={`Encaissé ${span}`}
           value={formatXof(d.collected.amount)}
-          detail={plural(d.collected.count, 'encaissement')}
+          detail={`${plural(d.collected.count, 'encaissement')}${
+            d.collected.fromStockSales
+              ? ` · dont ventes Stock : ${formatXof(d.collected.fromStockSales)}`
+              : ''
+          }`}
           testId="facture-kpi-collected"
         />
         <Tile
@@ -207,7 +309,7 @@ function Indicators() {
           </div>
         </Card>
       )}
-    </section>
+    </>
   );
 }
 
@@ -218,7 +320,13 @@ function Exports() {
     new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10),
   );
   const [to, setTo] = useState(now.toISOString().slice(0, 10));
-  const query = new URLSearchParams({ from, to }).toString();
+  const [establishmentId, setEstablishmentId] = useState('');
+  const options = useEstablishmentOptions();
+  const query = new URLSearchParams({
+    from,
+    to,
+    ...(establishmentId ? { establishmentId } : {}),
+  }).toString();
   const link =
     'inline-flex items-center gap-2 rounded-xl border border-line px-3 py-2 text-sm font-medium hover:bg-ivory';
   return (
@@ -230,6 +338,12 @@ function Exports() {
       <CardBody className="flex flex-wrap items-end gap-3">
         <InputField label="Du" type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
         <InputField label="Au" type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        <SelectField
+          label="Établissement émetteur"
+          value={establishmentId}
+          onChange={(e) => setEstablishmentId(e.target.value)}
+          options={options}
+        />
         <a
           href={`/api/v1/facture/exports/sales?${query}`}
           className={link}

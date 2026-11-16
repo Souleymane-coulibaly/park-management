@@ -84,6 +84,7 @@ export function SuitePortal({
   canSites = false,
   canInvite = false,
   canBilling = false,
+  canDashboard = false,
 }: {
   organizationName: string;
   firstName: string;
@@ -93,6 +94,8 @@ export function SuitePortal({
   canInvite?: boolean;
   /** Ocall Suite Sprint 2D : catalogue et abonnements (propriétaire, administrateurs). */
   canBilling?: boolean;
+  /** Ocall Suite étape 5 : tableau de bord de l'organisation (propriétaire, administrateurs). */
+  canDashboard?: boolean;
 }) {
   const apps = useApi<SuitePortalApp[]>('/suite/overview');
   const unread = useApi<{ unread: number }>('/suite/notifications/unread-count');
@@ -120,6 +123,15 @@ export function SuitePortal({
           </h1>
           <p className="mt-1 text-suite-ink-soft">Choisissez votre application.</p>
           <div className="mt-2 flex flex-wrap gap-4">
+            {canDashboard && (
+              <Link
+                href="/suite/tableau-de-bord"
+                className="text-sm font-semibold text-suite-green hover:underline"
+                data-testid="suite-dashboard-link"
+              >
+                Tableau de bord de l’organisation
+              </Link>
+            )}
             {canSites && (
               <Link
                 href="/suite/sites"

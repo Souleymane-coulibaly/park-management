@@ -1,5 +1,7 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import { type AuthContext, requireTenant } from '../../common/auth-context';
+import { CurrentAuth } from '../../common/decorators';
 import {
   CurrentStock,
   OcallStockAccessGuard,
@@ -26,8 +28,14 @@ export class OcallStockReportsController {
     'stock.movements.read',
   )
   @Get('dashboard')
-  dashboard(@CurrentStock() ctx: StockContext, @Query() query: StockReportQueryDto) {
-    return this.reports.dashboard(ctx, query);
+  dashboard(
+    @CurrentStock() ctx: StockContext,
+    @CurrentAuth() auth: AuthContext,
+    @Query() query: StockReportQueryDto,
+  ) {
+    return this.reports.dashboard(ctx, query, {
+      timezone: requireTenant(auth).membership.timezone,
+    });
   }
 
   @RequireStockPermission('stock.levels.read')

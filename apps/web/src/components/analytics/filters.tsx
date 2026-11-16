@@ -42,9 +42,12 @@ export function useAnalytics(): AnalyticsContextValue {
 /** Filtres communs aux onglets d'analyse : conservés quand on passe d'un onglet à l'autre. */
 export function AnalyticsProvider({
   scope,
+  initial,
   children,
 }: {
   scope: AnalyticsScopeInfo;
+  /** Filtres de départ (lien du tableau de bord de l'organisation), déjà validés. */
+  initial?: Partial<AnalyticsFilterState>;
   children: ReactNode;
 }) {
   const [filters, set] = useState<AnalyticsFilterState>({
@@ -53,6 +56,7 @@ export function AnalyticsProvider({
     to: '',
     establishmentId: '',
     activity: 'ALL',
+    ...initial,
   });
   const value = useMemo<AnalyticsContextValue>(
     () => ({
@@ -107,33 +111,51 @@ export function AnalyticsData<T>({
   return <>{children(result.data)}</>;
 }
 
+/**
+ * Champs de période (période, puis dates d'une période personnalisée), communs aux analyses et au
+ * tableau de bord de l'organisation.
+ */
+export function PeriodFields({
+  value,
+  onChange,
+}: {
+  value: { period: AnalyticsPeriod; from: string; to: string };
+  onChange: (next: Partial<{ period: AnalyticsPeriod; from: string; to: string }>) => void;
+}) {
+  return (
+    <>
+      <SelectField
+        label="Période"
+        value={value.period}
+        onChange={(e) => onChange({ period: e.target.value as AnalyticsPeriod })}
+        options={ANALYTICS_PERIODS.map((p) => ({ value: p, label: ANALYTICS_PERIOD_LABELS[p] }))}
+      />
+      {value.period === 'custom' && (
+        <>
+          <InputField
+            label="Du"
+            type="date"
+            value={value.from}
+            onChange={(e) => onChange({ from: e.target.value })}
+          />
+          <InputField
+            label="Au"
+            type="date"
+            value={value.to}
+            onChange={(e) => onChange({ to: e.target.value })}
+          />
+        </>
+      )}
+    </>
+  );
+}
+
 /** Barre de filtres : période, dates, établissement, activité — sur une ligne au-dessus des graphiques. */
 export function AnalyticsFilters({ showActivity = true }: { showActivity?: boolean }) {
   const { scope, filters, setFilters } = useAnalytics();
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" data-testid="analytics-filters">
-      <SelectField
-        label="Période"
-        value={filters.period}
-        onChange={(e) => setFilters({ period: e.target.value as AnalyticsPeriod })}
-        options={ANALYTICS_PERIODS.map((p) => ({ value: p, label: ANALYTICS_PERIOD_LABELS[p] }))}
-      />
-      {filters.period === 'custom' && (
-        <>
-          <InputField
-            label="Du"
-            type="date"
-            value={filters.from}
-            onChange={(e) => setFilters({ from: e.target.value })}
-          />
-          <InputField
-            label="Au"
-            type="date"
-            value={filters.to}
-            onChange={(e) => setFilters({ to: e.target.value })}
-          />
-        </>
-      )}
+      <PeriodFields value={filters} onChange={setFilters} />
       {scope.establishments.length > 1 && (
         <SelectField
           label="Établissement"

@@ -14,6 +14,7 @@ import {
   factureBalance,
   factureInvoiceStatus,
   formatXof,
+  localMoment,
 } from '@ocall/shared';
 import { AuditService } from '../../common/audit/audit.service';
 import { type CsvValue, toCsv } from '../../common/csv';
@@ -35,6 +36,88 @@ const conflict = (code: string, message: string, extra: Record<string, unknown> 
 
 const isoDay = (d: Date) => d.toISOString().slice(0, 10);
 const dayOf = (iso: string) => new Date(`${iso}T00:00:00.000Z`);
+
+/**
+ * Filtre par établissement émetteur : `ids` (null = tous ceux rattachés), `unassigned` = documents sans
+ * établissement. Absent : aucun filtre (toute l'organisation).
+ */
+export interface FactureEstablishmentFilter {
+  ids: string[] | null;
+  unassigned: boolean;
+}
+
+/** Paramètre `establishmentId` d'un rapport (UUID ou « none ») ; absent : aucun filtre. */
+export function factureEstablishmentFilter(value?: string): FactureEstablishmentFilter | undefined {
+  if (!value) return undefined;
+  return value.toLowerCase() === 'none'
+    ? { ids: [], unassigned: true }
+    : { ids: [value.toLowerCase()], unassigned: false };
+}
+
+/** Nom de l'établissement émetteur figé à l'émission (identité du vendeur), sinon vide. */
+const establishmentNameOf = (sellerSnapshot: unknown): string | null =>
+  (sellerSnapshot as { establishment?: { name?: string } } | null)?.establishment?.name ?? null;
+
+function establishmentWhere(filter?: FactureEstablishmentFilter): Prisma.FactureDocumentWhereInput {
+  if (!filter || (filter.ids === null && filter.unassigned)) return {};
+  const or: Prisma.FactureDocumentWhereInput[] = [];
+  if (filter.ids === null) or.push({ establishmentId: { not: null } });
+  else if (filter.ids.length) or.push({ establishmentId: { in: filter.ids } });
+  if (filter.unassigned) or.push({ establishmentId: null });
+  return or.length ? { OR: or } : { id: { in: [] } };
+}
+
+function establishmentSql(filter?: FactureEstablishmentFilter, alias?: string): Prisma.Sql {
+  if (!filter || (filter.ids === null && filter.unassigned)) return Prisma.empty;
+  const col = Prisma.raw(alias ? `${alias}."establishmentId"` : '"establishmentId"');
+  const parts: Prisma.Sql[] = [];
+  if (filter.ids === null) parts.push(Prisma.sql`${col} IS NOT NULL`);
+  else if (filter.ids.length) parts.push(Prisma.sql`${col} = ANY(${filter.ids}::uuid[])`);
+  if (filter.unassigned) parts.push(Prisma.sql`${col} IS NULL`);
+  if (!parts.length) return Prisma.sql`AND false`;
+  return Prisma.sql`AND (${Prisma.join(parts, ' OR ')})`;
+}
+
+/**
+ * Période du tableau de bord : jours inclus `from`..`to` (un an au plus), sinon le mois en cours entier.
+ * `month` (AAAA-MM) seulement pour le mois en cours par défaut.
+ */
+export function factureDashboardRange(
+  today: Date,
+  from?: string,
+  to?: string,
+): { from: Date; to: Date; month: string | null } {
+  if (!from && !to) {
+    const first = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+    const last = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 0));
+    return { from: first, to: last, month: isoDay(first).slice(0, 7) };
+  }
+  if (!from || !to) {
+    throw new BadRequestException({
+      code: 'PERIOD_MISSING_DATES',
+      message: 'Indiquez la date de début et la date de fin.',
+    });
+  }
+  const start = dayOf(from);
+  const end = dayOf(to);
+  const valid = (d: Date, iso: string) => !Number.isNaN(d.getTime()) && isoDay(d) === iso;
+  if (!valid(start, from) || !valid(end, to)) {
+    throw new BadRequestException({ code: 'PERIOD_INVALID_DATE', message: 'Date invalide.' });
+  }
+  if (end < start) {
+    throw new BadRequestException({
+      code: 'PERIOD_RANGE_INVERTED',
+      message: 'La date de fin précède la date de début.',
+    });
+  }
+  if ((end.getTime() - start.getTime()) / DAY + 1 > MAX_EXPORT_DAYS) {
+    throw new BadRequestException({
+      code: 'PERIOD_RANGE_TOO_LONG',
+      message: `La période ne peut pas dépasser ${MAX_EXPORT_DAYS} jours.`,
+    });
+  }
+  return { from: start, to: end, month: null };
+}
 
 interface OpenTotals {
   count: number;
@@ -168,31 +251,88 @@ export class FactureBillingService {
   // ─── Tableau de bord ───
 
   /**
-   * Indicateurs du mois en cours (UTC, heure du Mali) : facturé net des avoirs, encaissé ; reste à
-   * encaisser et retards sur toutes les factures ouvertes ; devis en attente de réponse.
+   * Indicateurs d'une période (par défaut le mois en cours, dans le fuseau de l'organisation ; jours
+   * d'émission et de règlement inclus) : facturé net des avoirs, encaissé — deux montants distincts, un
+   * encaissement n'est pas un montant facturé ; reste à encaisser et retards sur toutes les factures
+   * ouvertes ; devis en attente. Les factures de ventes en caisse Ocall Stock sont isolées
+   * (`fromStockSales`) : déjà comptées comme ventes dans Stock, elles ne doivent pas l'être deux fois.
+   * Filtre facultatif par établissement émetteur (`ids`) et/ou documents sans établissement
+   * (`unassigned`) ; sans filtre, toute l'organisation.
    */
-  async dashboard(ctx: FactureContext, now = new Date()) {
+  async dashboard(
+    ctx: FactureContext,
+    options: {
+      from?: string;
+      to?: string;
+      timezone?: string;
+      establishments?: FactureEstablishmentFilter;
+    } = {},
+    now = new Date(),
+  ) {
     const organizationId = ctx.organizationId;
-    const today = todayUtc(now);
-    const monthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
-    const nextMonth = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1));
-    const issuedThisMonth = { not: 'DRAFT' as const };
-    const month = { gte: monthStart, lt: nextMonth };
-    const [invoiced, credited, collected, open, overdue, quotes] = await Promise.all([
+    const today = options.timezone ? dayOf(localMoment(now, options.timezone).date) : todayUtc(now);
+    const range = factureDashboardRange(today, options.from, options.to);
+    const scope = establishmentWhere(options.establishments);
+    const scopeSql = establishmentSql(options.establishments);
+    const issued = { not: 'DRAFT' as const };
+    const days = { gte: range.from, lte: range.to };
+    const fromStock = { stockSaleId: { not: null } };
+    const creditOfStock = { creditedInvoice: { stockSaleId: { not: null } } };
+    const [
+      invoiced,
+      credited,
+      collected,
+      stockInvoiced,
+      stockCredited,
+      stockCollected,
+      open,
+      overdue,
+      quotes,
+    ] = await Promise.all([
       this.db.factureDocument.aggregate({
-        where: { organizationId, type: 'INVOICE', status: issuedThisMonth, issueDate: month },
+        where: { organizationId, type: 'INVOICE', status: issued, issueDate: days, ...scope },
         _sum: { totalHt: true, totalTtc: true },
         _count: true,
       }),
       this.db.factureDocument.aggregate({
-        where: { organizationId, type: 'CREDIT_NOTE', status: issuedThisMonth, issueDate: month },
+        where: { organizationId, type: 'CREDIT_NOTE', status: issued, issueDate: days, ...scope },
         _sum: { totalHt: true, totalTtc: true },
         _count: true,
       }),
       this.db.facturePayment.aggregate({
-        where: { organizationId, cancelledAt: null, paidAt: month },
+        where: { organizationId, cancelledAt: null, paidAt: days, invoice: scope },
         _sum: { amount: true },
         _count: true,
+      }),
+      this.db.factureDocument.aggregate({
+        where: {
+          organizationId,
+          type: 'INVOICE',
+          status: issued,
+          issueDate: days,
+          AND: [scope, fromStock],
+        },
+        _sum: { totalHt: true, totalTtc: true },
+        _count: true,
+      }),
+      this.db.factureDocument.aggregate({
+        where: {
+          organizationId,
+          type: 'CREDIT_NOTE',
+          status: issued,
+          issueDate: days,
+          AND: [scope, creditOfStock],
+        },
+        _sum: { totalHt: true, totalTtc: true },
+      }),
+      this.db.facturePayment.aggregate({
+        where: {
+          organizationId,
+          cancelledAt: null,
+          paidAt: days,
+          invoice: { AND: [scope, fromStock] },
+        },
+        _sum: { amount: true },
       }),
       this.db.$queryRaw<OpenTotals[]>`
         SELECT COUNT(*)::int AS "count",
@@ -202,13 +342,14 @@ export class FactureBillingService {
                  FILTER (WHERE "dueDate" < ${isoDay(today)}::date), 0)::bigint AS "overdueAmount"
         FROM "FactureDocument"
         WHERE "organizationId" = ${organizationId}::uuid AND "type" = 'INVOICE'
-          AND "status" IN ('ISSUED', 'SENT', 'PARTIALLY_PAID')`,
+          AND "status" IN ('ISSUED', 'SENT', 'PARTIALLY_PAID') ${scopeSql}`,
       this.db.factureDocument.findMany({
         where: {
           organizationId,
           type: 'INVOICE',
           status: { in: ['ISSUED', 'SENT', 'PARTIALLY_PAID'] },
           dueDate: { lt: today },
+          ...scope,
         },
         orderBy: [{ dueDate: 'asc' }, { number: 'asc' }],
         take: OVERDUE_LIST,
@@ -229,6 +370,7 @@ export class FactureBillingService {
           type: 'QUOTE',
           status: { in: ['ISSUED', 'SENT'] },
           validUntil: { gte: today },
+          ...scope,
         },
         _sum: { totalTtc: true },
         _count: true,
@@ -237,15 +379,27 @@ export class FactureBillingService {
     const totals = open[0] ?? { count: 0, amount: 0n, overdueCount: 0, overdueAmount: 0n };
     const n = (v: bigint | null | undefined) => Number(v ?? 0n);
     return {
-      month: isoDay(monthStart).slice(0, 7),
+      month: range.month,
+      period: { from: isoDay(range.from), to: isoDay(range.to) },
       invoiced: {
         count: invoiced._count,
         creditNotes: credited._count,
-        // Chiffre d'affaires du mois : factures émises moins avoirs émis.
+        // Chiffre d'affaires facturé : factures émises moins avoirs émis.
         netHt: n(invoiced._sum.totalHt) - n(credited._sum.totalHt),
         netTtc: n(invoiced._sum.totalTtc) - n(credited._sum.totalTtc),
+        // Dont factures de ventes en caisse Ocall Stock (et leurs avoirs).
+        fromStockSales: {
+          count: stockInvoiced._count,
+          netHt: n(stockInvoiced._sum.totalHt) - n(stockCredited._sum.totalHt),
+          netTtc: n(stockInvoiced._sum.totalTtc) - n(stockCredited._sum.totalTtc),
+        },
       },
-      collected: { count: collected._count, amount: n(collected._sum.amount) },
+      collected: {
+        count: collected._count,
+        amount: n(collected._sum.amount),
+        // Dont règlements de factures de ventes Stock.
+        fromStockSales: n(stockCollected._sum.amount),
+      },
       outstanding: { count: totals.count, amount: n(totals.amount) },
       overdue: {
         count: totals.overdueCount,
@@ -263,6 +417,45 @@ export class FactureBillingService {
     };
   }
 
+  /**
+   * Facturé net des avoirs (TTC) et encaissé, par établissement émetteur (null = sans établissement),
+   * sur une période de jours inclus ; même filtre que le tableau de bord.
+   */
+  async byEstablishment(
+    ctx: FactureContext,
+    range: { from: string; to: string },
+    establishments?: FactureEstablishmentFilter,
+  ): Promise<{ establishmentId: string | null; invoicedTtc: number; collected: number }[]> {
+    const org = ctx.organizationId;
+    const scopeSql = establishmentSql(establishments, 'd');
+    const [invoiced, collected] = await Promise.all([
+      this.db.$queryRaw<{ establishmentId: string | null; amount: bigint }[]>`
+        SELECT d."establishmentId",
+               COALESCE(SUM(CASE WHEN d."type" = 'CREDIT_NOTE' THEN -d."totalTtc" ELSE d."totalTtc" END), 0)::bigint AS "amount"
+        FROM "FactureDocument" d
+        WHERE d."organizationId" = ${org}::uuid AND d."type" IN ('INVOICE', 'CREDIT_NOTE')
+          AND d."status" <> 'DRAFT'
+          AND d."issueDate" >= ${range.from}::date AND d."issueDate" <= ${range.to}::date ${scopeSql}
+        GROUP BY d."establishmentId"`,
+      this.db.$queryRaw<{ establishmentId: string | null; amount: bigint }[]>`
+        SELECT d."establishmentId", COALESCE(SUM(p."amount"), 0)::bigint AS "amount"
+        FROM "FacturePayment" p
+        JOIN "FactureDocument" d ON d."organizationId" = p."organizationId" AND d."id" = p."invoiceId"
+        WHERE p."organizationId" = ${org}::uuid AND p."cancelledAt" IS NULL
+          AND p."paidAt" >= ${range.from}::date AND p."paidAt" <= ${range.to}::date ${scopeSql}
+        GROUP BY d."establishmentId"`,
+    ]);
+    const rows = new Map<string | null, { invoicedTtc: number; collected: number }>();
+    const row = (id: string | null) => {
+      const r = rows.get(id) ?? { invoicedTtc: 0, collected: 0 };
+      rows.set(id, r);
+      return r;
+    };
+    for (const r of invoiced) row(r.establishmentId).invoicedTtc += Number(r.amount);
+    for (const r of collected) row(r.establishmentId).collected += Number(r.amount);
+    return [...rows].map(([establishmentId, v]) => ({ establishmentId, ...v }));
+  }
+
   // ─── Exports ───
 
   /**
@@ -278,6 +471,7 @@ export class FactureBillingService {
         type: { in: ['INVOICE', 'CREDIT_NOTE'] },
         status: { not: 'DRAFT' },
         issueDate: { gte: from, lte: to },
+        ...establishmentWhere(factureEstablishmentFilter(query.establishmentId)),
       },
       orderBy: [{ issueDate: 'asc' }, { type: 'asc' }, { sequence: 'asc' }],
       take: MAX_EXPORT_ROWS + 1,
@@ -294,6 +488,7 @@ export class FactureBillingService {
         amountCredited: true,
         vatBreakdown: true,
         clientSnapshot: true,
+        sellerSnapshot: true,
         creditedInvoice: { select: { number: true } },
       },
     });
@@ -313,6 +508,7 @@ export class FactureBillingService {
         'Échéance',
         'Reste à payer',
         'Statut',
+        'Établissement',
       ],
     ];
     for (const r of rows) {
@@ -333,6 +529,7 @@ export class FactureBillingService {
         r.dueDate ? isoDay(r.dueDate) : null,
         r.type === 'INVOICE' ? factureBalance(invoiceAmounts(r)) : null,
         FACTURE_DOCUMENT_STATUS_LABELS[r.status],
+        establishmentNameOf(r.sellerSnapshot),
       ]);
     }
     await this.exported(ctx, 'sales', query, rows.length);
@@ -346,14 +543,30 @@ export class FactureBillingService {
   async paymentsJournal(ctx: FactureContext, query: FactureExportQueryDto) {
     const { from, to } = this.period(query);
     const rows = await this.db.facturePayment.findMany({
-      where: { organizationId: ctx.organizationId, paidAt: { gte: from, lte: to } },
+      where: {
+        organizationId: ctx.organizationId,
+        paidAt: { gte: from, lte: to },
+        invoice: establishmentWhere(factureEstablishmentFilter(query.establishmentId)),
+      },
       orderBy: [{ paidAt: 'asc' }, { createdAt: 'asc' }],
       take: MAX_EXPORT_ROWS + 1,
-      include: { invoice: { select: { number: true, clientSnapshot: true } } },
+      include: {
+        invoice: { select: { number: true, clientSnapshot: true, sellerSnapshot: true } },
+      },
     });
     this.assertRows(rows.length);
     const table: CsvValue[][] = [
-      ['Date', 'Facture', 'Client', 'Montant', 'Mode', 'Référence', 'Statut', 'Motif d’annulation'],
+      [
+        'Date',
+        'Facture',
+        'Client',
+        'Montant',
+        'Mode',
+        'Référence',
+        'Statut',
+        'Motif d’annulation',
+        'Établissement',
+      ],
     ];
     for (const p of rows) {
       const client = p.invoice.clientSnapshot as unknown as FactureClientIdentity | null;
@@ -366,6 +579,7 @@ export class FactureBillingService {
         p.reference,
         p.cancelledAt ? 'Annulé' : 'En vigueur',
         p.cancelReason,
+        establishmentNameOf(p.invoice.sellerSnapshot),
       ]);
     }
     await this.exported(ctx, 'payments', query, rows.length);
@@ -387,7 +601,12 @@ export class FactureBillingService {
       action: `facture.${journal}_exported`,
       targetType: 'FactureExport',
       targetId: ctx.organizationId,
-      metadata: { from: query.from, to: query.to, rows },
+      metadata: {
+        from: query.from,
+        to: query.to,
+        rows,
+        ...(query.establishmentId ? { establishmentId: query.establishmentId } : {}),
+      },
     });
   }
 
