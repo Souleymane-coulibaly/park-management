@@ -69,6 +69,9 @@ export default function StockSettingsPage() {
 
 function Settings({ manage }: { manage: boolean }) {
   const settings = useApi<SettingsView>('/ocall-stock/settings');
+  // Confirmation tenue ici : le premier enregistrement fait passer `saved` à vrai, ce qui recrée le
+  // formulaire (clé) pour reprendre les valeurs normalisées par le serveur ; elle doit y survivre.
+  const [done, setDone] = useState(false);
   if (settings.state === 'loading') return <LoadingState />;
   if (settings.state === 'error')
     return <ErrorState error={settings.error} onRetry={settings.reload} />;
@@ -77,7 +80,12 @@ function Settings({ manage }: { manage: boolean }) {
       key={String(settings.data.saved)}
       initial={settings.data}
       manage={manage}
-      onSaved={settings.reload}
+      done={done}
+      onSubmitting={() => setDone(false)}
+      onSaved={() => {
+        setDone(true);
+        settings.reload();
+      }}
     />
   );
 }
@@ -85,10 +93,14 @@ function Settings({ manage }: { manage: boolean }) {
 function SettingsForm({
   initial,
   manage,
+  done,
+  onSubmitting,
   onSaved,
 }: {
   initial: SettingsView;
   manage: boolean;
+  done: boolean;
+  onSubmitting: () => void;
   onSaved: () => void;
 }) {
   const [storeName, setStoreName] = useState(initial.storeName);
@@ -104,12 +116,11 @@ function SettingsForm({
   const [factureSite, setFactureSite] = useState(initial.factureLocation?.site.id ?? '');
   const [factureLocation, setFactureLocation] = useState(initial.factureLocationId ?? '');
   const [error, setError] = useState<ApiError | null>(null);
-  const [done, setDone] = useState(false);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError(null);
-    setDone(false);
+    onSubmitting();
     try {
       await api('/ocall-stock/settings', {
         method: 'PUT',
@@ -126,7 +137,6 @@ function SettingsForm({
           factureLocationId: factureLocation || null,
         },
       });
-      setDone(true);
       onSaved();
     } catch (e) {
       setError(asApiError(e));
@@ -145,7 +155,7 @@ function SettingsForm({
               Enregistrez ces réglages pour les confirmer.
             </Alert>
           )}
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <InputField
               label="Nom imprimé sur les étiquettes et les tickets"
               required
@@ -203,7 +213,7 @@ function SettingsForm({
           </div>
           <div className="border-t border-line pt-4">
             <p className="text-sm font-semibold">Caisse et tickets</p>
-            <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <InputField
                 label="Remise maximale en caisse (%)"
                 type="number"

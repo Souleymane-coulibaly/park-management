@@ -192,7 +192,7 @@ function NewRegister({ onDone }: { onDone: () => void }) {
       <CardBody>
         <form onSubmit={submit} className="space-y-4" data-testid="stock-register-form">
           <ApiErrorAlert error={error} />
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <InputField
               label="Code (ex. CAISSE1)"
               required
@@ -216,7 +216,7 @@ function NewRegister({ onDone }: { onDone: () => void }) {
               label="Vend depuis"
             />
           )}
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <SelectField
               label="Imprimante de tickets"
               value={connection}

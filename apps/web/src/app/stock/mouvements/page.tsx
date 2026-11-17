@@ -237,7 +237,7 @@ function Entry({
               label="Vers l’emplacement"
             />
           )}
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <InputField
               label={mode === 'ADJUSTMENT' ? 'Correction (+ ou −)' : 'Quantité'}
               type="number"

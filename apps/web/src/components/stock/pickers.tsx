@@ -199,7 +199,7 @@ export function LocationPicker({
   }
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2" data-testid={testId}>
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" data-testid={testId}>
       <SelectField
         label="Site"
         value={siteId}

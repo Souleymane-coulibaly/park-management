@@ -109,7 +109,7 @@ function Products({
   return (
     <>
       <Card>
-        <CardBody className="grid gap-4 lg:grid-cols-[2fr_3fr]">
+        <CardBody className="grid grid-cols-1 gap-4 lg:grid-cols-[2fr_3fr]">
           <ScanField onScan={onScan} feedback={feedback} testId="stock-products-scan" />
           <div className="flex flex-wrap items-end gap-4">
             <div className="min-w-48 flex-1">
