@@ -2,11 +2,12 @@
 
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, CheckCircle2, RotateCw, ScanLine, XCircle } from 'lucide-react';
-import { SCAN_REFUSAL_LABELS } from '@ocall/shared';
+import { PASS_KIND_LABELS, SCAN_REFUSAL_LABELS } from '@ocall/shared';
 import { AccessDenied } from '@/components/app/access-denied';
 import { useCan } from '@/components/app/session-context';
 import { ParkEstablishmentScope } from '@/components/park/park-establishment';
 import { ParkNav } from '@/components/park/park-nav';
+import { formatPassDay } from '@/components/park/pass-ui';
 import { ScanHistoryList } from '@/components/park/scan-history';
 import { OfflineBanner, toApiError } from '@/components/pos/cash-session';
 import { Button } from '@/components/ui/button';
@@ -164,7 +165,7 @@ function Gate({ park }: { park: ParkEstablishment }) {
                 label="Saisie manuelle du code"
                 value={manual}
                 onChange={(e) => setManual(e.target.value)}
-                placeholder="OCP1-…"
+                placeholder="OCP1-… / OCPS-… / OCPC-…"
                 autoComplete="off"
               />
             </div>
@@ -251,7 +252,7 @@ function ScanResult({
   if (!outcome) {
     return (
       <div className="hidden min-h-64 place-items-center rounded-3xl border-2 border-dashed border-line p-6 text-center text-muted lg:grid">
-        Présentez le QR code du billet devant la caméra.
+        Présentez le QR code du billet, du pass ou de la carte devant la caméra.
       </div>
     );
   }
@@ -280,6 +281,35 @@ function ScanResult({
         <p className="text-xl">
           {scan.ticket.visitorName} · {scan.ticket.categoryName}
         </p>
+      )}
+      {scan.pass && (
+        <div className="flex items-center gap-3 rounded-2xl bg-white/15 p-2 text-left">
+          {scan.pass.photoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- lien signé temporaire, privé
+            <img
+              src={scan.pass.photoUrl}
+              alt={`Photo de ${scan.pass.holderName}`}
+              className="h-28 w-28 rounded-xl bg-white object-cover lg:h-36 lg:w-36"
+              data-testid="scan-pass-photo"
+            />
+          ) : (
+            <div className="grid h-28 w-28 place-items-center rounded-xl border-2 border-dashed border-white/60 text-xs">
+              Sans photo
+            </div>
+          )}
+          <div className="min-w-0">
+            <p className="text-xl font-bold" data-testid="scan-pass-holder">
+              {scan.pass.holderName}
+            </p>
+            <p className="text-base">
+              {scan.pass.offerName} · {PASS_KIND_LABELS[scan.pass.kind]}
+            </p>
+            <p className="text-sm">Valable jusqu’au {formatPassDay(scan.pass.validUntil)}</p>
+            {scan.pass.photoUrl && accepted && (
+              <p className="text-sm font-semibold">Vérifiez la photo avant de laisser entrer.</p>
+            )}
+          </div>
+        </div>
       )}
       {scan.refusalReason === 'ALREADY_USED' && scan.ticket?.usedAt && (
         <p className="text-lg">Entré à {timeFormatter.format(new Date(scan.ticket.usedAt))}</p>

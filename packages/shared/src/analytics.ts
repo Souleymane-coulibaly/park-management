@@ -1,5 +1,6 @@
 import type { Activity } from './business';
 import { addDays, localMoment } from './park';
+import type { PassKind } from './park-pass';
 
 /**
  * Analyses (Sprint 9) : périodes, règles communes et formes des réponses, partagées par l'API,
@@ -377,6 +378,18 @@ export interface TicketCategoryStats {
   revenue: number;
 }
 
+/** Pass et abonnements (sprint 8) : ventes encaissées par offre et entrées des titulaires. */
+export interface PassOfferStats {
+  offerId: string;
+  offer: string;
+  kind: PassKind;
+  /** Pass et renouvellements encaissés sur la période. */
+  paidUnits: number;
+  revenue: number;
+  /** Entrées acceptées des pass de cette offre (déjà comprises dans les entrées du parc). */
+  entries: number;
+}
+
 export interface ParkAnalytics {
   meta: AnalyticsMeta;
   totals: ActivityTotals & {
@@ -395,6 +408,7 @@ export interface ParkAnalytics {
     usageRate: number | null;
   };
   categories: TicketCategoryStats[];
+  passOffers: PassOfferStats[];
   daily: { date: string; entries: number; revenue: number }[];
   previousDaily: { date: string; entries: number }[];
   hourly: { hour: number; entries: number }[];

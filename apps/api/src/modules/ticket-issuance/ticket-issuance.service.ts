@@ -4,6 +4,7 @@ import type { Prisma } from '@ocall/database';
 import { addDays, localMoment, splitPrice, zonedMidnight } from '@ocall/shared';
 import { AuditService } from '../../common/audit/audit.service';
 import type { TenantContext } from '../../common/auth-context';
+import { activatePassesForPaidSale } from './pass-activation';
 
 /** Jeton aléatoire de 128 bits en base64url (22 caractères) : non prédictible, seul contenu du QR. */
 export function newTicketToken(): string {
@@ -47,7 +48,14 @@ export class TicketIssuanceService {
       },
     });
 
-    if (sale._count.tickets > 0) return 0;
+    // Sprint 8 : les pass de la vente sont activés dans la même transaction que le paiement.
+    await activatePassesForPaidSale(
+      tx,
+      { userId: auth.user.id, membershipId: auth.membership.id },
+      saleId,
+    );
+
+    if (sale._count.tickets > 0 || sale.lines.length === 0) return 0;
 
     // Validité : du début du jour de la visite (heure locale) à la fin du dernier jour de validité.
     const now = new Date();

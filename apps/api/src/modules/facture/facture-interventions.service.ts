@@ -26,6 +26,7 @@ import {
   isFactureInterventionWorkOpen,
 } from '@ocall/shared';
 import sharp from 'sharp';
+import { PHOTO_MAX_BYTES, normalizePhoto } from '../../common/storage/photo';
 import { AuditService } from '../../common/audit/audit.service';
 import {
   STORAGE_PROVIDER,
@@ -72,11 +73,10 @@ const EQUIPMENT_NOT_FOUND = {
 const LIST_LIMIT = 300;
 const DAY = 86_400_000;
 
-/** Photo : 8 Mo au plus à l'envoi (appareil d'un téléphone) ; réencodée en JPEG, 1 600 px au plus. */
-export const FACTURE_PHOTO_MAX_BYTES = 8_000_000;
+/** Photo : 8 Mo au plus à l'envoi ; réencodée en JPEG (règle commune `common/storage/photo`). */
+export const FACTURE_PHOTO_MAX_BYTES = PHOTO_MAX_BYTES;
 /** Signature dessinée sur l'écran : PNG de 300 Ko au plus. */
 export const FACTURE_SIGNATURE_MAX_BYTES = 300_000;
-const PHOTO_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp']);
 
 const conflict = (code: string, message: string) => new ConflictException({ code, message });
 
@@ -1219,28 +1219,6 @@ export function hashReport(
 }
 
 /** Photo vérifiée et réencodée en JPEG (orientation appliquée, métadonnées et GPS retirés). */
-export async function normalizePhoto(file: FactureUpload | undefined): Promise<Buffer> {
-  if (!file || !PHOTO_TYPES.has(file.mimetype) || file.size > FACTURE_PHOTO_MAX_BYTES) {
-    throw new BadRequestException({
-      code: 'PHOTO_REFUSED',
-      message: 'Photo refusée : image JPEG, PNG ou WebP de 8 Mo au plus.',
-    });
-  }
-  try {
-    return await sharp(file.buffer, { failOn: 'error', limitInputPixels: 8192 * 8192 })
-      .rotate()
-      .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
-      .flatten({ background: '#ffffff' })
-      .jpeg({ quality: 80, mozjpeg: true })
-      .toBuffer();
-  } catch {
-    throw new BadRequestException({
-      code: 'PHOTO_REFUSED',
-      message: 'Image illisible ou corrompue.',
-    });
-  }
-}
-
 /** Signature : PNG vérifié, réencodé sur fond blanc ; une signature vide (aucun trait) est refusée. */
 async function normalizeSignature(file: FactureUpload | undefined): Promise<Buffer> {
   const refused = (message: string) =>

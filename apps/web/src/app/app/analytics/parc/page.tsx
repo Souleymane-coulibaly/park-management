@@ -2,6 +2,7 @@
 
 import {
   ISO_WEEKDAY_LABELS,
+  PASS_KIND_LABELS,
   type ParkAnalytics,
   SCAN_REFUSAL_LABELS,
   type ScanRefusalReason,
@@ -157,6 +158,26 @@ function Park({ data: d }: { data: ParkAnalytics }) {
         </Table>
         {d.categories.length === 0 && (
           <p className="px-2 py-4 text-sm text-muted">Aucune vente de billets sur la période.</p>
+        )}
+      </Section>
+
+      <Section
+        title="Pass et abonnements"
+        description="Pass et renouvellements encaissés ; leurs entrées sont déjà comprises dans les entrées du parc."
+      >
+        <Table head={['Offre', 'Type', 'Encaissés', 'Entrées', 'Recettes']}>
+          {d.passOffers.map((o) => (
+            <tr key={o.offerId} data-testid="pass-offer-row">
+              <Td className="font-medium">{o.offer}</Td>
+              <Td>{PASS_KIND_LABELS[o.kind]}</Td>
+              <Td className="tabular-nums">{formatInt(o.paidUnits)}</Td>
+              <Td className="tabular-nums">{formatInt(o.entries)}</Td>
+              <Td className="tabular-nums">{formatXof(o.revenue)}</Td>
+            </tr>
+          ))}
+        </Table>
+        {d.passOffers.length === 0 && (
+          <p className="px-2 py-4 text-sm text-muted">Aucun pass sur la période.</p>
         )}
       </Section>
     </>

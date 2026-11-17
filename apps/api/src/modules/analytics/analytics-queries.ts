@@ -1,5 +1,5 @@
 import { Prisma } from '@ocall/database';
-import type { Activity, AnalyticsRange } from '@ocall/shared';
+import type { Activity, AnalyticsRange, PassKind } from '@ocall/shared';
 import type { AnalyticsScope } from './analytics-scope';
 
 /**
@@ -556,5 +556,54 @@ export async function costMovements(db: Db, scope: AnalyticsScope): Promise<Cost
     establishment: String(r.establishment),
     day: String(r.day),
     unitCost: num(r.unitCost),
+  }));
+}
+
+export interface PassOfferRow {
+  offerId: string;
+  offer: string;
+  kind: PassKind;
+  paidUnits: number;
+  revenue: number;
+  entries: number;
+}
+
+/**
+ * Pass et abonnements (sprint 8), par offre : pass et renouvellements encaissés sur la période (même
+ * règle que les billets : paiements réussis de ventes parc non annulées) et entrées acceptées des
+ * titulaires (déjà comptées dans les entrées du parc).
+ */
+export async function passOfferStats(db: Db, scope: AnalyticsScope): Promise<PassOfferRow[]> {
+  if (isEmptyScope(scope, ['PARK'])) return [];
+  const { current: cur } = scope.period;
+  const paid = await db.$queryRaw<Row[]>`
+    SELECT l."passOfferId"::text AS id, SUM(l."quantity") AS units, SUM(l."lineTotal") AS revenue
+    ${PAID_FROM}
+    JOIN "SaleLine" l ON l."saleId" = s."id" AND l."passOfferId" IS NOT NULL
+    WHERE ${paidWhere(scope, ['PARK'])}
+      AND ${coarse('p."createdAt"', cur)} AND ${within('p."createdAt"', cur)}
+    GROUP BY 1`;
+  const entries = await db.$queryRaw<Row[]>`
+    SELECT ps."offerId"::text AS id, COUNT(*) AS entries
+    FROM "TicketScan" t JOIN "Establishment" e ON e."id" = t."establishmentId"
+    JOIN "Pass" ps ON ps."id" = t."passId"
+    WHERE ${entryWhere(scope)}
+      AND ${coarse('t."createdAt"', cur)} AND ${within('t."createdAt"', cur)}
+    GROUP BY 1`;
+  const ids = new Set([...paid, ...entries].map((r) => String(r.id)));
+  if (ids.size === 0) return [];
+  const offers = await db.passOffer.findMany({
+    where: { organizationId: scope.organizationId, id: { in: [...ids] } },
+    select: { id: true, name: true, kind: true },
+    orderBy: [{ kind: 'asc' }, { name: 'asc' }],
+  });
+  const by = (rows: Row[], id: string) => rows.find((r) => String(r.id) === id) ?? {};
+  return offers.map((o) => ({
+    offerId: o.id,
+    offer: o.name,
+    kind: o.kind,
+    paidUnits: num(by(paid, o.id).units),
+    revenue: num(by(paid, o.id).revenue),
+    entries: num(by(entries, o.id).entries),
   }));
 }

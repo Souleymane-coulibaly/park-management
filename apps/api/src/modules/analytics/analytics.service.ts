@@ -45,6 +45,7 @@ import {
   paymentTotals,
   productLines,
   refusedScans,
+  passOfferStats,
   ticketCategories,
   variantSales,
 } from './analytics-queries';
@@ -305,6 +306,7 @@ export class AnalyticsService {
     return this.readOnly(async (db) => {
       const totals = await paymentTotals(db, scope, ['PARK']);
       const categories = await ticketCategories(db, scope);
+      const passOffers = await passOfferStats(db, scope);
       const entries = await entryCounts(db, scope);
       const refused = await refusedScans(db, scope);
       const curEntries = await entryGrid(db, scope, scope.period.current);
@@ -348,6 +350,7 @@ export class AnalyticsService {
           scanned: c.scanned,
           revenue: c.revenue,
         })),
+        passOffers,
         daily: scope.period.days.map((date) => ({
           date,
           entries: byDay(curEntries, date),

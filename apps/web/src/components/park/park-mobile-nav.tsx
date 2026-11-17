@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import {
   BarChart3,
   History,
+  IdCard,
   LayoutDashboard,
   type LucideIcon,
   MoreHorizontal,
@@ -46,6 +47,7 @@ export function ParkMobileNav({ moduleHrefs }: { moduleHrefs: string[] }) {
     hasTicketing &&
       seesSales && { href: '/app/billetterie/tableau', label: 'Tableau', icon: LayoutDashboard },
     hasTicketing && canSell && { href: '/app/billetterie', label: 'Billetterie', icon: Ticket },
+    hasTicketing && canSell && { href: '/app/billetterie/pass', label: 'Pass', icon: IdCard },
     hasGate && canScan && { href: '/app/controle-acces', label: 'Scanner', icon: ScanLine },
     hasTicketing && seesSales && { href: '/app/parc/visiteurs', label: 'Visiteurs', icon: Users },
     hasGate && canScan && { href: '/app/parc/historique', label: 'Entrées', icon: History },
@@ -59,7 +61,10 @@ export function ParkMobileNav({ moduleHrefs }: { moduleHrefs: string[] }) {
     { href: '/app/parc/parametres', label: 'Paramètres', icon: Settings },
   ].filter((i): i is Item => !!i);
 
-  const isParkRoute = pathname === '/app' || items.some((i) => pathname === i.href);
+  const isParkRoute =
+    pathname === '/app' ||
+    pathname.startsWith('/app/billetterie/pass/') ||
+    items.some((i) => pathname === i.href);
   if (!isParkRoute) return null;
 
   const overflow = items.length > MAX_VISIBLE;

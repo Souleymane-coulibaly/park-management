@@ -1,4 +1,10 @@
 import type {
+  PassDurationUnit,
+  PassKind,
+  PassQrMode,
+  PassRules,
+  PassState,
+  PassStatus,
   InvoiceSitesSnapshot,
   ParkRestaurantSplitProposal,
   PricingMode,
@@ -521,6 +527,173 @@ export interface TicketScanView {
     validUntil: string;
     usedAt: string | null;
   } | null;
+  /** Pass contrôlé (titulaire et photo pour le contrôle visuel), seulement dans un parc autorisé. */
+  pass?: {
+    id: string;
+    holderName: string;
+    kind: PassKind;
+    offerName: string;
+    status: PassStatus;
+    validUntil: string;
+    photoUrl: string | null;
+  } | null;
+}
+
+// ─── Sprint 8 : pass et abonnements ───
+
+export interface PassOfferSite {
+  establishmentId: string;
+  name: string;
+  timezone: string;
+  price: number | null;
+  effectivePrice: number;
+  isActive: boolean;
+}
+
+export interface PassOffer {
+  id: string;
+  kind: PassKind;
+  name: string;
+  description: string | null;
+  price: number;
+  currency: string;
+  durationUnit: PassDurationUnit;
+  durationValue: number;
+  totalEntries: number | null;
+  dailyEntries: number | null;
+  allowedWeekdays: number[];
+  qrMode: PassQrMode;
+  photoRequired: boolean;
+  renewable: boolean;
+  maxSuspensionDays: number;
+  suspensionExtends: boolean;
+  conditions: string | null;
+  saleFrom: string | null;
+  saleUntil: string | null;
+  isActive: boolean;
+  createdAt: string;
+  sites: PassOfferSite[];
+}
+
+export interface SellablePassOffer {
+  id: string;
+  kind: PassKind;
+  name: string;
+  description: string | null;
+  price: number;
+  durationUnit: PassDurationUnit;
+  durationValue: number;
+  totalEntries: number | null;
+  dailyEntries: number | null;
+  allowedWeekdays: number[];
+  qrMode: PassQrMode;
+  photoRequired: boolean;
+  conditions: string | null;
+  sites: { establishmentId: string; name: string }[];
+}
+
+export interface PassPeriodView {
+  id: string;
+  saleId: string;
+  saleNumber: number;
+  status: 'PENDING' | 'PAID' | 'CANCELLED';
+  isRenewal: boolean;
+  startDate: string | null;
+  endDate: string | null;
+  price: number;
+  entriesUsed: number;
+  extendedDays: number;
+  paidAt: string | null;
+  createdAt: string;
+}
+
+export interface PassSummary {
+  id: string;
+  offerId: string;
+  customerId: string;
+  kind: PassKind;
+  holderName: string;
+  phone: string | null;
+  hasPhoto: boolean;
+  rules: PassRules;
+  status: PassStatus;
+  state: PassState;
+  startDate: string;
+  endDate: string;
+  today: string;
+  entriesLeft: number | null;
+  hasLink: boolean;
+  linkIssuedAt: string | null;
+  suspendedAt: string | null;
+  suspensionReason: string | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  pendingRenewal: boolean;
+  periods: PassPeriodView[];
+  createdAt: string;
+}
+
+export interface PassDetail extends PassSummary {
+  photoUrl: string | null;
+  staticQr: string | null;
+  events: {
+    id: string;
+    type: string;
+    reason: string | null;
+    metadata: Record<string, unknown> | null;
+    createdAt: string;
+    actor: string | null;
+  }[];
+  cards: {
+    id: string;
+    cardNumber: string;
+    status: 'ACTIVE' | 'REVOKED';
+    replacesCardId: string | null;
+    revokedAt: string | null;
+    revokeReason: string | null;
+    printRequestedAt: string | null;
+    createdAt: string;
+  }[];
+  scans: {
+    id: string;
+    result: 'ACCEPTED' | 'REFUSED';
+    refusalReason: ScanRefusalReason | null;
+    entryPoint: string;
+    localDate: string | null;
+    createdAt: string;
+    establishmentName: string;
+  }[];
+}
+
+/** Page du titulaire (lien personnel) : jamais de clé, ni photo, ni téléphone. */
+export interface PublicPass {
+  organizationName: string;
+  offerName: string;
+  kind: PassKind;
+  holderFirstName: string;
+  state: PassState;
+  startDate: string;
+  endDate: string;
+  qrMode: PassQrMode;
+  qr: string | null;
+  window: number | null;
+  expiresAt: string | null;
+  refreshInSeconds: number | null;
+}
+
+/** Données de carte préparées pour Ocall Print (aucune impression dans Ocall Parc). */
+export interface PassCardPrintData {
+  format: 'ocall-print/pass-card@1';
+  organizationName: string;
+  cardNumber: string;
+  qr: string;
+  holderName: string;
+  offerName: string;
+  kind: PassKind;
+  kindLabel: string;
+  validFrom: string;
+  validUntil: string;
+  photoUrl: string | null;
 }
 
 /** Visiteurs d'une journée de vente (sans QR). */

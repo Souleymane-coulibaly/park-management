@@ -10,6 +10,8 @@ export interface PricedSaleLine {
   ticketCategoryId?: string;
   peoplePerUnit?: number;
   visitorNames?: string[];
+  /** Ocall Parc sprint 8 : offre de pass vendue (un pass par ligne). */
+  passOfferId?: string;
   /** Restaurant : instruction de préparation de la ligne. */
   notes?: string | null;
   productName: string;

@@ -32,6 +32,14 @@ export const SCAN_REFUSAL_REASONS = [
   'OTHER_ESTABLISHMENT',
   'PARK_CLOSED',
   'NOT_YET_VALID',
+  // Sprint 8 : pass et abonnements des visiteurs.
+  'QUOTA_REACHED',
+  'DAILY_QUOTA_REACHED',
+  'DAY_NOT_ALLOWED',
+  'SUSPENDED',
+  'QR_EXPIRED',
+  'QR_REUSED',
+  'CARD_REVOKED',
 ] as const;
 export type ScanRefusalReason = (typeof SCAN_REFUSAL_REASONS)[number];
 
@@ -43,6 +51,13 @@ export const SCAN_REFUSAL_LABELS: Record<ScanRefusalReason, string> = {
   OTHER_ESTABLISHMENT: 'Billet d’un autre établissement',
   PARK_CLOSED: 'Parc fermé ou créneau invalide',
   NOT_YET_VALID: 'Billet pas encore valable',
+  QUOTA_REACHED: 'Pass : quota d’entrées atteint',
+  DAILY_QUOTA_REACHED: 'Pass : entrée du jour déjà utilisée',
+  DAY_NOT_ALLOWED: 'Pass : jour non autorisé',
+  SUSPENDED: 'Pass suspendu',
+  QR_EXPIRED: 'QR périmé : demandez au titulaire de l’actualiser',
+  QR_REUSED: 'QR déjà présenté',
+  CARD_REVOKED: 'Carte révoquée',
 };
 
 /** Limites de saisie d'une vente de billets. */

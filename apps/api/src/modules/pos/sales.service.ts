@@ -13,6 +13,7 @@ import { parkReadOnlyError } from '../../common/guards/park-read-only.guard';
 import { loadActivityAccess } from '../../common/park-access';
 import { PaymentMethodsService } from '../payments/payment-methods.service';
 import { TicketIssuanceService } from '../ticket-issuance/ticket-issuance.service';
+import { cancelPendingPassesForSale } from '../ticket-issuance/pass-activation';
 import { RestaurantEventsService } from '../realtime/restaurant-events.service';
 import { LoyaltyEarningService } from '../loyalty-earning/loyalty-earning.service';
 import { StockConsumptionService } from '../stock-consumption/stock-consumption.service';
@@ -460,6 +461,10 @@ export class SalesService {
       }
       // Des points utilisés sur cette vente non payée sont recrédités.
       await this.loyalty.reverseRedemption(tx, id, auth.membership.id);
+      // Sprint 8 : un pass vendu sur cette vente (jamais activé) est annulé avec elle.
+      if (sale.activity === 'PARK') {
+        await cancelPendingPassesForSale(tx, { membershipId: auth.membership.id }, id);
+      }
       await tx.sale.update({
         where: { id },
         data: { status: 'CANCELLED', cancelledAt: new Date(), cancelledById: auth.membership.id },

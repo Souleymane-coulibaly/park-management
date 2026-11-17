@@ -21,7 +21,11 @@ export function ScanHistoryList({ scans }: { scans: TicketScanView[] }) {
             </Badge>
           )}
           <span className="flex-1 truncate">
-            {s.ticket ? `${s.ticket.visitorName} · ${s.ticket.categoryName}` : '—'}
+            {s.ticket
+              ? `${s.ticket.visitorName} · ${s.ticket.categoryName}`
+              : s.pass
+                ? `${s.pass.holderName} · ${s.pass.offerName}`
+                : '—'}
           </span>
           <span className="text-muted">
             {s.entryPoint} · {s.scannedBy}

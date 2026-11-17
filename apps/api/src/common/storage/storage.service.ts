@@ -121,7 +121,8 @@ export class StorageService {
   async storePrivate(params: {
     organizationId: string;
     establishmentId: string | null;
-    kind: 'SUPPORT_ATTACHMENT';
+    /** Sprint 8 : `PASS_HOLDER_PHOTO` (photo du titulaire d'un pass). */
+    kind: 'SUPPORT_ATTACHMENT' | 'PASS_HOLDER_PHOTO';
     body: Buffer;
     mimeType: PrivateMimeType;
     displayName: string;

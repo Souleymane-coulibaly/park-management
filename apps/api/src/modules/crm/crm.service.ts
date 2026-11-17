@@ -295,6 +295,25 @@ export class CrmService {
       },
     });
     if (updated.count === 0) return;
+    // Sprint 8 : pass du client — nom du titulaire effacé, photo retirée (purgée par la conservation),
+    // lien personnel révoqué. Les droits payés, périodes et passages restent (sans donnée personnelle).
+    const passes = await tx.pass.findMany({
+      where: { customerId: id, organizationId: auth.membership.organizationId },
+      select: { id: true, photoFileId: true },
+    });
+    const photoIds = passes.flatMap((p) => (p.photoFileId ? [p.photoFileId] : []));
+    if (photoIds.length > 0) {
+      await tx.storedFile.updateMany({
+        where: { id: { in: photoIds }, deletedAt: null },
+        data: { retentionUntil: new Date() },
+      });
+    }
+    if (passes.length > 0) {
+      await tx.pass.updateMany({
+        where: { id: { in: passes.map((p) => p.id) } },
+        data: { holderName: 'Client anonymisé', photoFileId: null, linkTokenHash: null },
+      });
+    }
     const wallets = await tx.loyaltyWallet.findMany({
       where: { customerId: id, balance: { gt: 0 } },
       select: { id: true, balance: true },

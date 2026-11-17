@@ -29,7 +29,7 @@ import { STORAGE_PROVIDER, type StorageProvider } from '../../common/storage/sto
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { FactureContext } from './facture-access';
-import { normalizePhoto } from './facture-interventions.service';
+import { normalizePhoto } from '../../common/storage/photo';
 import { FacturePrismaService } from './facture-prisma.service';
 import type {
   FactureRequestQueryDto,

@@ -133,6 +133,12 @@ model Organization {
   invitations           OrganizationInvitation[]
   siteActivations       SiteActivation[]
   parkCombinedContracts ParkCombinedContract[]
+  passOffers            PassOffer[]
+  passOfferSites        PassOfferSite[]
+  passes                Pass[]
+  passPeriods           PassPeriod[]
+  passEvents            PassEvent[]
+  passCards             PassCard[]
   memberships           OrganizationMembership[]
   assignments           EstablishmentAssignment[]
   subscriptions         Subscription[]
@@ -244,6 +250,7 @@ model Establishment {
   supportTickets   SupportTicket[]
   voiceOrderDrafts VoiceOrderDraft[]
   publicSite       PublicSite?
+  passOfferSites   PassOfferSite[]
 
   @@unique([organizationId, name])
   @@index([organizationId, isActive])
@@ -1005,6 +1012,7 @@ model Sale {
   events              OrderEvent[]
   qrRequest           QrOrderRequest?
   stockMovements      StockMovement[]
+  passPeriods         PassPeriod[]
 
   @@unique([establishmentId, number])
   @@unique([organizationId, clientRequestId])
@@ -1025,6 +1033,8 @@ model SaleLine {
   variantId        String?  @db.Uuid
   /// Catégorie de billet (null pour une ligne de restaurant).
   ticketCategoryId String?  @db.Uuid
+  /// Sprint 8 : offre de pass vendue (vente initiale ou renouvellement) ; null sinon.
+  passOfferId      String?  @db.Uuid
   productName      String
   variantName      String
   unitPrice        Int
@@ -1045,6 +1055,8 @@ model SaleLine {
   variant        ProductVariant? @relation(fields: [variantId], references: [id], onDelete: NoAction)
   ticketCategory TicketCategory? @relation(fields: [ticketCategoryId], references: [id], onDelete: NoAction)
   tickets        Ticket[]
+  passOffer      PassOffer?      @relation(fields: [passOfferId], references: [id], onDelete: NoAction)
+  passPeriod     PassPeriod?
 
   @@index([saleId])
   @@index([organizationId])
@@ -1241,6 +1253,20 @@ enum TicketScanRefusal {
   OTHER_ESTABLISHMENT
   PARK_CLOSED
   NOT_YET_VALID
+  /// Sprint 8 (pass) : quota total de la période atteint.
+  QUOTA_REACHED
+  /// Sprint 8 (pass) : quota du jour atteint (remis à zéro à minuit, heure du parc).
+  DAILY_QUOTA_REACHED
+  /// Sprint 8 (pass) : jour de la semaine non autorisé par l'offre.
+  DAY_NOT_ALLOWED
+  /// Sprint 8 (pass) : pass suspendu.
+  SUSPENDED
+  /// Sprint 8 : QR dynamique périmé (fenêtre de 30 s dépassée).
+  QR_EXPIRED
+  /// Sprint 8 : QR dynamique déjà présenté (même fenêtre).
+  QR_REUSED
+  /// Sprint 8 : carte révoquée (perdue, remplacée).
+  CARD_REVOKED
 }
 
 /// Catégorie de billet d'un établissement (Adulte, Enfant, Famille…). Jamais supprimée : désactivée.
@@ -1330,10 +1356,19 @@ model TicketScan {
   entryPoint          String
   scannedById         String             @db.Uuid
   clientRequestId     String?
+  /// Sprint 8 : pass reconnu (null pour un billet, ou si inconnu / d'une autre organisation).
+  passId              String?            @db.Uuid
+  /// Sprint 8 : carte physique présentée (pass).
+  cardId              String?            @db.Uuid
+  /// Sprint 8 : jour local du passage (fuseau du parc), base des quotas quotidiens d'un pass.
+  localDate           DateTime?          @db.Date
+  /// Sprint 8 : QR dynamique accepté — « pass:fenêtre », unique : une même fenêtre n'entre qu'une fois.
+  passWindowKey       String?            @unique
   createdAt           DateTime           @default(now())
 
   organization   Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   establishment  Establishment          @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  pass           Pass?                  @relation(fields: [passId], references: [id], onDelete: Cascade)
   ticket         Ticket?                @relation("TicketScans", fields: [ticketId], references: [id], onDelete: Cascade)
   acceptedTicket Ticket?                @relation("TicketAcceptedScan", fields: [acceptedForTicketId], references: [id], onDelete: Cascade)
   scannedBy      OrganizationMembership @relation("TicketScanAgent", fields: [scannedById], references: [id], onDelete: NoAction)
@@ -1341,6 +1376,7 @@ model TicketScan {
   @@unique([organizationId, clientRequestId])
   @@index([establishmentId, createdAt])
   @@index([ticketId])
+  @@index([passId, localDate])
 }
 
 /// Horaire hebdomadaire du parc (n'affecte jamais le restaurant d'un établissement mixte).
@@ -1708,6 +1744,228 @@ model KioskSession {
 /// Fiche client (CRM), au niveau de l'organisation. Toutes les informations personnelles sont
 /// facultatives ; le consentement est enregistré. Une demande de suppression anonymise la fiche :
 /// les ventes restent (obligations comptables) mais ne sont plus rattachées à une personne identifiable.
+/// Sprint 8 : type de pass visiteur (droit d'entrée d'un titulaire identifié), domaine distinct des
+/// abonnements SaaS d'Ocall Suite. Extensible (familles, événements) sans changer le moteur de passage.
+enum PassKind {
+  DAY
+  WEEK
+  MONTHLY
+  ANNUAL
+}
+
+enum PassDurationUnit {
+  DAYS
+  MONTHS
+}
+
+/// QR d'un pass : fixe (journalier, hebdomadaire) ou dynamique signé renouvelé toutes les 30 s.
+enum PassQrMode {
+  STATIC
+  DYNAMIC
+}
+
+/// PENDING : vendu, en attente de paiement (inutilisable). L'expiration se déduit des dates.
+enum PassStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  CANCELLED
+}
+
+enum PassPeriodStatus {
+  PENDING
+  PAID
+  CANCELLED
+}
+
+enum PassCardStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum PassEventType {
+  SOLD
+  ACTIVATED
+  RENEWAL_ORDERED
+  RENEWED
+  SUSPENDED
+  REACTIVATED
+  CANCELLED
+  PHOTO_UPDATED
+  LINK_ISSUED
+  LINK_REVOKED
+  CARD_ISSUED
+  CARD_REVOKED
+  CARD_PRINT_REQUESTED
+}
+
+/// Sprint 8 : offre de pass configurée par l'organisation (catalogue). Jamais supprimée : désactivée.
+model PassOffer {
+  id                String           @id @default(uuid()) @db.Uuid
+  organizationId    String           @db.Uuid
+  kind              PassKind
+  name              String
+  description       String           @default("")
+  /// Prix de base (FCFA) ; un parc peut avoir son tarif (PassOfferSite.price).
+  price             Int
+  currency          String           @default("XOF") @db.Char(3)
+  durationUnit      PassDurationUnit @default(DAYS)
+  durationValue     Int              @default(1)
+  /// Entrées par période (null = illimité), partagées entre tous les parcs autorisés.
+  totalEntries      Int?
+  /// Entrées par jour (null = illimité), remises à zéro à minuit dans le fuseau du parc.
+  dailyEntries      Int?
+  /// Jours autorisés (0 = dimanche … 6 = samedi) ; vide = tous.
+  allowedWeekdays   Int[]            @default([])
+  qrMode            PassQrMode       @default(STATIC)
+  photoRequired     Boolean          @default(false)
+  renewable         Boolean          @default(false)
+  /// Suspension : durée maximale (jours) reportée sur la validité ; 0 = aucune suspension.
+  maxSuspensionDays Int              @default(0)
+  suspensionExtends Boolean          @default(true)
+  conditions        String           @default("")
+  saleFrom          DateTime?        @db.Date
+  saleUntil         DateTime?        @db.Date
+  isActive          Boolean          @default(true)
+  createdById       String?          @db.Uuid
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sites        PassOfferSite[]
+  passes       Pass[]
+  saleLines    SaleLine[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, isActive])
+}
+
+/// Sprint 8 : parc autorisé pour une offre, avec son tarif éventuel (sinon le prix de l'offre).
+model PassOfferSite {
+  id              String  @id @default(uuid()) @db.Uuid
+  organizationId  String  @db.Uuid
+  offerId         String  @db.Uuid
+  establishmentId String  @db.Uuid
+  price           Int?
+  isActive        Boolean @default(true)
+
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  offer         PassOffer     @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+
+  @@unique([offerId, establishmentId])
+  @@index([establishmentId])
+}
+
+/// Sprint 8 : pass vendu à un titulaire (fiche client obligatoire). Règles de l'offre figées à la vente
+/// (`rules`) ; périodes payées dans `PassPeriod` ; QR jamais stocké : il se calcule (signature serveur)
+/// à partir de `publicId` et `qrVersion`.
+model Pass {
+  id               String     @id @default(uuid()) @db.Uuid
+  organizationId   String     @db.Uuid
+  offerId          String     @db.Uuid
+  customerId       String     @db.Uuid
+  kind             PassKind
+  holderName       String
+  photoFileId      String?    @db.Uuid
+  rules            Json
+  status           PassStatus @default(PENDING)
+  /// Premier et dernier jour couverts (dates locales), prolongations comprises.
+  startDate        DateTime   @db.Date
+  endDate          DateTime   @db.Date
+  publicId         String     @unique
+  qrVersion        Int        @default(1)
+  /// Lien personnel du titulaire (QR dynamique) : empreinte seulement, révocable.
+  linkTokenHash    String?    @unique
+  linkIssuedAt     DateTime?
+  suspendedAt      DateTime?
+  suspensionReason String?
+  cancelledAt      DateTime?
+  cancelledById    String?    @db.Uuid
+  cancelReason     String?
+  createdById      String     @db.Uuid
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  offer        PassOffer    @relation(fields: [offerId], references: [id], onDelete: NoAction)
+  customer     Customer     @relation(fields: [customerId], references: [id], onDelete: NoAction)
+  periods      PassPeriod[]
+  events       PassEvent[]
+  cards        PassCard[]
+  scans        TicketScan[]
+
+  @@index([organizationId, status])
+  @@index([customerId])
+}
+
+/// Sprint 8 : période payée d'un pass (vente initiale ou renouvellement) : prix appliqué, paiement
+/// (vente), entrées consommées, prolongations ; jamais supprimée.
+model PassPeriod {
+  id             String           @id @default(uuid()) @db.Uuid
+  organizationId String           @db.Uuid
+  passId         String           @db.Uuid
+  saleId         String           @db.Uuid
+  saleLineId     String           @unique @db.Uuid
+  status         PassPeriodStatus @default(PENDING)
+  isRenewal      Boolean          @default(false)
+  /// Dates locales ; un renouvellement est daté au paiement (échéance précédente ou jour du paiement).
+  startDate      DateTime?        @db.Date
+  endDate        DateTime?        @db.Date
+  price          Int
+  entriesUsed    Int              @default(0)
+  extendedDays   Int              @default(0)
+  paidAt         DateTime?
+  createdAt      DateTime         @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  pass         Pass         @relation(fields: [passId], references: [id], onDelete: Cascade)
+  sale         Sale         @relation(fields: [saleId], references: [id], onDelete: NoAction)
+  saleLine     SaleLine     @relation(fields: [saleLineId], references: [id], onDelete: NoAction)
+
+  @@index([passId])
+}
+
+/// Sprint 8 : historique d'un pass (vente, renouvellements, suspensions, cartes, lien…).
+model PassEvent {
+  id                String        @id @default(uuid()) @db.Uuid
+  organizationId    String        @db.Uuid
+  passId            String        @db.Uuid
+  type              PassEventType
+  actorMembershipId String?       @db.Uuid
+  reason            String?
+  metadata          Json?
+  createdAt         DateTime      @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  pass         Pass         @relation(fields: [passId], references: [id], onDelete: Cascade)
+
+  @@index([passId, createdAt])
+}
+
+/// Sprint 8 : carte physique d'un pass (production par Ocall Print, jamais ici). Identifiant fixe et
+/// révocable ; une seule carte active par pass (index partiel) ; une carte de remplacement garde le
+/// lien avec le pass et le titulaire sans réactiver l'ancienne.
+model PassCard {
+  id               String         @id @default(uuid()) @db.Uuid
+  organizationId   String         @db.Uuid
+  passId           String         @db.Uuid
+  cardNumber       String         @unique
+  status           PassCardStatus @default(ACTIVE)
+  replacesCardId   String?        @db.Uuid
+  issuedById       String         @db.Uuid
+  revokedAt        DateTime?
+  revokedById      String?        @db.Uuid
+  revokeReason     String?
+  printRequestedAt DateTime?
+  createdAt        DateTime       @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  pass         Pass         @relation(fields: [passId], references: [id], onDelete: Cascade)
+
+  @@index([passId])
+}
+
 model Customer {
   id                 String    @id @default(uuid()) @db.Uuid
   organizationId     String    @db.Uuid
@@ -1730,6 +1988,7 @@ model Customer {
   organization Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   createdBy    OrganizationMembership? @relation("CustomerCreatedBy", fields: [createdById], references: [id], onDelete: NoAction)
   sales        Sale[]
+  passes       Pass[]
   wallets      LoyaltyWallet[]
 
   @@unique([organizationId, phone])
@@ -2362,6 +2621,8 @@ model PlatformCounter {
 
 enum StoredFileKind {
   SUPPORT_ATTACHMENT
+  /// Sprint 8 : photo du titulaire d'un pass (JPEG réencodé, sans métadonnées).
+  PASS_HOLDER_PHOTO
 }
 
 /// Fichier PRIVÉ d'une organisation : jamais public, servi uniquement par lien temporaire signé
