@@ -89,3 +89,9 @@ Les billets et scans existants ne changent pas.
 - **Événements** : un pass peut porter un jour unique (journalier daté) et des jours autorisés ; une
   offre « événement » réutilisera les mêmes règles, quotas et contrôle d'accès.
 - Hors périmètre (décision D11) : vente et renouvellement en ligne.
+
+## Dette connue
+
+- [DT-001](DETTE-TECHNIQUE.md#dt-001--stockage-objet-de-préproduction-inutilisable-prioritaire) : stockage objet
+  de préproduction inutilisable. Les photos de titulaire, et donc les ventes de pass mensuels et annuels, n'ont
+  pas pu être validées sur l'environnement déployé.
