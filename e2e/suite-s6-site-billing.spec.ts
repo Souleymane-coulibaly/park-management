@@ -109,6 +109,14 @@ test('Ocall Suite : facturation par site, du Super Admin à la page Tarifs', asy
   await expect(invoiceRow.getByTestId('invoice-sites')).toContainText('3 site(s) facturé(s)');
   await expect(invoiceRow).toContainText('Sites supplémentaires : 2 × 1 mois');
   await expect(invoiceRow).toContainText('32 500');
+  // J2 : identité légale d'Ocall non renseignée → facture provisoire annoncée ; PDF téléchargeable.
+  await expect(admin.getByTestId('legal-identity-incomplete')).toBeVisible();
+  await expect(invoiceRow).toContainText('Provisoire');
+  const [download] = await Promise.all([
+    admin.waitForEvent('download'),
+    invoiceRow.getByTestId('invoice-pdf').click(),
+  ]);
+  expect(download.suggestedFilename()).toMatch(/^Facture-.+\.pdf$/);
 
   // Page Tarifs : grille par site dès qu'Ocall active les offres (cache de 5 minutes des prix).
   await withTestDb((db) =>

@@ -1,5 +1,12 @@
 import { Module } from '@nestjs/common';
 import { OrganizationsModule } from '../organizations/organizations.module';
+import { LegalIdentityService } from './legal-identity.service';
+import { OcallBillingDocumentsService } from './ocall-billing-documents.service';
+import {
+  ClientBillingDocumentsController,
+  OcallLegalController,
+  PublicLegalIdentityController,
+} from './ocall-legal.controller';
 import { OperationsController } from './operations.controller';
 import { OperationsService } from './operations.service';
 import { PlatformController } from './platform.controller';
@@ -20,6 +27,9 @@ import { SuiteService } from './suite.service';
     OperationsController,
     SubscriptionPaymentsController,
     SubscriptionAdminController,
+    OcallLegalController,
+    ClientBillingDocumentsController,
+    PublicLegalIdentityController,
   ],
   providers: [
     PlatformService,
@@ -28,6 +38,8 @@ import { SuiteService } from './suite.service';
     OperationsService,
     SubscriptionPaymentsService,
     SubscriptionAdminService,
+    LegalIdentityService,
+    OcallBillingDocumentsService,
   ],
   exports: [SubscriptionPaymentsService],
 })

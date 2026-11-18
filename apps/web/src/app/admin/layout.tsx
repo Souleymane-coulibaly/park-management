@@ -156,6 +156,12 @@ const NAV: (NavItem & { permission: PlatformPermission | null })[] = [
     permission: 'platform.audit.read',
   },
   {
+    key: 'platform-legal-identity',
+    label: 'Identité légale Ocall',
+    href: '/admin/identite-legale',
+    permission: 'platform.billing.read',
+  },
+  {
     key: 'platform-settings',
     label: 'Paramètres généraux',
     href: '/admin/parametres',

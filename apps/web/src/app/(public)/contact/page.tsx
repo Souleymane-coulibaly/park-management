@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
-import { LegalPage, ToComplete } from '@/components/public/legal-page';
+import { LegalValue, joinLegal, loadLegalIdentity } from '@/components/public/legal-identity';
+import { LegalPage } from '@/components/public/legal-page';
 import { ButtonLink } from '@/components/ui/button';
 
 export const metadata: Metadata = {
@@ -8,7 +9,15 @@ export const metadata: Metadata = {
   alternates: { canonical: '/contact' },
 };
 
-export default function ContactPage() {
+// Coordonnées saisies dans l'administration, relues toutes les 5 minutes.
+export const dynamic = 'force-dynamic';
+
+export default async function ContactPage() {
+  const id = await loadLegalIdentity();
+  const phones = joinLegal(
+    [id?.phone, id?.whatsapp && id.whatsapp !== id.phone ? `WhatsApp ${id.whatsapp}` : null],
+    ' · ',
+  );
   return (
     <LegalPage eyebrow="Contact" title="Nous contacter">
       <section>
@@ -22,13 +31,14 @@ export default function ContactPage() {
         <h2>Coordonnées</h2>
         <ul className="space-y-1">
           <li>
-            Téléphone et WhatsApp : <ToComplete>numéro</ToComplete>
+            Téléphone et WhatsApp : <LegalValue value={phones} missing="numéro" />
           </li>
           <li>
-            E-mail : <ToComplete>adresse e-mail</ToComplete>
+            E-mail : <LegalValue value={id?.email ?? null} missing="adresse e-mail" />
           </li>
           <li>
-            Adresse : <ToComplete>adresse</ToComplete>
+            Adresse :{' '}
+            <LegalValue value={joinLegal([id?.address, id?.city, id?.country])} missing="adresse" />
           </li>
         </ul>
       </section>

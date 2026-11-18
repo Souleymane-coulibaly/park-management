@@ -15,6 +15,7 @@ export * from './organization-report';
 export * from './saas';
 export * from './sites';
 export * from './platform';
+export * from './ocall-legal';
 export * from './site-billing';
 export * from './park-restaurant';
 export * from './support';

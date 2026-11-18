@@ -107,7 +107,11 @@ export class OnlinePaymentsService {
         paidAt: true,
         product: { select: { name: true, status: true } },
         lines: { orderBy: { position: 'asc' }, select: { kind: true, label: true, amount: true } },
-        payments: { select: { amount: true, status: true } },
+        payments: {
+          orderBy: { paidAt: 'asc' },
+          select: { id: true, amount: true, status: true, paidAt: true },
+        },
+        issuerSnapshot: true,
         onlinePayments: {
           orderBy: { createdAt: 'desc' },
           take: 1,
@@ -115,7 +119,7 @@ export class OnlinePaymentsService {
         },
       },
     });
-    return rows.map(({ payments, onlinePayments, product, ...i }) => {
+    return rows.map(({ payments, onlinePayments, product, issuerSnapshot, ...i }) => {
       const remaining = i.status === 'ISSUED' ? invoiceRemaining(i.total, payments) : 0;
       return {
         ...i,
@@ -127,6 +131,11 @@ export class OnlinePaymentsService {
           remaining > 0 &&
           isProductBillable(product.status),
         lastOnlinePayment: onlinePayments[0] ?? null,
+        // J2 : facture définitive (identité d'Ocall figée) et reçus des règlements confirmés.
+        definitive: issuerSnapshot !== null,
+        receipts: payments
+          .filter((p) => p.status === 'CONFIRMED' || p.status === 'REFUNDED')
+          .map((p) => ({ id: p.id, amount: p.amount, paidAt: p.paidAt, status: p.status })),
       };
     });
   }

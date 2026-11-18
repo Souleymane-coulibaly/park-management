@@ -1,4 +1,6 @@
 import type {
+  OcallLegalField,
+  OcallLegalIdentity,
   PassDurationUnit,
   PassKind,
   PassQrMode,
@@ -1341,6 +1343,16 @@ export interface SuiteInvoice {
   payments: { id: string; amount: number; status: SubscriptionPaymentStatus }[];
   /** Étape 6 : sites facturés photographiés à l'émission (offre par site), sinon null. */
   sitesSnapshot?: InvoiceSitesSnapshot | null;
+  /** J2 : identité légale d'Ocall figée à l'émission (facture définitive) ; sinon provisoire. */
+  definitive: boolean;
+}
+
+/** J2 : identité légale de l'éditeur Ocall (administration). */
+export interface PlatformLegalIdentityView {
+  identity: OcallLegalIdentity;
+  missingForInvoices: OcallLegalField[];
+  invoicesDefinitive: boolean;
+  updatedAt: string | null;
 }
 
 /** Étape 6 : sites facturés d'un abonnement (Super Admin). */

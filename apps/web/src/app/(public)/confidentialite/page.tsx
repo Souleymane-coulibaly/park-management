@@ -1,9 +1,19 @@
 import type { Metadata } from 'next';
+import { LegalValue, joinLegal, loadLegalIdentity } from '@/components/public/legal-identity';
 import { DRAFT_ROBOTS, LegalPage, ToComplete } from '@/components/public/legal-page';
 
 export const metadata: Metadata = { title: 'Politique de confidentialité', robots: DRAFT_ROBOTS };
 
-export default function ConfidentialitePage() {
+// Responsable du traitement et contact saisis dans l'administration, relus toutes les 5 minutes.
+export const dynamic = 'force-dynamic';
+
+export default async function ConfidentialitePage() {
+  const id = await loadLegalIdentity();
+  const controller = joinLegal([
+    id?.legalName,
+    joinLegal([id?.address, id?.city, id?.country]),
+    id?.email,
+  ]);
   return (
     <LegalPage
       eyebrow="Informations"
@@ -13,7 +23,11 @@ export default function ConfidentialitePage() {
       <section>
         <h2>Responsable du traitement</h2>
         <p>
-          <ToComplete>raison sociale, adresse et contact du responsable du traitement</ToComplete>.
+          <LegalValue
+            value={id?.legalName && id.address && id.email ? controller : null}
+            missing="raison sociale, adresse et contact du responsable du traitement"
+          />
+          .
         </p>
       </section>
       <section>
@@ -53,7 +67,8 @@ export default function ConfidentialitePage() {
         <h2>Vos droits</h2>
         <p>
           Vous pouvez demander l’accès, la rectification ou la suppression de vos données en
-          écrivant à <ToComplete>adresse e-mail dédiée</ToComplete>.
+          écrivant à <LegalValue value={id?.privacyEmail ?? null} missing="adresse e-mail dédiée" />
+          .
         </p>
       </section>
       <section>

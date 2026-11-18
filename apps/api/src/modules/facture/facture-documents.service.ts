@@ -46,7 +46,7 @@ import {
   type FactureEstablishmentIdentity,
   type FactureSellerIdentity,
   renderFactureDocumentPdf,
-} from './facture-document-pdf';
+} from '../../common/pdf/commercial-document-pdf';
 import { allocateFactureNumber } from './facture-numbering';
 import { loadFactureLogos } from './facture-pdf';
 import { FacturePrismaService } from './facture-prisma.service';

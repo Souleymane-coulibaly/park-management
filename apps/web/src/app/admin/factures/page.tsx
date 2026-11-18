@@ -7,9 +7,12 @@ import {
   INVOICE_STATUS_LABELS,
   type InvoiceLineInput,
   type InvoiceStatus,
+  OCALL_LEGAL_FIELD_LABELS,
   formatXof,
 } from '@ocall/shared';
+import Link from 'next/link';
 import { useCanPlatform } from '@/components/app/session-context';
+import { PdfDownloadButton } from '@/components/billing/pdf-download-button';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader } from '@/components/ui/card';
@@ -21,6 +24,7 @@ import { Table, Td } from '@/components/ui/table';
 import { ApiError, api } from '@/lib/api';
 import { formatDate } from '@/lib/format';
 import type {
+  PlatformLegalIdentityView,
   PlatformOrganization,
   SubscriptionSites,
   SuiteInvoice,
@@ -45,6 +49,7 @@ export default function InvoicesPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const canManage = useCanPlatform('platform.billing.manage');
   const invoices = useApi<SuiteInvoice[]>(`/platform/invoices${status ? `?status=${status}` : ''}`);
+  const legal = useApi<PlatformLegalIdentityView>('/platform/legal-identity');
 
   return (
     <>
@@ -60,6 +65,17 @@ export default function InvoicesPage() {
           )
         }
       />
+      {legal.state === 'success' && !legal.data.invoicesDefinitive && (
+        <div className="mb-4" data-testid="legal-identity-incomplete">
+          <Alert tone="error" title="Les factures émises maintenant seront provisoires">
+            Mentions obligatoires de l’émetteur à renseigner avant toute facture définitive :{' '}
+            {legal.data.missingForInvoices.map((f) => OCALL_LEGAL_FIELD_LABELS[f]).join(', ')}.{' '}
+            <Link href="/admin/identite-legale" className="font-semibold underline">
+              Compléter l’identité légale
+            </Link>
+          </Alert>
+        </div>
+      )}
       {notice && (
         <div className="mb-4">
           <Alert tone="success">{notice}</Alert>
@@ -125,6 +141,11 @@ export default function InvoicesPage() {
                   <Td>{formatDate(i.dueAt)}</Td>
                   <Td>
                     <Badge tone={STATUS_TONE[i.status]}>{INVOICE_STATUS_LABELS[i.status]}</Badge>
+                    {!i.definitive && (
+                      <span className="ms-1">
+                        <Badge tone="terracotta">Provisoire</Badge>
+                      </span>
+                    )}
                     {i.paidAt && (
                       <span className="block text-xs text-muted">le {formatDate(i.paidAt)}</span>
                     )}
@@ -132,7 +153,13 @@ export default function InvoicesPage() {
                       <span className="block text-xs text-muted">{i.cancelReason}</span>
                     )}
                   </Td>
-                  <Td>
+                  <Td className="space-y-1">
+                    <PdfDownloadButton
+                      path={`/platform/invoices/${i.id}/pdf`}
+                      fileName={`Facture-${i.number}.pdf`}
+                      label="PDF"
+                      testId="invoice-pdf"
+                    />
                     {canManage && i.status === 'ISSUED' && i.payments.length === 0 && (
                       <Button
                         size="sm"

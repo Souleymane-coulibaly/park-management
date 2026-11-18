@@ -2457,6 +2457,9 @@ model Invoice {
   idempotencyKey String        @unique
   /// Étape 6, offre PER_SITE : sites facturés photographiés à l'émission (jamais recalculés).
   sitesSnapshot  Json?
+  /// Commercialisation J2 : identité légale d'Ocall copiée à l'émission si toutes les mentions
+  /// obligatoires étaient renseignées (facture DÉFINITIVE, jamais relue) ; null = facture provisoire.
+  issuerSnapshot Json?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
@@ -2609,6 +2612,32 @@ model DemoRequest {
   @@index([status, createdAt])
   @@index([retentionUntil])
   @@index([partnerId, createdAt])
+}
+
+/// Commercialisation J2 : identité légale de l'éditeur Ocall (ligne unique, id « ocall »), saisie dans
+/// l'administration et jamais inventée. Pages légales et factures d'abonnement Ocall ; indépendante des
+/// identités des organisations clientes (Ocall Facture).
+model PlatformLegalIdentity {
+  id                  String   @id
+  legalName           String?
+  tradeName           String?
+  legalForm           String?
+  shareCapital        String?
+  address             String?
+  city                String?
+  country             String?
+  rccm                String?
+  nif                 String?
+  taxRegime           String?
+  publicationDirector String?
+  phone               String?
+  whatsapp            String?
+  email               String?
+  privacyEmail        String?
+  hostingProvider     String?
+  bankDetails         String?
+  updatedById         String?  @db.Uuid
+  updatedAt           DateTime @updatedAt
 }
 
 /// Compteurs de la plateforme (numérotation des factures par année), incrémentés de façon atomique.

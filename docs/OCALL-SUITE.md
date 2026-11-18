@@ -415,3 +415,62 @@ Décisions D1 à D8 validées. Deux applications commerciales, chacune avec son 
 - **Ocall Restaurant indépendant** : l'ouverture (`listed`) accepte désormais une offre par site active
   (`RESTAURANT_PLAN_REQUIRED` sans aucune offre d'essai active) ; un restaurant seul démarre alors son essai
   Ocall Restaurant sur l'offre par site, sans contrat combiné.
+
+## Commercialisation J2 — identité légale Ocall, factures et reçus PDF
+
+**Identité légale de l'éditeur.** La page d'administration « Identité légale Ocall »
+(`/admin/identite-legale`) enregistre une ligne unique `PlatformLegalIdentity` :
+
+- **Contenu** : raison sociale, forme, capital, siège, RCCM, NIF, régime fiscal, contacts, directeur de la
+  publication, hébergeur, coordonnées bancaires.
+- **Aucune valeur préremplie.** Ces informations sont saisies par Ocall et ne sont jamais inventées.
+- **Droits** :
+  - modification : propriétaire ou administrateur délégué (`platform.legal.manage`) ;
+  - lecture : facturation et audit ;
+  - chaque modification est journalisée avec la liste des champs modifiés, sans leurs valeurs.
+
+**Pages légales.** Les pages Mentions légales, Contact et Confidentialité lisent l'identité publique
+(`GET /public/suite/legal-identity`, cache de 5 minutes).
+
+- Un champ vide reste affiché « À compléter ».
+- Les coordonnées bancaires ne sont jamais publiées.
+- Les mentions légales deviennent indexables seulement quand elles sont complètes.
+- CGU, cadre légal de la confidentialité et page À propos : textes rédactionnels encore à fournir.
+
+**Factures définitives ou provisoires.**
+
+- **Mentions obligatoires** (`OCALL_INVOICE_REQUIRED_FIELDS`, liste à valider par le conseil d'Ocall) :
+  raison sociale, forme, adresse, ville, pays, RCCM, NIF, régime fiscal.
+- **Mentions complètes à l'émission** : l'identité est copiée sur la facture (`Invoice.issuerSnapshot`).
+  La facture est **définitive** et ne change plus, même si l'identité est modifiée ensuite.
+- **Mentions incomplètes** : la facture est numérotée normalement, mais elle est **provisoire**. Son PDF
+  porte un avertissement et un filigrane « PROVISOIRE ».
+- **Avertissement** : la page Factures prévient tant que l'identité est incomplète.
+- **En production**, l'identité doit être complète avant la première facture, pour qu'aucun numéro ne soit
+  attribué à une facture provisoire.
+
+**Documents PDF.** Ils reprennent le moteur et la charte d'Ocall Facture, déplacés dans `common/pdf` (`renderFactureDocumentPdf`, en-tête et
+pied de page), avec des options ajoutées et sans effet sur Ocall Facture :
+
+- document provisoire ;
+- montants sans TVA calculée, régime fiscal imprimé tel que saisi ;
+- pas de cases de signature.
+
+La facturation Ocall reste indépendante d'Ocall Facture : aucune donnée de Facture n'est lue.
+
+| Document | Administration | Espace client (`subscription.read`) |
+| --- | --- | --- |
+| Facture | `GET /platform/invoices/:id/pdf` | `GET /billing/invoices/:id/pdf` |
+| Reçu d'un règlement | `GET /platform/subscription-payments/:id/receipt` | `GET /billing/payments/:id/receipt` |
+
+- **Espace client** : uniquement les documents de l'organisation ; toute autre demande renvoie 404.
+- **Reçu** : disponible seulement pour un règlement confirmé ou remboursé, sinon 409 `RECEIPT_NOT_AVAILABLE`.
+  - Il reprend l'identité figée de la facture réglée.
+  - Son numéro est celui du reçu d'espèces, sinon `REG-` suivi de l'identifiant du règlement.
+
+**Migration additive** `20261218000000_suite_j2_identite_legale_ocall` : une table vide et une colonne
+facultative. Les factures déjà émises restent provisoires.
+
+**Tests** :
+- intégration : `suite-j2-documents-ocall` ;
+- unitaires : `ocall-legal.spec.ts`, options de `facture-document-pdf.spec.ts`.

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { CreditCard, FileText } from 'lucide-react';
 import { INVOICE_STATUS_LABELS, formatXof } from '@ocall/shared';
 import { useCan } from '@/components/app/session-context';
+import { PdfDownloadButton } from '@/components/billing/pdf-download-button';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader } from '@/components/ui/card';
@@ -27,6 +28,10 @@ export interface ClientInvoice {
   product: string;
   payableOnline: boolean;
   lastOnlinePayment: { reference: string; status: string } | null;
+  /** Facture définitive (identité légale d'Ocall figée à l'émission) ; sinon provisoire. */
+  definitive: boolean;
+  /** Reçus des règlements confirmés (ou remboursés). */
+  receipts: { id: string; amount: number; paidAt: string; status: 'CONFIRMED' | 'REFUNDED' }[];
 }
 
 const CHANNELS = [
@@ -116,8 +121,28 @@ export function ClientInvoices() {
                   >
                     {INVOICE_STATUS_LABELS[i.status]}
                   </Badge>
+                  {!i.definitive && (
+                    <span className="block text-xs text-muted">Facture provisoire</span>
+                  )}
                 </Td>
                 <Td>
+                  <div className="flex flex-wrap items-start gap-2">
+                    <PdfDownloadButton
+                      path={`/billing/invoices/${i.id}/pdf`}
+                      fileName={`Facture-${i.number}.pdf`}
+                      label="Facture PDF"
+                      testId="client-invoice-pdf"
+                    />
+                    {i.receipts.map((r) => (
+                      <PdfDownloadButton
+                        key={r.id}
+                        path={`/billing/payments/${r.id}/receipt`}
+                        fileName="Recu.pdf"
+                        label={`Reçu ${formatXof(r.amount)}`}
+                        testId="client-receipt-pdf"
+                      />
+                    ))}
+                  </div>
                   {canPay && i.payableOnline && (
                     <Button
                       size="sm"

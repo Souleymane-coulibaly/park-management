@@ -40,6 +40,7 @@ import { PasswordService } from '../../common/security/password.service';
 import { SessionService } from '../../common/security/session.service';
 import { nextPlatformSequence } from '../../common/platform-counter';
 import { PLATFORM_TIMEZONE, platformPeriod } from './platform-period';
+import { LegalIdentityService } from './legal-identity.service';
 import { generateTemporaryPassword } from '../../common/security/tokens';
 import {
   MONTHLY_AMOUNT_PLAN_SELECT,
@@ -134,6 +135,7 @@ export class SuiteService {
     private readonly passwords: PasswordService,
     private readonly sessions: SessionService,
     private readonly siteActivations: SiteActivationService,
+    private readonly legal: LegalIdentityService,
   ) {}
 
   // ─── Catalogue de produits ───
@@ -630,6 +632,8 @@ export class SuiteService {
         product: { select: { code: true, name: true } },
         // Étape 6 : sites facturés photographiés à l'émission (offre par site).
         sitesSnapshot: true,
+        // J2 : identité de l'émetteur figée (facture définitive) ; seule sa présence est renvoyée.
+        issuerSnapshot: true,
         lines: {
           select: {
             kind: true,
@@ -649,9 +653,10 @@ export class SuiteService {
       orderBy: { issuedAt: 'desc' },
       take: 200,
     });
-    return rows.map((r) => ({
+    return rows.map(({ issuerSnapshot, ...r }) => ({
       ...r,
       sitesSnapshot: r.sitesSnapshot as unknown as InvoiceSitesSnapshot | null,
+      definitive: issuerSnapshot !== null,
     }));
   }
 
@@ -727,6 +732,8 @@ export class SuiteService {
       });
       if ('error' in computed)
         throw new BadRequestException({ code: 'INVOICE_LINES_INVALID', message: computed.error });
+      // J2 : facture définitive si l'identité légale d'Ocall est complète (copie figée), sinon provisoire.
+      const issuer = await this.legal.invoiceSnapshot(tx);
       const { year, sequence } = await nextPlatformSequence(tx, 'invoice');
       const dueAt = dto.dueAt
         ? zonedMidnight(dto.dueAt, PLATFORM_TIMEZONE)
@@ -744,6 +751,7 @@ export class SuiteService {
           createdById: auth.user.id,
           idempotencyKey: dto.idempotencyKey,
           ...(snapshot ? { sitesSnapshot: snapshot as unknown as Prisma.InputJsonValue } : {}),
+          ...(issuer ? { issuerSnapshot: issuer as unknown as Prisma.InputJsonValue } : {}),
           lines: { create: computed.lines.map((l, position) => ({ ...l, position })) },
         },
         select: { id: true, number: true, total: true },
@@ -769,6 +777,7 @@ export class SuiteService {
             number: invoice.number,
             organizationId: agreed.sub.organizationId,
             total: invoice.total,
+            definitive: issuer !== null,
             lines: computed.lines.map((l) => ({ kind: l.kind, amount: l.amount })),
             ...(snapshot ? { billedSites: snapshot.billedSites } : {}),
           },

@@ -19,7 +19,7 @@ import {
 import { AuditService } from '../../common/audit/audit.service';
 import { type CsvValue, toCsv } from '../../common/csv';
 import type { FactureContext } from './facture-access';
-import type { FactureClientIdentity } from './facture-document-pdf';
+import type { FactureClientIdentity } from '../../common/pdf/commercial-document-pdf';
 import { FactureDocumentsService, invoiceAmounts, todayUtc } from './facture-documents.service';
 import { FacturePrismaService } from './facture-prisma.service';
 import type { FactureExportQueryDto, RecordFacturePaymentDto } from './facture-commercial.dto';

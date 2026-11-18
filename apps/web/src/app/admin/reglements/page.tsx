@@ -15,6 +15,7 @@ import {
   invoiceRemaining,
 } from '@ocall/shared';
 import { useCanPlatform, useSession } from '@/components/app/session-context';
+import { PdfDownloadButton } from '@/components/billing/pdf-download-button';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader } from '@/components/ui/card';
@@ -302,6 +303,14 @@ function PaymentRow({
                 Refuser
               </Button>
             </>
+          )}
+          {(p.status === 'CONFIRMED' || p.status === 'REFUNDED') && (
+            <PdfDownloadButton
+              path={`/platform/subscription-payments/${p.id}/receipt`}
+              fileName="Recu.pdf"
+              label="Reçu"
+              testId="payment-receipt"
+            />
           )}
           {p.status === 'CONFIRMED' && canValidate && (
             <Button

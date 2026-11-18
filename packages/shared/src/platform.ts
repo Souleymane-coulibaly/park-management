@@ -65,6 +65,8 @@ export const PlatformPermission = {
   PAYOUTS_MANAGE: 'platform.payouts.manage',
   /** Ocall School : contrats B2B et activation des produits vendus sur contrat. */
   CONTRACTS_MANAGE: 'platform.contracts.manage',
+  /** Commercialisation J2 : identité légale d'Ocall (pages légales, factures d'abonnement). */
+  LEGAL_MANAGE: 'platform.legal.manage',
 } as const;
 export type PlatformPermission = (typeof PlatformPermission)[keyof typeof PlatformPermission];
 export const PLATFORM_PERMISSIONS: readonly PlatformPermission[] =

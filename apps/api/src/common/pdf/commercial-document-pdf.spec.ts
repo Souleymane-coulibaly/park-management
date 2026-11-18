@@ -5,8 +5,8 @@ import {
   type FacturePdfDocument,
   type FactureSellerIdentity,
   renderFactureDocumentPdf,
-} from './facture-document-pdf';
-import { NO_FACTURE_LOGOS } from './facture-pdf';
+} from './commercial-document-pdf';
+import { NO_FACTURE_LOGOS } from './letterhead';
 
 /**
  * Ocall Facture — PDF d'un document, Suite S2 (établissement émetteur facultatif) : l'établissement est
@@ -132,5 +132,33 @@ describe('Ocall Facture — PDF : établissement émetteur', () => {
     const { body, texts } = await drawnTexts(document(null));
     expect(body.subarray(0, 5).toString()).toBe('%PDF-');
     expect(texts.some((t) => /établissement/i.test(t))).toBe(false);
+  });
+});
+
+describe('Ocall Facture — PDF : options des documents Ocall (commercialisation J2)', () => {
+  it('sans option, le rendu Facture est inchangé (TVA, signatures, aucun filigrane)', async () => {
+    const { texts } = await drawnTexts(document(null));
+    expect(texts).toContain('Sous-total HT');
+    expect(texts).toContain('BON POUR ACCORD');
+    expect(texts).toContain('MONTANT HT');
+    expect(texts.some((t) => /PROVISOIRE/.test(t))).toBe(false);
+  });
+
+  it('document provisoire : avertissement et filigrane ; sans TVA calculée ni signatures', async () => {
+    const { body, texts } = await drawnTexts({
+      ...document(null),
+      vat: [],
+      provisional: { notice: 'FACTURE PROVISOIRE — test', watermark: 'PROVISOIRE' },
+      untaxed: { title: 'Régime fiscal', text: 'Mention de test' },
+      signatures: false,
+    });
+    expect(body.subarray(0, 5).toString()).toBe('%PDF-');
+    expect(texts).toContain('FACTURE PROVISOIRE — test');
+    expect(texts).toContain('PROVISOIRE');
+    expect(texts).toContain('Mention de test');
+    expect(texts).toContain('MONTANT');
+    expect(texts).not.toContain('MONTANT HT');
+    expect(texts).not.toContain('BON POUR ACCORD');
+    expect(texts.join('\n')).not.toMatch(/Sous-total HT|toutes taxes comprises|18 %/);
   });
 });

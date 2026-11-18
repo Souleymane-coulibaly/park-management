@@ -5,8 +5,9 @@ import {
   factureAmountInWords,
   formatVatRate,
   formatXof,
+  numberToFrenchWords,
 } from '@ocall/shared';
-import { PDF_CONTENT_WIDTH, PDF_PAGE, renderPdfDocument } from '../../common/pdf/pdf-document';
+import { PDF_CONTENT_WIDTH, PDF_PAGE, renderPdfDocument } from './pdf-document';
 import {
   FACTURE_INK,
   FACTURE_LINE,
@@ -19,7 +20,7 @@ import {
   drawLetterhead,
   footerHeight,
   tint,
-} from './facture-pdf';
+} from './letterhead';
 
 /** Identité du client imprimée (copiée à l'émission, ou lue en direct sur un brouillon). */
 export interface FactureClientIdentity {
@@ -94,6 +95,24 @@ export interface FacturePdfDocument {
   totalTtc: number;
   vat: FactureVatBucket[];
   lines: FacturePdfLine[];
+  /**
+   * Document numéroté mais PROVISOIRE (facture d'abonnement Ocall émise avant que les mentions légales
+   * de l'émetteur soient complètes) : avertissement sous le numéro et filigrane sur chaque page.
+   */
+  provisional?: { notice: string; watermark: string } | null;
+  /**
+   * Montants sans TVA calculée (factures d'abonnement Ocall) : colonnes sans « HT », ni ligne ni
+   * colonne de TVA, montant en lettres sans mention de taxes ; `text` (régime fiscal) sous `title`.
+   */
+  untaxed?: { title: string; text: string } | null;
+  /** Cases « Bon pour accord » et « Le fournisseur » ; imprimées par défaut. */
+  signatures?: boolean;
+}
+
+/** Options de rendu hors charte Facture : application émettrice et titre du fichier. */
+export interface FacturePdfOptions {
+  creator?: string;
+  title?: string;
 }
 
 const dateFr = (d: Date) =>
@@ -135,10 +154,17 @@ export function renderFactureDocumentPdf(
   client: FactureClientIdentity,
   document: FacturePdfDocument,
   logos: FactureLogos,
+  options: FacturePdfOptions = {},
 ): Promise<Buffer> {
   const label = FACTURE_DOCUMENT_TYPE_LABELS[document.type];
-  const title = document.number ? `${label} ${document.number}` : `${label} — brouillon`;
-  return renderPdfDocument({ title, creator: 'Ocall Facture', bufferPages: true }, (doc) => {
+  const title =
+    options.title ?? (document.number ? `${label} ${document.number}` : `${label} — brouillon`);
+  const untaxed = document.untaxed ?? null;
+  const columns = untaxed
+    ? COLUMNS.map((c) => ({ ...c, title: c.title.replace(' HT', '') }))
+    : COLUMNS;
+  const creator = options.creator ?? 'Ocall Facture';
+  return renderPdfDocument({ title, creator, bufferPages: true }, (doc) => {
     const left = PDF_PAGE.margin;
     const right = PDF_PAGE.width - PDF_PAGE.margin;
     const accent = seller.accentColor;
@@ -171,6 +197,10 @@ export function renderFactureDocumentPdf(
     if (document.number) {
       doc.font('sans').fontSize(10).fillColor(FACTURE_MUTED);
       doc.text(`N° ${document.number}`, left, y);
+      if (document.provisional) {
+        doc.font('sansBold').fontSize(9).fillColor('#b4472e');
+        doc.text(document.provisional.notice, left, doc.y + 2, { width: PDF_CONTENT_WIDTH });
+      }
     } else {
       doc.font('sansBold').fontSize(9).fillColor('#b4472e');
       doc.text('BROUILLON — SANS VALEUR', left, y, { characterSpacing: 0.5 });
@@ -304,7 +334,7 @@ export function renderFactureDocumentPdf(
       doc.roundedRect(left, y, PDF_CONTENT_WIDTH, 22, 5).fill(accent);
       let x = left;
       doc.font('sansBold').fontSize(7.5).fillColor('#ffffff');
-      for (const c of COLUMNS) {
+      for (const c of columns) {
         doc.text(c.title.toUpperCase(), x + 6, y + 7.5, {
           width: c.width - 12,
           align: c.align,
@@ -335,7 +365,7 @@ export function renderFactureDocumentPdf(
         qty: `${quantity(line.quantity)} ${line.unit}`,
         price: amount(line.unitPrice),
         discount: line.discountPercent ? `${line.discountPercent} %` : '—',
-        vat: `${line.vatRate} %`,
+        vat: untaxed ? '—' : `${line.vatRate} %`,
         total: amount(line.totalHt),
       };
       let x = left;
@@ -367,7 +397,7 @@ export function renderFactureDocumentPdf(
     y += 16;
 
     // ── Totaux (à droite) et montant en lettres (à gauche) ──
-    const rows: [string, string][] = [
+    const taxedRows: [string, string][] = [
       ['Sous-total HT', amount(document.grossHt)],
       ...(document.totalDiscount > 0
         ? ([
@@ -380,10 +410,13 @@ export function renderFactureDocumentPdf(
         amount(b.amount),
       ]),
     ];
+    const rows: [string, string][] = untaxed ? [['Total', amount(document.totalTtc)]] : taxedRows;
     const totalsWidth = 228;
     const totalsLeft = right - totalsWidth;
     const totalsHeight = rows.length * 17 + 40;
-    const words = factureAmountInWords(document.type, document.totalTtc);
+    const words = untaxed
+      ? `Arrêtée la présente facture à la somme de ${numberToFrenchWords(document.totalTtc)} franc${document.totalTtc > 1 ? 's' : ''} CFA.`
+      : factureAmountInWords(document.type, document.totalTtc);
     const wordsWidth = totalsLeft - left - 18;
     doc.font('sans').fontSize(9);
     const wordsHeight = doc.heightOfString(words, { width: wordsWidth - 24 }) + 34;
@@ -421,7 +454,9 @@ export function renderFactureDocumentPdf(
 
     // ── Exonération, conditions, notes : sous le montant en lettres si la place le permet ──
     const paragraphs: [string, string][] = [];
-    if (document.vat.some((b) => b.rate === 0)) {
+    if (untaxed) {
+      paragraphs.push([untaxed.title, untaxed.text]);
+    } else if (document.vat.some((b) => b.rate === 0)) {
       paragraphs.push(['Exonération de TVA', document.vatExemptionReason ?? 'Motif à préciser.']);
     }
     if (document.terms) paragraphs.push(['Conditions', document.terms]);
@@ -452,35 +487,38 @@ export function renderFactureDocumentPdf(
     y = Math.max(floor, py) + 14;
 
     // ── Signatures ──
-    ensure(74);
-    const boxWidth = (PDF_CONTENT_WIDTH - gap) / 2;
-    const boxes: [number, string, string][] = [
-      [left, 'BON POUR ACCORD', 'Date, signature et cachet du client'],
-      [left + boxWidth + gap, 'LE FOURNISSEUR', seller.legalName],
-    ];
-    for (const [bx, heading, hint] of boxes) {
-      doc.roundedRect(bx, y, boxWidth, 68, 6).lineWidth(0.8).dash(3, { space: 3 });
-      doc.strokeColor(FACTURE_LINE).stroke().undash();
-      doc.font('sansBold').fontSize(7.5).fillColor(accent);
-      doc.text(heading, bx + 12, y + 10, { characterSpacing: 1 });
-      doc.font('sans').fontSize(7.5).fillColor(FACTURE_MUTED);
-      doc.text(hint, bx + 12, y + 22, { width: boxWidth - 24 });
+    if (document.signatures !== false) {
+      ensure(74);
+      const boxWidth = (PDF_CONTENT_WIDTH - gap) / 2;
+      const boxes: [number, string, string][] = [
+        [left, 'BON POUR ACCORD', 'Date, signature et cachet du client'],
+        [left + boxWidth + gap, 'LE FOURNISSEUR', seller.legalName],
+      ];
+      for (const [bx, heading, hint] of boxes) {
+        doc.roundedRect(bx, y, boxWidth, 68, 6).lineWidth(0.8).dash(3, { space: 3 });
+        doc.strokeColor(FACTURE_LINE).stroke().undash();
+        doc.font('sansBold').fontSize(7.5).fillColor(accent);
+        doc.text(heading, bx + 12, y + 10, { characterSpacing: 1 });
+        doc.font('sans').fontSize(7.5).fillColor(FACTURE_MUTED);
+        doc.text(hint, bx + 12, y + 22, { width: boxWidth - 24 });
+      }
+      if (logos.stamp) {
+        drawImage(doc, logos.stamp, left + boxWidth + gap + boxWidth / 2 - 30, y + 4, [110, 60]);
+      }
+      y += 68 + 12;
     }
-    if (logos.stamp) {
-      drawImage(doc, logos.stamp, left + boxWidth + gap + boxWidth / 2 - 30, y + 4, [110, 60]);
-    }
-    y += 68 + 12;
 
     // ── Pied de chaque page, filigrane des brouillons ──
     const range = doc.bufferedPageRange();
     for (let i = range.start; i < range.start + range.count; i++) {
       doc.switchToPage(i);
       drawFooter(doc, seller, logos.footer, { index: i + 1, total: range.count });
-      if (!document.number) {
+      const watermark = document.number ? (document.provisional?.watermark ?? null) : 'BROUILLON';
+      if (watermark) {
         doc.save();
         doc.rotate(-30, { origin: [PDF_PAGE.width / 2, PDF_PAGE.height / 2] });
         doc.font('sansBold').fontSize(64).fillColor('#b4472e').opacity(0.07);
-        doc.text('BROUILLON', 0, PDF_PAGE.height / 2 - 36, {
+        doc.text(watermark, 0, PDF_PAGE.height / 2 - 36, {
           width: PDF_PAGE.width,
           align: 'center',
           lineBreak: false,
