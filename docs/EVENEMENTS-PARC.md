@@ -47,6 +47,29 @@ annulation. Aucun nouveau module : le code vit dans `modules/ticketing` et `modu
 | Isolation                            | Événements, séances et tarifs filtrés par organisation et par établissements du membre ; tarif d'une autre organisation : `EVENT_TARIFF_UNAVAILABLE`.                                                                                                                                                                                                            |
 | Journal                              | Création, modification, statut, séances, annulation (nombre de billets annulés), émission.                                                                                                                                                                                                                                                                       |
 
+## Garanties ajoutées après l'audit ciblé (18/11/2026)
+
+- **Encaissement** : sous le verrou de la séance, l'encaissement revérifie aussi que la vente de la
+  séance est ouverte, que l'événement est publié, que le tarif est actif et que les prénoms sont
+  saisis si le tarif est devenu nominatif. Sinon `409` (`EVENT_SESSION_NOT_ON_SALE`,
+  `EVENT_TARIFF_UNAVAILABLE`, `VISITOR_NAMES_MISMATCH`) : la vente non payée reste à annuler par le
+  caissier.
+- **Sérialisation** : un changement de statut ou de tolérance de l'événement et la modification d'un
+  tarif (quota, activation, nominatif) prennent le même verrou des séances que l'encaissement, qui relit
+  ensuite quota et statut. Un quota baissé pendant un encaissement n'est jamais dépassé.
+- **Prolongation ou report** : un billet refusé comme expiré redevient valable si la nouvelle fin de
+  validité est future. Un billet utilisé n'est jamais modifié.
+- **Archivage** : refusé tant qu'il reste des billets valides pour une séance à venir
+  (`PARK_EVENT_HAS_VALID_TICKETS`) ; un événement archivé n'accepte plus de séance ni de tarif
+  (`PARK_EVENT_ARCHIVED`).
+- **Montants** : la remise fidélité, déduite du total de la vente, est répartie au prorata des billets
+  dans la liste des acheteurs et le chiffre d'affaires. La liste des acheteurs indique la part payée des
+  billets annulés (base du remboursement manuel).
+- **Suivi** : un billet n'est compté « absent » qu'après la tolérance de fin.
+- **Saisie** : fin égale au début refusée (`EVENT_SESSION_TIMES_INVALID`) ; séance au plus 730 jours à
+  l'avance (`EVENT_SESSION_TOO_FAR`).
+- **Agenda public** : les 20 événements les plus proches (tri par première séance).
+
 ## API (`/api/v1`, Swagger « Billetterie — événements »)
 
 | Méthode et route                                          | Permission         | Rôle                                                   |

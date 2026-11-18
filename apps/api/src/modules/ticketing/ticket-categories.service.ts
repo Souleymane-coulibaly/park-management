@@ -11,6 +11,7 @@ import type { TenantContext } from '../../common/auth-context';
 import { establishmentScope } from '../../common/tenant-scope';
 import { fromDbDate, ParkScheduleService, toDbDate } from './park-schedule.service';
 import type { CreateTicketCategoryDto, UpdateTicketCategoryDto } from './ticketing.dto';
+import { lockEventSessions } from '../ticket-issuance/event-capacity';
 
 export const CATEGORY_SELECT = {
   id: true,
@@ -185,6 +186,8 @@ export class TicketCategoriesService {
     );
     try {
       const row = await this.prisma.$transaction(async (tx) => {
+        // Tarif d'événement : même verrou que l'encaissement, qui relit quota et statut ensuite.
+        if (event) await lockEventSessions(tx, event.eventId);
         const updated = await tx.ticketCategory.update({
           where: { id },
           data: {

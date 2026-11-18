@@ -31,6 +31,8 @@ export const PARK_EVENT_LIMITS = {
   maxToleranceMinutes: 720,
   /** Séances d'un événement. */
   maxSessions: 200,
+  /** Une séance se programme au plus deux ans à l'avance. */
+  maxDaysAhead: 730,
 } as const;
 
 /**

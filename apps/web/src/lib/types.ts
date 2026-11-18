@@ -551,8 +551,16 @@ export interface EventSessionBuyers {
     used: number;
     cancelled: number;
     amount: number;
+    cancelledAmount: number;
+    loyaltyDiscount: boolean;
   }[];
-  totals: { sales: number; tickets: number; amount: number; cancelled: number };
+  totals: {
+    sales: number;
+    tickets: number;
+    amount: number;
+    cancelled: number;
+    cancelledAmount: number;
+  };
 }
 
 export interface EventDashboard {

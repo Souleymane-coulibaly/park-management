@@ -16,7 +16,11 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
 import type { TenantContext } from '../../common/auth-context';
 import { establishmentScope } from '../../common/tenant-scope';
-import { lockEventSession, soldBySession } from '../ticket-issuance/event-capacity';
+import {
+  lockEventSession,
+  lockEventSessions,
+  soldBySession,
+} from '../ticket-issuance/event-capacity';
 import { fromDbDate, ParkScheduleService, toDbDate } from './park-schedule.service';
 import type {
   CancelEventSessionDto,
@@ -70,6 +74,16 @@ const isUniqueViolation = (error: unknown) =>
   error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
 
 const toSession = ({ date, ...s }: SessionRow) => ({ ...s, date: fromDbDate(date) });
+
+/**
+ * Part réellement encaissée d'un billet : la remise fidélité est déduite du total de la vente sans
+ * toucher aux lignes, elle est donc répartie au prorata du prix des billets.
+ */
+export function netPaid(pricePaid: number, sale: { total: number; loyaltyDiscount: number }) {
+  if (sale.loyaltyDiscount <= 0) return pricePaid;
+  const gross = sale.total + sale.loyaltyDiscount;
+  return gross > 0 ? pricePaid - Math.round((sale.loyaltyDiscount * pricePaid) / gross) : pricePaid;
+}
 
 /**
  * Événements du parc : création, séances (date, horaires, capacité), tarifs (catégories de billet
@@ -223,8 +237,28 @@ export class ParkEventsService {
         dto.entryOpensBeforeMinutes !== existing.entryOpensBeforeMinutes) ||
       (dto.entryClosesAfterMinutes !== undefined &&
         dto.entryClosesAfterMinutes !== existing.entryClosesAfterMinutes);
+    const statusChanged = dto.status !== undefined && dto.status !== existing.status;
     try {
       await this.prisma.$transaction(async (tx) => {
+        // Statut ou tolérance : sérialisés avec les encaissements (même verrou des séances), qui
+        // relisent ensuite l'événement.
+        if (statusChanged || toleranceChanged) await lockEventSessions(tx, id);
+        if (statusChanged && dto.status === 'ARCHIVED') {
+          const cutoff = new Date(Date.now() - existing.entryClosesAfterMinutes * 60_000);
+          const pending = await tx.ticket.count({
+            where: {
+              status: 'VALID',
+              eventSession: { eventId: id, status: 'SCHEDULED', endsAt: { gt: cutoff } },
+            },
+          });
+          if (pending > 0) {
+            throw new ConflictException({
+              code: 'PARK_EVENT_HAS_VALID_TICKETS',
+              message: `${pending} billet(s) valide(s) pour des séances à venir : annulez ces séances avant d'archiver l'événement.`,
+              details: { validTickets: pending },
+            });
+          }
+        }
         const updated = await tx.parkEvent.update({
           where: { id },
           data: {
@@ -278,6 +312,7 @@ export class ParkEventsService {
 
   async createSession(auth: TenantContext, eventId: string, dto: CreateEventSessionDto) {
     const event = await this.findEvent(auth, eventId);
+    this.assertNotArchived(event);
     const timezone = await this.timezoneOf(event.establishmentId);
     const instants = this.instants(dto.date, dto.startTime, dto.endTime, timezone);
     const count = await this.prisma.parkEventSession.count({ where: { eventId } });
@@ -378,8 +413,13 @@ export class ParkEventsService {
             salesOpen: dto.salesOpen,
           },
         });
+        // Tolérance relue après le verrou : une modification concurrente de l'événement est prise en compte.
+        const tolerance = await tx.parkEvent.findUniqueOrThrow({
+          where: { id: eventId },
+          select: { entryOpensBeforeMinutes: true, entryClosesAfterMinutes: true },
+        });
         const ticketsUpdated = timesChanged
-          ? await this.refreshTicketWindows(tx, { id: sessionId, ...instants }, event)
+          ? await this.refreshTicketWindows(tx, { id: sessionId, ...instants }, tolerance)
           : 0;
         await this.audit.record(
           {
@@ -493,6 +533,8 @@ export class ParkEventsService {
             id: true,
             number: true,
             createdAt: true,
+            total: true,
+            loyaltyDiscount: true,
             cashier: { select: { user: { select: { firstName: true, lastName: true } } } },
             customer: {
               select: { firstName: true, lastName: true, phone: true, anonymizedAt: true },
@@ -516,6 +558,9 @@ export class ParkEventsService {
         used: number;
         cancelled: number;
         amount: number;
+        /** Part payée des billets annulés (base d'un remboursement manuel). */
+        cancelledAmount: number;
+        loyaltyDiscount: boolean;
       }
     >();
     for (const t of tickets) {
@@ -539,14 +584,19 @@ export class ParkEventsService {
         used: 0,
         cancelled: 0,
         amount: 0,
+        cancelledAmount: 0,
+        loyaltyDiscount: s.loyaltyDiscount > 0,
       };
       if (t.visitorName) entry.visitorNames.push(t.visitorName);
       entry.tariffs[t.ticketCategory.name] = (entry.tariffs[t.ticketCategory.name] ?? 0) + 1;
       entry.tickets++;
-      entry.amount += t.pricePaid;
+      const paid = netPaid(t.pricePaid, s);
+      entry.amount += paid;
       if (t.status === 'USED') entry.used++;
-      else if (t.status === 'CANCELLED') entry.cancelled++;
-      else entry.valid++;
+      else if (t.status === 'CANCELLED') {
+        entry.cancelled++;
+        entry.cancelledAmount += paid;
+      } else entry.valid++;
       bySale.set(s.id, entry);
     }
     const sales = [...bySale.values()];
@@ -559,6 +609,7 @@ export class ParkEventsService {
         tickets: tickets.length,
         amount: sales.reduce((sum, s) => sum + s.amount, 0),
         cancelled: sales.reduce((sum, s) => sum + s.cancelled, 0),
+        cancelledAmount: sales.reduce((sum, s) => sum + s.cancelledAmount, 0),
       },
     };
   }
@@ -567,6 +618,7 @@ export class ParkEventsService {
 
   async createTariff(auth: TenantContext, eventId: string, dto: CreateEventTariffDto) {
     const event = await this.findEvent(auth, eventId);
+    this.assertNotArchived(event);
     const { sessionQuota, requiresVisitorName, ...base } = dto;
     await this.categories.create(
       auth,
@@ -604,12 +656,12 @@ export class ParkEventsService {
   /**
    * Suivi d'un événement par séance et par tarif : capacité, places vendues et restantes, taux de
    * remplissage, entrées, absents (billets valides d'une séance terminée), annulations, chiffre
-   * d'affaires (part du prix des billets non annulés).
+   * d'affaires (part encaissée du prix des billets non annulés, remise fidélité déduite).
    */
   async dashboard(auth: TenantContext, eventId: string) {
     const event = await this.findEvent(auth, eventId);
     const now = new Date();
-    const [sessions, tariffs, groups] = await Promise.all([
+    const [sessions, tariffs, groups, discounted] = await Promise.all([
       this.prisma.parkEventSession.findMany({
         where: { eventId },
         orderBy: { startsAt: 'asc' },
@@ -626,10 +678,26 @@ export class ParkEventsService {
         _count: { _all: true },
         _sum: { pricePaid: true },
       }),
+      // Ventes avec remise fidélité : le chiffre d'affaires retient la part réellement encaissée.
+      this.prisma.ticket.findMany({
+        where: {
+          eventSession: { eventId },
+          organizationId: event.organizationId,
+          status: { not: 'CANCELLED' },
+          sale: { loyaltyDiscount: { gt: 0 } },
+        },
+        select: {
+          eventSessionId: true,
+          ticketCategoryId: true,
+          pricePaid: true,
+          sale: { select: { total: true, loyaltyDiscount: true } },
+        },
+      }),
     ]);
     const empty = () => ({ sold: 0, entered: 0, waiting: 0, cancelled: 0, revenue: 0 });
     const rows = sessions.map((s) => {
-      const ended = s.endsAt <= now;
+      // Absents seulement une fois la tolérance de fin écoulée (l'entrée reste possible jusque-là).
+      const ended = s.endsAt.getTime() + event.entryClosesAfterMinutes * 60_000 <= now.getTime();
       const perTariff = new Map(tariffs.map((t) => [t.id, empty()]));
       for (const g of groups.filter((x) => x.eventSessionId === s.id)) {
         const bucket = perTariff.get(g.ticketCategoryId) ?? empty();
@@ -642,6 +710,10 @@ export class ParkEventsService {
           else bucket.waiting += n;
         }
         perTariff.set(g.ticketCategoryId, bucket);
+      }
+      for (const t of discounted.filter((x) => x.eventSessionId === s.id)) {
+        const bucket = perTariff.get(t.ticketCategoryId);
+        if (bucket) bucket.revenue -= t.pricePaid - netPaid(t.pricePaid, t.sale);
       }
       const totals = [...perTariff.values()].reduce(
         (a, b) => ({
@@ -726,7 +798,19 @@ export class ParkEventsService {
   }
 
   private instants(date: string, startTime: string, endTime: string, timezone: string) {
+    if (startTime === endTime) {
+      throw new BadRequestException({
+        code: 'EVENT_SESSION_TIMES_INVALID',
+        message: "L'heure de fin doit être différente de l'heure de début.",
+      });
+    }
     const instants = sessionInstants(date, startTime, endTime, timezone);
+    if (instants.startsAt.getTime() > Date.now() + PARK_EVENT_LIMITS.maxDaysAhead * 86_400_000) {
+      throw new BadRequestException({
+        code: 'EVENT_SESSION_TOO_FAR',
+        message: `Une séance se programme au plus ${PARK_EVENT_LIMITS.maxDaysAhead} jours à l'avance.`,
+      });
+    }
     if (instants.endsAt <= new Date()) {
       throw new BadRequestException({
         code: 'EVENT_SESSION_IN_PAST',
@@ -736,7 +820,7 @@ export class ParkEventsService {
     return instants;
   }
 
-  /** Validité des billets encore valides d'une séance, recalculée après un changement d'horaire. */
+  /** Validité des billets non utilisés d'une séance, recalculée après un changement d'horaire. */
   private async refreshTicketWindows(
     tx: Prisma.TransactionClient,
     session: { id: string; startsAt: Date; endsAt: Date },
@@ -747,11 +831,28 @@ export class ParkEventsService {
       event.entryOpensBeforeMinutes,
       event.entryClosesAfterMinutes,
     );
+    // Un billet refusé comme expiré (scan après l'ancienne fin) redevient valable si la séance est
+    // prolongée ou reportée ; un billet utilisé ou annulé n'est jamais modifié.
     const { count } = await tx.ticket.updateMany({
-      where: { eventSessionId: session.id, status: 'VALID' },
+      where: { eventSessionId: session.id, status: { in: ['VALID', 'EXPIRED'] } },
       data: window,
     });
+    if (window.validUntil > new Date()) {
+      await tx.ticket.updateMany({
+        where: { eventSessionId: session.id, status: 'EXPIRED' },
+        data: { status: 'VALID' },
+      });
+    }
     return count;
+  }
+
+  private assertNotArchived(event: { status: string }) {
+    if (event.status === 'ARCHIVED') {
+      throw new ConflictException({
+        code: 'PARK_EVENT_ARCHIVED',
+        message: 'Cet événement est archivé : repassez-le en brouillon pour le modifier.',
+      });
+    }
   }
 
   private nameTaken() {
@@ -764,7 +865,8 @@ export class ParkEventsService {
   private sessionTaken() {
     return {
       code: 'EVENT_SESSION_DUPLICATE',
-      message: 'Une séance de cet événement commence déjà à cette date et à cette heure.',
+      message:
+        'Une séance de cet événement (programmée ou annulée) commence déjà à cette date et à cette heure.',
     };
   }
 }

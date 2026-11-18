@@ -44,7 +44,7 @@ export class TicketIssuanceService {
             peoplePerUnit: true,
             visitorNames: true,
             eventSessionId: true,
-            ticketCategory: { select: { validityDays: true, name: true, sessionQuota: true } },
+            ticketCategory: { select: { validityDays: true, name: true } },
           },
         },
       },
@@ -134,7 +134,8 @@ export class TicketIssuanceService {
       ticketCategoryId: string | null;
       quantity: number;
       peoplePerUnit: number;
-      ticketCategory: { name: string; sessionQuota: number | null } | null;
+      visitorNames: string[];
+      ticketCategory: { name: string } | null;
     }[],
     now: Date,
   ): Promise<Map<string, { validFrom: Date; validUntil: Date }>> {
@@ -152,9 +153,29 @@ export class TicketIssuanceService {
         capacity: true,
         startsAt: true,
         endsAt: true,
-        event: { select: { entryOpensBeforeMinutes: true, entryClosesAfterMinutes: true } },
+        salesOpen: true,
+        event: {
+          select: { status: true, entryOpensBeforeMinutes: true, entryClosesAfterMinutes: true },
+        },
       },
     });
+    // Tarifs relus après le verrou : un quota ou une désactivation modifiés pendant l'encaissement
+    // (modification qui prend le même verrou) sont pris en compte.
+    const tariffRows = await tx.ticketCategory.findMany({
+      where: {
+        id: {
+          in: [...new Set(lines.filter((l) => l.eventSessionId).map((l) => l.ticketCategoryId!))],
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        sessionQuota: true,
+        isActive: true,
+        requiresVisitorName: true,
+      },
+    });
+    const tariffById = new Map(tariffRows.map((t) => [t.id, t]));
     const sold = await soldBySession(tx, sessionIds);
     for (const session of sessions) {
       if (session.status !== 'SCHEDULED') {
@@ -169,15 +190,36 @@ export class TicketIssuanceService {
           message: 'Cette séance est terminée : la vente ne peut pas être encaissée.',
         });
       }
+      // Vente fermée, événement retiré de la vente ou tarif désactivé depuis la commande : la vente
+      // non payée ne peut plus être encaissée (le caissier l'annule).
+      if (!session.salesOpen || session.event.status !== 'PUBLISHED') {
+        throw new ConflictException({
+          code: 'EVENT_SESSION_NOT_ON_SALE',
+          message: 'La vente de cette séance est fermée : la vente ne peut pas être encaissée.',
+        });
+      }
       const requested = new Map<string, number>();
       const tariffs = new Map<string, { name: string; sessionQuota: number | null }>();
       for (const line of lines.filter((l) => l.eventSessionId === session.id)) {
+        const tariff = tariffById.get(line.ticketCategoryId!);
+        if (!tariff?.isActive) {
+          throw new ConflictException({
+            code: 'EVENT_TARIFF_UNAVAILABLE',
+            message: `Le tarif « ${line.ticketCategory?.name ?? ''} » n'est plus en vente : la vente ne peut pas être encaissée.`,
+          });
+        }
+        if (tariff.requiresVisitorName && line.visitorNames.some((n) => !n.trim())) {
+          throw new ConflictException({
+            code: 'VISITOR_NAMES_MISMATCH',
+            message: `Le tarif « ${tariff.name} » est désormais nominatif : refaites la commande avec les prénoms.`,
+          });
+        }
         const people = line.quantity * line.peoplePerUnit;
         requested.set(
           line.ticketCategoryId!,
           (requested.get(line.ticketCategoryId!) ?? 0) + people,
         );
-        if (line.ticketCategory) tariffs.set(line.ticketCategoryId!, line.ticketCategory);
+        tariffs.set(line.ticketCategoryId!, tariff);
       }
       assertPlaces(session, sold.get(session.id)!, requested, tariffs);
       windows.set(

@@ -609,4 +609,170 @@ describe('Événements du parc (intégration)', () => {
       expect(JSON.stringify(pub.events)).not.toMatch(/capacity|sold"|id"/);
     });
   });
+  describe('Correctifs de l’audit', () => {
+    let ev: string;
+    let session: string;
+    let tariff: string;
+    const line = (quantity = 1, names: string[] = []) => ({
+      ticketCategoryId: tariff,
+      quantity,
+      visitorNames: names,
+      eventSessionId: session,
+    });
+    const patchEvent = (body: object) =>
+      park.agent.patch(api(`/ticketing/events/${ev}`)).send(body);
+    const patchSession = (body: object, id = session) =>
+      park.agent.patch(api(`/ticketing/events/${ev}/sessions/${id}`)).send(body);
+
+    beforeAll(async () => {
+      ev = (
+        await park.agent
+          .post(api('/ticketing/events'))
+          .send({ establishmentId: est, name: 'Nocturne audit', entryClosesAfterMinutes: 0 })
+          .expect(201)
+      ).body.id;
+      const now = localMoment(new Date(), TZ);
+      session = (
+        await park.agent
+          .post(api(`/ticketing/events/${ev}/sessions`))
+          .send({
+            date: now.date,
+            startTime: hhmm(Math.max(0, now.minutes - 30)),
+            endTime: hhmm(now.minutes + 120),
+            capacity: 20,
+          })
+          .expect(201)
+      ).body.sessions[0].id;
+      tariff = (
+        await park.agent
+          .post(api(`/ticketing/events/${ev}/tariffs`))
+          .send({ kind: 'CUSTOM', name: 'Entrée', price: 4000 })
+          .expect(201)
+      ).body.tariffs[0].id;
+      await patchEvent({ status: 'PUBLISHED' }).expect(200);
+    });
+
+    it('encaissement refusé si la vente a été fermée, l’événement retiré ou le tarif modifié depuis la commande', async () => {
+      const sale = (await order(cashier, [line()]).expect(201)).body;
+      const refuse = async (code: string) => {
+        const res = await pay(cashier, sale.id, sale.total).expect(409);
+        expect(res.body.code).toBe(code);
+        expect(await prisma.ticket.count({ where: { saleId: sale.id } })).toBe(0);
+      };
+      await patchSession({ salesOpen: false }).expect(200);
+      await refuse('EVENT_SESSION_NOT_ON_SALE');
+      await patchSession({ salesOpen: true }).expect(200);
+      await patchEvent({ status: 'DRAFT' }).expect(200);
+      await refuse('EVENT_SESSION_NOT_ON_SALE');
+      await patchEvent({ status: 'PUBLISHED' }).expect(200);
+      await park.agent
+        .patch(api(`/ticketing/events/${ev}/tariffs/${tariff}`))
+        .send({ isActive: false })
+        .expect(200);
+      await refuse('EVENT_TARIFF_UNAVAILABLE');
+      await park.agent
+        .patch(api(`/ticketing/events/${ev}/tariffs/${tariff}`))
+        .send({ isActive: true, requiresVisitorName: true })
+        .expect(200);
+      await refuse('VISITOR_NAMES_MISMATCH');
+      await park.agent
+        .patch(api(`/ticketing/events/${ev}/tariffs/${tariff}`))
+        .send({ requiresVisitorName: false })
+        .expect(200);
+      await pay(cashier, sale.id, sale.total).expect(200);
+      expect(await prisma.ticket.count({ where: { saleId: sale.id } })).toBe(1);
+    });
+
+    it('quota baissé pendant un encaissement : relu après le verrou, aucun dépassement', async () => {
+      // Une place déjà vendue (test précédent). Commande de 2 places, quota encore libre.
+      const sale = (await order(cashier, [line(2)]).expect(201)).body;
+      let settled = false;
+      let pending: Promise<request.Response> | undefined;
+      await prisma.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`SELECT id FROM "ParkEventSession" WHERE "eventId" = ${ev}::uuid ORDER BY id FOR UPDATE`;
+          pending = pay(cashier, sale.id, sale.total).then((r) => {
+            settled = true;
+            return r;
+          });
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          expect(settled).toBe(false);
+          await tx.ticketCategory.update({ where: { id: tariff }, data: { sessionQuota: 2 } });
+        },
+        { timeout: 20_000 },
+      );
+      const res = await pending!;
+      expect(res.status).toBe(409);
+      expect(res.body.code).toBe('EVENT_TARIFF_SOLD_OUT');
+      expect(
+        await prisma.ticket.count({
+          where: { eventSessionId: session, status: { not: 'CANCELLED' } },
+        }),
+      ).toBe(1);
+      await prisma.ticketCategory.update({ where: { id: tariff }, data: { sessionQuota: null } });
+    });
+
+    it('billet expiré : redevient valable si la séance est prolongée ; remise fidélité déduite des montants', async () => {
+      const { sale, tickets } = await buy(cashier, [line()]);
+      await prisma.ticket.update({ where: { id: tickets[0]!.id }, data: { status: 'EXPIRED' } });
+      const now = localMoment(new Date(), TZ);
+      await patchSession({ endTime: hhmm(now.minutes + 150) }).expect(200);
+      const after = await prisma.ticket.findUniqueOrThrow({ where: { id: tickets[0]!.id } });
+      const moved = await prisma.parkEventSession.findUniqueOrThrow({ where: { id: session } });
+      expect(after.status).toBe('VALID');
+      // Nouvelle fin de séance (tolérance de sortie 0) appliquée au billet expiré.
+      expect(after.validUntil.getTime()).toBe(moved.endsAt.getTime());
+      expect(after.validUntil.getTime()).toBeGreaterThan(
+        new Date(tickets[0]!.validUntil).getTime(),
+      );
+
+      // Remise fidélité de 1 000 sur ce billet de 4 000 (déduite du total de la vente seulement).
+      await prisma.sale.update({
+        where: { id: sale.id },
+        data: { total: 3000, loyaltyDiscount: 1000 },
+      });
+      const buyers = (
+        await park.agent.get(api(`/ticketing/events/${ev}/sessions/${session}/buyers`)).expect(200)
+      ).body;
+      const row = buyers.sales.find((s: { saleId: string }) => s.saleId === sale.id);
+      expect(row).toMatchObject({ amount: 3000, loyaltyDiscount: true });
+      expect(buyers.totals.amount).toBe(4000 + 3000);
+      const dash = (await park.agent.get(api(`/ticketing/events/${ev}/dashboard`)).expect(200))
+        .body;
+      expect(dash.totals.revenue).toBe(7000);
+    });
+
+    it('saisie des séances : fin égale au début et date trop lointaine refusées', async () => {
+      const now = localMoment(new Date(), TZ);
+      const same = await park.agent
+        .post(api(`/ticketing/events/${ev}/sessions`))
+        .send({ date: addDays(now.date, 3), startTime: '20:00', endTime: '20:00', capacity: 5 })
+        .expect(400);
+      expect(same.body.code).toBe('EVENT_SESSION_TIMES_INVALID');
+      const far = await park.agent
+        .post(api(`/ticketing/events/${ev}/sessions`))
+        .send({ date: addDays(now.date, 800), startTime: '20:00', endTime: '22:00', capacity: 5 })
+        .expect(400);
+      expect(far.body.code).toBe('EVENT_SESSION_TOO_FAR');
+    });
+
+    it('archivage refusé tant que des billets valides restent ; annulation, montant à rembourser, puis archivage', async () => {
+      const blocked = await patchEvent({ status: 'ARCHIVED' }).expect(409);
+      expect(blocked.body.code).toBe('PARK_EVENT_HAS_VALID_TICKETS');
+      const cancelled = (
+        await park.agent
+          .post(api(`/ticketing/events/${ev}/sessions/${session}/cancel`))
+          .send({ reason: 'Intempéries' })
+          .expect(200)
+      ).body;
+      expect(cancelled.totals).toMatchObject({ cancelled: 2, cancelledAmount: 4000 + 3000 });
+      await patchEvent({ status: 'ARCHIVED' }).expect(200);
+      const now = localMoment(new Date(), TZ);
+      const late = await park.agent
+        .post(api(`/ticketing/events/${ev}/sessions`))
+        .send({ date: addDays(now.date, 3), startTime: '20:00', endTime: '22:00', capacity: 5 })
+        .expect(409);
+      expect(late.body.code).toBe('PARK_EVENT_ARCHIVED');
+    });
+  });
 });

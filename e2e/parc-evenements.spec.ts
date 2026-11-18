@@ -112,7 +112,7 @@ test.describe('Ocall Parc — événements', () => {
     await page.reload();
     await page.getByLabel('Fond de caisse (FCFA)').fill('0');
     await page.getByRole('button', { name: 'Ouvrir la caisse' }).click();
-    await page.getByRole('tab', { name: 'Événements' }).click();
+    await page.getByRole('button', { name: 'Événements', exact: true }).click();
     const panel = page.getByTestId('event-sale-panel');
     await expect(panel).toContainText('Gala du Djoliba', NETWORK_WAIT);
     await expect(panel.getByRole('button', { name: /2 place\(s\)/ })).toBeVisible();

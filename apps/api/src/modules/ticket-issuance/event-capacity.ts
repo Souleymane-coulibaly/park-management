@@ -43,6 +43,17 @@ export async function lockEventSession(tx: Prisma.TransactionClient, id: string)
 }
 
 /**
+ * Verrouille toutes les séances d'un événement (ordre des identifiants, comme l'encaissement) : un
+ * changement de statut, de tolérance ou de quota est sérialisé avec les encaissements en cours.
+ */
+export async function lockEventSessions(
+  tx: Prisma.TransactionClient,
+  eventId: string,
+): Promise<void> {
+  await tx.$queryRaw`SELECT id FROM "ParkEventSession" WHERE "eventId" = ${eventId}::uuid ORDER BY id FOR UPDATE`;
+}
+
+/**
  * Refuse une demande qui dépasse la capacité de la séance ou le quota d'un tarif. Les places sont
  * comptées en billets individuels (une formule famille de 4 = 4 places).
  */

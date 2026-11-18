@@ -709,7 +709,6 @@ export class SitesService {
         sessions: { some: upcoming },
       },
       orderBy: { name: 'asc' },
-      take: 20,
       select: {
         name: true,
         description: true,
@@ -738,22 +737,26 @@ export class SitesService {
       this.prisma,
       events.flatMap((e) => e.sessions.map((s) => s.id)),
     );
-    return events
-      .map((e) => ({
-        name: e.name,
-        description: e.description,
-        conditions: e.conditions,
-        firstStart: e.sessions[0]!.startsAt.getTime(),
-        sessions: e.sessions.map((s) => ({
-          date: s.date.toISOString().slice(0, 10),
-          startTime: s.startTime,
-          endTime: s.endTime,
-          soldOut: sold.get(s.id)!.total >= s.capacity,
-        })),
-        tariffs: e.tariffs,
-      }))
-      .sort((a, b) => a.firstStart - b.firstStart)
-      .map(({ firstStart: _f, ...e }) => e);
+    return (
+      events
+        .map((e) => ({
+          name: e.name,
+          description: e.description,
+          conditions: e.conditions,
+          firstStart: e.sessions[0]!.startsAt.getTime(),
+          sessions: e.sessions.map((s) => ({
+            date: s.date.toISOString().slice(0, 10),
+            startTime: s.startTime,
+            endTime: s.endTime,
+            soldOut: sold.get(s.id)!.total >= s.capacity,
+          })),
+          tariffs: e.tariffs,
+        }))
+        .sort((a, b) => a.firstStart - b.firstStart)
+        // Les 20 événements les plus proches (tri par première séance, pas par nom).
+        .slice(0, 20)
+        .map(({ firstStart: _f, ...e }) => e)
+    );
   }
 
   /**

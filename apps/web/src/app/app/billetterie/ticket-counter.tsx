@@ -201,7 +201,7 @@ export function TicketCounter({
         body: {
           establishmentId,
           clientRequestId: orderRequestId,
-          ...(customer ? { customerId: customer.id } : {}),
+          ...(customer && lines.some((l) => l.session) ? { customerId: customer.id } : {}),
           lines: lines.map((l) => ({
             ticketCategoryId: l.category.id,
             quantity: l.quantity,
@@ -254,7 +254,7 @@ export function TicketCounter({
       <div className="grid gap-3 pb-24 lg:grid-cols-[minmax(0,1fr)_400px] lg:pb-0">
         <section aria-label="Catégories de billets" className="min-w-0 space-y-3">
           {(hasEvents || mode === 'events') && (
-            <div className="flex flex-wrap gap-2" role="tablist" aria-label="Type de billet">
+            <div className="flex flex-wrap gap-2" role="group" aria-label="Type de billet">
               {(
                 [
                   ['day', 'Billets du jour', Ticket],
@@ -264,8 +264,7 @@ export function TicketCounter({
                 <button
                   key={value}
                   type="button"
-                  role="tab"
-                  aria-selected={mode === value}
+                  aria-pressed={mode === value}
                   onClick={() => setMode(value)}
                   className={`inline-flex min-h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold ${mode === value ? 'bg-forest text-white' : 'border border-line bg-surface hover:border-forest'}`}
                 >

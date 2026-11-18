@@ -633,9 +633,10 @@ function CancelSessionDialog({
     <Dialog open onClose={onClose} title={`Annuler la séance du ${sessionLabel(session)}`}>
       <form onSubmit={onSubmit} className="space-y-3">
         <Alert tone="error" title="Action définitive">
-          La vente est fermée et les {session.sold} billet(s) encore valides sont annulés : ils
-          seront refusés à l’entrée. Ocall Parc ne rembourse pas automatiquement : la liste des
-          acheteurs s’affiche ensuite pour organiser le remboursement.
+          La vente est fermée et les billets encore valides sont annulés : ils seront refusés à
+          l’entrée (les billets déjà utilisés restent tels quels). Ocall Parc ne rembourse pas
+          automatiquement : la liste des acheteurs s’affiche ensuite pour organiser le
+          remboursement.
         </Alert>
         <InputField
           label="Motif"
@@ -680,8 +681,11 @@ function BuyersDialog({
         <div className="space-y-3">
           {buyers.data.session.status === 'CANCELLED' && (
             <Alert tone="info" title="Séance annulée">
-              {buyers.data.totals.cancelled} billet(s) annulé(s) ·{' '}
-              {formatXof(buyers.data.totals.amount)} encaissé(s) au total pour cette séance.
+              {buyers.data.totals.cancelled} billet(s) annulé(s), soit{' '}
+              <span data-testid="buyers-refund">
+                {formatXof(buyers.data.totals.cancelledAmount)}
+              </span>{' '}
+              payé(s) pour ces billets (base du remboursement manuel).
             </Alert>
           )}
           <p className="text-sm text-muted" data-testid="buyers-total">
@@ -715,6 +719,8 @@ function BuyersDialog({
                   </p>
                   <p className="text-xs text-muted">
                     {s.valid} valide(s) · {s.used} utilisé(s) · {s.cancelled} annulé(s)
+                    {s.cancelled > 0 ? ` (${formatXof(s.cancelledAmount)})` : ''}
+                    {s.loyaltyDiscount ? ' · remise fidélité déduite' : ''}
                   </p>
                 </li>
               ))}
