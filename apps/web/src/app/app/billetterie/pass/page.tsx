@@ -2,9 +2,8 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { IdCard, Search, UserPlus } from 'lucide-react';
+import { IdCard, Search } from 'lucide-react';
 import {
-  CUSTOMER_SEARCH_MIN_LENGTH,
   PASS_KIND_LABELS,
   PASS_STATE_LABELS,
   type PassStatus,
@@ -13,7 +12,7 @@ import {
 } from '@ocall/shared';
 import { AccessDenied } from '@/components/app/access-denied';
 import { useCan } from '@/components/app/session-context';
-import { CustomerFormDialog } from '@/components/crm/customer-form';
+import { CustomerPicker, fullName } from '@/components/crm/customer-picker';
 import { ParkEstablishmentScope } from '@/components/park/park-establishment';
 import { ParkNav } from '@/components/park/park-nav';
 import {
@@ -75,9 +74,6 @@ export default function PassPage() {
     </div>
   );
 }
-
-const fullName = (c: { firstName: string | null; lastName: string | null }) =>
-  [c.firstName, c.lastName].filter(Boolean).join(' ').trim();
 
 function PassCounter({
   establishmentId,
@@ -271,114 +267,6 @@ function PassCounter({
         </Dialog>
       )}
     </>
-  );
-}
-
-/** Recherche d'une fiche client (nom ou téléphone), ou création sur place. */
-function CustomerPicker({
-  value,
-  onChange,
-}: {
-  value: CustomerSummary | null;
-  onChange: (c: CustomerSummary | null) => void;
-}) {
-  const [q, setQ] = useState('');
-  const [submitted, setSubmitted] = useState('');
-  const [creating, setCreating] = useState(false);
-  const searching = submitted.length >= CUSTOMER_SEARCH_MIN_LENGTH;
-  const results = useApi<CustomerSummary[]>(
-    searching ? `/customers?q=${encodeURIComponent(submitted)}` : null,
-  );
-
-  if (value) {
-    return (
-      <div className="flex items-center justify-between gap-2 rounded-xl border border-forest/40 bg-forest-light/40 p-3">
-        <div className="min-w-0">
-          <p className="truncate font-semibold" data-testid="pass-holder">
-            {fullName(value) || 'Sans nom'}
-          </p>
-          {value.phone && <p className="text-sm text-muted">{value.phone}</p>}
-        </div>
-        <Button type="button" variant="ghost" size="sm" onClick={() => onChange(null)}>
-          Changer
-        </Button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-end gap-2">
-        <div className="flex-1">
-          <InputField
-            label="Fiche client (nom ou téléphone)"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                setSubmitted(q.trim());
-              }
-            }}
-            autoComplete="off"
-          />
-        </div>
-        <Button
-          type="button"
-          variant="secondary"
-          onClick={() => setSubmitted(q.trim())}
-          disabled={q.trim().length < CUSTOMER_SEARCH_MIN_LENGTH}
-          icon={<Search className="h-4 w-4" />}
-          aria-label="Rechercher le client"
-        >
-          <span className="sr-only sm:not-sr-only">Rechercher</span>
-        </Button>
-      </div>
-      {searching && results.state === 'loading' && <LoadingState />}
-      {searching && results.state === 'error' && (
-        <ErrorState error={results.error} onRetry={results.reload} />
-      )}
-      {searching && results.state === 'success' && (
-        <ul className="max-h-56 divide-y divide-line/70 overflow-y-auto rounded-xl border border-line">
-          {results.data.length === 0 && (
-            <li className="p-3 text-sm text-muted">Aucun client trouvé.</li>
-          )}
-          {results.data
-            .filter((c) => !c.anonymizedAt)
-            .map((c) => (
-              <li key={c.id}>
-                <button
-                  type="button"
-                  onClick={() => onChange(c)}
-                  className="flex min-h-11 w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-forest-light/40"
-                >
-                  <span className="truncate font-medium">{fullName(c) || 'Sans nom'}</span>
-                  <span className="text-sm text-muted">{c.phone}</span>
-                </button>
-              </li>
-            ))}
-        </ul>
-      )}
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={() => setCreating(true)}
-        icon={<UserPlus className="h-4 w-4" />}
-      >
-        Nouveau client
-      </Button>
-      {creating && (
-        <CustomerFormDialog
-          initialPhone={/^[\d+\s]+$/.test(q) ? q.trim() : undefined}
-          onClose={() => setCreating(false)}
-          onSaved={(c) => {
-            setCreating(false);
-            onChange(c);
-          }}
-        />
-      )}
-    </div>
   );
 }
 

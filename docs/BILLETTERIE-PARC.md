@@ -105,3 +105,9 @@ distingue, y compris dans le chiffre d'affaires du tableau de bord principal.
 - **Impression des QR** (`GS ( k`, modèle 2, correction M) sur les imprimantes 58 et 80 mm réelles :
   lisibilité du QR imprimé par la caméra, coupe entre billets.
 - Temps de passage à l'entrée en conditions réelles (réseau 4G).
+
+## Événements
+
+Les billets d'événement (séances datées, capacité, quotas par tarif, prénom facultatif, annulation de
+séance) réutilisent cette billetterie : voir [EVENEMENTS-PARC.md](EVENEMENTS-PARC.md). Les tarifs
+d'événement n'apparaissent pas dans les tarifs du parc ni au guichet du jour.

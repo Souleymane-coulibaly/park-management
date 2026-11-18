@@ -7,6 +7,7 @@ import { useCan } from '@/components/app/session-context';
 import { toApiError } from '@/components/pos/cash-session';
 import { ReprintDialog } from '@/components/pos/reprint-dialog';
 import { Badge } from '@/components/ui/badge';
+import { eventLine, visitorLabel } from '@/components/park/event-ui';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 import { InputField } from '@/components/ui/field';
@@ -70,14 +71,23 @@ export function SaleTickets({
             data-testid="issued-ticket"
           >
             {t.status === 'VALID' ? (
-              <TicketQr value={t.qr} size={112} label={`QR code du billet de ${t.visitorName}`} />
+              <TicketQr
+                value={t.qr}
+                size={112}
+                label={`QR code du billet de ${visitorLabel(t.visitorName)}`}
+              />
             ) : (
               <div className="grid h-[112px] w-[112px] shrink-0 place-items-center rounded-lg bg-ivory-dark/60 text-center text-xs text-muted">
                 QR inactif
               </div>
             )}
             <div className="min-w-0 flex-1 space-y-1">
-              <p className="truncate text-lg font-bold">{t.visitorName}</p>
+              <p className="truncate text-lg font-bold">{visitorLabel(t.visitorName)}</p>
+              {t.event && (
+                <p className="text-sm font-semibold text-forest" data-testid="ticket-event">
+                  {eventLine(t.event)}
+                </p>
+              )}
               <p className="text-sm text-muted">
                 {t.ticketCategory.name} · {formatXof(t.pricePaid)}
               </p>
@@ -121,7 +131,7 @@ export function SaleTickets({
         <ReprintDialog
           saleId={saleId}
           ticketId={reprint.id}
-          label={`le billet de ${reprint.visitorName}`}
+          label={`le billet de ${visitorLabel(reprint.visitorName)}`}
           terminal={terminal}
           onClose={() => setReprint(null)}
         />
@@ -170,7 +180,7 @@ function CancelTicketDialog({
     <Dialog
       open
       onClose={onClose}
-      title={`Annuler le billet de ${ticket.visitorName}`}
+      title={`Annuler le billet de ${visitorLabel(ticket.visitorName)}`}
       description="Le QR code sera refusé au contrôle d’accès. L’annulation est enregistrée dans le journal d’audit."
     >
       <form onSubmit={onSubmit} className="space-y-4">

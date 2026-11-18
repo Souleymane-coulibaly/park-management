@@ -1,5 +1,5 @@
 import { type Page, devices, expect, test } from '@playwright/test';
-import { signupOrganization, uniqueEmail } from './support';
+import { expectNoHorizontalOverflow, signupOrganization, uniqueEmail } from './support';
 
 /**
  * Ocall Parc sprint 8 — pass et abonnements, de bout en bout dans le navigateur (bureau et téléphone).
@@ -48,35 +48,6 @@ async function pay(page: Page, amount: string) {
 async function scan(page: Page, qr: string) {
   await page.getByLabel('Saisie manuelle du code').fill(qr);
   await page.getByRole('button', { name: 'Valider', exact: true }).click();
-}
-
-/** Aucun débordement horizontal, ni de la page, ni d'un bloc dans sa colonne. */
-async function expectNoHorizontalOverflow(page: Page) {
-  const overflow = await page.evaluate(() => {
-    const doc = document.documentElement;
-    // Un tableau large dans un cadre qui défile (overflow-x auto) est voulu : seul compte ce qui dépasse
-    // de l'écran sans cadre de défilement.
-    const inScroller = (el: HTMLElement) => {
-      for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
-        if (['auto', 'scroll'].includes(getComputedStyle(p).overflowX)) return true;
-      }
-      return false;
-    };
-    const wide = [...document.querySelectorAll<HTMLElement>('body *')].filter((el) => {
-      const r = el.getBoundingClientRect();
-      return (
-        r.width > 0 &&
-        r.right > doc.clientWidth + 1 &&
-        getComputedStyle(el).position !== 'fixed' &&
-        !inScroller(el)
-      );
-    });
-    return {
-      page: doc.scrollWidth - doc.clientWidth,
-      elements: wide.slice(0, 3).map((e) => e.outerHTML.slice(0, 160)),
-    };
-  });
-  expect(overflow).toEqual({ page: 0, elements: [] });
 }
 
 test.describe('Ocall Parc sprint 8 — pass et abonnements', () => {

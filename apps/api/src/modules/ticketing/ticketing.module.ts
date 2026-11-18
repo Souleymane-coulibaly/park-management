@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
 import { PosModule } from '../pos/pos.module';
 import { AccessControlService } from './access-control.service';
+import { ParkEventsController } from './park-events.controllers';
+import { ParkEventsService } from './park-events.service';
 import { ParkScheduleService } from './park-schedule.service';
 import { PassOffersController, PassesController, PublicPassController } from './pass.controllers';
 import { PassOffersService } from './pass-offers.service';
@@ -26,6 +28,7 @@ import { TicketsService } from './tickets.service';
     PassOffersController,
     PassesController,
     PublicPassController,
+    ParkEventsController,
   ],
   providers: [
     ParkScheduleService,
@@ -36,6 +39,7 @@ import { TicketsService } from './tickets.service';
     TicketingDashboardService,
     PassOffersService,
     PassesService,
+    ParkEventsService,
     // Sprint 8 : signature des QR de pass, clé dérivée de la clé du serveur (jamais exposée).
     {
       provide: PassQrSigner,

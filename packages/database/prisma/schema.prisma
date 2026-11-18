@@ -165,6 +165,8 @@ model Organization {
   printJobs             PrintJob[]
   drawerEvents          DrawerEvent[]
   ticketCategories      TicketCategory[]
+  parkEvents            ParkEvent[]
+  parkEventSessions     ParkEventSession[]
   tickets               Ticket[]
   ticketScans           TicketScan[]
   parkSchedules         ParkOpeningSchedule[]
@@ -221,36 +223,38 @@ model Establishment {
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 
-  organization     Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  brand            Brand?                    @relation(fields: [organizationId, brandId], references: [organizationId, id], onDelete: Restrict)
-  assignments      EstablishmentAssignment[]
-  variantPrices    VariantPrice[]
-  cashSessions     CashSession[]
-  sales            Sale[]
-  posTerminals     PosTerminal[]
-  printJobs        PrintJob[]
-  drawerEvents     DrawerEvent[]
-  ticketCategories TicketCategory[]
-  tickets          Ticket[]
-  ticketScans      TicketScan[]
-  parkSchedules    ParkOpeningSchedule[]
-  parkExceptions   ParkCalendarException[]
-  orderEvents      OrderEvent[]
-  diningZones      DiningZone[]
-  diningTables     DiningTable[]
-  qrOrderRequests  QrOrderRequest[]
-  stockItems       StockItem[]
-  stockMovements   StockMovement[]
-  reservations     Reservation[]
-  kioskDevices     KioskDevice[]
-  staffAssignments StaffAssignment[]
-  aiUsages         AiUsage[]
-  aiImports        AiImport[]
-  storedFiles      StoredFile[]
-  supportTickets   SupportTicket[]
-  voiceOrderDrafts VoiceOrderDraft[]
-  publicSite       PublicSite?
-  passOfferSites   PassOfferSite[]
+  organization      Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  brand             Brand?                    @relation(fields: [organizationId, brandId], references: [organizationId, id], onDelete: Restrict)
+  assignments       EstablishmentAssignment[]
+  variantPrices     VariantPrice[]
+  cashSessions      CashSession[]
+  sales             Sale[]
+  posTerminals      PosTerminal[]
+  printJobs         PrintJob[]
+  drawerEvents      DrawerEvent[]
+  ticketCategories  TicketCategory[]
+  parkEvents        ParkEvent[]
+  parkEventSessions ParkEventSession[]
+  tickets           Ticket[]
+  ticketScans       TicketScan[]
+  parkSchedules     ParkOpeningSchedule[]
+  parkExceptions    ParkCalendarException[]
+  orderEvents       OrderEvent[]
+  diningZones       DiningZone[]
+  diningTables      DiningTable[]
+  qrOrderRequests   QrOrderRequest[]
+  stockItems        StockItem[]
+  stockMovements    StockMovement[]
+  reservations      Reservation[]
+  kioskDevices      KioskDevice[]
+  staffAssignments  StaffAssignment[]
+  aiUsages          AiUsage[]
+  aiImports         AiImport[]
+  storedFiles       StoredFile[]
+  supportTickets    SupportTicket[]
+  voiceOrderDrafts  VoiceOrderDraft[]
+  publicSite        PublicSite?
+  passOfferSites    PassOfferSite[]
 
   @@unique([organizationId, name])
   @@index([organizationId, isActive])
@@ -1049,17 +1053,21 @@ model SaleLine {
   /// Rang de la ligne dans la saisie : ordre stable des tickets, billets et écrans (0 pour les
   /// lignes antérieures, alors départagées par identifiant).
   lineNo           Int      @default(0)
+  /// Événements : séance vendue (null pour un billet classique, un pass ou le restaurant).
+  eventSessionId   String?  @db.Uuid
 
-  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  sale           Sale            @relation(fields: [saleId], references: [id], onDelete: Cascade)
-  variant        ProductVariant? @relation(fields: [variantId], references: [id], onDelete: NoAction)
-  ticketCategory TicketCategory? @relation(fields: [ticketCategoryId], references: [id], onDelete: NoAction)
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  sale           Sale              @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  eventSession   ParkEventSession? @relation(fields: [eventSessionId], references: [id], onDelete: NoAction)
+  variant        ProductVariant?   @relation(fields: [variantId], references: [id], onDelete: NoAction)
+  ticketCategory TicketCategory?   @relation(fields: [ticketCategoryId], references: [id], onDelete: NoAction)
   tickets        Ticket[]
-  passOffer      PassOffer?      @relation(fields: [passOfferId], references: [id], onDelete: NoAction)
+  passOffer      PassOffer?        @relation(fields: [passOfferId], references: [id], onDelete: NoAction)
   passPeriod     PassPeriod?
 
   @@index([saleId])
   @@index([organizationId])
+  @@index([eventSessionId])
 }
 
 model Payment {
@@ -1271,33 +1279,44 @@ enum TicketScanRefusal {
 
 /// Catégorie de billet d'un établissement (Adulte, Enfant, Famille…). Jamais supprimée : désactivée.
 model TicketCategory {
-  id              String     @id @default(uuid()) @db.Uuid
-  organizationId  String     @db.Uuid
-  establishmentId String     @db.Uuid
-  kind            TicketKind
-  name            String
-  description     String?
+  id                  String     @id @default(uuid()) @db.Uuid
+  organizationId      String     @db.Uuid
+  establishmentId     String     @db.Uuid
+  kind                TicketKind
+  name                String
+  description         String?
   /// Prix TTC en FCFA d'une unité (une formule famille compte pour une unité).
-  price           Int
+  price               Int
   /// Nombre de billets individuels émis par unité vendue (famille de 5 = 5).
-  peopleIncluded  Int        @default(1)
-  conditions      String?
+  peopleIncluded      Int        @default(1)
+  conditions          String?
   /// Fenêtre de vente (dates locales incluses) ; null = sans limite.
-  availableFrom   DateTime?  @db.Date
-  availableUntil  DateTime?  @db.Date
+  availableFrom       DateTime?  @db.Date
+  availableUntil      DateTime?  @db.Date
   /// Durée de validité d'un billet, en jours à compter du jour de la visite.
-  validityDays    Int        @default(1)
-  sortOrder       Int        @default(0)
-  isActive        Boolean    @default(true)
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
+  validityDays        Int        @default(1)
+  sortOrder           Int        @default(0)
+  isActive            Boolean    @default(true)
+  /// Événements : tarif propre à un événement (null pour un tarif de la billetterie classique).
+  eventId             String?    @db.Uuid
+  /// Portée de l'unicité du nom : '' pour la billetterie classique, identifiant de l'événement sinon
+  /// (contrainte CHECK de la migration).
+  eventScope          String     @default("")
+  /// Événements : places maximales de ce tarif par séance (null = seule la capacité de la séance).
+  sessionQuota        Int?
+  /// Faux : billet non nominatif, prénom facultatif (tarifs d'événement uniquement).
+  requiresVisitorName Boolean    @default(true)
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
 
   organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  event         ParkEvent?    @relation(fields: [eventId], references: [id], onDelete: NoAction)
   saleLines     SaleLine[]
   tickets       Ticket[]
 
-  @@unique([establishmentId, name])
+  @@unique([establishmentId, eventScope, name])
+  @@index([eventId])
   @@index([organizationId, establishmentId, isActive])
 }
 
@@ -1323,12 +1342,16 @@ model Ticket {
   cancelledAt      DateTime?
   cancelledById    String?      @db.Uuid
   cancelReason     String?
+  /// Événements : séance du billet (null pour un billet classique). Validité = horaires de la séance
+  /// élargis de la tolérance d'entrée de l'événement.
+  eventSessionId   String?      @db.Uuid
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
   organization   Organization            @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   establishment  Establishment           @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
   sale           Sale                    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  eventSession   ParkEventSession?       @relation(fields: [eventSessionId], references: [id], onDelete: NoAction)
   saleLine       SaleLine                @relation(fields: [saleLineId], references: [id], onDelete: Cascade)
   ticketCategory TicketCategory          @relation(fields: [ticketCategoryId], references: [id], onDelete: NoAction)
   cancelledBy    OrganizationMembership? @relation("TicketCancelledBy", fields: [cancelledById], references: [id], onDelete: NoAction)
@@ -1339,6 +1362,7 @@ model Ticket {
   @@index([organizationId, establishmentId, createdAt])
   @@index([saleId])
   @@index([establishmentId, status, validUntil])
+  @@index([eventSessionId, status])
 }
 
 /// Passage au contrôle d'accès, accepté ou refusé (historique complet des scans).
@@ -1418,6 +1442,81 @@ model ParkCalendarException {
 
   @@unique([establishmentId, date])
   @@index([organizationId])
+}
+
+// ─── Événements du parc : billetterie événementielle (billets datés, distincts des pass) ───
+
+enum ParkEventStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum ParkEventSessionStatus {
+  SCHEDULED
+  CANCELLED
+}
+
+/// Événement d'un parc (concert, spectacle, festival…). Jamais supprimé : archivé. Ses tarifs sont des
+/// TicketCategory rattachées (eventId) ; ses billets sont des Ticket rattachés à une séance.
+model ParkEvent {
+  id                      String          @id @default(uuid()) @db.Uuid
+  organizationId          String          @db.Uuid
+  establishmentId         String          @db.Uuid
+  name                    String
+  description             String          @default("")
+  conditions              String          @default("")
+  status                  ParkEventStatus @default(DRAFT)
+  /// Contrôle d'accès : entrée acceptée à partir de N minutes avant le début de la séance…
+  entryOpensBeforeMinutes Int             @default(60)
+  /// … et jusqu'à N minutes après sa fin.
+  entryClosesAfterMinutes Int             @default(0)
+  /// Affiché dans l'agenda du site vitrine (événement publié uniquement).
+  showOnSite              Boolean         @default(true)
+  createdById             String?         @db.Uuid
+  createdAt               DateTime        @default(now())
+  updatedAt               DateTime        @updatedAt
+
+  organization  Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment      @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  sessions      ParkEventSession[]
+  tariffs       TicketCategory[]
+
+  @@unique([establishmentId, name])
+  @@index([organizationId, establishmentId, status])
+}
+
+/// Séance d'un événement : date et horaires locaux, capacité globale (places = billets individuels).
+/// Une fin antérieure ou égale au début désigne le lendemain (séance de nuit). Jamais supprimée : annulée.
+model ParkEventSession {
+  id              String                 @id @default(uuid()) @db.Uuid
+  organizationId  String                 @db.Uuid
+  establishmentId String                 @db.Uuid
+  eventId         String                 @db.Uuid
+  date            DateTime               @db.Date
+  /// « HH:MM », heure locale de l'établissement.
+  startTime       String
+  endTime         String
+  /// Instants calculés dans le fuseau de l'établissement (tri, vente, validité des billets).
+  startsAt        DateTime
+  endsAt          DateTime
+  capacity        Int
+  salesOpen       Boolean                @default(true)
+  status          ParkEventSessionStatus @default(SCHEDULED)
+  cancelledAt     DateTime?
+  cancelledById   String?                @db.Uuid
+  cancelReason    String?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  establishment Establishment @relation(fields: [establishmentId], references: [id], onDelete: Cascade)
+  event         ParkEvent     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  saleLines     SaleLine[]
+  tickets       Ticket[]
+
+  @@unique([eventId, date, startTime])
+  @@index([establishmentId, startsAt])
 }
 
 // ─── Sprint 5 : restaurant — commandes, cuisine, QR, tables, stocks, réservations ───

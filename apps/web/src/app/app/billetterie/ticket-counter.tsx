@@ -1,8 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Minus, Plus, Ticket, Trash2, Users } from 'lucide-react';
+import { CalendarDays, Minus, Plus, Ticket, Trash2, Users } from 'lucide-react';
 import { TICKET_KIND_LABELS, formatSaleNumber, formatXof } from '@ocall/shared';
+import { CustomerPicker } from '@/components/crm/customer-picker';
+import { EventSalePanel, type EventSessionChoice } from '@/components/park/event-sale-panel';
 import { describeOpening } from '@/components/park/opening';
 import { SaleTickets } from '@/components/park/sale-tickets';
 import { AfterPaymentHardware } from '@/components/pos/after-payment-hardware';
@@ -19,6 +21,8 @@ import { useDeviceTerminal, useOnline, useWakeLock } from '@/lib/hardware/use-te
 import { newRequestId } from '@/lib/request-id';
 import type {
   CashSession,
+  CustomerSummary,
+  EventCatalogEntry,
   PaymentResult,
   PosTerminal,
   Sale,
@@ -33,7 +37,14 @@ interface OrderLine {
   quantity: number;
   /** Un prénom par billet individuel : quantité × personnes incluses. */
   names: string[];
+  /** Billet d'événement : séance choisie (absente pour un billet du jour). */
+  session?: EventSessionChoice;
 }
+
+const lineKey = (categoryId: string, sessionId?: string) => `${categoryId}:${sessionId ?? ''}`;
+const keyOf = (l: OrderLine) => lineKey(l.category.id, l.session?.id);
+/** Prénom exigé : toujours pour un billet du jour, selon le tarif pour un billet d'événement. */
+const needsNames = (l: OrderLine) => !l.session || l.category.requiresVisitorName !== false;
 
 const MAX_UNITS = 50;
 
@@ -57,6 +68,11 @@ export function TicketCounter({
   onSessionChange: () => void;
 }) {
   const catalog = useApi<TicketCatalog>(`/ticketing/catalog?establishmentId=${establishmentId}`);
+  const eventCatalog = useApi<EventCatalogEntry[]>(
+    `/ticketing/event-catalog?establishmentId=${establishmentId}`,
+  );
+  const [mode, setMode] = useState<'day' | 'events'>('day');
+  const [customer, setCustomer] = useState<CustomerSummary | null>(null);
   const device = useDeviceTerminal(establishmentId);
   const online = useOnline();
   useWakeLock(true);
@@ -81,10 +97,7 @@ export function TicketCounter({
   const [unpaidNotice, setUnpaidNotice] = useState<Sale | null>(null);
   const [historyVersion, setHistoryVersion] = useState(0);
 
-  const quoteKey = useMemo(
-    () => JSON.stringify(lines.map((l) => [l.category.id, l.quantity])),
-    [lines],
-  );
+  const quoteKey = useMemo(() => JSON.stringify(lines.map((l) => [keyOf(l), l.quantity])), [lines]);
 
   // Montants affichés : ceux du serveur. Les prénoms non encore saisis sont remplacés par un
   // libellé provisoire pour l'aperçu uniquement (l'enregistrement exige tous les prénoms).
@@ -104,6 +117,7 @@ export function TicketCounter({
             ticketCategoryId: l.category.id,
             quantity: l.quantity,
             visitorNames: l.names.map((_, i) => `Visiteur ${i + 1}`),
+            ...(l.session ? { eventSessionId: l.session.id } : {}),
           })),
         },
       })
@@ -120,30 +134,42 @@ export function TicketCounter({
     // eslint-disable-next-line react-hooks/exhaustive-deps -- quoteKey résume la commande
   }, [quoteKey, establishmentId]);
 
-  function changeQuantity(category: TicketCategory, delta: number) {
+  function changeQuantity(category: TicketCategory, delta: number, session?: EventSessionChoice) {
+    const key = lineKey(category.id, session?.id);
     setLines((current) => {
-      const existing = current.find((l) => l.category.id === category.id);
+      const existing = current.find((l) => keyOf(l) === key);
       const quantity = Math.min((existing?.quantity ?? 0) + delta, MAX_UNITS);
       if (!existing)
         return quantity > 0
           ? [
               ...current,
-              { category, quantity, names: resize([], quantity * category.peopleIncluded) },
+              {
+                category,
+                quantity,
+                names: resize([], quantity * category.peopleIncluded),
+                ...(session ? { session } : {}),
+              },
             ]
           : current;
-      if (quantity <= 0) return current.filter((l) => l.category.id !== category.id);
+      if (quantity <= 0) return current.filter((l) => keyOf(l) !== key);
       return current.map((l) =>
-        l.category.id === category.id
+        keyOf(l) === key
           ? { ...l, quantity, names: resize(l.names, quantity * category.peopleIncluded) }
           : l,
       );
     });
   }
 
-  function setName(categoryId: string, index: number, value: string) {
+  /** Places déjà dans la commande pour une séance (tous tarifs, ou un tarif). */
+  const inCart = (sessionId: string, categoryId?: string) =>
+    lines
+      .filter((l) => l.session?.id === sessionId && (!categoryId || l.category.id === categoryId))
+      .reduce((sum, l) => sum + l.names.length, 0);
+
+  function setName(key: string, index: number, value: string) {
     setLines((current) =>
       current.map((l) =>
-        l.category.id === categoryId
+        keyOf(l) === key
           ? { ...l, names: l.names.map((n, i) => (i === index ? value.slice(0, 40) : n)) }
           : l,
       ),
@@ -151,14 +177,15 @@ export function TicketCounter({
   }
 
   const visitors = lines.reduce((sum, l) => sum + l.names.length, 0);
-  const missingNames = lines.reduce(
-    (sum, l) => sum + l.names.filter((n) => n.trim() === '').length,
-    0,
-  );
+  const missingNames = lines
+    .filter(needsNames)
+    .reduce((sum, l) => sum + l.names.filter((n) => n.trim() === '').length, 0);
   const openToday = catalog.state === 'success' ? catalog.data.openToday : false;
+  // Billets du jour : parc ouvert aujourd'hui. Billets d'événement : selon leur séance.
+  const needsOpenPark = lines.some((l) => !l.session);
   const canCheckout =
     online &&
-    openToday &&
+    (openToday || !needsOpenPark) &&
     lines.length > 0 &&
     missingNames === 0 &&
     !!quote.data &&
@@ -174,14 +201,17 @@ export function TicketCounter({
         body: {
           establishmentId,
           clientRequestId: orderRequestId,
+          ...(customer ? { customerId: customer.id } : {}),
           lines: lines.map((l) => ({
             ticketCategoryId: l.category.id,
             quantity: l.quantity,
             visitorNames: l.names.map((n) => n.trim()),
+            ...(l.session ? { eventSessionId: l.session.id } : {}),
           })),
         },
       });
       setLines([]);
+      setCustomer(null);
       setOrderRequestId(newRequestId());
       setCheckout({ loading: false, error: null });
       setPayingSale(sale);
@@ -193,7 +223,9 @@ export function TicketCounter({
   const refresh = () => {
     onSessionChange();
     setHistoryVersion((v) => v + 1);
+    eventCatalog.reload();
   };
+  const hasEvents = eventCatalog.state === 'success' && eventCatalog.data.length > 0;
   const total = quote.data?.total;
 
   return (
@@ -214,27 +246,59 @@ export function TicketCounter({
       )}
       {catalog.state === 'success' && !catalog.data.openToday && (
         <Alert tone="error" title="Parc fermé aujourd’hui">
-          La vente de billets est suspendue (fermeture hebdomadaire ou exceptionnelle). Le
-          restaurant n’est pas concerné.
+          La vente de billets du jour est suspendue (fermeture hebdomadaire ou exceptionnelle). Les
+          billets d’événement restent en vente selon leur séance. Le restaurant n’est pas concerné.
         </Alert>
       )}
 
       <div className="grid gap-3 pb-24 lg:grid-cols-[minmax(0,1fr)_400px] lg:pb-0">
-        <section aria-label="Catégories de billets" className="min-w-0">
-          {catalog.state === 'loading' && <LoadingState label="Chargement des tarifs…" />}
-          {catalog.state === 'error' && (
+        <section aria-label="Catégories de billets" className="min-w-0 space-y-3">
+          {(hasEvents || mode === 'events') && (
+            <div className="flex flex-wrap gap-2" role="tablist" aria-label="Type de billet">
+              {(
+                [
+                  ['day', 'Billets du jour', Ticket],
+                  ['events', 'Événements', CalendarDays],
+                ] as const
+              ).map(([value, label, Icon]) => (
+                <button
+                  key={value}
+                  type="button"
+                  role="tab"
+                  aria-selected={mode === value}
+                  onClick={() => setMode(value)}
+                  className={`inline-flex min-h-11 items-center gap-2 rounded-xl px-4 text-sm font-semibold ${mode === value ? 'bg-forest text-white' : 'border border-line bg-surface hover:border-forest'}`}
+                >
+                  <Icon className="h-4 w-4" aria-hidden /> {label}
+                </button>
+              ))}
+            </div>
+          )}
+          {mode === 'events' && (
+            <EventSalePanel
+              catalog={eventCatalog}
+              inCart={inCart}
+              onAdd={(category, session) => changeQuantity(category, 1, session)}
+            />
+          )}
+          {mode === 'day' && catalog.state === 'loading' && (
+            <LoadingState label="Chargement des tarifs…" />
+          )}
+          {mode === 'day' && catalog.state === 'error' && (
             <ErrorState error={catalog.error} onRetry={catalog.reload} />
           )}
-          {catalog.state === 'success' && catalog.data.categories.length === 0 && (
-            <Card>
-              <EmptyState
-                icon={<Ticket className="h-7 w-7" />}
-                title="Aucun billet en vente aujourd’hui"
-                description="Un responsable peut créer les tarifs dans la configuration de la billetterie."
-              />
-            </Card>
-          )}
-          {catalog.state === 'success' && (
+          {mode === 'day' &&
+            catalog.state === 'success' &&
+            catalog.data.categories.length === 0 && (
+              <Card>
+                <EmptyState
+                  icon={<Ticket className="h-7 w-7" />}
+                  title="Aucun billet en vente aujourd’hui"
+                  description="Un responsable peut créer les tarifs dans la configuration de la billetterie."
+                />
+              </Card>
+            )}
+          {mode === 'day' && catalog.state === 'success' && (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               {catalog.data.categories.map((c) => (
                 <button
@@ -296,21 +360,30 @@ export function TicketCounter({
             ) : (
               <ul className="max-h-[55vh] divide-y divide-line/70 overflow-y-auto">
                 {lines.map((l) => {
+                  const key = keyOf(l);
+                  const optional = !needsNames(l);
                   const priced = quote.data?.lines.find(
-                    (q) => q.ticketCategoryId === l.category.id,
+                    (q) =>
+                      q.ticketCategoryId === l.category.id &&
+                      (q.eventSessionId ?? '') === (l.session?.id ?? ''),
                   );
                   return (
-                    <li key={l.category.id} className="space-y-2 px-4 py-3">
+                    <li key={key} className="space-y-2 px-4 py-3">
                       <div className="flex items-center gap-2">
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium">{l.category.name}</p>
+                          {l.session && (
+                            <p className="truncate text-xs font-semibold text-forest">
+                              {l.session.eventName} · {l.session.label}
+                            </p>
+                          )}
                           <p className="text-xs text-muted">
                             {priced ? formatXof(priced.unitPrice) : '…'} l’unité
                           </p>
                         </div>
                         <button
                           type="button"
-                          onClick={() => changeQuantity(l.category, -1)}
+                          onClick={() => changeQuantity(l.category, -1, l.session)}
                           className="grid h-11 w-11 place-items-center rounded-xl border border-line"
                           aria-label={`Retirer un billet ${l.category.name}`}
                         >
@@ -321,7 +394,7 @@ export function TicketCounter({
                         </span>
                         <button
                           type="button"
-                          onClick={() => changeQuantity(l.category, 1)}
+                          onClick={() => changeQuantity(l.category, 1, l.session)}
                           className="grid h-11 w-11 place-items-center rounded-xl border border-line"
                           aria-label={`Ajouter un billet ${l.category.name}`}
                         >
@@ -336,9 +409,11 @@ export function TicketCounter({
                           <input
                             key={i}
                             value={name}
-                            onChange={(e) => setName(l.category.id, i, e.target.value)}
-                            aria-label={`Prénom du visiteur ${i + 1} (${l.category.name})`}
-                            placeholder={`Prénom ${i + 1}`}
+                            onChange={(e) => setName(key, i, e.target.value)}
+                            aria-label={`Prénom du visiteur ${i + 1} (${l.category.name})${optional ? ', facultatif' : ''}`}
+                            placeholder={
+                              optional ? `Prénom ${i + 1} (facultatif)` : `Prénom ${i + 1}`
+                            }
                             autoComplete="off"
                             className="min-h-11 rounded-xl border border-line bg-surface px-3 text-base focus:border-forest focus:outline-none focus:ring-2 focus:ring-forest/20"
                           />
@@ -350,6 +425,14 @@ export function TicketCounter({
               </ul>
             )}
             <div className="space-y-3 border-t border-line/70 p-4">
+              {lines.some((l) => l.session) && (
+                <CustomerPicker
+                  value={customer}
+                  onChange={setCustomer}
+                  label="Acheteur (facultatif : contact en cas d’annulation)"
+                  testId="event-buyer"
+                />
+              )}
               {quote.error && <ApiErrorAlert error={quote.error} />}
               <ApiErrorAlert error={checkout.error} />
               {missingNames > 0 && (

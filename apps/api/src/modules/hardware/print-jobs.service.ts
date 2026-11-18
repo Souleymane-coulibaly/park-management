@@ -16,6 +16,7 @@ import {
   hasPermission,
   layoutReceipt,
   layoutTickets,
+  sessionLabel,
   ticketQrPayload,
   layoutTestPage,
   previewLines,
@@ -484,6 +485,14 @@ export class PrintJobsService {
           validUntil: true,
           token: true,
           ticketCategory: { select: { name: true } },
+          eventSession: {
+            select: {
+              date: true,
+              startTime: true,
+              endTime: true,
+              event: { select: { name: true } },
+            },
+          },
         },
       });
       return layoutTickets(
@@ -501,6 +510,16 @@ export class PrintJobsService {
             validFrom: t.validFrom.toISOString(),
             validUntil: t.validUntil.toISOString(),
             qr: ticketQrPayload(t.token),
+            event: t.eventSession
+              ? {
+                  name: t.eventSession.event.name,
+                  session: sessionLabel({
+                    date: t.eventSession.date.toISOString().slice(0, 10),
+                    startTime: t.eventSession.startTime,
+                    endTime: t.eventSession.endTime,
+                  }),
+                }
+              : null,
           })),
         },
         paperWidth,

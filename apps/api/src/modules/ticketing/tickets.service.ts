@@ -1,12 +1,33 @@
 import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '@ocall/database';
-import { addDays, localMoment, ticketQrPayload, zonedMidnight } from '@ocall/shared';
+import { addDays, localMoment, sessionLabel, ticketQrPayload, zonedMidnight } from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
 import type { TenantContext } from '../../common/auth-context';
 import { establishmentScope } from '../../common/tenant-scope';
 import { findSellingEstablishment, visibleSalesWhere } from '../pos/pos-scope';
+import { fromDbDate } from './park-schedule.service';
 import type { TicketSearchQueryDto } from './ticketing.dto';
+
+type EventSessionRef = {
+  date: Date;
+  startTime: string;
+  endTime: string;
+  event: { name: string };
+} | null;
+
+/** Événement et séance d'un billet (null pour un billet classique). */
+export const ticketEvent = (s: EventSessionRef) =>
+  s
+    ? {
+        name: s.event.name,
+        session: sessionLabel({
+          date: fromDbDate(s.date),
+          startTime: s.startTime,
+          endTime: s.endTime,
+        }),
+      }
+    : null;
 
 const TICKET_NOT_FOUND = { code: 'TICKET_NOT_FOUND', message: 'Billet introuvable.' };
 
@@ -42,10 +63,19 @@ export class TicketsService {
         cancelReason: true,
         token: true,
         ticketCategory: { select: { id: true, name: true, kind: true } },
+        eventSession: {
+          select: {
+            date: true,
+            startTime: true,
+            endTime: true,
+            event: { select: { name: true } },
+          },
+        },
       },
     });
-    return tickets.map(({ token, ...t }) => ({
+    return tickets.map(({ token, eventSession, ...t }) => ({
       ...t,
+      event: ticketEvent(eventSession),
       // Expiration constatée à la lecture : le statut en base est mis à jour au prochain scan.
       status: t.status === 'VALID' && t.validUntil < now ? ('EXPIRED' as const) : t.status,
       // Le QR ne contient que le jeton aléatoire : ni nom, ni prix, ni secret applicatif.
@@ -106,14 +136,23 @@ export class TicketsService {
           saleId: true,
           sale: { select: { number: true } },
           ticketCategory: { select: { name: true } },
+          eventSession: {
+            select: {
+              date: true,
+              startTime: true,
+              endTime: true,
+              event: { select: { name: true } },
+            },
+          },
         },
       }),
     ]);
     return {
       date,
       total,
-      items: rows.map(({ sale, ticketCategory, ...t }) => ({
+      items: rows.map(({ sale, ticketCategory, eventSession, ...t }) => ({
         ...t,
+        event: ticketEvent(eventSession),
         status: t.status === 'VALID' && t.validUntil < now ? ('EXPIRED' as const) : t.status,
         saleNumber: sale.number,
         categoryName: ticketCategory.name,

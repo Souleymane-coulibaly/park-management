@@ -11,6 +11,7 @@ import { AccessDenied } from '@/components/app/access-denied';
 import { useCan } from '@/components/app/session-context';
 import { ParkEstablishmentScope } from '@/components/park/park-establishment';
 import { ParkNav } from '@/components/park/park-nav';
+import { eventLine, visitorLabel } from '@/components/park/event-ui';
 import { Badge } from '@/components/ui/badge';
 import { Card } from '@/components/ui/card';
 import { InputField, SelectField } from '@/components/ui/field';
@@ -110,9 +111,12 @@ function Visitors({ park }: { park: ParkEstablishment }) {
                 {visitors.data.items.map((t) => (
                   <li key={t.id} className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate font-semibold">{t.visitorName}</span>
+                      <span className="block truncate font-semibold">
+                        {visitorLabel(t.visitorName)}
+                      </span>
                       <span className="block truncate text-muted">
                         {t.categoryName} · vente n° {t.saleNumber}
+                        {t.event && ` · ${eventLine(t.event)}`}
                       </span>
                     </span>
                     <span className="text-right">

@@ -14,6 +14,7 @@ export function ParkNav() {
   const links = [
     canSell && { href: '/app/billetterie', label: 'Vente' },
     canSell && { href: '/app/billetterie/pass', label: 'Pass' },
+    seesStats && { href: '/app/billetterie/evenements', label: 'Événements' },
     seesStats && { href: '/app/billetterie/tableau', label: 'Tableau de bord' },
     canManage && { href: '/app/billetterie/configuration', label: 'Tarifs et horaires' },
     canManage && { href: '/app/billetterie/pass/offres', label: 'Offres de pass' },

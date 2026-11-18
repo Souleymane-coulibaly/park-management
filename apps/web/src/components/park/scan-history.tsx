@@ -1,5 +1,6 @@
 import { SCAN_REFUSAL_LABELS } from '@ocall/shared';
 import { Badge } from '@/components/ui/badge';
+import { visitorLabel } from '@/components/park/event-ui';
 import { formatDateTime } from '@/lib/format';
 import type { TicketScanView } from '@/lib/types';
 
@@ -22,7 +23,7 @@ export function ScanHistoryList({ scans }: { scans: TicketScanView[] }) {
           )}
           <span className="flex-1 truncate">
             {s.ticket
-              ? `${s.ticket.visitorName} · ${s.ticket.categoryName}`
+              ? `${visitorLabel(s.ticket.visitorName)} · ${s.ticket.categoryName}${s.ticket.event ? ` · ${s.ticket.event.name}` : ''}`
               : s.pass
                 ? `${s.pass.holderName} · ${s.pass.offerName}`
                 : '—'}

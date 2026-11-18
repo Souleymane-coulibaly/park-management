@@ -3,6 +3,8 @@ import type {
   OcallLegalIdentity,
   PassDurationUnit,
   PassKind,
+  ParkEventSessionStatus,
+  ParkEventStatus,
   PassQrMode,
   PassRules,
   PassState,
@@ -456,6 +458,135 @@ export interface TicketCategory {
   validityDays: number;
   sortOrder: number;
   isActive: boolean;
+  /** Tarif d'événement (null pour la billetterie classique). */
+  eventId?: string | null;
+  sessionQuota?: number | null;
+  requiresVisitorName?: boolean;
+}
+
+/** Billet d'événement : nom de l'événement et séance (« 24/12/2026 · 20:00 – 23:30 »). */
+export interface TicketEventRef {
+  name: string;
+  session: string;
+}
+
+export interface ParkEventSession {
+  id: string;
+  eventId: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  startsAt: string;
+  endsAt: string;
+  capacity: number;
+  salesOpen: boolean;
+  status: ParkEventSessionStatus;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+}
+
+export interface ParkEventSummary {
+  id: string;
+  establishmentId: string;
+  name: string;
+  description: string;
+  conditions: string;
+  status: ParkEventStatus;
+  entryOpensBeforeMinutes: number;
+  entryClosesAfterMinutes: number;
+  showOnSite: boolean;
+  createdAt: string;
+  activeTariffs: number;
+  sessionCount: number;
+  nextSession: ParkEventSession | null;
+  capacity: number;
+  sold: number;
+}
+
+export interface ParkEventDetail extends Omit<
+  ParkEventSummary,
+  'activeTariffs' | 'sessionCount' | 'nextSession' | 'capacity' | 'sold'
+> {
+  tariffs: TicketCategory[];
+  sessions: (ParkEventSession & {
+    sold: number;
+    placesLeft: number;
+    byTariff: { ticketCategoryId: string; sold: number }[];
+  })[];
+}
+
+export interface EventCatalogEntry {
+  id: string;
+  name: string;
+  description: string;
+  conditions: string;
+  tariffs: TicketCategory[];
+  sessions: {
+    id: string;
+    date: string;
+    startTime: string;
+    endTime: string;
+    startsAt: string;
+    endsAt: string;
+    capacity: number;
+    sold: number;
+    placesLeft: number;
+    tariffs: { ticketCategoryId: string; placesLeft: number | null }[];
+  }[];
+}
+
+export interface EventSessionBuyers {
+  event: { id: string; name: string };
+  session: ParkEventSession;
+  sales: {
+    saleId: string;
+    saleNumber: number;
+    soldAt: string;
+    cashier: string;
+    customer: { name: string; phone: string | null } | null;
+    visitorNames: string[];
+    tariffs: Record<string, number>;
+    tickets: number;
+    valid: number;
+    used: number;
+    cancelled: number;
+    amount: number;
+  }[];
+  totals: { sales: number; tickets: number; amount: number; cancelled: number };
+}
+
+export interface EventDashboard {
+  event: { id: string; name: string; status: ParkEventStatus };
+  totals: {
+    sessions: number;
+    capacity: number;
+    sold: number;
+    entered: number;
+    absent: number;
+    cancelled: number;
+    revenue: number;
+  };
+  sessions: (ParkEventSession & {
+    ended: boolean;
+    sold: number;
+    placesLeft: number;
+    fillRate: number;
+    entered: number;
+    expected: number;
+    absent: number;
+    cancelled: number;
+    revenue: number;
+    byTariff: {
+      ticketCategoryId: string;
+      name: string;
+      sessionQuota: number | null;
+      sold: number;
+      entered: number;
+      waiting: number;
+      cancelled: number;
+      revenue: number;
+    }[];
+  })[];
 }
 
 export interface TicketCatalog {
@@ -467,6 +598,7 @@ export interface TicketCatalog {
 
 export interface TicketQuoteLine {
   ticketCategoryId: string;
+  eventSessionId?: string;
   peoplePerUnit: number;
   visitorNames: string[];
   productName: string;
@@ -493,6 +625,7 @@ export interface IssuedTicket {
   cancelReason: string | null;
   qr: string;
   ticketCategory: { id: string; name: string; kind: TicketKind };
+  event?: TicketEventRef | null;
 }
 
 export interface ParkSchedule {
@@ -528,6 +661,7 @@ export interface TicketScanView {
     status: TicketStatus;
     validUntil: string;
     usedAt: string | null;
+    event?: TicketEventRef | null;
   } | null;
   /** Pass contrôlé (titulaire et photo pour le contrôle visuel), seulement dans un parc autorisé. */
   pass?: {
@@ -712,6 +846,7 @@ export interface ParkVisitors {
     saleId: string;
     saleNumber: number;
     categoryName: string;
+    event?: TicketEventRef | null;
   }[];
 }
 

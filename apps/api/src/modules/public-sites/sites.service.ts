@@ -9,6 +9,8 @@ import {
 import { Prisma } from '@ocall/database';
 import {
   type BusinessType,
+  coversActivity,
+  type PublicSiteEvent,
   type PublicSiteResponse,
   type PublishedMedia,
   type PublishedSite,
@@ -35,6 +37,7 @@ import type { TenantContext } from '../../common/auth-context';
 import { establishmentScope } from '../../common/tenant-scope';
 import { APP_CONFIG, type AppConfig } from '../../config/app-config';
 import { PARK_SUBSCRIPTION_STATUS } from '../../common/park-subscription';
+import { soldBySession } from '../ticket-issuance/event-capacity';
 
 type Db = Prisma.TransactionClient | PrismaService;
 
@@ -454,6 +457,7 @@ export class SitesService {
             establishmentId,
             id: { in: draft.tickets.map((t) => t.ticketCategoryId) },
             isActive: true,
+            eventId: null,
           },
           select: {
             id: true,
@@ -640,6 +644,7 @@ export class SitesService {
           organizationId: site.organizationId,
           establishmentId: site.establishmentId,
           isActive: true,
+          eventId: null,
         },
         select: { id: true, name: true, price: true, peopleIncluded: true },
         orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
@@ -667,6 +672,8 @@ export class SitesService {
         slug: true,
         isOnline: true,
         published: true,
+        establishmentId: true,
+        establishment: { select: { businessType: true } },
         organization: { select: { status: true, subscriptions: PARK_SUBSCRIPTION_STATUS } },
         domains: { where: { status: 'ACTIVE' }, select: { hostname: true, status: true } },
       },
@@ -681,7 +688,72 @@ export class SitesService {
       site: published,
       canonicalUrl: this.canonicalUrl(site),
       siteId: site.id,
+      ...(coversActivity(site.establishment.businessType, 'PARK')
+        ? { events: await this.publicEvents(site.establishmentId) }
+        : {}),
     };
+  }
+
+  /**
+   * Agenda public d'un parc, lu en direct : événements publiés et affichés sur le site, séances à
+   * venir (10 au plus par événement), tarifs actifs. Aucune donnée de vente sauf « complet ».
+   */
+  private async publicEvents(establishmentId: string): Promise<PublicSiteEvent[]> {
+    const now = new Date();
+    const upcoming = { status: 'SCHEDULED' as const, endsAt: { gt: now } };
+    const events = await this.prisma.parkEvent.findMany({
+      where: {
+        establishmentId,
+        status: 'PUBLISHED',
+        showOnSite: true,
+        sessions: { some: upcoming },
+      },
+      orderBy: { name: 'asc' },
+      take: 20,
+      select: {
+        name: true,
+        description: true,
+        conditions: true,
+        sessions: {
+          where: upcoming,
+          orderBy: { startsAt: 'asc' },
+          take: 10,
+          select: {
+            id: true,
+            date: true,
+            startTime: true,
+            endTime: true,
+            capacity: true,
+            startsAt: true,
+          },
+        },
+        tariffs: {
+          where: { isActive: true },
+          orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+          select: { name: true, price: true, peopleIncluded: true },
+        },
+      },
+    });
+    const sold = await soldBySession(
+      this.prisma,
+      events.flatMap((e) => e.sessions.map((s) => s.id)),
+    );
+    return events
+      .map((e) => ({
+        name: e.name,
+        description: e.description,
+        conditions: e.conditions,
+        firstStart: e.sessions[0]!.startsAt.getTime(),
+        sessions: e.sessions.map((s) => ({
+          date: s.date.toISOString().slice(0, 10),
+          startTime: s.startTime,
+          endTime: s.endTime,
+          soldOut: sold.get(s.id)!.total >= s.capacity,
+        })),
+        tariffs: e.tariffs,
+      }))
+      .sort((a, b) => a.firstStart - b.firstStart)
+      .map(({ firstStart: _f, ...e }) => e);
   }
 
   /**

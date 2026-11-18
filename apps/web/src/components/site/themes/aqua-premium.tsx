@@ -23,6 +23,8 @@ import {
   formatXof,
   sectionsFor,
 } from '@ocall/shared';
+import type { PublicSiteEvent } from '@ocall/shared';
+import { SiteEventsAgenda } from '../site-events';
 import { SiteImage } from '../site-image';
 import { HoursTable, MapFacade } from './site-client-parts';
 
@@ -75,7 +77,15 @@ function SectionTitle({ id, eyebrow, title }: { id: string; eyebrow?: string; ti
   );
 }
 
-export function AquaPremium({ site, banner }: { site: PublishedSite; banner?: ReactNode }) {
+export function AquaPremium({
+  site,
+  banner,
+  events = [],
+}: {
+  site: PublishedSite;
+  banner?: ReactNode;
+  events?: PublicSiteEvent[];
+}) {
   const c = site.content;
   const accent = site.accentColor ?? SITE_DEFAULT_ACCENT;
   const allowed = sectionsFor(site.businessType);
@@ -220,37 +230,51 @@ export function AquaPremium({ site, banner }: { site: PublishedSite; banner?: Re
         </ul>
       </>
     ) : null,
-    prices: site.tickets.length ? (
-      <>
-        <SectionTitle id="prices" eyebrow="Tarifs" title="Nos tarifs d’entrée" />
-        <ul className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {site.tickets.map((t) => (
-            <li
-              key={t.name}
-              className="flex flex-col rounded-3xl bg-white p-6 shadow-sm ring-1 ring-black/5"
-            >
-              <p className="text-lg font-bold">{t.name}</p>
-              {t.peopleIncluded > 1 && (
-                <p className="text-sm opacity-70">Pour {t.peopleIncluded} personnes</p>
-              )}
-              {t.price !== null && (
-                <p
-                  className="mt-4 font-display text-4xl font-bold"
-                  style={{ color: 'var(--brand)' }}
-                >
-                  {formatXof(t.price)}
-                </p>
-              )}
-              {t.description && <p className="mt-3 text-[15px] opacity-80">{t.description}</p>}
-              {t.conditions && <p className="mt-2 text-sm opacity-65">{t.conditions}</p>}
-            </li>
-          ))}
-        </ul>
-        <p className="mt-5 text-sm opacity-70">
-          Tarifs indicatifs. Billets en vente sur place uniquement.
-        </p>
-      </>
-    ) : null,
+    prices:
+      site.tickets.length || events.length ? (
+        <>
+          <SectionTitle id="prices" eyebrow="Tarifs" title="Nos tarifs d’entrée" />
+          {site.tickets.length > 0 && (
+            <>
+              <ul className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                {site.tickets.map((t) => (
+                  <li
+                    key={t.name}
+                    className="flex flex-col rounded-3xl bg-white p-6 shadow-sm ring-1 ring-black/5"
+                  >
+                    <p className="text-lg font-bold">{t.name}</p>
+                    {t.peopleIncluded > 1 && (
+                      <p className="text-sm opacity-70">Pour {t.peopleIncluded} personnes</p>
+                    )}
+                    {t.price !== null && (
+                      <p
+                        className="mt-4 font-display text-4xl font-bold"
+                        style={{ color: 'var(--brand)' }}
+                      >
+                        {formatXof(t.price)}
+                      </p>
+                    )}
+                    {t.description && (
+                      <p className="mt-3 text-[15px] opacity-80">{t.description}</p>
+                    )}
+                    {t.conditions && <p className="mt-2 text-sm opacity-65">{t.conditions}</p>}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-5 text-sm opacity-70">
+                Tarifs indicatifs. Billets en vente sur place uniquement.
+              </p>
+            </>
+          )}
+          <div className={site.tickets.length > 0 ? 'mt-10' : ''}>
+            <SiteEventsAgenda
+              events={events}
+              cardClass="rounded-3xl bg-white shadow-sm ring-1 ring-black/5"
+              titleClass="font-display text-2xl font-bold"
+            />
+          </div>
+        </>
+      ) : null,
     hours: (
       <div className="grid gap-8 lg:grid-cols-[1fr_1.2fr] lg:items-start">
         <SectionTitle id="hours" eyebrow="Planifiez votre visite" title="Horaires d’ouverture" />

@@ -958,9 +958,27 @@ export interface PublishedSite {
   }[];
 }
 
+/**
+ * Agenda public d'un parc : événements publiés (et affichés sur le site) ayant une séance à venir.
+ * Lu en direct (non figé à la publication) ; prix indicatifs, aucune vente en ligne.
+ */
+export interface PublicSiteEvent {
+  name: string;
+  description: string;
+  conditions: string;
+  sessions: { date: string; startTime: string; endTime: string; soldOut: boolean }[];
+  tariffs: { name: string; price: number; peopleIncluded: number }[];
+}
+
 /** Réponse publique : site publié, ou indisponible (suspension, expiration) sans perte de contenu. */
 export type PublicSiteResponse =
-  | { state: 'PUBLISHED'; site: PublishedSite; canonicalUrl: string }
+  | {
+      state: 'PUBLISHED';
+      site: PublishedSite;
+      canonicalUrl: string;
+      /** Parc : agenda des événements (absent des sites sans activité parc). */
+      events?: PublicSiteEvent[];
+    }
   | { state: 'UNAVAILABLE'; publicName: string };
 
 export const SITE_STATUS_LABELS = {

@@ -1,4 +1,6 @@
 import type { CSSProperties, ReactNode } from 'react';
+import type { PublicSiteEvent } from '@ocall/shared';
+import { SiteEventsAgenda } from './site-events';
 import { AquaPremium } from './themes/aqua-premium';
 import {
   Clock,
@@ -45,10 +47,20 @@ const THEMES = {
 
 const digits = (phone: string) => phone.replace(/[^0-9]/g, '');
 
-export function SiteView({ site, banner }: { site: PublishedSite; banner?: ReactNode }) {
+export function SiteView({
+  site,
+  banner,
+  events = [],
+}: {
+  site: PublishedSite;
+  banner?: ReactNode;
+  /** Parc : agenda des événements, lu en direct (absent de l'aperçu de l'éditeur). */
+  events?: PublicSiteEvent[];
+}) {
   // Registre des thèmes : un composant par thème dédié ; les thèmes historiques partagent la mise
   // en page ci-dessous.
-  if (site.theme === 'AQUA_PREMIUM') return <AquaPremium site={site} banner={banner} />;
+  if (site.theme === 'AQUA_PREMIUM')
+    return <AquaPremium site={site} banner={banner} events={events} />;
   const c = site.content;
   const theme = THEMES[site.theme] ?? THEMES.CLASSIC;
   const allowed = sectionsFor(site.businessType);
@@ -128,33 +140,39 @@ export function SiteView({ site, banner }: { site: PublishedSite; banner?: React
         </p>
       </div>
     ) : null,
-    prices: site.tickets.length ? (
-      <div>
-        <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {site.tickets.map((t) => (
-            <li key={t.name} className={`rounded-xl p-4 ${theme.card}`}>
-              <p className="font-semibold">{t.name}</p>
-              {t.price !== null && (
-                <p
-                  className="mt-1 font-display text-2xl font-bold"
-                  style={{ color: 'var(--brand)' }}
-                >
-                  {formatXof(t.price)}
-                </p>
-              )}
-              {t.peopleIncluded > 1 && (
-                <p className="text-sm opacity-75">Pour {t.peopleIncluded} personnes</p>
-              )}
-              {t.description && <p className="mt-1 text-sm opacity-80">{t.description}</p>}
-              {t.conditions && <p className="mt-1 text-sm opacity-70">{t.conditions}</p>}
-            </li>
-          ))}
-        </ul>
-        <p className="mt-3 text-sm opacity-70">
-          Tarifs indicatifs. Billets en vente sur place uniquement.
-        </p>
-      </div>
-    ) : null,
+    prices:
+      site.tickets.length || events.length ? (
+        <div className="space-y-6">
+          {site.tickets.length > 0 && (
+            <div>
+              <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {site.tickets.map((t) => (
+                  <li key={t.name} className={`rounded-xl p-4 ${theme.card}`}>
+                    <p className="font-semibold">{t.name}</p>
+                    {t.price !== null && (
+                      <p
+                        className="mt-1 font-display text-2xl font-bold"
+                        style={{ color: 'var(--brand)' }}
+                      >
+                        {formatXof(t.price)}
+                      </p>
+                    )}
+                    {t.peopleIncluded > 1 && (
+                      <p className="text-sm opacity-75">Pour {t.peopleIncluded} personnes</p>
+                    )}
+                    {t.description && <p className="mt-1 text-sm opacity-80">{t.description}</p>}
+                    {t.conditions && <p className="mt-1 text-sm opacity-70">{t.conditions}</p>}
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-3 text-sm opacity-70">
+                Tarifs indicatifs. Billets en vente sur place uniquement.
+              </p>
+            </div>
+          )}
+          <SiteEventsAgenda events={events} cardClass={`rounded-xl ${theme.card}`} />
+        </div>
+      ) : null,
     services: c.services.length ? (
       <ul className="flex flex-wrap gap-2">
         {c.services.map((s) => (

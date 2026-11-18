@@ -26,6 +26,9 @@ export const CATEGORY_SELECT = {
   validityDays: true,
   sortOrder: true,
   isActive: true,
+  eventId: true,
+  sessionQuota: true,
+  requiresVisitorName: true,
 } as const;
 
 type CategoryRow = Prisma.TicketCategoryGetPayload<{ select: typeof CATEGORY_SELECT }>;
@@ -47,7 +50,18 @@ const NAME_TAKEN = {
 const dateOrNull = (value: string | null | undefined) =>
   value === undefined ? undefined : value === null ? null : toDbDate(value.slice(0, 10));
 
-/** Tarifs de la billetterie. Une catégorie vendue n'est jamais supprimée : elle est désactivée. */
+/** Tarif d'un événement : rattaché à l'événement, quota par séance et prénom facultatif possibles. */
+export interface EventTariffScope {
+  eventId: string;
+  establishmentId: string;
+  sessionQuota?: number | null;
+  requiresVisitorName?: boolean;
+}
+
+/**
+ * Tarifs de la billetterie. Une catégorie vendue n'est jamais supprimée : elle est désactivée. Les
+ * tarifs d'événement réutilisent ce service (option `event`) ; la billetterie classique ne les voit pas.
+ */
 @Injectable()
 export class TicketCategoriesService {
   constructor(
@@ -59,7 +73,7 @@ export class TicketCategoriesService {
   async list(auth: TenantContext, establishmentId: string) {
     await this.schedule.findParkEstablishment(auth, establishmentId);
     const rows = await this.prisma.ticketCategory.findMany({
-      where: { organizationId: auth.membership.organizationId, establishmentId },
+      where: { organizationId: auth.membership.organizationId, establishmentId, eventId: null },
       orderBy: [{ isActive: 'desc' }, { sortOrder: 'asc' }, { name: 'asc' }],
       select: CATEGORY_SELECT,
     });
@@ -73,9 +87,13 @@ export class TicketCategoriesService {
   async create(
     auth: TenantContext,
     dto: CreateTicketCategoryDto,
-    options: { inactive?: boolean; source?: string } = {},
+    options: { inactive?: boolean; source?: string; event?: EventTariffScope } = {},
   ) {
-    const establishment = await this.schedule.findParkEstablishment(auth, dto.establishmentId);
+    const establishment = await this.schedule.findParkEstablishment(
+      auth,
+      options.event?.establishmentId ?? dto.establishmentId,
+    );
+    const event = options.event;
     assertWindow(dto.availableFrom, dto.availableUntil);
     const organizationId = auth.membership.organizationId;
     try {
@@ -95,6 +113,17 @@ export class TicketCategoriesService {
             validityDays: dto.validityDays ?? 1,
             sortOrder: dto.sortOrder ?? 0,
             ...(options.inactive ? { isActive: false } : {}),
+            ...(event
+              ? {
+                  eventId: event.eventId,
+                  eventScope: event.eventId,
+                  sessionQuota: event.sessionQuota ?? null,
+                  requiresVisitorName: event.requiresVisitorName ?? true,
+                  availableFrom: null,
+                  availableUntil: null,
+                  validityDays: 1,
+                }
+              : {}),
           },
           select: CATEGORY_SELECT,
         });
@@ -110,6 +139,7 @@ export class TicketCategoriesService {
               kind: created.kind,
               price: created.price,
               ...(options.source ? { source: options.source } : {}),
+              ...(event ? { eventId: event.eventId } : {}),
             },
           },
           tx,
@@ -123,12 +153,22 @@ export class TicketCategoriesService {
     }
   }
 
-  async update(auth: TenantContext, id: string, dto: UpdateTicketCategoryDto) {
+  /**
+   * `event` : tarif d'un événement (seul ce tarif-là est modifiable par cette voie) ; sans option, seuls
+   * les tarifs de la billetterie classique le sont.
+   */
+  async update(
+    auth: TenantContext,
+    id: string,
+    dto: UpdateTicketCategoryDto,
+    event?: Omit<EventTariffScope, 'establishmentId'>,
+  ) {
     const existing = await this.prisma.ticketCategory.findFirst({
       where: {
         id,
         organizationId: auth.membership.organizationId,
         establishment: establishmentScope(auth),
+        eventId: event?.eventId ?? null,
       },
       select: CATEGORY_SELECT,
     });
@@ -159,6 +199,15 @@ export class TicketCategoriesService {
             validityDays: dto.validityDays,
             sortOrder: dto.sortOrder,
             isActive: dto.isActive,
+            ...(event
+              ? {
+                  availableFrom: null,
+                  availableUntil: null,
+                  validityDays: 1,
+                  sessionQuota: event.sessionQuota,
+                  requiresVisitorName: event.requiresVisitorName,
+                }
+              : {}),
           },
           select: CATEGORY_SELECT,
         });

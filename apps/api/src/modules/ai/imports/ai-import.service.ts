@@ -518,7 +518,7 @@ export class AiImportService {
 
   private existingTicketCategories(establishmentId: string): Promise<ExistingName[]> {
     return this.prisma.ticketCategory.findMany({
-      where: { establishmentId },
+      where: { establishmentId, eventId: null },
       select: { id: true, name: true },
     });
   }

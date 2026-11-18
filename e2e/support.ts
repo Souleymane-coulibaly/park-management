@@ -43,3 +43,32 @@ export async function login(page: Page, identifier: string, password: string) {
 export function sidebar(page: Page) {
   return page.getByRole('navigation', { name: 'Navigation de l’espace' });
 }
+
+/** Aucun débordement horizontal, ni de la page, ni d'un bloc dans sa colonne. */
+export async function expectNoHorizontalOverflow(page: Page) {
+  const overflow = await page.evaluate(() => {
+    const doc = document.documentElement;
+    // Un tableau large dans un cadre qui défile (overflow-x auto) est voulu : seul compte ce qui dépasse
+    // de l'écran sans cadre de défilement.
+    const inScroller = (el: HTMLElement) => {
+      for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+        if (['auto', 'scroll'].includes(getComputedStyle(p).overflowX)) return true;
+      }
+      return false;
+    };
+    const wide = [...document.querySelectorAll<HTMLElement>('body *')].filter((el) => {
+      const r = el.getBoundingClientRect();
+      return (
+        r.width > 0 &&
+        r.right > doc.clientWidth + 1 &&
+        getComputedStyle(el).position !== 'fixed' &&
+        !inScroller(el)
+      );
+    });
+    return {
+      page: doc.scrollWidth - doc.clientWidth,
+      elements: wide.slice(0, 3).map((e) => e.outerHTML.slice(0, 160)),
+    };
+  });
+  expect(overflow).toEqual({ page: 0, elements: [] });
+}

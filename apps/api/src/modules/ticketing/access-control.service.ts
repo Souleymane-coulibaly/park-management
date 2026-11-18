@@ -10,6 +10,7 @@ import {
   type PassRules,
   passRefusal,
   type ScanRefusalReason,
+  sessionLabel,
   zonedMidnight,
 } from '@ocall/shared';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -17,7 +18,7 @@ import type { TenantContext } from '../../common/auth-context';
 import { findSellingEstablishment } from '../pos/pos-scope';
 import { StorageService } from '../../common/storage/storage.service';
 import { dbDay, lockPass, toDay } from '../ticket-issuance/pass-activation';
-import { ParkScheduleService } from './park-schedule.service';
+import { fromDbDate, ParkScheduleService } from './park-schedule.service';
 import { PassQrSigner } from './pass-qr';
 import type { ScanTicketDto, ScansQueryDto } from './ticketing.dto';
 
@@ -39,6 +40,14 @@ const SCAN_SELECT = {
       validUntil: true,
       usedAt: true,
       ticketCategory: { select: { name: true, kind: true } },
+      eventSession: {
+        select: {
+          date: true,
+          startTime: true,
+          endTime: true,
+          event: { select: { name: true } },
+        },
+      },
     },
   },
   cardId: true,
@@ -117,6 +126,16 @@ function toScan(
             status: ticket.status,
             validUntil: ticket.validUntil,
             usedAt: ticket.usedAt,
+            event: ticket.eventSession
+              ? {
+                  name: ticket.eventSession.event.name,
+                  session: sessionLabel({
+                    date: fromDbDate(ticket.eventSession.date),
+                    startTime: ticket.eventSession.startTime,
+                    endTime: ticket.eventSession.endTime,
+                  }),
+                }
+              : null,
           }
         : null,
   };
@@ -170,6 +189,7 @@ export class AccessControlService {
                 status: true,
                 validFrom: true,
                 validUntil: true,
+                eventSessionId: true,
               },
             })
           : null;
@@ -177,7 +197,9 @@ export class AccessControlService {
         const ticket = found && found.organizationId === organizationId ? found : null;
 
         let refusal = ticketRefusal(ticket, establishment.id, now);
-        if (!refusal) {
+        // Billet d'événement : sa validité couvre déjà les horaires de la séance et la tolérance
+        // d'entrée ; les horaires d'ouverture du parc ne s'appliquent pas (ex. nocturne).
+        if (!refusal && !ticket!.eventSessionId) {
           const ctx = await this.schedule.openingContext(
             tx,
             establishment.id,

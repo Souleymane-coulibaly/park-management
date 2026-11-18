@@ -7,6 +7,7 @@ import { AccessDenied } from '@/components/app/access-denied';
 import { useCan } from '@/components/app/session-context';
 import { ParkEstablishmentScope } from '@/components/park/park-establishment';
 import { ParkNav } from '@/components/park/park-nav';
+import { eventLine, visitorLabel } from '@/components/park/event-ui';
 import { formatPassDay } from '@/components/park/pass-ui';
 import { ScanHistoryList } from '@/components/park/scan-history';
 import { OfflineBanner, toApiError } from '@/components/pos/cash-session';
@@ -279,7 +280,12 @@ function ScanResult({
       )}
       {scan.ticket && (
         <p className="text-xl">
-          {scan.ticket.visitorName} · {scan.ticket.categoryName}
+          {visitorLabel(scan.ticket.visitorName)} · {scan.ticket.categoryName}
+        </p>
+      )}
+      {scan.ticket?.event && (
+        <p className="text-lg font-semibold" data-testid="scan-event">
+          {eventLine(scan.ticket.event)}
         </p>
       )}
       {scan.pass && (

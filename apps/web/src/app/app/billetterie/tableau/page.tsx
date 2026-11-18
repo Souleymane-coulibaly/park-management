@@ -6,6 +6,7 @@ import { SCAN_REFUSAL_LABELS, formatXof } from '@ocall/shared';
 import { AccessDenied } from '@/components/app/access-denied';
 import { useCan } from '@/components/app/session-context';
 import { describeOpening } from '@/components/park/opening';
+import { visitorLabel } from '@/components/park/event-ui';
 import { ParkEstablishmentScope } from '@/components/park/park-establishment';
 import { ParkNav } from '@/components/park/park-nav';
 import { Badge } from '@/components/ui/badge';
@@ -163,7 +164,7 @@ function Dashboard({ park }: { park: ParkEstablishment }) {
                   </Badge>
                 )}
                 <span className="flex-1 truncate">
-                  {s.visitorName ? `${s.visitorName} · ${s.categoryName}` : '—'}
+                  {s.categoryName ? `${visitorLabel(s.visitorName)} · ${s.categoryName}` : '—'}
                 </span>
                 <span className="text-muted">{s.entryPoint}</span>
               </li>

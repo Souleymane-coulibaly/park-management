@@ -7,6 +7,7 @@ export * from './pos';
 export * from './hardware';
 export * from './park';
 export * from './park-pass';
+export * from './park-events';
 export * from './restaurant';
 export * from './crm';
 export * from './ai';

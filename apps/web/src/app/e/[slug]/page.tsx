@@ -83,7 +83,7 @@ export default async function PublicSitePage({ params }: Params) {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: siteJsonLd(data.site, data.canonicalUrl) }}
       />
-      <SiteView site={data.site} />
+      <SiteView site={data.site} events={data.events} />
     </>
   );
 }

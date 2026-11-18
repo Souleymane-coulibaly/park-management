@@ -150,6 +150,8 @@ export interface TicketPrintData {
     validUntil: string;
     /** Contenu du QR code (préfixe + jeton), jamais de donnée personnelle. */
     qr: string;
+    /** Billet d'événement : nom de l'événement et séance (« 24/12/2026 · 20:00 – 23:30 »). */
+    event?: { name: string; session: string } | null;
   }[];
   duplicate: boolean;
 }
@@ -176,16 +178,30 @@ export function layoutTickets(data: TicketPrintData, paperWidth: PaperWidth): Re
       out.push({ text: line, align: 'center', bold: true, large: true });
     for (const line of wrap(data.establishmentName, w)) out.push({ text: line, align: 'center' });
     out.push(separator(w));
-    out.push({ text: 'BILLET D’ENTRÉE', align: 'center', bold: true });
-    for (const line of wrap(t.visitorName, Math.floor(w / 2)))
-      out.push({ text: line, align: 'center', large: true });
-    out.push({ text: columns(t.categoryName, formatXof(t.pricePaid), w) });
-    const from = formatDay(t.validFrom, data.timezone);
-    const until = formatDay(t.validUntil, data.timezone);
     out.push({
-      text: from === until ? `Valable le ${until}` : `Valable du ${from} au ${until}`,
+      text: t.event ? 'BILLET ÉVÉNEMENT' : 'BILLET D’ENTRÉE',
       align: 'center',
+      bold: true,
     });
+    if (t.event) {
+      for (const line of wrap(t.event.name, Math.floor(w / 2)))
+        out.push({ text: line, align: 'center', bold: true, large: true });
+      for (const line of wrap(`Séance du ${t.event.session}`, w))
+        out.push({ text: line, align: 'center' });
+    }
+    // Billet non nominatif : aucun prénom saisi, aucune ligne vide imprimée.
+    if (t.visitorName)
+      for (const line of wrap(t.visitorName, Math.floor(w / 2)))
+        out.push({ text: line, align: 'center', large: true });
+    out.push({ text: columns(t.categoryName, formatXof(t.pricePaid), w) });
+    if (!t.event) {
+      const from = formatDay(t.validFrom, data.timezone);
+      const until = formatDay(t.validUntil, data.timezone);
+      out.push({
+        text: from === until ? `Valable le ${until}` : `Valable du ${from} au ${until}`,
+        align: 'center',
+      });
+    }
     out.push({ text: `[QR ${t.id.slice(0, 8).toUpperCase()}]`, qr: t.qr });
     out.push({
       text: `Réf. ${t.id.slice(0, 8).toUpperCase()} · Vente n° ${formatSaleNumber(data.saleNumber)}`,

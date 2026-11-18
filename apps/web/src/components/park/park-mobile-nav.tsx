@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import {
+  CalendarDays,
   BarChart3,
   History,
   IdCard,
@@ -48,6 +49,8 @@ export function ParkMobileNav({ moduleHrefs }: { moduleHrefs: string[] }) {
       seesSales && { href: '/app/billetterie/tableau', label: 'Tableau', icon: LayoutDashboard },
     hasTicketing && canSell && { href: '/app/billetterie', label: 'Billetterie', icon: Ticket },
     hasTicketing && canSell && { href: '/app/billetterie/pass', label: 'Pass', icon: IdCard },
+    hasTicketing &&
+      seesSales && { href: '/app/billetterie/evenements', label: 'Événements', icon: CalendarDays },
     hasGate && canScan && { href: '/app/controle-acces', label: 'Scanner', icon: ScanLine },
     hasTicketing && seesSales && { href: '/app/parc/visiteurs', label: 'Visiteurs', icon: Users },
     hasGate && canScan && { href: '/app/parc/historique', label: 'Entrées', icon: History },

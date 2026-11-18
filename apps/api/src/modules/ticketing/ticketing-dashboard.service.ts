@@ -69,9 +69,15 @@ export class TicketingDashboardService {
         select: { createdAt: true },
       }),
       this.schedule.get(auth, establishment.id),
-      // Tous les billets encore utilisables, y compris ceux vendus un autre jour (validité de plusieurs jours).
+      // Tous les billets encore utilisables, y compris ceux vendus un autre jour (validité de plusieurs
+      // jours). Les billets d'événement ont leur propre suivi (places, entrées, absents par séance).
       this.prisma.ticket.count({
-        where: { establishmentId, status: 'VALID', validUntil: { gte: new Date() } },
+        where: {
+          establishmentId,
+          status: 'VALID',
+          validUntil: { gte: new Date() },
+          eventSessionId: null,
+        },
       }),
     ]);
 

@@ -197,14 +197,22 @@ export class TicketOrderLineDto {
   quantity: number;
 
   @ApiProperty({
-    description: 'Un prénom par billet individuel (quantité × personnes incluses).',
+    description:
+      'Un prénom par billet individuel (quantité × personnes incluses). Billet d’événement non nominatif : liste vide ou prénoms vides acceptés.',
     example: ['Awa'],
   })
   @IsArray()
   @ArrayMaxSize(MAX_VISITORS_PER_ORDER)
   @IsString({ each: true })
-  @Length(1, 40, { each: true })
+  @MaxLength(40, { each: true })
   visitorNames: string[];
+
+  @ApiPropertyOptional({
+    description: 'Séance d’un événement (obligatoire pour un tarif d’événement).',
+  })
+  @IsOptional()
+  @IsUUID('4')
+  eventSessionId?: string;
 }
 
 export class TicketQuoteDto {
@@ -228,6 +236,11 @@ export class CreateTicketOrderDto extends TicketQuoteDto {
   @IsOptional()
   @IsUUID('4')
   clientRequestId?: string;
+
+  @ApiPropertyOptional({ description: 'Fiche client de l’acheteur (facultative).' })
+  @IsOptional()
+  @IsUUID('4')
+  customerId?: string;
 }
 
 export class WeeklyOpeningDto {
