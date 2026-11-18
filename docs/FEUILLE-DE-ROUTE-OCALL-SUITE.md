@@ -1,7 +1,7 @@
 # Ocall Suite — feuille de route
 
 Chantiers validés. **Aucun ne démarre sans autorisation explicite**, et rien n'est déployé en préproduction ou en
-production sans accord. État au 17/11/2026, `main` à `7ef3e3e`.
+production sans accord. État au 18/11/2026, `main` à `be26d3b`.
 
 Le détail d'Ocall School est dans [OCALL-SCHOOL-FEUILLE-DE-ROUTE.md](OCALL-SCHOOL-FEUILLE-DE-ROUTE.md). La dette
 connue est dans [DETTE-TECHNIQUE.md](DETTE-TECHNIQUE.md).
@@ -12,15 +12,15 @@ connue est dans [DETTE-TECHNIQUE.md](DETTE-TECHNIQUE.md).
 | ----- | ------------------------------------------------------------------------ | --------------------------------------------------------- |
 | R-001 | Stockage objet R2 de préproduction (DT-001)                              | **Reporté**, prioritaire (décision du 17/11/2026)         |
 | R-002 | Audit responsive sous Chromium Linux : Parc, Restaurant, School, Facture | **Audit en lecture seule en cours** (17/11/2026)          |
-| R-003 | Ocall Parc : événements et abonnements                                   | Pass et abonnements livrés ; événements à cadrer          |
-| R-004 | Ocall School                                                             | Livré dans `main` ; suite à décider                       |
-| R-005 | Ocall Restaurant (application indépendante)                              | Séparation livrée ; offres inactives                      |
+| R-003 | Ocall Parc : événements et abonnements                                   | Pass et abonnements livrés ; événements en audit          |
+| R-004 | Ocall School                                                             | Livré dans `main` ; grille par site en préproduction      |
+| R-005 | Ocall Restaurant (application indépendante)                              | Publié en préproduction, grille par site                  |
 | R-006 | Interconnexion Facture ↔ Stock (et Parc ↔ Stock)                         | Facture ↔ Stock livré sur un emplacement ; suite à cadrer |
-| R-007 | Facturation multi-sites                                                  | Moteur livré ; offres par site inactives                  |
+| R-007 | Facturation multi-sites                                                  | Grille par site active en préproduction (5 applications)  |
 | R-008 | Ocall Print                                                              | À cadrer ; contrat de données préparé                     |
 | R-009 | Sabatii                                                                  | À cadrer                                                  |
 | R-010 | PWA et hors ligne                                                        | PWA Parc livrée ; contrôle hors ligne étudié, non activé  |
-| R-011 | Préparation commerciale et mise en production                            | À planifier                                               |
+| R-011 | Préparation commerciale et mise en production                            | J1 et J2 livrés dans `main` ; production à planifier      |
 
 ## R-001 — Stockage objet R2 de préproduction
 
@@ -48,8 +48,9 @@ tous les fichiers stockés échouent. Le chantier est reporté. La liste des tes
   [PASS-ABONNEMENTS-PARC.md](PASS-ABONNEMENTS-PARC.md).
 - **À faire** :
   - Rejouer en préproduction les cas avec photo, après R-001.
-  - Cadrer les **événements**. Les pass savent déjà porter un jour unique et des jours autorisés ; une offre
-    « événement » réutilisera les mêmes règles, quotas et contrôle d'accès.
+  - Cadrer les **événements** : audit de l'existant lancé le 18/11/2026, développement après validation du
+    périmètre. Les pass savent déjà porter un jour unique et des jours autorisés ; une offre « événement »
+    réutilisera les mêmes règles, quotas et contrôle d'accès.
 - **Reporté** :
   - formule billet + repas (décision D7 de la séparation Parc/Restaurant) ;
   - vente et renouvellement en ligne (décision D11 du sprint 8).
@@ -60,7 +61,10 @@ tous les fichiers stockés échouent. Le chantier est reporté. La liste des tes
   - sprints 1 à 10 (PR #7) ;
   - crédits SMS, notifications et renouvellements (Suite S2) ;
   - rattachement des écoles au référentiel commun des sites (Suite 2B).
-- **À faire** : décider de la suite (formules, offre gratuite jusqu'à 50 élèves conservée) et la planifier dans
+- **Préproduction (18/11/2026)** : grille par site active pour les nouveaux clients, forfaits retirés du
+  catalogue. Les contrats existants sont inchangés. L'offre gratuite School Free (contrat, jusqu'à 50 élèves
+  actifs, sans SMS) est conservée et vérifiée : le 51e élève est refusé.
+- **À faire** : décider de la suite et la planifier dans
   [OCALL-SCHOOL-FEUILLE-DE-ROUTE.md](OCALL-SCHOOL-FEUILLE-DE-ROUTE.md).
 
 ## R-005 — Ocall Restaurant
@@ -70,10 +74,11 @@ tous les fichiers stockés échouent. Le chantier est reporté. La liste des tes
   - les contrats combinés existants sont conservés ;
   - la bascule d'un contrat combiné est explicite ;
   - les interconnexions (clients, fidélité, paiements, caisse, statistiques) sont conservées.
-- **À faire** :
-  - activer commercialement les offres Restaurant, aujourd'hui inactives ;
-  - retirer l'offre « Parc + Restaurant » (`OCALL_PARK_RESTAURANT`), par migration non destructive des contrats
-    existants et sans changement automatique de prix.
+- **Préproduction (J1, 18/11/2026)** : Ocall Restaurant est publié au catalogue sur la grille par site ; un
+  restaurant seul démarre son essai sans contrat combiné. L'offre « Parc + Restaurant »
+  (`OCALL_PARK_RESTAURANT`) est hors catalogue, sans offre active ; les contrats combinés existants et leurs
+  droits sont conservés, sans changement de prix.
+- **À faire** : reproduire ce réglage en production, avec la mise en production (R-011).
 
 ## R-006 — Interconnexion Facture ↔ Stock (et Parc ↔ Stock)
 
@@ -88,17 +93,25 @@ tous les fichiers stockés échouent. Le chantier est reporté. La liste des tes
 ## R-007 — Facturation multi-sites
 
 - **Livré** (étape 6, `6d184c1`) :
-  - offres par site **inactives** ;
+  - offres par site ;
   - activations de site et prorata ;
   - lignes « sites supplémentaires » et « vitrine ».
+- **Commercialisation J1** (`d1eb5ab`) : un nouvel essai prend l'offre par site dès qu'Ocall a retiré tous les
+  forfaits d'une application ; aucun client n'est basculé automatiquement.
+- **Préproduction** : grille par site active et forfaits retirés du catalogue sur les cinq applications —
+  Stock, Facture et Restaurant (J2), Parc et School (18/11/2026). Empreinte des contrats existants identique
+  avant et après chaque activation.
 - **Tarifs confirmés** :
   - par application : 17 500 FCFA par mois pour le premier site, 7 500 FCFA par site supplémentaire ;
   - vitrine : +5 000 FCFA par mois et par application ;
   - installation : 150 000 FCFA pour la première application, puis 112 500 FCFA.
+- **Clients historiques (décision du 18/11/2026)** : ils gardent leur forfait, leurs prix et leurs contrats,
+  et restent gérés par Ocall. Un client en essai sur un forfait retiré ne peut pas l'activer lui-même
+  (`PLAN_NOT_FOUND`) ; Ocall l'active depuis l'administration. Pas d'auto-activation des anciens forfaits.
 - **À faire** :
-  - activer commercialement les offres par site ;
-  - organiser le passage volontaire des clients existants, qui gardent leurs prix et contrats jusqu'à une
-    transition acceptée.
+  - activer la grille en production, avec la mise en production (R-011) ;
+  - organiser le passage volontaire des clients existants vers la grille, seulement après une transition
+    acceptée.
 
 ## R-008 — Ocall Print
 
@@ -134,8 +147,14 @@ tous les fichiers stockés échouent. Le chantier est reporté. La liste des tes
   - supervision et alertes ;
   - test de restauration ;
   - application des migrations accumulées depuis Suite S1 (production non migrée ni déployée depuis).
-- **Commercial** :
-  - activation des offres (R-005, R-007) ;
-  - page de tarifs publique ;
-  - mise en vente d'Ocall Stock et d'Ocall Facture (aujourd'hui en préproduction ou « à venir »).
+- **Commercial, livré dans `main` (`be26d3b`)** :
+  - J1 : lancement de la grille par site, Ocall Restaurant indépendant ;
+  - J2 : identité légale Ocall, pages légales, factures (définitives ou provisoires) et reçus d'abonnement en
+    PDF ;
+  - préproduction : les cinq applications en vente sur la grille par site, Ocall Stock compris.
+- **Commercial, à faire** :
+  - saisir l'identité légale d'Ocall, avant toute facture définitive ;
+  - décider de la TVA sur les abonnements ;
+  - fournir les textes CGU, cadre légal de la confidentialité et À propos.
+- **Reporté** : envoi des e-mails (Resend), fichiers (R2), environnement de production.
 - **Prérequis** : R-001 avant toute ouverture (identifiants R2 valides en production) ; R-002 corrigé.
