@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { INestApplication } from '@nestjs/common';
+import { APP_CONFIG, type AppConfig } from '../src/config/app-config';
 import { SchoolPrismaService } from '../src/modules/school/school-prisma.service';
 import {
   SCHOOL_SMS_PROVIDER,
@@ -634,7 +635,9 @@ schoolSuite('Ocall School S2 : portefeuille SMS prépayé (intégration)', () =>
       const view = (await a.agent.get(api(`/school/sms/wallet?schoolId=${a.schoolId}`)).expect(200))
         .body;
       expect(view.tariff).toMatchObject({ creditPriceXof: 25, internationalAllowed: true });
-      expect(JSON.stringify(view)).not.toContain('12.5');
+      // L'horodatage est exclu : « …:12.5xxZ » contiendrait la chaîne sans exposer le coût.
+      expect(JSON.stringify({ ...view, updatedAt: null })).not.toContain('12.5');
+      expect(JSON.stringify(view.tariff)).not.toMatch(/cost/i);
       const req = (await requestTopUp(a, 200).expect(201)).body;
       expect(req.quotedAmountXof).toBe(5000);
       await a.agent
@@ -720,6 +723,89 @@ schoolSuite('Ocall School S2 : portefeuille SMS prépayé (intégration)', () =>
       expect(failures.length).toBeGreaterThan(0);
       for (const f of failures) expect(f.phone).not.toMatch(/77 \d{3}/);
       expect(JSON.stringify(failures)).not.toContain('Message B');
+    });
+  });
+
+  /**
+   * Commercialisation J1 : sans fournisseur réel (production avec le simulateur), les SMS ne sont ni
+   * vendus, ni activables, ni envoyés ; soldes et historiques restent consultables, rien n'est effacé.
+   */
+  describe('SMS indisponibles (aucun fournisseur réel)', () => {
+    const config = () => app.get<AppConfig>(APP_CONFIG).school.sms;
+
+    afterEach(() => {
+      config().available = true;
+    });
+
+    it('ni activation, ni recharge, ni validation, ni mise en file, ni envoi ; données conservées', async () => {
+      const before = await wallet(a);
+      await a.agent
+        .put(api('/school/sms/settings'))
+        .send({ schoolId: a.schoolId, enabled: true })
+        .expect(200);
+      const pendingBefore = (await wallet(a)).pendingRequest;
+      if (pendingBefore) {
+        await a.agent
+          .post(api(`/school/sms/top-ups/${pendingBefore.id}/cancel`))
+          .send({ schoolId: a.schoolId })
+          .expect(200);
+      }
+      const pending = (await requestTopUp(a, 60).expect(201)).body as { id: string };
+      const queued = await queue(a, '+221 77 600 00 01', 'Avant coupure');
+      config().available = false;
+
+      const settings = (
+        await a.agent.get(api(`/school/sms/settings?schoolId=${a.schoolId}`)).expect(200)
+      ).body;
+      expect(settings).toMatchObject({ available: false, enabled: false });
+      const refused = await a.agent
+        .put(api('/school/sms/settings'))
+        .send({ schoolId: a.schoolId, enabled: true })
+        .expect(409);
+      expect(refused.body.code).toBe('SCHOOL_SMS_UNAVAILABLE');
+      // Une demande en attente reste annulable ; aucune nouvelle demande.
+      await a.agent
+        .post(api(`/school/sms/top-ups/${pending.id}/cancel`))
+        .send({ schoolId: a.schoolId })
+        .expect(200);
+      expect((await requestTopUp(a, 60).expect(409)).body.code).toBe('SCHOOL_SMS_UNAVAILABLE');
+      const w = (await a.agent.get(api(`/school/sms/wallet?schoolId=${a.schoolId}`)).expect(200))
+        .body;
+      expect(w).toMatchObject({ available: false, balance: before.balance });
+
+      // Le Super Admin ne peut plus valider de recharge.
+      config().available = true;
+      const pendingB = (await wallet(b)).pendingRequest;
+      const other = pendingB ?? ((await requestTopUp(b, 60).expect(201)).body as { id: string });
+      config().available = false;
+      const approve = await owner.agent
+        .post(api(`/platform/school-sms/top-ups/${other.id}/approve`))
+        .send({ paymentReference: `VIR-J1-${RUN}` })
+        .expect(409);
+      expect(approve.body.code).toBe('SCHOOL_SMS_UNAVAILABLE');
+      expect(
+        (await db.schoolSmsTopUpRequest.findUniqueOrThrow({ where: { id: other.id } })).status,
+      ).toBe('PENDING');
+
+      // Aucun message mis en file, aucun envoi : le message déjà en file attend, intact.
+      const sentBefore = provider.sent.length;
+      expect(
+        await sms.enqueue(db, [
+          {
+            organizationId: a.organizationId,
+            schoolId: a.schoolId,
+            guardianId: randomUUID(),
+            phone: '+221 77 600 00 02',
+            kind: 'ABSENCE',
+            body: 'Après coupure',
+            dedupeKey: `j1-${RUN}`,
+          },
+        ]),
+      ).toBe(0);
+      expect(await sms.processDue(later())).toMatchObject({ sent: 0, failed: 0, cancelled: 0 });
+      expect(provider.sent.length).toBe(sentBefore);
+      expect(await message(queued.id)).toMatchObject({ status: 'PENDING', creditsReserved: 0 });
+      expect((await wallet(a)).balance).toBe(before.balance);
     });
   });
 });

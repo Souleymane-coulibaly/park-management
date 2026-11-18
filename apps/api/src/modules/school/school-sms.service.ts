@@ -1,4 +1,5 @@
 import {
+  ConflictException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -70,6 +71,7 @@ export class SchoolSmsService implements OnModuleInit, OnModuleDestroy {
   onModuleInit() {
     // Les essais déclenchent l'envoi explicitement (processDue) : aucun traitement de fond en test.
     if (process.env.NODE_ENV === 'test' || !this.config.school.enabled) return;
+    if (!this.available) return;
     this.timer = setInterval(() => void this.processDue(), POLL_MS);
     this.timer.unref();
   }
@@ -81,11 +83,30 @@ export class SchoolSmsService implements OnModuleInit, OnModuleDestroy {
   async settings(ctx: SchoolContext, schoolId: string) {
     await this.school.assertSchool(ctx, schoolId);
     const row = await this.db.schoolSmsSettings.findUnique({ where: { schoolId } });
-    return { enabled: row?.enabled ?? false, provider: this.config.school.sms.provider };
+    return {
+      // Sans fournisseur réel, aucun SMS ne part : l'établissement ne les voit jamais « activés ».
+      enabled: this.available && (row?.enabled ?? false),
+      provider: this.config.school.sms.provider,
+      available: this.available,
+    };
+  }
+
+  /** SMS proposés aux établissements (fournisseur réel, ou simulé hors production). */
+  get available(): boolean {
+    return this.config.school.sms.available;
+  }
+
+  /** Refus commun quand les SMS ne sont pas proposés (activation, vente de crédits). */
+  static unavailable(): ConflictException {
+    return new ConflictException({
+      code: 'SCHOOL_SMS_UNAVAILABLE',
+      message: 'Les SMS ne sont pas encore disponibles : aucun SMS n’est envoyé pour le moment.',
+    });
   }
 
   async updateSettings(ctx: SchoolContext, schoolId: string, enabled: boolean) {
     await this.school.assertSchool(ctx, schoolId);
+    if (enabled && !this.available) throw SchoolSmsService.unavailable();
     // Offre Ocall School Free (socle S1) : aucun SMS inclus (crédits SMS prévus au Sprint S2).
     // Droit calculé pour CET établissement (le contrat payant d'un autre établissement ne compte pas).
     if (
@@ -154,7 +175,8 @@ export class SchoolSmsService implements OnModuleInit, OnModuleDestroy {
    * destinataire) est ignoré. À appeler dans la transaction métier : le message part avec le fait.
    */
   async enqueue(db: Db, messages: SmsToSend[]): Promise<number> {
-    if (messages.length === 0) return 0;
+    // SMS indisponibles : rien n'est mis en file (les autres canaux restent inchangés).
+    if (messages.length === 0 || !this.available) return 0;
     const schoolIds = [...new Set(messages.map((m) => m.schoolId))];
     const enabled = new Set(
       (
@@ -188,6 +210,7 @@ export class SchoolSmsService implements OnModuleInit, OnModuleDestroy {
    */
   async processDue(now = new Date(), limit = 50) {
     const result = { sent: 0, retried: 0, failed: 0, cancelled: 0 };
+    if (!this.available) return result;
     try {
       const claimed = await this.db.$transaction(async (tx) => {
         // Bail expiré après la dernière tentative autorisée (processus interrompu avant d'enregistrer le

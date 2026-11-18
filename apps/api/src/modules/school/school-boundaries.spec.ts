@@ -55,7 +55,7 @@ describe('configuration School', () => {
       databaseUrl: null,
       dataKey: null,
       portalBaseUrl: null,
-      sms: { provider: 'simulated', apiKey: null, sender: null },
+      sms: { provider: 'simulated', apiKey: null, sender: null, available: false },
       sites: {
         baseDomain: null,
         subdomainsEnabled: false,
@@ -76,10 +76,27 @@ describe('configuration School', () => {
       ...enabled,
       SCHOOL_SMS_API_KEY: 'cle-de-test',
     } as NodeJS.ProcessEnv);
-    expect(config.sms).toEqual({ provider: 'simulated', apiKey: 'cle-de-test', sender: null });
+    expect(config.sms).toEqual({
+      provider: 'simulated',
+      apiKey: 'cle-de-test',
+      sender: null,
+      available: true,
+    });
     expect(() =>
       loadSchoolConfig({ ...enabled, SCHOOL_SMS_PROVIDER: 'inconnu' } as NodeJS.ProcessEnv),
     ).toThrow(/SCHOOL_SMS_PROVIDER/);
+  });
+
+  it('SMS : le simulateur n’est jamais proposé en production (préproduction comprise)', () => {
+    const production = loadSchoolConfig({
+      ...enabled,
+      NODE_ENV: 'production',
+      SCHOOL_DATA_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString('base64'),
+    } as NodeJS.ProcessEnv);
+    expect(production.sms).toMatchObject({ provider: 'simulated', available: false });
+    expect(
+      loadSchoolConfig({ ...enabled, NODE_ENV: 'development' } as NodeJS.ProcessEnv).sms.available,
+    ).toBe(true);
   });
 
   it('adresse du portail parents : origine seule, https exigé en production', () => {

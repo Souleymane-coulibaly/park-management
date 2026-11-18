@@ -324,6 +324,19 @@ passe, et chaque correctif est couvert par un test.
 
 Chaque correctif complémentaire a son test, et sa mutation est détectée.
 
+### SMS indisponibles sans fournisseur réel (commercialisation J1)
+
+Le fournisseur simulé n'envoie rien : il ne sert qu'en développement et en test. En production (préproduction
+comprise, `NODE_ENV=production`), tant qu'aucun fournisseur réel n'est branché, les SMS sont **indisponibles**
+(`school.sms.available`) :
+
+- l'écran Communication l'annonce clairement et masque l'activation et la demande de recharge ;
+- l'invitation au portail parents ne propose plus l'envoi par SMS (le lien est remis par l'établissement) ;
+- l'API refuse l'activation, la demande de recharge et la validation d'une recharge
+  (`SCHOOL_SMS_UNAVAILABLE`) ; rien n'est mis en file ni envoyé ;
+- soldes, demandes, registre et historique restent consultables ; une demande en attente reste annulable ;
+  rien n'est effacé.
+
 ### Risques résiduels et limites
 
 1. **Fournisseur réel absent.** La politique de facturation (succès consommé, échec rendu) devra être

@@ -42,6 +42,7 @@ import {
   portalSubscriptionWhere,
 } from '../../common/park-subscription';
 import { notifyOrganization } from '../../common/suite-notify';
+import { findTrialPlan } from '../../common/trial-plan';
 import { ProductUserAccountsService } from '../organizations/product-user-accounts.service';
 import { SuiteContractsService } from '../suite-contracts/suite-contracts.service';
 import {
@@ -141,12 +142,8 @@ export class SuiteCommercialService {
         });
       }
     }
-    // Étape 6 : l'essai n'attribue jamais une offre par site (changement d'offre explicite seulement).
-    const plan = await tx.subscriptionPlan.findFirst({
-      where: { productId: product.id, isActive: true, pricingMode: 'FLAT' },
-      orderBy: [{ includesShowcase: 'asc' }, { monthlyPrice: 'asc' }],
-      select: { id: true, trialDays: true },
-    });
+    // Forfait actif d'abord ; offre par site seulement si Ocall a retiré tous les forfaits (`findTrialPlan`).
+    const plan = await findTrialPlan(tx, { productId: product.id }, { id: true, trialDays: true });
     if (!plan) {
       throw new ConflictException({
         code: 'PLAN_NOT_FOUND',

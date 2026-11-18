@@ -12,6 +12,7 @@ import {
 import { randomInt } from 'node:crypto';
 import { notifyOrganization } from '../../common/suite-notify';
 import { isRestaurantOpen, keepCombinedBeforeOpening } from '../../common/park-subscription';
+import { findTrialPlan } from '../../common/trial-plan';
 
 /** Offre d'essai d'une application de la famille Park (sprint 7). */
 export interface ParkFamilyOffer {
@@ -194,13 +195,13 @@ export class OrganizationProvisioningService {
     return subscription.id;
   }
 
-  /** Offre forfaitaire d'essai d'une application de la famille Park (jamais une offre par site). */
+  /** Offre d'essai d'une application de la famille Park (`findTrialPlan`). */
   async parkFamilyOffer(tx: Prisma.TransactionClient, code: string): Promise<ParkFamilyOffer> {
-    const plan = await tx.subscriptionPlan.findFirst({
-      where: { product: { code }, isActive: true, pricingMode: 'FLAT' },
-      orderBy: [{ includesShowcase: 'asc' }, { monthlyPrice: 'asc' }],
-      select: { id: true, trialDays: true, product: { select: { id: true, name: true } } },
-    });
+    const plan = await findTrialPlan(
+      tx,
+      { product: { code } },
+      { id: true, trialDays: true, product: { select: { id: true, name: true } } },
+    );
     if (!plan)
       throw new NotFoundException({
         code: 'PLAN_NOT_FOUND',

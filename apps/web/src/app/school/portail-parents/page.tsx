@@ -21,6 +21,7 @@ interface GuardianRow {
 interface PortalStatus {
   account: { status: 'ACTIVE' | 'REVOKED'; loginId: string | null } | null;
   authorizedChildren: number;
+  smsAvailable: boolean;
   invitations: {
     id: string;
     createdAt: string;
@@ -118,7 +119,10 @@ function PortalPanel({ guardianId, canManage }: { guardianId: string; canManage:
     run(async () => {
       const res = await api<{ path: string; expiresAt: string; smsQueued: boolean }>(
         `/school/guardians/${guardianId}/portal/invitations`,
-        { method: 'POST', body: { sendSms } },
+        {
+          method: 'POST',
+          body: { sendSms: sendSms && status.state === 'success' && status.data.smsAvailable },
+        },
       );
       setCopied(false);
       setLink({
@@ -172,14 +176,16 @@ function PortalPanel({ guardianId, canManage }: { guardianId: string; canManage:
           )}
           {canManage && (
             <div className="flex flex-wrap items-center gap-3">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={sendSms}
-                  onChange={(e) => setSendSms(e.target.checked)}
-                />
-                {t('por.sendSms')}
-              </label>
+              {s.smsAvailable && (
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={sendSms}
+                    onChange={(e) => setSendSms(e.target.checked)}
+                  />
+                  {t('por.sendSms')}
+                </label>
+              )}
               <Button loading={loading} onClick={() => void invite()} data-testid="invite">
                 {t('por.invite')}
               </Button>

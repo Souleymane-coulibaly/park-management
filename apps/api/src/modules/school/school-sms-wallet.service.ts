@@ -16,6 +16,7 @@ import type { SchoolContext } from './school-access';
 import { SchoolPrismaService } from './school-prisma.service';
 import { applySmsLedger } from './school-sms-ledger';
 import { SchoolService } from './school.service';
+import { SchoolSmsService } from './school-sms.service';
 import { SuiteContractsService } from '../suite-contracts/suite-contracts.service';
 
 const PAGE = 50;
@@ -46,6 +47,7 @@ export class SchoolSmsWalletService {
     private readonly school: SchoolService,
     private readonly audit: AuditService,
     private readonly contracts: SuiteContractsService,
+    private readonly sms: SchoolSmsService,
   ) {}
 
   /**
@@ -87,6 +89,8 @@ export class SchoolSmsWalletService {
       updatedAt: wallet?.updatedAt ?? null,
       /** Les SMS exigent une offre qui les inclut (essai ou payant), puis un solde suffisant. */
       included,
+      /** SMS proposés (fournisseur réel) : sinon, aucune recharge ni aucun envoi. */
+      available: this.sms.available,
       tariff: tariff
         ? {
             version: tariff.version,
@@ -164,6 +168,7 @@ export class SchoolSmsWalletService {
    */
   async requestTopUp(ctx: SchoolContext, schoolId: string, credits: number, note?: string | null) {
     await this.school.assertSchool(ctx, schoolId);
+    if (!this.sms.available) throw SchoolSmsService.unavailable();
     if (!(await this.included(ctx.organizationId, schoolId))) {
       throw new ForbiddenException(NOT_INCLUDED);
     }
@@ -317,6 +322,8 @@ export class SchoolSmsWalletService {
     id: string,
     input: { credits?: number; paymentReference: string; note?: string | null },
   ) {
+    // Vente de crédits suspendue tant qu'aucun SMS réel ne part (une demande peut encore être refusée).
+    if (!this.sms.available) throw SchoolSmsService.unavailable();
     const target = await this.db.schoolSmsTopUpRequest.findUnique({
       where: { id },
       select: { organizationId: true, schoolId: true, status: true },

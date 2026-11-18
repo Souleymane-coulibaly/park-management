@@ -519,7 +519,7 @@ function Targets({
 
 function Sms({ schoolId, canWrite }: { schoolId: string; canWrite: boolean }) {
   const { t, date } = useSchoolText();
-  const settings = useApi<{ enabled: boolean; provider: string }>(
+  const settings = useApi<{ enabled: boolean; provider: string; available: boolean }>(
     `/school/sms/settings?schoolId=${schoolId}`,
   );
   // Filtre de statut (accès direct aux échecs) et pages déjà parcourues (curseurs fournis par l'API).
@@ -549,7 +549,12 @@ function Sms({ schoolId, canWrite }: { schoolId: string; canWrite: boolean }) {
       <CardBody>
         <h2 className="mb-2 font-semibold">{t('com.sms')}</h2>
         <ApiErrorAlert error={error} />
-        {settings.state === 'success' && (
+        {settings.state === 'success' && !settings.data.available && (
+          <div data-testid="sms-unavailable">
+            <Alert tone="info" title={t('com.smsUnavailable')} />
+          </div>
+        )}
+        {settings.state === 'success' && settings.data.available && (
           <div className="space-y-2">
             <label className="flex items-center gap-2 text-sm">
               <input
@@ -653,6 +658,7 @@ interface SmsWalletView {
   reserved: number;
   consumed: number;
   included: boolean;
+  available: boolean;
   tariff: {
     creditPriceXof: number | null;
     internationalAllowed: boolean;
@@ -772,8 +778,10 @@ function SmsWallet({ schoolId, canWrite }: { schoolId: string; canWrite: boolean
           ? ` ${t('com.walletInternational', { n: w.tariff.internationalCreditsPerSegment })}`
           : ''}
       </p>
-      {!w.included && <Alert tone="info" title={t('com.walletNotIncluded')} />}
-      {w.included && w.balance === 0 && <Alert tone="error" title={t('com.walletEmpty')} />}
+      {w.available && !w.included && <Alert tone="info" title={t('com.walletNotIncluded')} />}
+      {w.available && w.included && w.balance === 0 && (
+        <Alert tone="error" title={t('com.walletEmpty')} />
+      )}
       <ApiErrorAlert error={error} />
       {notice && (
         <p className="text-sm text-forest" role="status">
@@ -803,6 +811,7 @@ function SmsWallet({ schoolId, canWrite }: { schoolId: string; canWrite: boolean
           )}
         </div>
       ) : (
+        w.available &&
         w.included &&
         canWrite && (
           <form

@@ -30,6 +30,7 @@ import {
 } from '@ocall/shared';
 import { FREEZE_PLAN_SELECT, freezeAgreedPrices } from '../../common/subscription-billing';
 import { isRestaurantOpen, keepCombinedBeforeOpening } from '../../common/park-subscription';
+import { findTrialPlan } from '../../common/trial-plan';
 import { type BilledSite, SiteActivationService } from '../establishments/site-activation.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AuditService } from '../../common/audit/audit.service';
@@ -327,17 +328,14 @@ export class SuiteService {
         }
       }
       // Sprint 7 : présenter Ocall Restaurant au catalogue OUVRE la séparation commerciale (inscription en
-      // deux applications) ; il faut une offre forfaitaire Restaurant active (essais), jamais par site
-      // (étape 6 : aucune offre par site attribuée automatiquement).
+      // deux applications) ; il faut une offre Restaurant d'essai active : forfait, ou offre par site quand
+      // Ocall a retiré les forfaits (`findTrialPlan`).
       if (before.code === 'OCALL_RESTAURANT' && dto.listed === true && !before.listed) {
-        const flat = await tx.subscriptionPlan.count({
-          where: { productId: id, isActive: true, pricingMode: 'FLAT' },
-        });
-        if (flat === 0) {
+        if (!(await findTrialPlan(tx, { productId: id }, { id: true }))) {
           throw new ConflictException({
             code: 'RESTAURANT_PLAN_REQUIRED',
             message:
-              'Activez d’abord une offre forfaitaire Ocall Restaurant : les nouveaux clients en démarrent l’essai.',
+              'Activez d’abord une offre Ocall Restaurant : les nouveaux clients en démarrent l’essai.',
           });
         }
       }

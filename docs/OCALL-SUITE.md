@@ -399,3 +399,19 @@ Décisions D1 à D8 validées. Deux applications commerciales, chacune avec son 
 - **Facturation par site** : un contrat combiné compte les établissements parc et restaurant (une fois
   chacun) ; Ocall Parc et Ocall Restaurant séparés, chacun les siens.
 - **Billet + repas** (D7) : hors sprint ; clients, fidélité, caisses, paiements et rapports restent communs.
+
+## Commercialisation J1 — lancement de la grille par site
+
+- **Grille** (déjà en base, offres inactives depuis l'étape 6) : par application, 17 500 FCFA par mois pour
+  le premier site, 7 500 FCFA par site supplémentaire, vitrine +5 000 FCFA, mise en service 150 000 FCFA pour
+  la première application puis 112 500 FCFA, essai de 14 jours.
+- **Offre d'un nouvel essai** (`common/trial-plan.ts`, inscription, essai demandé par le client ou lancé par
+  Ocall) : le forfait actif le moins cher, sans vitrine d'abord, **comme avant**. Seulement si Ocall a retiré
+  tous les forfaits d'une application, l'offre par site active, sans vitrine d'abord. Aucun client n'est
+  jamais basculé automatiquement ; un essai ou un contrat existant garde son offre, même retirée du
+  catalogue (renouvellement et facturation inchangés).
+- **Lancement d'une application sur la grille** : action explicite d'Ocall, après accord sur le plan de
+  migration — activer l'offre par site, désactiver ses forfaits pour les nouveaux clients.
+- **Ocall Restaurant indépendant** : l'ouverture (`listed`) accepte désormais une offre par site active
+  (`RESTAURANT_PLAN_REQUIRED` sans aucune offre d'essai active) ; un restaurant seul démarre alors son essai
+  Ocall Restaurant sur l'offre par site, sans contrat combiné.

@@ -973,6 +973,8 @@ export const SCHOOL_TEXT_FR = {
   'com.sms': 'SMS',
   'com.smsEnabled': 'SMS activés pour cet établissement',
   'com.smsSimulated': 'Fournisseur simulé : aucun SMS réel n’est envoyé.',
+  'com.smsUnavailable':
+    'Les SMS ne sont pas encore disponibles : aucun SMS n’est envoyé et aucun crédit n’est vendu pour le moment. Les familles sont informées par le portail parents.',
   'com.smsHistory': 'Historique des envois',
   'com.sms.PENDING': 'En attente',
   'com.sms.SENT': 'Envoyé',
@@ -2491,6 +2493,8 @@ export const SCHOOL_TEXT_AR: Record<SchoolTextKey, Entry> = {
   'com.sms': 'الرسائل القصيرة',
   'com.smsEnabled': 'الرسائل القصيرة مفعلة لهذه المؤسسة',
   'com.smsSimulated': 'مزود محاكى: لا ترسل أي رسالة حقيقية.',
+  'com.smsUnavailable':
+    'الرسائل القصيرة غير متاحة بعد: لا تُرسل أي رسالة ولا يُباع أي رصيد حاليًا. تُبلَّغ الأسر عبر بوابة أولياء الأمور.',
   'com.smsHistory': 'سجل الإرسال',
   'com.sms.PENDING': 'قيد الانتظار',
   'com.sms.SENT': 'أُرسل',

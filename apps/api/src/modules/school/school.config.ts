@@ -61,6 +61,12 @@ export interface SchoolSmsConfig {
   provider: 'simulated';
   apiKey: string | null;
   sender: string | null;
+  /**
+   * SMS proposés aux établissements (activation, vente de crédits, envoi). Le fournisseur simulé n'envoie
+   * rien : il ne sert qu'en développement et en test. En production (préproduction comprise), sans
+   * fournisseur réel, les SMS sont indisponibles, jamais présentés comme fonctionnels.
+   */
+  available: boolean;
 }
 
 const SMS_PROVIDERS = ['simulated'] as const;
@@ -74,6 +80,7 @@ function loadSmsConfig(env: NodeJS.ProcessEnv): SchoolSmsConfig {
     provider,
     apiKey: env.SCHOOL_SMS_API_KEY?.trim() || null,
     sender: env.SCHOOL_SMS_SENDER?.trim() || null,
+    available: provider !== 'simulated' || env.NODE_ENV !== 'production',
   };
 }
 
@@ -111,7 +118,7 @@ export function loadSchoolConfig(env: NodeJS.ProcessEnv): SchoolConfig {
       databaseUrl: null,
       dataKey: null,
       portalBaseUrl: null,
-      sms: loadSmsConfig({}),
+      sms: { ...loadSmsConfig({}), available: false },
       sites: loadSchoolSitesConfig({}),
     };
   }

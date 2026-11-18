@@ -158,6 +158,8 @@ export class SchoolPortalAccountsService implements OnModuleInit, PortalAccountS
     return {
       account: guardian.portalUserId && account ? { ...account, loginId: loginId ?? null } : null,
       authorizedChildren: authorized,
+      /** Lien d'invitation envoyable par SMS (fournisseur réel) ; sinon, l'établissement le remet. */
+      smsAvailable: this.sms.available && Boolean(this.config.school.portalBaseUrl),
       invitations: invitations.map((i) => ({
         id: i.id,
         createdAt: i.createdAt,
