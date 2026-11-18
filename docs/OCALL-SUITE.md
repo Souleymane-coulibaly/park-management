@@ -458,9 +458,9 @@ pied de page), avec des options ajoutées et sans effet sur Ocall Facture :
 
 La facturation Ocall reste indépendante d'Ocall Facture : aucune donnée de Facture n'est lue.
 
-| Document | Administration | Espace client (`subscription.read`) |
-| --- | --- | --- |
-| Facture | `GET /platform/invoices/:id/pdf` | `GET /billing/invoices/:id/pdf` |
+| Document            | Administration                                    | Espace client (`subscription.read`) |
+| ------------------- | ------------------------------------------------- | ----------------------------------- |
+| Facture             | `GET /platform/invoices/:id/pdf`                  | `GET /billing/invoices/:id/pdf`     |
 | Reçu d'un règlement | `GET /platform/subscription-payments/:id/receipt` | `GET /billing/payments/:id/receipt` |
 
 - **Espace client** : uniquement les documents de l'organisation ; toute autre demande renvoie 404.
@@ -472,5 +472,6 @@ La facturation Ocall reste indépendante d'Ocall Facture : aucune donnée de Fac
 facultative. Les factures déjà émises restent provisoires.
 
 **Tests** :
+
 - intégration : `suite-j2-documents-ocall` ;
 - unitaires : `ocall-legal.spec.ts`, options de `facture-document-pdf.spec.ts`.
