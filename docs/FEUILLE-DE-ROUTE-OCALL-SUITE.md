@@ -12,7 +12,7 @@ connue est dans [DETTE-TECHNIQUE.md](DETTE-TECHNIQUE.md).
 | ----- | ------------------------------------------------------------------------ | --------------------------------------------------------- |
 | R-001 | Stockage objet R2 de préproduction (DT-001)                              | **Reporté**, prioritaire (décision du 17/11/2026)         |
 | R-002 | Audit responsive sous Chromium Linux : Parc, Restaurant, School, Facture | **Audit en lecture seule en cours** (17/11/2026)          |
-| R-003 | Ocall Parc : événements et abonnements                                   | Pass livrés ; événements E1 à E4 développés (branche)     |
+| R-003 | Ocall Parc : événements et abonnements                                   | Pass et événements livrés dans `main`, en préproduction   |
 | R-004 | Ocall School                                                             | Livré dans `main` ; grille par site en préproduction      |
 | R-005 | Ocall Restaurant (application indépendante)                              | Publié en préproduction, grille par site                  |
 | R-006 | Interconnexion Facture ↔ Stock (et Parc ↔ Stock)                         | Facture ↔ Stock livré sur un emplacement ; suite à cadrer |
@@ -48,10 +48,22 @@ tous les fichiers stockés échouent. Le chantier est reporté. La liste des tes
   [PASS-ABONNEMENTS-PARC.md](PASS-ABONNEMENTS-PARC.md).
 - **À faire** :
   - Rejouer en préproduction les cas avec photo, après R-001.
-- **Événements (lots E1 à E4)** : développés sur la branche `claude/parc-evenements`, non fusionnés.
-  Billets datés par séance, distincts des pass ; capacité par séance et quotas par tarif, réservation
-  atomique à l'encaissement ; prénom facultatif ; contrôle selon la séance avec tolérance ; annulation
-  avec la liste des acheteurs ; suivi ; agenda sur la vitrine. Voir [EVENEMENTS-PARC.md](EVENEMENTS-PARC.md).
+- **Événements (lots E1 à E4)** : livrés dans `main` et déployés en préproduction le 18/11/2026, après
+  un audit ciblé et une recette complète. Billets datés par séance, distincts des pass ; capacité par
+  séance et quotas par tarif, réservation atomique à l'encaissement ; prénom facultatif ; contrôle selon
+  la séance avec tolérance ; annulation avec la liste des acheteurs ; suivi ; agenda sur la vitrine. Voir
+  [EVENEMENTS-PARC.md](EVENEMENTS-PARC.md).
+- **Backlog événements (anomalies mineures connues, non bloquantes)** :
+  - les ventes non payées d'une séance annulée ne sont pas listées : le caissier les annule à la main ;
+  - l'agenda de la vitrine se met à jour en 5 minutes au plus (cache) et n'indique pas une séance dont la
+    vente est fermée ;
+  - les rapports par tarif ne précisent pas l'événement quand un tarif d'événement porte le nom d'un tarif
+    classique ;
+  - le créneau d'une séance annulée ne peut pas être réutilisé (choisir un autre horaire) ;
+  - dans un fuseau à heure d'été, une séance placée la nuit du changement d'heure serait décalée d'une
+    heure (sans effet au Mali) ;
+  - à valider en conditions réelles : impression sur imprimantes 58 et 80 mm, lecture caméra des billets
+    imprimés, affluence à l'entrée en 4G.
 - **Reporté** :
   - formule billet + repas (décision D7 de la séparation Parc/Restaurant) ;
   - vente et renouvellement en ligne (décision D11 du sprint 8), y compris les billets d'événement ;

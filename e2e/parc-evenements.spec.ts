@@ -122,6 +122,12 @@ test.describe('Ocall Parc — événements', () => {
     await expect(standard).toBeDisabled(); // les 2 places sont dans la commande
     await expect(page.getByTestId('ticket-total')).toHaveText(/10\s?000 FCFA/, NETWORK_WAIT);
     await expect(page.getByLabel('Prénom du visiteur 1 (Standard), facultatif')).toBeVisible();
+    // Téléphone : la commande d'événement (libellé de séance, acheteur) ne doit pas élargir la page,
+    // sinon le navigateur mobile dézoome et la barre « Encaisser » devient inaccessible.
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(page.getByText('Acheteur (facultatif', { exact: false })).toBeVisible();
+    await expectNoHorizontalOverflow(page);
+    await page.setViewportSize({ width: 1280, height: 720 });
     const checkout = page
       .getByRole('button', { name: 'Encaisser', exact: true })
       .filter({ visible: true });

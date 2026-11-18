@@ -332,7 +332,7 @@ export function TicketCounter({
           )}
         </section>
 
-        <aside aria-label="Commande" className="lg:sticky lg:top-20 lg:self-start">
+        <aside aria-label="Commande" className="min-w-0 lg:sticky lg:top-20 lg:self-start">
           <Card className="flex flex-col">
             <div className="flex items-center justify-between border-b border-line/70 px-4 py-3">
               <h2 className="font-semibold">
