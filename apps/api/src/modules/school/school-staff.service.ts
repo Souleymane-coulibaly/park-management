@@ -165,8 +165,9 @@ export class SchoolStaffService {
     const q = filter.q ? normalizeSearch(filter.q) : '';
     const rows = await this.db.schoolStaff.findMany({
       where: {
-        ...this.scope(ctx),
-        ...(filter.schoolId ? { schoolId: filter.schoolId } : {}),
+        // Filtre demandé ET périmètre du membre : le `schoolId` de la requête ne remplace jamais le
+        // périmètre (sinon un membre limité à A1 lirait le personnel de A2 avec `?schoolId=A2`).
+        AND: [this.scope(ctx), ...(filter.schoolId ? [{ schoolId: filter.schoolId }] : [])],
         ...(SCHOOL_STAFF_CATEGORIES.includes(filter.category as SchoolStaffCategory)
           ? { category: filter.category as SchoolStaffCategory }
           : {}),

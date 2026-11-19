@@ -20,6 +20,8 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
  * - Ocall (plateforme), sites publics, partenaires : `platform*`, `public*`, `partner` ;
  * - Ocall School (garde de contrat propre) : `school*` ; portail Ocall Suite : `suite` ;
  * - Ocall Print (garde propre, accès autonome gratuit sans abonnement) : `ocall-print` ;
+ * - Ocall Facture et Ocall Stock (gardes propres : activation et lecture seule de LEUR abonnement) :
+ *   `facture*`, `ocall-stock*` — un essai Park échu ne bloque pas une application payée à part ;
  * - administration nécessaire : `organization` (membres), `roles`, `billing`, `online-payments`
  *   (factures, règlement), `support` (assistance).
  */
@@ -31,6 +33,8 @@ const EXEMPT_PREFIXES = [
   'partner',
   'school',
   'ocall-print',
+  'facture',
+  'ocall-stock',
   'suite',
   'organization',
   'roles',

@@ -71,7 +71,8 @@ export const PlatformPermission = {
   LEGAL_MANAGE: 'platform.legal.manage',
   /**
    * Ocall Print : production des cartes à l'atelier (file des commandes, fichiers de production, étapes,
-   * encaissement à la livraison) et supervision centrale (refus, correction d'un règlement, purge).
+   * refus d'une carte ou d'une commande, encaissement à la livraison) et supervision centrale (vue
+   * d'ensemble, annulation d'un règlement, purge manuelle).
    */
   PRINT_PRODUCTION: 'platform.print.production',
   PRINT_SUPERVISE: 'platform.print.supervise',

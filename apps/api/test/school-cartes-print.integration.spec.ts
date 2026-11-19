@@ -535,6 +535,21 @@ interface Structure {
         .expect(404);
       const orders = await secretary.get(api('/school/card-orders')).expect(200);
       expect(orders.body.some((o: { id: string }) => o.id === created.body.id)).toBe(false);
+      // Personnel de a2 : invisible au secrétariat de a1, même en demandant explicitement a2.
+      const cook = await ownerA
+        .post(api('/school/staff'))
+        .send({
+          schoolId: a2.schoolId,
+          lastName: 'Keita',
+          firstName: 'Fanta',
+          category: 'CATERING',
+        })
+        .expect(201);
+      for (const query of [`?schoolId=${a2.schoolId}`, '']) {
+        const staff = await secretary.get(api(`/school/staff${query}`)).expect(200);
+        expect(staff.body.some((p: { id: string }) => p.id === cook.body.id)).toBe(false);
+      }
+      await secretary.get(api(`/school/staff/${cook.body.id}`)).expect(404);
       await secretary.get(api(`/school/card-orders/${created.body.id}`)).expect(404);
       await supervisor
         .post(api('/school/cards/verify'))
@@ -602,6 +617,14 @@ interface Structure {
         .send({ qr: qr(card3.cardNumber) })
         .expect(200);
       expect(check.body.result).toBe('REVOKED');
+      // L'ancienne carte (a1) ne révèle ni la nouvelle inscription (a2) ni une photo ajoutée ensuite.
+      await addPhoto(ownerA, s3.id);
+      const old = await secretary
+        .get(api(`/school/cards/${card3.id}/preview?templateId=${studentTemplate}`))
+        .expect(200);
+      expect(old.body.front).toContain(s3.matricule);
+      expect(old.body.front).not.toContain('CE1');
+      expect(old.body.front).not.toContain('data:image/jpeg;base64,');
     });
 
     it('titulaire sorti sans révocation (Print indisponible au départ) : carte refusée à la lecture', async () => {

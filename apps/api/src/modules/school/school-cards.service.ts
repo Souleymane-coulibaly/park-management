@@ -108,12 +108,16 @@ export class SchoolCardsService {
     return { name: s.name, nameAr: s.nameAr, contact: s.phone };
   }
 
-  /** Inscription validée de l'année en cours (classe, année) ; null si l'élève n'est pas inscrit. */
-  private async enrollment(organizationId: string, studentId: string) {
+  /**
+   * Inscription validée de l'année en cours DANS l'établissement donné (classe, année) ; null si l'élève
+   * n'y est pas inscrit. Jamais l'inscription d'un autre établissement (élève transféré).
+   */
+  private async enrollment(organizationId: string, studentId: string, schoolId: string) {
     return this.db.schoolEnrollment.findFirst({
       where: {
         organizationId,
         studentId,
+        schoolId,
         status: 'VALIDATED',
         year: { status: { not: 'CLOSED' } },
       },
@@ -157,10 +161,13 @@ export class SchoolCardsService {
         where: { id: card.holderId, organizationId: ctx.organizationId },
       });
       if (!st) throw new NotFoundException(NOT_FOUND);
-      const e = await this.enrollment(ctx.organizationId, st.id);
+      // Élève parti dans un autre établissement : ni sa nouvelle classe ni sa nouvelle photo ne
+      // remontent vers l'établissement de la carte.
+      const here = st.schoolId === card.scopeId;
+      const e = here ? await this.enrollment(ctx.organizationId, st.id, card.scopeId!) : null;
       return {
         label: `${st.lastName.toUpperCase()} ${st.firstName}`,
-        photo: await this.studentPhoto(st),
+        photo: here ? await this.studentPhoto(st) : null,
         content: {
           issuer: this.issuer(s),
           holder: {
@@ -306,7 +313,7 @@ export class SchoolCardsService {
     const holders = [];
     const notEnrolled: string[] = [];
     for (const st of students) {
-      const e = await this.enrollment(ctx.organizationId, st.id);
+      const e = await this.enrollment(ctx.organizationId, st.id, st.schoolId);
       if (!e || !ACTIVE_STUDENT.includes(st.status)) {
         notEnrolled.push(st.id);
         continue;
