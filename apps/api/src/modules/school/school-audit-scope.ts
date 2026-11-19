@@ -45,6 +45,8 @@ export const AUDIT_TARGET_SCOPES: Readonly<Record<string, AuditTargetScope>> = {
   // Sprint S2 : demandes de recharge SMS, propres à un établissement.
   SchoolSmsTopUpRequest: direct('schoolSmsTopUpRequest'),
   SchoolStudent: direct('schoolStudent'),
+  // Ocall Print : fiche du personnel (avec ou sans compte), propre à un établissement.
+  SchoolStaff: direct('schoolStaff'),
   SchoolTimetable: direct('schoolTimetable'),
   SchoolYear: direct('schoolYear'),
   Subject: direct('subject'),
@@ -69,4 +71,10 @@ export const UNSCOPED_AUDIT_TARGETS: readonly string[] = [
   'User',
   'SchoolSmsTariff',
   'SchoolSmsWallet',
+  // Ocall Print : modèles, cartes et commandes vivent dans la base Print (moteur commun), hors de portée
+  // de ce rattachement ; leur établissement figure dans leur propre journal (commande) et l'action reste
+  // visible pour un périmètre complet.
+  'PrintTemplate',
+  'PrintCard',
+  'PrintOrder',
 ];

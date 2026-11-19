@@ -17,6 +17,7 @@ export const PLATFORM_ROLES = [
   'BILLING_MANAGER',
   'SUPPORT_AGENT',
   'READ_ONLY_AUDITOR',
+  'PRINT_OPERATOR',
 ] as const;
 export type PlatformRoleName = (typeof PLATFORM_ROLES)[number];
 /** Valeur stockée : les rôles ci-dessus, ou SUPER_ADMIN (historique, équivalent au propriétaire). */
@@ -28,6 +29,7 @@ export const PLATFORM_ROLE_LABELS: Record<PlatformRoleName, string> = {
   BILLING_MANAGER: 'Gestion des abonnements et paiements',
   SUPPORT_AGENT: 'Assistance',
   READ_ONLY_AUDITOR: 'Consultation et audit',
+  PRINT_OPERATOR: 'Imprimeur (atelier Ocall Print)',
 };
 
 /** Le rôle historique SUPER_ADMIN est traité comme le propriétaire de la plateforme. */
@@ -67,6 +69,12 @@ export const PlatformPermission = {
   CONTRACTS_MANAGE: 'platform.contracts.manage',
   /** Commercialisation J2 : identité légale d'Ocall (pages légales, factures d'abonnement). */
   LEGAL_MANAGE: 'platform.legal.manage',
+  /**
+   * Ocall Print : production des cartes à l'atelier (file des commandes, fichiers de production, étapes,
+   * encaissement à la livraison) et supervision centrale (refus, correction d'un règlement, purge).
+   */
+  PRINT_PRODUCTION: 'platform.print.production',
+  PRINT_SUPERVISE: 'platform.print.supervise',
 } as const;
 export type PlatformPermission = (typeof PlatformPermission)[keyof typeof PlatformPermission];
 export const PLATFORM_PERMISSIONS: readonly PlatformPermission[] =
@@ -99,6 +107,8 @@ export const PLATFORM_ROLE_PERMISSIONS: Record<PlatformRoleName, readonly Platfo
     PP.DEMO_REQUESTS_MANAGE,
   ],
   READ_ONLY_AUDITOR: [PP.DASHBOARD, PP.ORGS_READ, PP.BILLING_READ, PP.AUDIT_READ, PP.SETTINGS_READ],
+  /** Accès limité à la production : aucune organisation, aucun abonnement, aucun paramètre. */
+  PRINT_OPERATOR: [PP.PRINT_PRODUCTION],
 };
 
 export function hasPlatformPermission(
@@ -119,7 +129,13 @@ export function platformPermissionsOf(
 /** Rôles soumis à l'authentification à deux facteurs obligatoire. */
 export function platformRoleRequiresMfa(role: StoredPlatformRole | null | undefined): boolean {
   const r = effectivePlatformRole(role);
-  return r === 'PLATFORM_OWNER' || r === 'PLATFORM_ADMIN' || r === 'BILLING_MANAGER';
+  // L'imprimeur voit les photos et les noms d'enfants : double authentification obligatoire.
+  return (
+    r === 'PLATFORM_OWNER' ||
+    r === 'PLATFORM_ADMIN' ||
+    r === 'BILLING_MANAGER' ||
+    r === 'PRINT_OPERATOR'
+  );
 }
 
 /**
@@ -130,7 +146,7 @@ export function assignablePlatformRoles(
   actor: StoredPlatformRole | null | undefined,
 ): PlatformRoleName[] {
   return hasPlatformPermission(actor, PP.USERS_MANAGE)
-    ? ['PLATFORM_ADMIN', 'BILLING_MANAGER', 'SUPPORT_AGENT', 'READ_ONLY_AUDITOR']
+    ? ['PLATFORM_ADMIN', 'BILLING_MANAGER', 'SUPPORT_AGENT', 'READ_ONLY_AUDITOR', 'PRINT_OPERATOR']
     : [];
 }
 

@@ -8,19 +8,19 @@ connue est dans [DETTE-TECHNIQUE.md](DETTE-TECHNIQUE.md).
 
 ## Vue d'ensemble
 
-| Réf.  | Chantier                                                                 | État                                                      |
-| ----- | ------------------------------------------------------------------------ | --------------------------------------------------------- |
-| R-001 | Stockage objet R2 de préproduction (DT-001)                              | **Reporté**, prioritaire (décision du 17/11/2026)         |
-| R-002 | Audit responsive sous Chromium Linux : Parc, Restaurant, School, Facture | **Audit en lecture seule en cours** (17/11/2026)          |
-| R-003 | Ocall Parc : événements et abonnements                                   | Pass et événements livrés dans `main`, en préproduction   |
-| R-004 | Ocall School                                                             | Livré dans `main` ; grille par site en préproduction      |
-| R-005 | Ocall Restaurant (application indépendante)                              | Publié en préproduction, grille par site                  |
-| R-006 | Interconnexion Facture ↔ Stock (et Parc ↔ Stock)                         | Facture ↔ Stock livré sur un emplacement ; suite à cadrer |
-| R-007 | Facturation multi-sites                                                  | Grille par site active en préproduction (5 applications)  |
-| R-008 | Ocall Print                                                              | À cadrer ; contrat de données préparé                     |
-| R-009 | Sabatii                                                                  | À cadrer                                                  |
-| R-010 | PWA et hors ligne                                                        | PWA Parc livrée ; contrôle hors ligne étudié, non activé  |
-| R-011 | Préparation commerciale et mise en production                            | J1 et J2 livrés dans `main` ; production à planifier      |
+| Réf.  | Chantier                                                                 | État                                                       |
+| ----- | ------------------------------------------------------------------------ | ---------------------------------------------------------- |
+| R-001 | Stockage objet R2 de préproduction (DT-001)                              | **Reporté**, prioritaire (décision du 17/11/2026)          |
+| R-002 | Audit responsive sous Chromium Linux : Parc, Restaurant, School, Facture | **Audit en lecture seule en cours** (17/11/2026)           |
+| R-003 | Ocall Parc : événements et abonnements                                   | Pass et événements livrés dans `main`, en préproduction    |
+| R-004 | Ocall School                                                             | Livré dans `main` ; grille par site en préproduction       |
+| R-005 | Ocall Restaurant (application indépendante)                              | Publié en préproduction, grille par site                   |
+| R-006 | Interconnexion Facture ↔ Stock (et Parc ↔ Stock)                         | Facture ↔ Stock livré sur un emplacement ; suite à cadrer  |
+| R-007 | Facturation multi-sites                                                  | Grille par site active en préproduction (5 applications)   |
+| R-008 | Ocall Print                                                              | Socle et intégration School développés (branche à valider) |
+| R-009 | Sabatii                                                                  | À cadrer                                                   |
+| R-010 | PWA et hors ligne                                                        | PWA Parc livrée ; contrôle hors ligne étudié, non activé   |
+| R-011 | Préparation commerciale et mise en production                            | J1 et J2 livrés dans `main` ; production à planifier       |
 
 ## R-001 — Stockage objet R2 de préproduction
 
@@ -129,13 +129,21 @@ tous les fichiers stockés échouent. Le chantier est reporté. La liste des tes
 
 ## R-008 — Ocall Print
 
-- **Définition** : personnalisation, commande et impression de cartes pour School, Parc et Sabatii, plus un
-  portail autonome gratuit.
-- **Préparé** :
-  - le contrat de données `ocall-print/pass-card@1` (cartes de pass Parc) ;
-  - `PassCard.printRequestedAt` ;
-  - les connecteurs du tableau de bord de l'organisation, prévus pour accueillir de futures applications.
-- **À faire** : audit et cadrage avant tout développement.
+- **Définition** : moteur COMMUN de personnalisation, de commande et de suivi des cartes, pour School, Parc
+  et Sabatii, plus un accès autonome gratuit. Voir [OCALL-PRINT.md](OCALL-PRINT.md).
+- **Développé** (branche `claude/ocall-print`, décisions du 19/11/2026) :
+  - PR-1 : modèles recto verso versionnés, moteur de rendu (aperçu SVG, bon à tirer A4, production CR80),
+    cartes et QR signés ;
+  - PR-2 : commandes (prix 3 000 FCFA figé, envoi idempotent), atelier de Bamako (rôle Imprimeur),
+    encaissement en espèces à la livraison, purge des fichiers à 90 jours ;
+  - SC-1 et SC-2 : fiches du personnel avec ou sans compte, cartes et badges depuis les fiches, commande
+    et suivi dans Ocall School, lecture du QR, reprise des fiches Print à l'activation de School ;
+  - accès autonome `/print` et atelier `/admin/impression`.
+- **Reste à faire** :
+  - fusion dans `main`, puis base Print en préproduction et recette, sur GO ;
+  - branchement des cartes de pass Ocall Parc sur le moteur commun (aujourd'hui `pass-card@1`) ;
+  - traduction arabe des écrans des cartes (seul l'onglet « Carte » de la fiche élève l'est) ;
+  - recette des photos en préproduction après R-001 (stockage).
 
 ## R-009 — Sabatii
 

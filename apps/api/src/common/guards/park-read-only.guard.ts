@@ -19,6 +19,7 @@ const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
  * - sécurité et compte : `auth` ; santé : `health` ;
  * - Ocall (plateforme), sites publics, partenaires : `platform*`, `public*`, `partner` ;
  * - Ocall School (garde de contrat propre) : `school*` ; portail Ocall Suite : `suite` ;
+ * - Ocall Print (garde propre, accès autonome gratuit sans abonnement) : `ocall-print` ;
  * - administration nécessaire : `organization` (membres), `roles`, `billing`, `online-payments`
  *   (factures, règlement), `support` (assistance).
  */
@@ -29,6 +30,7 @@ const EXEMPT_PREFIXES = [
   'public',
   'partner',
   'school',
+  'ocall-print',
   'suite',
   'organization',
   'roles',

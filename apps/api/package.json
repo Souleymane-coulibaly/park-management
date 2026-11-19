@@ -20,6 +20,7 @@
     "@nestjs/throttler": "^6.4.0",
     "@ocall/database": "workspace:*",
     "@ocall/facture-database": "workspace:*",
+    "@ocall/print-database": "workspace:*",
     "@ocall/school-database": "workspace:*",
     "@ocall/shared": "workspace:*",
     "@ocall/stock-database": "workspace:*",

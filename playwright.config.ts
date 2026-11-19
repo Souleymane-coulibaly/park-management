@@ -71,6 +71,21 @@ if (stockUrl) {
 const stockEnv: Record<string, string> = stockUrl
   ? { STOCK_ENABLED: 'true', STOCK_DATABASE_URL: stockUrl }
   : { STOCK_ENABLED: 'false' };
+// Ocall Print : activé seulement avec une base Print de test dédiée (TEST_PRINT_DATABASE_URL), locale et
+// jetable, distincte de toutes les autres bases ; sinon les specs Print sont ignorées.
+const printUrl = process.env.TEST_PRINT_DATABASE_URL;
+if (printUrl) {
+  assertDisposableTestDatabases([printUrl], { ...apiEnv, ...process.env });
+  const others = [testDb.databaseUrl, schoolDb?.url, factureUrl, stockUrl].filter(
+    (u): u is string => Boolean(u),
+  );
+  if (others.some((u) => databaseIdentity(u) === databaseIdentity(printUrl))) {
+    throw new Error('Refus : la base Print de test doit être distincte des autres bases de test.');
+  }
+}
+const printEnv: Record<string, string> = printUrl
+  ? { PRINT_ENABLED: 'true', PRINT_DATABASE_URL: printUrl }
+  : { PRINT_ENABLED: 'false' };
 const schoolEnv: Record<string, string> = schoolDb
   ? {
       SCHOOL_ENABLED: 'true',
@@ -131,6 +146,7 @@ export default defineConfig({
         ...schoolEnv,
         ...factureEnv,
         ...stockEnv,
+        ...printEnv,
       },
       reuseExistingServer: false,
       timeout: 120_000,

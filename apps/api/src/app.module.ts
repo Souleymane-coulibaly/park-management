@@ -44,6 +44,7 @@ import { RestaurantModule } from './modules/restaurant/restaurant.module';
 import { RolesModule } from './modules/roles/roles.module';
 import { FactureModule } from './modules/facture/facture.module';
 import { OcallStockModule } from './modules/ocall-stock/ocall-stock.module';
+import { OcallPrintModule } from './modules/ocall-print/ocall-print.module';
 import { SchoolModule } from './modules/school/school.module';
 import { SuiteContractsModule } from './modules/suite-contracts/suite-contracts.module';
 import { SuiteCommercialModule } from './modules/suite-commercial/suite-commercial.module';
@@ -99,6 +100,7 @@ import { TicketingModule } from './modules/ticketing/ticketing.module';
     SchoolModule,
     FactureModule,
     OcallStockModule,
+    OcallPrintModule,
   ],
   controllers: [HealthController],
   providers: [

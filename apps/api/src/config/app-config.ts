@@ -4,6 +4,7 @@ import { type AiConfig, loadAiConfig } from '../ai-core/ai-core.config';
 import { type MailConfig, loadMailConfig } from '../common/mail/mail.config';
 import { type FactureConfig, loadFactureConfig } from '../modules/facture/facture.config';
 import { type StockConfig, loadStockConfig } from '../modules/ocall-stock/ocall-stock.config';
+import { type PrintConfig, loadPrintConfig } from '../modules/ocall-print/print.config';
 import { type SchoolConfig, loadSchoolConfig } from '../modules/school/school.config';
 import { type SitesConfig, loadSitesConfig } from '../modules/public-sites/sites.config';
 import {
@@ -63,6 +64,8 @@ export interface AppConfig {
   mail: MailConfig;
   facture: FactureConfig;
   stock: StockConfig;
+  /** Ocall Print : cartes scolaires et badges, moteur commun (base séparée). */
+  print: PrintConfig;
 }
 
 function storageSigningKey(env: NodeJS.ProcessEnv, nodeEnv: string): Buffer {
@@ -148,6 +151,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     mail: loadMailConfig(env, nodeEnv, webOrigins),
     facture: loadFactureConfig(env),
     stock: loadStockConfig(env),
+    print: loadPrintConfig(env),
     mfaEncryptionKey: mfaKey(env, nodeEnv),
     storageSigningKey: storageSigningKey(env, nodeEnv),
     logFormat:

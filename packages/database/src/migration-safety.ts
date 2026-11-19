@@ -116,7 +116,39 @@ export function stockMigrationTargetProblem(env: {
   });
 }
 
-/** Règle commune des applications à base séparée (Facture, Stock). */
+/** Ocall Print : base distincte des bases Suite, School, Facture et Stock. */
+export function printMigrationTargetProblem(env: {
+  DATABASE_URL?: string;
+  DIRECT_URL?: string;
+  SCHOOL_DATABASE_URL?: string;
+  SCHOOL_DIRECT_URL?: string;
+  FACTURE_DATABASE_URL?: string;
+  FACTURE_DIRECT_URL?: string;
+  STOCK_DATABASE_URL?: string;
+  STOCK_DIRECT_URL?: string;
+  PRINT_DATABASE_URL?: string;
+  PRINT_DIRECT_URL?: string;
+}): string | null {
+  return separateDatabaseTargetProblem({
+    prefix: 'PRINT',
+    label: 'Print',
+    othersLabel: 'des bases Ocall Suite, Ocall School, Ocall Facture et Ocall Stock',
+    url: env.PRINT_DATABASE_URL,
+    directUrl: env.PRINT_DIRECT_URL,
+    others: [
+      env.DATABASE_URL,
+      env.DIRECT_URL,
+      env.SCHOOL_DATABASE_URL,
+      env.SCHOOL_DIRECT_URL,
+      env.FACTURE_DATABASE_URL,
+      env.FACTURE_DIRECT_URL,
+      env.STOCK_DATABASE_URL,
+      env.STOCK_DIRECT_URL,
+    ],
+  });
+}
+
+/** Règle commune des applications à base séparée (Facture, Stock, Print). */
 function separateDatabaseTargetProblem(t: {
   prefix: string;
   label: string;

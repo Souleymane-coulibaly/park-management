@@ -28,7 +28,8 @@ const argon2 = apiRequire('argon2') as {
 export async function superAdminPage(
   browser: Browser,
   label: string,
-  role: 'BILLING_MANAGER' | 'PLATFORM_ADMIN' | 'PLATFORM_OWNER' = 'BILLING_MANAGER',
+  role:
+    'BILLING_MANAGER' | 'PLATFORM_ADMIN' | 'PLATFORM_OWNER' | 'PRINT_OPERATOR' = 'BILLING_MANAGER',
 ): Promise<Page> {
   const email = `${label}.${Date.now()}${E2E_INTERNAL_DOMAIN}`;
   const db = new PrismaClient({ datasourceUrl: testDb.databaseUrl });

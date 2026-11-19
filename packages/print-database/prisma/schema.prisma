@@ -1,0 +1,264 @@
+// Ocall Print : base PostgreSQL distincte des bases Ocall Suite, School, Facture et Stock.
+//
+// Ocall Print est le moteur COMMUN de personnalisation, de commande et de suivi des cartes (cartes
+// scolaires, badges du personnel ; plus tard cartes de pass Ocall Parc et cartes Sabatii). Il ne connaît
+// ni les élèves ni les pass : chaque application source (School, Parc, Sabatii, ou Print lui-même en accès
+// autonome) lui confie un titulaire par son identifiant (`sourceApp`, `holderId`) et des données de carte
+// au format versionné `ocall-print/card@1`.
+//
+// `organizationId`, `userId` et `establishmentId` désignent des lignes de la base Suite ; `scopeId` et
+// `holderId` des lignes de la base de l'application source (par exemple l'établissement et l'élève d'Ocall
+// School). Aucune clé étrangère entre bases : l'API les contrôle. Dans cette base, chaque lien passe par une
+// clé composée (organizationId, id) : PostgreSQL refuse lui-même tout lien entre deux organisations.
+//
+// Montants : entiers en francs CFA (aucune décimale). Le prix unitaire est figé dans chaque commande.
+//
+// Contrôles, index partiels et déclencheurs (journal en ajout seul) sont écrits à la main dans les
+// migrations.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/print-client"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("PRINT_DATABASE_URL")
+  directUrl = env("PRINT_DIRECT_URL")
+}
+
+/// Nature d'une carte : carte scolaire d'un élève, badge d'un membre du personnel.
+enum PrintCardKind {
+  STUDENT
+  STAFF
+}
+
+/// Une carte active porte un QR valable ; révoquée (perte, départ, remplacement), son QR est refusé.
+enum PrintCardStatus {
+  ACTIVE
+  REVOKED
+}
+
+/// Cycle d'une commande : envoyée par le client, puis traitée par l'atelier Ocall de Bamako.
+enum PrintOrderStatus {
+  SUBMITTED
+  ACCEPTED
+  IN_PRODUCTION
+  READY
+  DELIVERED
+  CANCELLED
+  REJECTED
+}
+
+enum PrintItemStatus {
+  PENDING
+  PRINTED
+  REJECTED
+  CANCELLED
+}
+
+/// V1 : paiement en espèces à la livraison, enregistré par l'atelier ou la supervision Ocall.
+enum PrintPaymentStatus {
+  UNPAID
+  PAID
+}
+
+/// Modèle de carte recto verso. Chaque modification crée une version ; une commande garde la sienne.
+model PrintTemplate {
+  id              String        @id @default(uuid()) @db.Uuid
+  organizationId  String        @db.Uuid
+  /// Application qui gère le modèle (OCALL_SCHOOL, OCALL_PRINT…) et périmètre propre à cette application
+  /// (établissement School) ; null = toute l'organisation.
+  sourceApp       String
+  scopeId         String?       @db.Uuid
+  name            String
+  kind            PrintCardKind
+  currentVersion  Int           @default(1)
+  archivedAt      DateTime?
+  createdByUserId String        @db.Uuid
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  versions PrintTemplateVersion[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, sourceApp, scopeId])
+}
+
+model PrintTemplateVersion {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @db.Uuid
+  templateId      String   @db.Uuid
+  version         Int
+  /// Mise en page validée par `parsePrintLayout` (@ocall/shared) : couleurs, champs, recto, verso.
+  layout          Json
+  /// Logo réencodé, stockage privé ; jamais d'adresse publique.
+  logoKey         String?
+  createdByUserId String   @db.Uuid
+  createdAt       DateTime @default(now())
+
+  template PrintTemplate @relation(fields: [organizationId, templateId], references: [organizationId, id], onDelete: Restrict)
+  orders   PrintOrder[]
+
+  @@unique([organizationId, id])
+  @@unique([templateId, version])
+}
+
+/// Fiche d'un titulaire en accès autonome (écoles et entreprises sans Ocall School). Reprise sans doublon
+/// à l'activation d'Ocall School : `transferredApp` et `transferredId` désignent alors la fiche School.
+model PrintPerson {
+  id              String        @id @default(uuid()) @db.Uuid
+  organizationId  String        @db.Uuid
+  kind            PrintCardKind
+  lastName        String
+  firstName       String
+  lastNameAr      String?
+  firstNameAr     String?
+  /// Matricule ou numéro de personnel, libre ; unique par organisation et par nature quand il est saisi.
+  reference       String?
+  /// Classe, service ou département affiché sur la carte.
+  groupLabel      String?
+  jobTitle        String?
+  birthDate       DateTime?     @db.Date
+  /// Photo réencodée (WebP, sans métadonnées), stockage privé.
+  photoKey        String?
+  photoSha        String?       @db.Char(64)
+  archivedAt      DateTime?
+  transferredApp  String?
+  transferredId   String?       @db.Uuid
+  transferredAt   DateTime?
+  searchText      String
+  createdByUserId String        @db.Uuid
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@unique([organizationId, id])
+  @@index([organizationId, kind, archivedAt])
+}
+
+/// Carte d'un titulaire. Le numéro est opaque (aucune donnée personnelle) ; le QR le signe.
+model PrintCard {
+  id              String          @id @default(uuid()) @db.Uuid
+  organizationId  String          @db.Uuid
+  sourceApp       String
+  scopeId         String?         @db.Uuid
+  holderKind      PrintCardKind
+  holderId        String          @db.Uuid
+  cardNumber      String          @unique
+  status          PrintCardStatus @default(ACTIVE)
+  validUntil      DateTime?       @db.Date
+  replacesCardId  String?         @db.Uuid
+  revokedAt       DateTime?
+  revokedByUserId String?         @db.Uuid
+  revokeReason    String?
+  createdByUserId String          @db.Uuid
+  createdAt       DateTime        @default(now())
+
+  items PrintOrderItem[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, sourceApp, holderKind, holderId])
+  @@index([organizationId, sourceApp, scopeId, status])
+}
+
+model PrintOrder {
+  id                      String             @id @default(uuid()) @db.Uuid
+  organizationId          String             @db.Uuid
+  /// Numéro lisible, unique dans l'organisation : IMP-2026-00001.
+  number                  String
+  sourceApp               String
+  scopeId                 String?            @db.Uuid
+  establishmentId         String?            @db.Uuid
+  kind                    PrintCardKind
+  templateVersionId       String             @db.Uuid
+  status                  PrintOrderStatus   @default(SUBMITTED)
+  unitPrice               Int
+  currency                String             @default("XOF")
+  /// Cartes facturées : lignes ni refusées ni annulées. Montant = prix unitaire × quantité.
+  quantity                Int
+  totalAmount             Int
+  deliveryAddress         String
+  contactName             String
+  contactPhone            String
+  note                    String?
+  idempotencyKey          String
+  submittedByUserId       String             @db.Uuid
+  submittedAt             DateTime           @default(now())
+  acceptedAt              DateTime?
+  productionAt            DateTime?
+  readyAt                 DateTime?
+  deliveredAt             DateTime?
+  cancelledAt             DateTime?
+  rejectedAt              DateTime?
+  closedReason            String?
+  paymentStatus           PrintPaymentStatus @default(UNPAID)
+  paidAmount              Int?
+  paidAt                  DateTime?
+  paymentReference        String?
+  paymentRecordedByUserId String?            @db.Uuid
+  /// Purge des fichiers de production (photos, données nominatives) 90 jours après la clôture.
+  filesPurgedAt           DateTime?
+  updatedAt               DateTime           @updatedAt
+
+  template PrintTemplateVersion @relation(fields: [organizationId, templateVersionId], references: [organizationId, id], onDelete: Restrict)
+  items    PrintOrderItem[]
+  events   PrintOrderEvent[]
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, number])
+  @@unique([organizationId, idempotencyKey])
+  @@index([status, submittedAt])
+  @@index([organizationId, sourceApp, scopeId, submittedAt])
+}
+
+/// Ligne de commande : données de la carte FIGÉES à l'envoi (format `ocall-print/card@1`) et copie de la
+/// photo dans le stockage Print. Une modification ultérieure de la fiche ne change pas la commande.
+model PrintOrderItem {
+  id             String          @id @default(uuid()) @db.Uuid
+  organizationId String          @db.Uuid
+  orderId        String          @db.Uuid
+  cardId         String          @db.Uuid
+  cardNumber     String
+  holderKind     PrintCardKind
+  /// Nom affiché à l'atelier ; effacé avec les fichiers de production.
+  holderLabel    String?
+  data           Json
+  photoKey       String?
+  status         PrintItemStatus @default(PENDING)
+  rejectReason   String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  order PrintOrder @relation(fields: [organizationId, orderId], references: [organizationId, id], onDelete: Restrict)
+  card  PrintCard  @relation(fields: [organizationId, cardId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@index([organizationId, orderId])
+  @@index([organizationId, cardId])
+}
+
+/// Journal d'une commande, en ajout seul (déclencheur) : jamais de donnée nominative.
+model PrintOrderEvent {
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @db.Uuid
+  orderId        String   @db.Uuid
+  type           String
+  /// CLIENT (organisation), PLATFORM (atelier ou supervision Ocall), SYSTEM (purge).
+  actorKind      String
+  actorUserId    String?  @db.Uuid
+  details        Json     @default("{}")
+  createdAt      DateTime @default(now())
+
+  order PrintOrder @relation(fields: [organizationId, orderId], references: [organizationId, id], onDelete: Restrict)
+
+  @@index([organizationId, orderId, createdAt])
+}
+
+/// Compteur des numéros de commande, incrémenté atomiquement : jamais de MAX + 1.
+model PrintCounter {
+  organizationId String @db.Uuid
+  year           Int
+  value          Int    @default(0)
+
+  @@id([organizationId, year])
+}

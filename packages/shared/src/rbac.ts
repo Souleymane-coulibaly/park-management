@@ -37,6 +37,8 @@ export const PlatformRole = {
   BILLING_MANAGER: 'BILLING_MANAGER',
   SUPPORT_AGENT: 'SUPPORT_AGENT',
   READ_ONLY_AUDITOR: 'READ_ONLY_AUDITOR',
+  /** Ocall Print : imprimeur de l'atelier, production des cartes seulement. */
+  PRINT_OPERATOR: 'PRINT_OPERATOR',
 } as const;
 export type PlatformRole = (typeof PlatformRole)[keyof typeof PlatformRole];
 
@@ -47,6 +49,7 @@ export const ROLE_LABELS: Record<MemberRole | PlatformRole, string> = {
   BILLING_MANAGER: 'Gestion des abonnements et paiements',
   SUPPORT_AGENT: 'Assistance',
   READ_ONLY_AUDITOR: 'Consultation et audit',
+  PRINT_OPERATOR: 'Imprimeur (atelier Ocall Print)',
   OWNER: 'Propriétaire',
   ADMIN: 'Administrateur',
   SUPERVISOR: 'Superviseur',

@@ -8,6 +8,7 @@ export {
   findDestructiveStatements,
   factureMigrationTargetProblem,
   stockMigrationTargetProblem,
+  printMigrationTargetProblem,
   schoolMigrationTargetProblem,
 } from './migration-safety';
 export {

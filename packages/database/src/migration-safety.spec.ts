@@ -6,6 +6,7 @@ import {
   findDestructiveStatements,
   factureMigrationTargetProblem,
   stockMigrationTargetProblem,
+  printMigrationTargetProblem,
   schoolMigrationTargetProblem,
 } from './migration-safety';
 
@@ -169,6 +170,45 @@ describe('stockMigrationTargetProblem', () => {
           STOCK_DATABASE_URL: other,
         }),
       ).toContain('distincte');
+    }
+  });
+});
+
+describe('printMigrationTargetProblem', () => {
+  const suite = 'postgresql://u:p@ep-suite-pooler.neon.tech/neondb';
+  const school = 'postgresql://u:p@ep-school-pooler.neon.tech/neondb';
+  const facture = 'postgresql://u:p@ep-facture-pooler.neon.tech/neondb';
+  const stock = 'postgresql://u:p@ep-stock-pooler.neon.tech/neondb';
+  const print = 'postgresql://u:p@ep-print-pooler.neon.tech/neondb';
+  const all = {
+    DATABASE_URL: suite,
+    SCHOOL_DATABASE_URL: school,
+    FACTURE_DATABASE_URL: facture,
+    STOCK_DATABASE_URL: stock,
+  };
+
+  it('accepte une base Print distincte des bases Suite, School, Facture et Stock', () => {
+    expect(
+      printMigrationTargetProblem({
+        ...all,
+        PRINT_DATABASE_URL: print,
+        PRINT_DIRECT_URL: 'postgresql://u:p@ep-print.neon.tech/neondb',
+      }),
+    ).toBeNull();
+  });
+
+  it('refuse une base absente, deux URL divergentes, ou une autre base Ocall', () => {
+    expect(printMigrationTargetProblem({ DATABASE_URL: suite })).toContain('PRINT_DATABASE_URL');
+    expect(
+      printMigrationTargetProblem({
+        PRINT_DATABASE_URL: print,
+        PRINT_DIRECT_URL: 'postgresql://u:p@ep-autre.neon.tech/neondb',
+      }),
+    ).toContain('différentes');
+    for (const other of [suite, school, facture, stock]) {
+      expect(printMigrationTargetProblem({ ...all, PRINT_DATABASE_URL: other })).toContain(
+        'distincte',
+      );
     }
   });
 });

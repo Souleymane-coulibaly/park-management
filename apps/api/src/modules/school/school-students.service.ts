@@ -86,6 +86,8 @@ const FULL_SELECT = {
   address: true,
   adminNotes: true,
   customFields: true,
+  /** Ocall Print : photo du dossier retenue pour la carte (null = la plus récente). */
+  cardPhotoDocumentId: true,
   createdAt: true,
 } satisfies Prisma.SchoolStudentSelect;
 

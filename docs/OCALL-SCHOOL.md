@@ -1017,6 +1017,30 @@ milliers de FCFA. Ces chiffres sont à confirmer par la consommation réelle rel
 4. **Couper :** décocher l'activation de l'établissement (effet immédiat), ou revenir à `AI_PROVIDER=none`
    (toutes applications).
 
+## 13 quater. Cartes scolaires, badges et personnel (Ocall Print)
+
+Le moteur des cartes est celui d'Ocall Print, commun à toutes les applications ([OCALL-PRINT.md](OCALL-PRINT.md)) ;
+School n'a aucun code d'impression propre. Il contrôle les droits, le périmètre des établissements, et fournit les
+données et la photo de chaque titulaire.
+
+- **Personnel** (`/school/personnel`) : fiches avec ou sans compte (gardien, cuisine, entretien, transport,
+  administration, enseignants), numéro `P-000001`, catégorie, fonction, photo réencodée ; création des fiches
+  depuis l'équipe ; désactivation (badges révoqués).
+- **Cartes** (`/school/cartes`) : carte d'un élève inscrit (inscription validée de l'année), depuis sa fiche
+  (onglet « Carte », français et arabe) ou pour une classe ; badge d'un membre du personnel actif ; aperçu
+  recto verso ; révocation et remplacement (nouveau numéro, nouveau QR).
+- **Photo** : obligatoire pour commander, facultative pour l'inscription. Les photos du dossier envoyées
+  désormais sont réencodées en JPEG sans métadonnées (EXIF, GPS) ; une image illisible est refusée. La photo
+  retenue pour la carte se choisit parmi celles du dossier.
+- **Commandes** : par la direction ; prix unitaire (3 000 FCFA), quantité et total affichés ; suivi des étapes
+  de l'atelier, règlement en espèces à la livraison, bon à tirer PDF.
+- **Lecture du QR** (`/school/cartes/verifier`) : direction, secrétariat, surveillant ; carte valable seulement
+  si elle est active et si l'élève est toujours inscrit (ou le membre du personnel actif) dans l'établissement.
+- **Automatismes** : sortie ou transfert d'un élève, désactivation d'un membre du personnel → cartes révoquées
+  (au mieux : la lecture du QR contrôle de toute façon l'état du titulaire).
+- **Reprise** (`/school/cartes/reprise`, direction du groupe) : fiches et photos Ocall Print saisies avant
+  l'activation de School, sans doublon ; les cartes déjà imprimées restent valables.
+
 ## 14. Limites actuelles
 
 - Réserves P3 de l'audit du Sprint 6 (non bloquantes) : reprise de l'écran d'appel quand la réponse du

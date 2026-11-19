@@ -58,6 +58,8 @@ enum PlatformRole {
   BILLING_MANAGER
   SUPPORT_AGENT
   READ_ONLY_AUDITOR
+  /// Ocall Print : atelier d'impression, accès limité à la production des cartes.
+  PRINT_OPERATOR
 }
 
 enum OrganizationStatus {

@@ -227,6 +227,18 @@ enum SchoolNotificationKind {
   EVENT
 }
 
+/// Catégorie d'un membre du personnel (badge, listes) : enseignants, administration et agents.
+enum SchoolStaffCategory {
+  TEACHING
+  ADMINISTRATION
+  SECURITY
+  CATERING
+  MAINTENANCE
+  TRANSPORT
+  HEALTH
+  OTHER
+}
+
 enum SchoolSmsStatus {
   PENDING
   SENT
@@ -290,6 +302,7 @@ model School {
   reportViews   SchoolReportView[]
   aiSettings    SchoolAiSettings?
   site          SchoolSite?
+  staff         SchoolStaff[]
 
   @@unique([organizationId, establishmentId])
   @@unique([organizationId, id])
@@ -320,6 +333,7 @@ model SchoolMember {
   slots          SchoolTimetableSlot[]
   unavailability SchoolTeacherUnavailability[]
   supervisions   SchoolExamSchedule[]
+  staff          SchoolStaff[]
 
   @@unique([organizationId, id])
   @@unique([organizationId, userId])
@@ -614,6 +628,10 @@ model SchoolStudent {
   status          SchoolStudentStatus @default(REGISTERED)
   searchText      String
   identityKey     String
+  /// Ocall Print : photo du dossier retenue pour la carte (document PHOTO du même élève) ; null = la plus
+  /// récente. Fiche Ocall Print autonome reprise à l'activation de School (unique : jamais de doublon).
+  cardPhotoDocumentId String?         @db.Uuid
+  printPersonId   String?             @db.Uuid
   createdByUserId String              @db.Uuid
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
@@ -2193,4 +2211,37 @@ model SchoolSiteLink {
 
   @@unique([organizationId, id])
   @@index([organizationId, siteId, position])
+}
+
+/// Fiche d'un membre du personnel, avec ou sans compte Ocall (gardien, cuisinière, chauffeur…). Un compte
+/// School (`memberId`) peut y être rattaché, une seule fois. Numéro de personnel unique dans le client.
+/// Photo réencodée (sans métadonnées), stockage privé. `printPersonId` : fiche Ocall Print autonome reprise.
+model SchoolStaff {
+  id              String              @id @default(uuid()) @db.Uuid
+  organizationId  String              @db.Uuid
+  schoolId        String              @db.Uuid
+  memberId        String?             @db.Uuid
+  lastName        String
+  firstName       String
+  lastNameAr      String?
+  firstNameAr     String?
+  category        SchoolStaffCategory
+  jobTitle        String?
+  staffNumber     String
+  phone           String?
+  photoKey        String?
+  photoSha        String?             @db.Char(64)
+  isActive        Boolean             @default(true)
+  printPersonId   String?             @db.Uuid
+  searchText      String
+  createdByUserId String              @db.Uuid
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  school School        @relation(fields: [organizationId, schoolId], references: [organizationId, id], onDelete: Restrict)
+  member SchoolMember? @relation(fields: [organizationId, memberId], references: [organizationId, id], onDelete: Restrict)
+
+  @@unique([organizationId, id])
+  @@unique([organizationId, staffNumber])
+  @@index([organizationId, schoolId, isActive])
 }

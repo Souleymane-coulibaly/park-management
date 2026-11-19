@@ -52,6 +52,10 @@ import { SchoolSmsWalletService } from './school-sms-wallet.service';
 import { SchoolSmsAdminController } from './school-sms-admin.controller';
 import { SchoolFilesController, SchoolStudentsController } from './school-students.controller';
 import { SchoolStudentsService } from './school-students.service';
+import { SchoolCardsController } from './school-cards.controller';
+import { SchoolCardsService } from './school-cards.service';
+import { SchoolPrintImportService } from './school-print-import.service';
+import { SchoolStaffService } from './school-staff.service';
 import { SchoolTeachingController } from './school-teaching.controller';
 import { SchoolTeachingService } from './school-teaching.service';
 import { SchoolTimetablesService } from './school-timetables.service';
@@ -73,6 +77,7 @@ import { APP_CONFIG, type AppConfig } from '../../config/app-config';
     SchoolController,
     SchoolPlatformController,
     SchoolStudentsController,
+    SchoolCardsController,
     SchoolFilesController,
     SchoolTeachingController,
     SchoolAssessmentController,
@@ -99,6 +104,9 @@ import { APP_CONFIG, type AppConfig } from '../../config/app-config';
     SchoolEstablishmentsService,
     SchoolAccessGuard,
     SchoolStudentsService,
+    SchoolStaffService,
+    SchoolCardsService,
+    SchoolPrintImportService,
     SchoolEnrollmentsService,
     SchoolGuardiansService,
     SchoolDocumentsService,

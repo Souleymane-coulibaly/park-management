@@ -68,6 +68,8 @@ const NAV: NavItem[] = [
     href: '/school/reglages-eleves',
   },
   { key: 'school-team', label: 'Équipe', href: '/school/equipe' },
+  { key: 'school-staff', label: 'Personnel', href: '/school/personnel' },
+  { key: 'school-cards', label: 'Cartes et badges', href: '/school/cartes' },
 ];
 
 /** Application Ocall School. Le droit d'accès réel est décidé par l'API à chaque requête. */

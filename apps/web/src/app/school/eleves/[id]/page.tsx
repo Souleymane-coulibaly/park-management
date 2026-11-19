@@ -38,6 +38,7 @@ import { SimpleForm } from '@/components/ui/simple-form';
 import { Alert, ApiErrorAlert, ErrorState, LoadingState } from '@/components/ui/states';
 import { type ApiError, api, apiUpload } from '@/lib/api';
 import { useApi } from '@/lib/use-api';
+import { StudentCardTab } from '@/components/school/school-cards';
 
 interface StudentFull extends StudentRow {
   birthDate?: string;
@@ -46,6 +47,7 @@ interface StudentFull extends StudentRow {
   nationality?: string | null;
   address?: string | null;
   adminNotes?: string | null;
+  cardPhotoDocumentId?: string | null;
 }
 
 const TABS = [
@@ -54,6 +56,7 @@ const TABS = [
   { key: 'guardians', permission: 'school.guardians.read' },
   { key: 'documents', permission: 'school.documents.read' },
   { key: 'history', permission: 'school.students.read_full' },
+  { key: 'card', permission: 'school.cards.read' },
 ] as const;
 type TabKey = (typeof TABS)[number]['key'];
 
@@ -137,6 +140,7 @@ function SheetContent({
       {tab === 'guardians' && <Guardians student={s} page={page} />}
       {tab === 'documents' && <Documents student={s} page={page} />}
       {tab === 'history' && <History studentId={s.id} />}
+      {tab === 'card' && <StudentCardTab student={s} page={page} />}
     </>
   );
 }

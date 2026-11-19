@@ -20,6 +20,7 @@ import {
 import type { Prisma } from '@ocall/school-database';
 import { AuditService } from '../../common/audit/audit.service';
 import type { RequestMeta } from '../../common/request-meta';
+import { isImageRefusal, reencodeImage } from '../../common/images/image-reencode';
 import { signFileToken, verifyFileToken } from '../../common/storage/signed-url';
 import {
   STORAGE_PROVIDER,
@@ -121,14 +122,26 @@ export class SchoolDocumentsService {
       });
     }
     await this.assertRoomForDocument(this.db, ctx, studentId);
+    // Photo d'identité (carte scolaire, Ocall Print) : réencodée en JPEG, sans aucune métadonnée de
+    // l'original (EXIF, GPS, appareil). Les autres pièces sont conservées telles quelles.
+    let body: Buffer = file.buffer;
+    let storedMime: string = mimeType;
+    if (category === 'PHOTO') {
+      const photo = await reencodeImage(file.buffer, { width: 64, height: 64 }, 'jpeg', 1600);
+      if (isImageRefusal(photo)) {
+        throw new BadRequestException({ code: 'FILE_TYPE_REFUSED', message: photo.message });
+      }
+      body = photo.body;
+      storedMime = photo.mimeType;
+    }
     const id = randomUUID();
     const storageKey = privateKey(
       ctx.organizationId,
       student.schoolId,
       id,
-      EXTENSION[mimeType as keyof typeof EXTENSION],
+      EXTENSION[storedMime as keyof typeof EXTENSION],
     );
-    await this.storage.put(storageKey, file.buffer, mimeType);
+    await this.storage.put(storageKey, body, storedMime);
     let document;
     try {
       document = await this.db.$transaction(async (tx) => {
@@ -141,9 +154,9 @@ export class SchoolDocumentsService {
             studentId,
             category,
             displayName: safeDisplayName(file.originalname),
-            mimeType,
-            bytes: file.size,
-            sha256: createHash('sha256').update(file.buffer).digest('hex'),
+            mimeType: storedMime,
+            bytes: body.length,
+            sha256: createHash('sha256').update(body).digest('hex'),
             storageKey,
             createdByUserId: ctx.userId,
           },

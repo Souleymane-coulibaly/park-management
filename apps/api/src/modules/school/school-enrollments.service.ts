@@ -23,6 +23,7 @@ import type {
   ExitDto,
   TransferDto,
 } from './school-students.dto';
+import { SchoolCardsService } from './school-cards.service';
 import { SchoolStudentsService } from './school-students.service';
 import { SchoolService } from './school.service';
 
@@ -67,6 +68,7 @@ export class SchoolEnrollmentsService {
     private readonly db: SchoolPrismaService,
     private readonly school: SchoolService,
     private readonly students: SchoolStudentsService,
+    private readonly cards: SchoolCardsService,
   ) {}
 
   async list(ctx: SchoolContext, q: EnrollmentsQueryDto) {
@@ -395,6 +397,13 @@ export class SchoolEnrollmentsService {
     await this.school.log(ctx, 'school.enrollment_exited', 'SchoolEnrollment', id, {
       reason: dto.reason,
     });
+    // L'élève quitte l'établissement : ses cartes (Ocall Print) sont révoquées, au mieux.
+    const left = await this.db.schoolStudent.findFirst({
+      where: { id: enrollment.studentId, organizationId: ctx.organizationId },
+      select: { status: true },
+    });
+    if (left && !['REGISTERED', 'ENROLLED'].includes(left.status))
+      await this.cards.onStudentLeft(ctx, enrollment.studentId, 'Sortie de l’élève');
     return view;
   }
 
@@ -516,6 +525,8 @@ export class SchoolEnrollmentsService {
       from: visible.schoolId,
       to: dto.targetSchoolId,
     });
+    // La carte porte l'établissement d'origine : elle est révoquée ; une nouvelle se crée à l'arrivée.
+    await this.cards.onStudentLeft(ctx, studentId, 'Transfert vers un autre établissement');
     return result;
   }
 

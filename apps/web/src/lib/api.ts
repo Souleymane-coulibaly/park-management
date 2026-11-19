@@ -39,8 +39,12 @@ export async function api<T>(
  * Envoi d'un fichier (photo, PDF, enregistrement vocal) en multipart : le navigateur fixe
  * lui-même l'en-tête Content-Type et sa limite.
  */
-export function apiUpload<T>(path: string, form: FormData): Promise<T> {
-  return send<T>(path, { method: 'POST', body: form });
+export function apiUpload<T>(
+  path: string,
+  form: FormData,
+  method: 'POST' | 'PUT' = 'POST',
+): Promise<T> {
+  return send<T>(path, { method, body: form });
 }
 
 async function send<T>(path: string, init: RequestInit): Promise<T> {

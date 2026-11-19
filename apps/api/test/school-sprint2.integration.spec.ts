@@ -1,6 +1,7 @@
 import { Workbook } from 'exceljs';
 import request from 'supertest';
 import type { INestApplication } from '@nestjs/common';
+import sharp from 'sharp';
 import { AuditService } from '../src/common/audit/audit.service';
 import { SchoolEnrollmentsService } from '../src/modules/school/school-enrollments.service';
 import { SchoolGuardiansService } from '../src/modules/school/school-guardians.service';
@@ -1122,11 +1123,24 @@ suite('Ocall School — Sprint 2 (intégration)', () => {
         .field('category', 'PHOTO')
         .attach('file', PDF, 'photo.pdf')
         .expect(400);
+      // Photo d'identité : une image illisible est refusée (réencodage, décision Ocall Print du 19/11/2026),
+      // une vraie image est acceptée et conservée sans métadonnées.
       await ownerA
         .post(url)
         .field('category', 'PHOTO')
         .attach('file', PNG, 'photo.png')
+        .expect(400);
+      const realPng = await sharp({
+        create: { width: 120, height: 160, channels: 3, background: '#4477AA' },
+      })
+        .png()
+        .toBuffer();
+      const photo = await ownerA
+        .post(url)
+        .field('category', 'PHOTO')
+        .attach('file', realPng, 'photo.png')
         .expect(201);
+      expect(photo.body.mimeType).toBe('image/jpeg');
       await ownerA
         .post(url)
         .field('category', 'INVENTE')

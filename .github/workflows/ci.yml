@@ -80,12 +80,17 @@ jobs:
         run: |
           PGPASSWORD=postgres psql -h localhost -U postgres -c 'CREATE DATABASE ocall_stock_ci'
           STOCK_ENABLED=true DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ocall_park_ci SCHOOL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ocall_school_ci FACTURE_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ocall_facture_ci STOCK_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ocall_stock_ci pnpm db:stock:migrate:deploy
+      - name: Base Print éphémère et migrations
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -c 'CREATE DATABASE ocall_print_ci'
+          PRINT_ENABLED=true DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ocall_park_ci SCHOOL_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ocall_school_ci FACTURE_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ocall_facture_ci STOCK_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ocall_stock_ci PRINT_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/ocall_print_ci pnpm db:print:migrate:deploy
       - name: Tests d'intégration API
         run: pnpm test:integration
         env:
           TEST_SCHOOL_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ocall_school_ci
           TEST_FACTURE_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ocall_facture_ci
           TEST_STOCK_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ocall_stock_ci
+          TEST_PRINT_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ocall_print_ci
       - run: pnpm exec playwright install --with-deps chromium
       - name: Tests E2E Playwright
         run: pnpm test:e2e
@@ -96,6 +101,8 @@ jobs:
           TEST_FACTURE_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ocall_facture_ci
           # Parcours Ocall Stock : base Stock éphémère, distincte des bases Suite, School et Facture.
           TEST_STOCK_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ocall_stock_ci
+          # Parcours Ocall Print : base Print éphémère, distincte de toutes les autres.
+          TEST_PRINT_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ocall_print_ci
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

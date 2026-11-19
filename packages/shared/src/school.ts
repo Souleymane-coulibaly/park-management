@@ -179,6 +179,17 @@ export const SchoolPermission = {
   SITE_MANAGE: 'school.site.manage',
   /** Publier, dépublier ou activer le site vitrine ; retirer immédiatement une photo publiée. */
   SITE_PUBLISH: 'school.site.publish',
+  /**
+   * Cartes scolaires et badges (Ocall Print) : consulter les cartes et commandes ; préparer modèles,
+   * photos et cartes ; commander l'impression (direction) ; vérifier un QR à l'entrée.
+   */
+  CARDS_READ: 'school.cards.read',
+  CARDS_MANAGE: 'school.cards.manage',
+  CARDS_ORDER: 'school.cards.order',
+  CARDS_VERIFY: 'school.cards.verify',
+  /** Fiches du personnel, avec ou sans compte (enseignants, administration, gardiens, cuisine…). */
+  STAFF_READ: 'school.staff.read',
+  STAFF_MANAGE: 'school.staff.manage',
 } as const;
 export type SchoolPermission = (typeof SchoolPermission)[keyof typeof SchoolPermission];
 
@@ -241,6 +252,12 @@ const DIRECTION: readonly SchoolPermission[] = [
   SP.AI_MANAGE,
   SP.SITE_MANAGE,
   SP.SITE_PUBLISH,
+  SP.CARDS_READ,
+  SP.CARDS_MANAGE,
+  SP.CARDS_ORDER,
+  SP.CARDS_VERIFY,
+  SP.STAFF_READ,
+  SP.STAFF_MANAGE,
 ];
 
 /**
@@ -260,6 +277,8 @@ const DIRECTION: readonly SchoolPermission[] = [
  * du groupe ; l'enseignant dispose de l'assistant pédagogique pour ses classes.
  * Site vitrine (Sprint 10) : le secrétariat prépare contenus, médias, actualités et liens ; la direction
  * publie, dépublie et peut retirer immédiatement une photo publiée.
+ * Cartes et badges (Ocall Print) : le secrétariat tient les fiches du personnel, les photos et prépare les
+ * cartes ; la direction commande l'impression ; le surveillant consulte et vérifie les cartes à l'entrée.
  */
 export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermission[]> = {
   GROUP_DIRECTOR: [...DIRECTION, SP.SCHOOLS_MANAGE, SP.AUDIT_READ],
@@ -292,6 +311,11 @@ export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermissi
     SP.CALENDAR_MANAGE,
     SP.EXAMS_MANAGE,
     SP.SITE_MANAGE,
+    SP.CARDS_READ,
+    SP.CARDS_MANAGE,
+    SP.CARDS_VERIFY,
+    SP.STAFF_READ,
+    SP.STAFF_MANAGE,
   ],
   TEACHER: [
     SP.STRUCTURE_READ,
@@ -314,6 +338,9 @@ export const SCHOOL_ROLE_PERMISSIONS: Record<SchoolRole, readonly SchoolPermissi
     SP.ATTENDANCE_TAKE,
     SP.ATTENDANCE_JUSTIFY,
     SP.PLANNING_READ,
+    SP.CARDS_READ,
+    SP.CARDS_VERIFY,
+    SP.STAFF_READ,
   ],
   ACCOUNTANT: [
     SP.STRUCTURE_READ,

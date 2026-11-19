@@ -148,6 +148,7 @@ export function SuitePortal({
                 Sites de l’organisation
               </Link>
             )}
+            <PrintLink />
             {canInvite && (
               <Link
                 href="/suite/invitations"
@@ -731,5 +732,23 @@ function ContractPanel({ code }: { code: string }) {
         </details>
       )}
     </div>
+  );
+}
+
+/**
+ * Ocall Print en accès autonome (gratuit) : lien affiché seulement si l'API l'ouvre à ce compte
+ * (application activée, propriétaire ou administrateur de l'organisation).
+ */
+function PrintLink() {
+  const settings = useApi<{ unitPrice: number }>('/ocall-print/settings');
+  if (settings.state !== 'success') return null;
+  return (
+    <Link
+      href="/print"
+      className="text-sm font-semibold text-suite-green hover:underline"
+      data-testid="suite-print-link"
+    >
+      Ocall Print — cartes et badges
+    </Link>
   );
 }

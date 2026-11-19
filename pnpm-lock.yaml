@@ -20,6 +20,9 @@ importers:
       '@ocall/facture-database':
         specifier: workspace:*
         version: link:packages/facture-database
+      '@ocall/print-database':
+        specifier: workspace:*
+        version: link:packages/print-database
       '@ocall/stock-database':
         specifier: workspace:*
         version: link:packages/stock-database
@@ -77,6 +80,9 @@ importers:
       '@ocall/facture-database':
         specifier: workspace:*
         version: link:../../packages/facture-database
+      '@ocall/print-database':
+        specifier: workspace:*
+        version: link:../../packages/print-database
       '@ocall/school-database':
         specifier: workspace:*
         version: link:../../packages/school-database
@@ -259,6 +265,34 @@ importers:
         version: 5.7.3
 
   packages/facture-database:
+    dependencies:
+      '@ocall/database':
+        specifier: workspace:*
+        version: link:../database
+      '@prisma/client':
+        specifier: ^6.2.1
+        version: 6.19.3(prisma@6.19.3(typescript@5.7.3))(typescript@5.7.3)
+      dotenv:
+        specifier: ^16.4.7
+        version: 16.6.1
+      dotenv-cli:
+        specifier: ^8.0.0
+        version: 8.0.0
+      prisma:
+        specifier: ^6.2.1
+        version: 6.19.3(typescript@5.7.3)
+      tsx:
+        specifier: ^4.19.2
+        version: 4.23.15
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.7
+        version: 22.20.5
+      typescript:
+        specifier: ~5.7.3
+        version: 5.7.3
+
+  packages/print-database:
     dependencies:
       '@ocall/database':
         specifier: workspace:*

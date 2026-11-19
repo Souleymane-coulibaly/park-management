@@ -11,6 +11,7 @@ import {
 } from '@ocall/database';
 import { FacturePrismaClient } from '@ocall/facture-database';
 import { SchoolPrismaClient } from '@ocall/school-database';
+import { PrintPrismaClient } from '@ocall/print-database';
 import { StockPrismaClient } from '@ocall/stock-database';
 import { type BusinessType, type StoredPlatformRole, platformRoleRequiresMfa } from '@ocall/shared';
 import { hash } from 'argon2';
@@ -30,6 +31,7 @@ const APP_DATABASES: NodeJS.ProcessEnv = {
   SCHOOL_DATABASE_URL: process.env.SCHOOL_DATABASE_URL,
   FACTURE_DATABASE_URL: process.env.FACTURE_DATABASE_URL,
   STOCK_DATABASE_URL: process.env.STOCK_DATABASE_URL,
+  PRINT_DATABASE_URL: process.env.PRINT_DATABASE_URL,
   NODE_ENV: process.env.OCALL_ORIGINAL_NODE_ENV || process.env.NODE_ENV,
   RAILWAY_ENVIRONMENT_NAME: process.env.RAILWAY_ENVIRONMENT_NAME,
   CI: process.env.CI,
@@ -56,6 +58,7 @@ export async function createTestApp(): Promise<{ app: INestApplication; prisma: 
       process.env.SCHOOL_TEST_DATABASE_URL ?? process.env.TEST_SCHOOL_DATABASE_URL,
       process.env.TEST_FACTURE_DATABASE_URL,
       process.env.TEST_STOCK_DATABASE_URL,
+      process.env.TEST_PRINT_DATABASE_URL,
     ],
     APP_DATABASES,
   );
@@ -123,6 +126,27 @@ export async function createTestApp(): Promise<{ app: INestApplication; prisma: 
   }
   process.env.STOCK_ENABLED = stockUrl ? 'true' : 'false';
   process.env.STOCK_DATABASE_URL = stockUrl ?? '';
+  // Ocall Print : activé seulement avec une base de test dédiée, distincte des bases Suite, School,
+  // Facture et Stock, soumise au même marqueur.
+  const printUrl = process.env.TEST_PRINT_DATABASE_URL;
+  if (printUrl) {
+    const others = [testDb.databaseUrl, schoolUrl, factureUrl, stockUrl].filter((u): u is string =>
+      Boolean(u),
+    );
+    if (others.some((u) => databaseIdentity(u) === databaseIdentity(printUrl))) {
+      throw new Error(
+        'Refus : la base Print de test doit être distincte des bases Suite, School, Facture et Stock.',
+      );
+    }
+    const printProbe = new PrintPrismaClient({ datasourceUrl: printUrl });
+    try {
+      await assertTestDatabaseMarker((sql) => printProbe.$queryRawUnsafe(sql), printUrl);
+    } finally {
+      await printProbe.$disconnect();
+    }
+  }
+  process.env.PRINT_ENABLED = printUrl ? 'true' : 'false';
+  process.env.PRINT_DATABASE_URL = printUrl ?? '';
   // Clé fictive, propre aux tests.
   process.env.SCHOOL_DATA_ENCRYPTION_KEY = Buffer.alloc(32, 7).toString('base64');
   const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();

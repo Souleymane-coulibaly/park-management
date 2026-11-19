@@ -138,6 +138,12 @@ const NAV: (NavItem & { permission: PlatformPermission | null })[] = [
     permission: 'platform.dashboard',
   },
   {
+    key: 'platform-print',
+    label: 'Atelier Ocall Print',
+    href: '/admin/impression',
+    permission: 'platform.print.production',
+  },
+  {
     key: 'platform-support',
     label: 'Support',
     href: '/admin/support',
@@ -190,7 +196,9 @@ export default async function AdminLayout({ children }: { children: ReactNode })
         title: 'Ocall Suite',
         subtitle: role ? PLATFORM_ROLE_LABELS[role] : 'Administration',
       }}
-      homeHref="/admin"
+      homeHref={
+        me.platformPermissions.includes('platform.dashboard') ? '/admin' : '/admin/impression'
+      }
       headerNote="Données agrégées uniquement"
     >
       {children}
